@@ -1,9 +1,10 @@
 import { DashboardView } from "./DashboardView";
+import type { Order } from "@/types/order";
+import type { Batch } from "@/types/batch";
 
 export function DashboardContainer() {
-  // TEMP data (hardcoded)
-  const orders: any[] = [];
-  const batches: any[] = [];
+  const orders: Order[] = [];
+  const batches: Batch[] = [];
 
   return <DashboardView orders={orders} batches={batches} />;
 }

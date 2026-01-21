@@ -12,10 +12,12 @@ import {
 import { KPIStats } from "./KPIStats";
 import { BottlenecksPanel } from "./BottlenecksPanel";
 import { RecentActivityList } from "./RecentActivity";
+import { Batch } from "@/types/batch";
+import { Order } from "@/types/order";
 
 interface DashboardProps {
-  orders: any[];
-  batches: any[];
+  orders: Order[];
+  batches: Batch[];
 }
 
 export function DashboardView({ orders, batches }: DashboardProps) {

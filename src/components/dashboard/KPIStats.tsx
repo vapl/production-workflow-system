@@ -5,13 +5,15 @@ import {
   TrendingUpIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/Card";
+import { Order } from "@/types/order";
+import { Batch } from "@/types/batch";
 
 export function KPIStats({
   orders,
   batches,
 }: {
-  orders: any[];
-  batches: any[];
+  orders: Order[];
+  batches: Batch[];
 }) {
   // Calculate KPIs
   const activeOrders = orders.filter(
