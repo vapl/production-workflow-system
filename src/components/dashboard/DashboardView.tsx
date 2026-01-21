@@ -19,12 +19,20 @@ interface DashboardProps {
   orders: Order[];
   batches: Batch[];
   bottlenecks: Batch[];
+  kpis: {
+    activeOrders: number;
+    totalOrders: number;
+    activeBatches: number;
+    completedToday: number;
+    lateBatches: number;
+  };
 }
 
 export function DashboardView({
   orders,
   batches,
   bottlenecks,
+  kpis,
 }: DashboardProps) {
   // // Calculate KPIs
   // const activeOrders = orders.filter(
@@ -90,8 +98,8 @@ export function DashboardView({
 
   return (
     <div className="space-y-6">
-      <KPIStats orders={orders} batches={batches} />
-      <BottlenecksPanel batches={batches} />
+      <KPIStats kpis={kpis} />
+      <BottlenecksPanel batches={bottlenecks} />
       <RecentActivityList orders={orders} batches={batches} />
       {/* KPI Cards */}
       {/* <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

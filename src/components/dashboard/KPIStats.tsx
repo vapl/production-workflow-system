@@ -9,36 +9,23 @@ import { Order } from "@/types/order";
 import { Batch } from "@/types/batch";
 
 export function KPIStats({
-  orders,
-  batches,
+  kpis,
 }: {
-  orders: Order[];
-  batches: Batch[];
+  kpis: {
+    activeOrders: number;
+    totalOrders: number;
+    activeBatches: number;
+    completedToday: number;
+    lateBatches: number;
+  };
 }) {
-  // Calculate KPIs
-  const activeOrders = orders.filter(
-    (o) => o.status !== "completed" && o.status !== "cancelled",
-  ).length;
-  const activeBatches = batches.filter(
-    (b) => b.status === "in_progress",
-  ).length;
-  const completedToday = batches.filter((b) => {
-    const completedDate = new Date(b.completedAt);
-    const today = new Date();
-    return (
-      b.status === "completed" &&
-      completedDate.toDateString() === today.toDateString()
-    );
-  }).length;
-
-  // Identify bottlenecks - batches that are overdue or taking too long
-  const bottlenecks = batches.filter((b) => {
-    if (b.status !== "in_progress") return false;
-    const estimatedHours = b.estimatedHours || 0;
-    const actualHours = b.actualHours || 0;
-    return actualHours > estimatedHours * 1.2; // 20% over estimate
-  });
-
+  const {
+    activeOrders,
+    totalOrders,
+    activeBatches,
+    completedToday,
+    lateBatches,
+  } = kpis;
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -50,7 +37,7 @@ export function KPIStats({
           <CardContent>
             <div className="text-2xl font-bold">{activeOrders}</div>
             <p className="text-xs text-muted-foreground">
-              {orders.length} total orders
+              {totalOrders} total orders
             </p>
           </CardContent>
         </Card>
@@ -84,7 +71,7 @@ export function KPIStats({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-amber-600">
-              {bottlenecks.length}
+              {lateBatches}
             </div>
             <p className="text-xs text-muted-foreground">
               Batches over estimate
