@@ -1,5 +1,5 @@
-import { DashboardView } from "@/components/dashboard/DashboardView";
+import { DashboardContainer } from "@/components/dashboard/DashboardContainer";
 
-export default function Home() {
-  return <DashboardView orders={[]} batches={[]} />;
+export default function Page() {
+  return <DashboardContainer />;
 }
