@@ -18,9 +18,14 @@ import { Order } from "@/types/order";
 interface DashboardProps {
   orders: Order[];
   batches: Batch[];
+  bottlenecks: Batch[];
 }
 
-export function DashboardView({ orders, batches }: DashboardProps) {
+export function DashboardView({
+  orders,
+  batches,
+  bottlenecks,
+}: DashboardProps) {
   // // Calculate KPIs
   // const activeOrders = orders.filter(
   //   (o) => o.status !== "completed" && o.status !== "cancelled",
