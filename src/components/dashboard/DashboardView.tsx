@@ -9,6 +9,9 @@ import {
   PauseIcon,
   CheckCircleIcon,
 } from "lucide-react";
+import { KPIStats } from "./KPIStats";
+import { BottlenecksPanel } from "./BottlenecksPanel";
+import { RecentActivityList } from "./RecentActivity";
 
 interface DashboardProps {
   orders: any[];
@@ -16,72 +19,75 @@ interface DashboardProps {
 }
 
 export function DashboardView({ orders, batches }: DashboardProps) {
-  // Calculate KPIs
-  const activeOrders = orders.filter(
-    (o) => o.status !== "completed" && o.status !== "cancelled",
-  ).length;
-  const activeBatches = batches.filter(
-    (b) => b.status === "in_progress",
-  ).length;
-  const completedToday = batches.filter((b) => {
-    const completedDate = new Date(b.completedAt);
-    const today = new Date();
-    return (
-      b.status === "completed" &&
-      completedDate.toDateString() === today.toDateString()
-    );
-  }).length;
+  // // Calculate KPIs
+  // const activeOrders = orders.filter(
+  //   (o) => o.status !== "completed" && o.status !== "cancelled",
+  // ).length;
+  // const activeBatches = batches.filter(
+  //   (b) => b.status === "in_progress",
+  // ).length;
+  // const completedToday = batches.filter((b) => {
+  //   const completedDate = new Date(b.completedAt);
+  //   const today = new Date();
+  //   return (
+  //     b.status === "completed" &&
+  //     completedDate.toDateString() === today.toDateString()
+  //   );
+  // }).length;
 
-  // Identify bottlenecks - batches that are overdue or taking too long
-  const bottlenecks = batches.filter((b) => {
-    if (b.status !== "in_progress") return false;
-    const estimatedHours = b.estimatedHours || 0;
-    const actualHours = b.actualHours || 0;
-    return actualHours > estimatedHours * 1.2; // 20% over estimate
-  });
+  // // Identify bottlenecks - batches that are overdue or taking too long
+  // const bottlenecks = batches.filter((b) => {
+  //   if (b.status !== "in_progress") return false;
+  //   const estimatedHours = b.estimatedHours || 0;
+  //   const actualHours = b.actualHours || 0;
+  //   return actualHours > estimatedHours * 1.2; // 20% over estimate
+  // });
 
-  // Recent activity - last 5 batches with status changes
-  const recentBatches = [...batches]
-    .sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-    )
-    .slice(0, 5);
+  // // Recent activity - last 5 batches with status changes
+  // const recentBatches = [...batches]
+  //   .sort(
+  //     (a, b) =>
+  //       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  //   )
+  //   .slice(0, 5);
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "in_progress":
-        return <PlayIcon className="w-4 h-4" />;
-      case "on_hold":
-        return <PauseIcon className="w-4 h-4" />;
-      case "completed":
-        return <CheckCircleIcon className="w-4 h-4" />;
-      default:
-        return null;
-    }
-  };
+  // const getStatusIcon = (status: string) => {
+  //   switch (status) {
+  //     case "in_progress":
+  //       return <PlayIcon className="w-4 h-4" />;
+  //     case "on_hold":
+  //       return <PauseIcon className="w-4 h-4" />;
+  //     case "completed":
+  //       return <CheckCircleIcon className="w-4 h-4" />;
+  //     default:
+  //       return null;
+  //   }
+  // };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "pending":
-        return "bg-gray-100 text-gray-800";
-      case "in_progress":
-        return "bg-blue-100 text-blue-800";
-      case "on_hold":
-        return "bg-yellow-100 text-yellow-800";
-      case "completed":
-        return "bg-green-100 text-green-800";
-      case "cancelled":
-        return "bg-red-100 text-red-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
+  // const getStatusColor = (status: string) => {
+  //   switch (status) {
+  //     case "pending":
+  //       return "bg-gray-100 text-gray-800";
+  //     case "in_progress":
+  //       return "bg-blue-100 text-blue-800";
+  //     case "on_hold":
+  //       return "bg-yellow-100 text-yellow-800";
+  //     case "completed":
+  //       return "bg-green-100 text-green-800";
+  //     case "cancelled":
+  //       return "bg-red-100 text-red-800";
+  //     default:
+  //       return "bg-gray-100 text-gray-800";
+  //   }
+  // };
 
   return (
     <div className="space-y-6">
+      <KPIStats orders={orders} batches={batches} />
+      <BottlenecksPanel batches={batches} />
+      <RecentActivityList orders={orders} batches={batches} />
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Active Orders</CardTitle>
@@ -131,10 +137,10 @@ export function DashboardView({ orders, batches }: DashboardProps) {
             </p>
           </CardContent>
         </Card>
-      </div>
+      </div> */}
 
       {/* Bottlenecks Section */}
-      {bottlenecks.length > 0 && (
+      {/* {bottlenecks.length > 0 && (
         <Card className="border-amber-200">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -171,10 +177,10 @@ export function DashboardView({ orders, batches }: DashboardProps) {
             </div>
           </CardContent>
         </Card>
-      )}
+      )} */}
 
       {/* Recent Activity */}
-      <Card>
+      {/* <Card>
         <CardHeader>
           <CardTitle>Recent Activity</CardTitle>
         </CardHeader>
@@ -213,7 +219,7 @@ export function DashboardView({ orders, batches }: DashboardProps) {
             ))}
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
     </div>
   );
 }
