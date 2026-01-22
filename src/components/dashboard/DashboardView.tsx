@@ -14,18 +14,13 @@ import { BottlenecksPanel } from "./BottlenecksPanel";
 import { RecentActivityList } from "./RecentActivity";
 import { Batch } from "@/types/batch";
 import { Order } from "@/types/order";
+import { DashboardKpis } from "@/types/dashboard";
 
 interface DashboardProps {
   orders: Order[];
   batches: Batch[];
   bottlenecks: Batch[];
-  kpis: {
-    activeOrders: number;
-    totalOrders: number;
-    activeBatches: number;
-    completedToday: number;
-    lateBatches: number;
-  };
+  kpis: DashboardKpis;
 }
 
 export function DashboardView({
@@ -34,125 +29,11 @@ export function DashboardView({
   bottlenecks,
   kpis,
 }: DashboardProps) {
-  // // Calculate KPIs
-  // const activeOrders = orders.filter(
-  //   (o) => o.status !== "completed" && o.status !== "cancelled",
-  // ).length;
-  // const activeBatches = batches.filter(
-  //   (b) => b.status === "in_progress",
-  // ).length;
-  // const completedToday = batches.filter((b) => {
-  //   const completedDate = new Date(b.completedAt);
-  //   const today = new Date();
-  //   return (
-  //     b.status === "completed" &&
-  //     completedDate.toDateString() === today.toDateString()
-  //   );
-  // }).length;
-
-  // // Identify bottlenecks - batches that are overdue or taking too long
-  // const bottlenecks = batches.filter((b) => {
-  //   if (b.status !== "in_progress") return false;
-  //   const estimatedHours = b.estimatedHours || 0;
-  //   const actualHours = b.actualHours || 0;
-  //   return actualHours > estimatedHours * 1.2; // 20% over estimate
-  // });
-
-  // // Recent activity - last 5 batches with status changes
-  // const recentBatches = [...batches]
-  //   .sort(
-  //     (a, b) =>
-  //       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  //   )
-  //   .slice(0, 5);
-
-  // const getStatusIcon = (status: string) => {
-  //   switch (status) {
-  //     case "in_progress":
-  //       return <PlayIcon className="w-4 h-4" />;
-  //     case "on_hold":
-  //       return <PauseIcon className="w-4 h-4" />;
-  //     case "completed":
-  //       return <CheckCircleIcon className="w-4 h-4" />;
-  //     default:
-  //       return null;
-  //   }
-  // };
-
-  // const getStatusColor = (status: string) => {
-  //   switch (status) {
-  //     case "pending":
-  //       return "bg-gray-100 text-gray-800";
-  //     case "in_progress":
-  //       return "bg-blue-100 text-blue-800";
-  //     case "on_hold":
-  //       return "bg-yellow-100 text-yellow-800";
-  //     case "completed":
-  //       return "bg-green-100 text-green-800";
-  //     case "cancelled":
-  //       return "bg-red-100 text-red-800";
-  //     default:
-  //       return "bg-gray-100 text-gray-800";
-  //   }
-  // };
-
   return (
     <div className="space-y-6">
       <KPIStats kpis={kpis} />
       <BottlenecksPanel batches={bottlenecks} />
       <RecentActivityList orders={orders} batches={batches} />
-      {/* KPI Cards */}
-      {/* <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Active Orders</CardTitle>
-            <PackageIcon className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{activeOrders}</div>
-            <p className="text-xs text-muted-foreground">
-              {orders.length} total orders
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">In Production</CardTitle>
-            <ClockIcon className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{activeBatches}</div>
-            <p className="text-xs text-muted-foreground">Active work batches</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Completed Today</CardTitle>
-            <TrendingUpIcon className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{completedToday}</div>
-            <p className="text-xs text-muted-foreground">Batches finished</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Bottlenecks</CardTitle>
-            <AlertTriangleIcon className="w-4 h-4 text-amber-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-600">
-              {bottlenecks.length}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Batches over estimate
-            </p>
-          </CardContent>
-        </Card>
-      </div> */}
 
       {/* Bottlenecks Section */}
       {/* {bottlenecks.length > 0 && (

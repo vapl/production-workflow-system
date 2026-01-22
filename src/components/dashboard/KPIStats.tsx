@@ -5,8 +5,6 @@ import {
   TrendingUpIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/Card";
-import { Order } from "@/types/order";
-import { Batch } from "@/types/batch";
 
 export function KPIStats({
   kpis,
