@@ -15,25 +15,26 @@ import { RecentActivityList } from "./RecentActivity";
 import { Batch } from "@/types/batch";
 import { Order } from "@/types/order";
 import { DashboardKpis } from "@/types/dashboard";
+import { Activity } from "@/types/activity";
 
 interface DashboardProps {
   orders: Order[];
   batches: Batch[];
   bottlenecks: Batch[];
   kpis: DashboardKpis;
+  activities: Activity[];
 }
 
 export function DashboardView({
-  orders,
-  batches,
   bottlenecks,
   kpis,
+  activities,
 }: DashboardProps) {
   return (
     <div className="space-y-6">
       <KPIStats kpis={kpis} />
       <BottlenecksPanel batches={bottlenecks} />
-      <RecentActivityList orders={orders} batches={batches} />
+      <RecentActivityList activities={activities} />
 
       {/* Bottlenecks Section */}
       {/* {bottlenecks.length > 0 && (
@@ -74,48 +75,6 @@ export function DashboardView({
           </CardContent>
         </Card>
       )} */}
-
-      {/* Recent Activity */}
-      {/* <Card>
-        <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {recentBatches.map((batch) => (
-              <div
-                key={batch.id}
-                className="flex items-center justify-between py-3 border-b last:border-0"
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`p-2 rounded-lg ${getStatusColor(batch.status)}`}
-                  >
-                    {getStatusIcon(batch.status)}
-                  </div>
-                  <div>
-                    <div className="font-medium">{batch.name}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {batch.orderNumber} • {batch.workStation}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <Badge
-                    variant="outline"
-                    className={getStatusColor(batch.status)}
-                  >
-                    {batch.status.replace("_", " ")}
-                  </Badge>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {new Date(batch.updatedAt).toLocaleTimeString()}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card> */}
     </div>
   );
 }

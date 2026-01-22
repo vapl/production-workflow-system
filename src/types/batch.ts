@@ -8,6 +8,6 @@ export interface Batch {
   operator?: string;
   estimatedHours: number;
   actualHours?: number;
-  completedAt: string; // ISO date string
+  completedAt?: string; // ISO date string
   status: BatchStatus;
 }
