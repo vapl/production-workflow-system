@@ -65,10 +65,14 @@ export function KPIStats({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Bottlenecks</CardTitle>
-            <AlertTriangleIcon className="w-4 h-4 text-amber-500" />
+            {lateBatches > 0 && (
+              <AlertTriangleIcon className="w-4 h-4 text-amber-500" />
+            )}
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-amber-600">
+            <div
+              className={`text-2xl font-bold ${lateBatches > 0 ? "text-amber-600" : ""}`}
+            >
               {lateBatches}
             </div>
             <p className="text-xs text-muted-foreground">

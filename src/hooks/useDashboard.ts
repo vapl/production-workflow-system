@@ -39,6 +39,14 @@ export function useDashboard(): UseDashboardResult {
       priority: "normal",
       status: "completed",
     },
+    {
+      id: "o3",
+      orderNumber: "ORD-003",
+      customerName: "Baltic Steel",
+      dueDate: "2026-02-06",
+      priority: "normal",
+      status: "pending",
+    },
   ];
   const batches: Batch[] = [
     {
