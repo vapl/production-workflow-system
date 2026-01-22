@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { Header } from "@/components/layout/Header";
+import { TabsNav } from "@/components/layout/TabsNav";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 const geistSans = Geist({
@@ -28,10 +30,12 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <div className="flex min-h-screen items-center justify-center bg-background font-sans text-foreground">
+        <Header />
+        <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
           {/* Main Content */}
           <main className="container mx-auto px-4 py-6">
-            <div className="mb-4 flex justify-end">
+            <div className="flex justify-between">
+              <TabsNav />
               <ThemeToggle />
             </div>
             {children}

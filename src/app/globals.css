@@ -3,6 +3,14 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --tabs-bg: #f3f4f6;
+  --tabs-border: #e5e7eb;
+  --tabs-text: #6b7280;
+  --tabs-hover-text: #111827;
+  --tabs-active-bg: #ffffff;
+  --tabs-active-border: #e5e7eb;
+  --tabs-active-text: #111827;
+  --tabs-ring: #cbd5f5;
 }
 
 @theme inline {
@@ -27,6 +35,14 @@
 :root[data-theme="dark"] {
   --background: #0a0a0a;
   --foreground: #ededed;
+  --tabs-bg: #2c3138;
+  --tabs-border: #2c3138;
+  --tabs-text: #94a3b8;
+  --tabs-hover-text: #e2e8f0;
+  --tabs-active-bg: #131517;
+  --tabs-active-border: #1f2225;
+  --tabs-active-text: #ffffff;
+  --tabs-ring: #475569;
 }
 
 body {
