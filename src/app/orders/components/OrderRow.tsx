@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { TableCell, TableRow } from "@/components/ui/Table";
 import { EyeIcon } from "lucide-react";
 import Link from "next/link";
 
@@ -18,26 +19,26 @@ interface OrderRowProps {
 
 export function OrderRow({ order }: OrderRowProps) {
   return (
-    <tr>
-      <td className="font-medium">{order.orderNumber}</td>
-      <td>{order.customerName}</td>
-      <td>{order.productName}</td>
-      <td>{order.quantity}</td>
-      <td>{new Date(order.dueDate).toLocaleDateString()}</td>
-      <td>
+    <TableRow>
+      <TableCell className="font-medium">{order.orderNumber}</TableCell>
+      <TableCell>{order.customerName}</TableCell>
+      <TableCell>{order.productName}</TableCell>
+      <TableCell>{order.quantity}</TableCell>
+      <TableCell>{new Date(order.dueDate).toLocaleDateString()}</TableCell>
+      <TableCell>
         <Badge variant="outline">{order.priority}</Badge>
-      </td>
-      <td>
+      </TableCell>
+      <TableCell>
         <Badge variant="outline">{order.status.replace("_", " ")}</Badge>
-      </td>
-      <td className="text-right">
+      </TableCell>
+      <TableCell className="text-right">
         <Link href={`/orders/${order.id}`}>
           <Button variant="ghost" size="sm" className="gap-2">
-            <EyeIcon className="w-4 h-4" />
+            <EyeIcon className="h-4 w-4" />
             View
           </Button>
         </Link>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
