@@ -2,7 +2,7 @@ import { KPIStats } from "./KPIStats";
 import { BottlenecksPanel } from "./BottlenecksPanel";
 import { RecentActivityList } from "./RecentActivity";
 import { Batch } from "@/types/batch";
-import { Order } from "@/types/order";
+import { Order } from "@/types/orders";
 import { DashboardKpis } from "@/types/dashboard";
 import { Activity } from "@/types/activity";
 

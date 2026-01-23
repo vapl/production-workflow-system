@@ -1,4 +1,4 @@
-import type { Order } from "@/types/order";
+import type { Order } from "@/types/orders";
 import type { Batch } from "@/types/batch";
 import type { Activity } from "@/types/activity";
 

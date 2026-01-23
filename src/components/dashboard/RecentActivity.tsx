@@ -41,7 +41,7 @@ export function RecentActivityList({ activities }: { activities: Activity[] }) {
             {activities.map((activity) => (
               <div
                 key={activity.id}
-                className="flex items-center justify-between py-3 border-b last:border-0"
+                className="flex items-center justify-between py-3 border-b border-foreground/20 last:border-0"
               >
                 <div className="flex items-center gap-3">
                   <div

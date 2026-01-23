@@ -7,7 +7,7 @@ import {
 } from "@/lib/domain/dashboardKpis";
 import { getRecentActivities } from "@/lib/domain/getRecentActivities";
 
-import type { Order } from "@/types/order";
+import type { Order } from "@/types/orders";
 import type { Batch } from "@/types/batch";
 import type { DashboardKpis } from "@/types/dashboard";
 import type { Activity } from "@/types/activity";
