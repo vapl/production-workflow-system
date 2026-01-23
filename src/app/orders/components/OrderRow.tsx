@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EyeIcon } from "lucide-react";
+import Link from "next/link";
 
 interface OrderRowProps {
   order: {
@@ -30,15 +31,12 @@ export function OrderRow({ order }: OrderRowProps) {
         <Badge variant="outline">{order.status.replace("_", " ")}</Badge>
       </td>
       <td className="text-right">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => console.log("view", order.id)}
-          className="gap-2"
-        >
-          <EyeIcon className="w-4 h-4" />
-          View
-        </Button>
+        <Link href={`/orders/${order.id}`}>
+          <Button variant="ghost" size="sm" className="gap-2">
+            <EyeIcon className="w-4 h-4" />
+            View
+          </Button>
+        </Link>
       </td>
     </tr>
   );
