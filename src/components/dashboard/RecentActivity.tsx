@@ -3,6 +3,7 @@ import type { ActivityStatus } from "@/types/activity";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/Card";
 import { AlertTriangleIcon, CheckCircleIcon, ClockIcon } from "lucide-react";
 import { Badge } from "../ui/Badge";
+import { formatActivityStatus, formatTime } from "@/lib/domain/formatters";
 
 export function getStatusColor(status: ActivityStatus): string {
   switch (status) {
@@ -63,10 +64,10 @@ export function RecentActivityList({ activities }: { activities: Activity[] }) {
                     variant="outline"
                     className={getStatusColor(activity.status)}
                   >
-                    {activity.status.replace("_", " ")}
+                    {formatActivityStatus(activity.status)}
                   </Badge>
                   <div className="text-xs text-muted-foreground mt-1">
-                    {new Date(activity.timestamp).toLocaleTimeString()}
+                    {formatTime(activity.timestamp)}
                   </div>
                 </div>
               </div>

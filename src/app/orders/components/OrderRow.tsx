@@ -1,43 +1,138 @@
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { TableCell, TableRow } from "@/components/ui/Table";
-import { EyeIcon } from "lucide-react";
+import {
+  EyeIcon,
+  MoreVerticalIcon,
+  PencilIcon,
+  Trash2Icon,
+} from "lucide-react";
 import Link from "next/link";
+import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
+import type { Order } from "@/types/orders";
+import { createPortal } from "react-dom";
+import { useEffect, useRef, useState } from "react";
 
 interface OrderRowProps {
-  order: {
-    id: string;
-    orderNumber: string;
-    customerName: string;
-    productName: string;
-    quantity: number;
-    dueDate: string;
-    priority: string;
-    status: string;
-  };
+  order: Order;
+  onEdit?: (order: Order) => void;
+  onDelete?: (order: Order) => void;
 }
 
-export function OrderRow({ order }: OrderRowProps) {
+export function OrderRow({ order, onEdit, onDelete }: OrderRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    function handlePosition() {
+      if (!triggerRef.current) {
+        return;
+      }
+      const rect = triggerRef.current.getBoundingClientRect();
+      setMenuPosition({
+        top: rect.bottom + 8,
+        left: rect.right - rect.width,
+        width: rect.width,
+      });
+    }
+
+    if (menuOpen) {
+      handlePosition();
+      window.addEventListener("resize", handlePosition);
+      window.addEventListener("scroll", handlePosition, true);
+    }
+
+    return () => {
+      window.removeEventListener("resize", handlePosition);
+      window.removeEventListener("scroll", handlePosition, true);
+    };
+  }, [menuOpen]);
+
   return (
     <TableRow>
       <TableCell className="font-medium">{order.orderNumber}</TableCell>
       <TableCell>{order.customerName}</TableCell>
-      <TableCell>{order.productName}</TableCell>
-      <TableCell>{order.quantity}</TableCell>
-      <TableCell>{new Date(order.dueDate).toLocaleDateString()}</TableCell>
+      <TableCell>{order.productName ?? "—"}</TableCell>
+      <TableCell>{order.quantity ?? "—"}</TableCell>
+      <TableCell>{formatDate(order.dueDate)}</TableCell>
       <TableCell>
         <Badge variant="outline">{order.priority}</Badge>
       </TableCell>
       <TableCell>
-        <Badge variant="outline">{order.status.replace("_", " ")}</Badge>
+        <Badge variant="outline">{formatOrderStatus(order.status)}</Badge>
       </TableCell>
       <TableCell className="text-right">
-        <Link href={`/orders/${order.id}`}>
-          <Button variant="ghost" size="sm" className="gap-2">
-            <EyeIcon className="h-4 w-4" />
-            View
+        <div className="relative inline-flex">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            ref={triggerRef}
+            onClick={() => setMenuOpen((prev) => !prev)}
+          >
+            <MoreVerticalIcon className="h-4 w-4" />
           </Button>
-        </Link>
+        </div>
+        {menuOpen && menuPosition
+          ? createPortal(
+              <div
+                className="fixed inset-0 z-50"
+                onClick={() => setMenuOpen(false)}
+              >
+                <div
+                  className="absolute rounded-md border border-border bg-card p-1 text-sm shadow-md"
+                  style={{
+                    top: menuPosition.top,
+                    left: menuPosition.left,
+                    minWidth: Math.max(menuPosition.width, 160),
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <Link
+                    href={`/orders/${order.id}`}
+                    className="flex items-center gap-2 rounded px-2 py-1.5 text-sm leading-none text-foreground hover:bg-muted/50"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    <EyeIcon className="h-4 w-4" />
+                    View
+                  </Link>
+                  {onEdit && (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm leading-none text-foreground hover:bg-muted/50"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onEdit(order);
+                      }}
+                    >
+                      <PencilIcon className="h-4 w-4" />
+                      Edit
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm leading-none text-destructive hover:bg-destructive/10"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onDelete(order);
+                      }}
+                    >
+                      <Trash2Icon className="h-4 w-4" />
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
       </TableCell>
     </TableRow>
   );

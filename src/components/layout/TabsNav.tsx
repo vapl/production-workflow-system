@@ -36,7 +36,12 @@ export function TabsNav() {
   const pathname = usePathname();
   const router = useRouter();
 
-  const activeTab = tabs.find((t) => t.href === pathname)?.value ?? "dashboard";
+  const activeTab =
+    tabs.find((t) =>
+      t.href === "/"
+        ? pathname === "/"
+        : pathname.startsWith(t.href),
+    )?.value ?? "dashboard";
 
   return (
     <Tabs

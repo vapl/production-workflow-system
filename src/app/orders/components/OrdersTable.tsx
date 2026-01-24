@@ -9,13 +9,12 @@ import { OrderRow } from "./OrderRow";
 import { Order } from "@/types/orders";
 
 interface OrdersTableProps {
-  orders: (Order & {
-    productName: string;
-    quantity: number;
-  })[];
+  orders: Order[];
+  onEdit?: (order: Order) => void;
+  onDelete?: (order: Order) => void;
 }
 
-export function OrdersTable({ orders }: OrdersTableProps) {
+export function OrdersTable({ orders, onEdit, onDelete }: OrdersTableProps) {
   return (
     <div className="rounded-md border">
       <Table>
@@ -43,7 +42,14 @@ export function OrdersTable({ orders }: OrdersTableProps) {
               </td>
             </TableRow>
           ) : (
-            orders.map((order) => <OrderRow key={order.id} order={order} />)
+            orders.map((order) => (
+              <OrderRow
+                key={order.id}
+                order={order}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))
           )}
         </TableBody>
       </Table>
