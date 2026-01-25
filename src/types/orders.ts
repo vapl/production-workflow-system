@@ -6,6 +6,7 @@ export interface Order {
   customerName: string;
   productName?: string;
   quantity?: number;
+  hierarchy?: Record<string, string>;
   dueDate: string; // ISO date string
   priority: "low" | "normal" | "high" | "urgent";
   status: OrderStatus;

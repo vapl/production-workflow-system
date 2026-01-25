@@ -43,6 +43,7 @@ export default function OrdersPage() {
     dueDate: string;
     priority: "low" | "normal" | "high" | "urgent";
     notes?: string;
+    hierarchy?: Record<string, string>;
   }) {
     const maxOrderNumber = orders.reduce((max, order) => {
       const match = order.orderNumber.match(/\d+/);
@@ -58,6 +59,7 @@ export default function OrdersPage() {
       customerName: values.customerName,
       productName: values.productName,
       quantity: values.quantity,
+      hierarchy: values.hierarchy,
       dueDate: values.dueDate,
       priority: values.priority,
       status: "pending" as const,
@@ -74,6 +76,7 @@ export default function OrdersPage() {
     dueDate: string;
     priority: "low" | "normal" | "high" | "urgent";
     notes?: string;
+    hierarchy?: Record<string, string>;
   }) {
     if (!editingOrder) {
       return;
@@ -82,6 +85,7 @@ export default function OrdersPage() {
       customerName: values.customerName,
       productName: values.productName,
       quantity: values.quantity,
+      hierarchy: values.hierarchy,
       dueDate: values.dueDate,
       priority: values.priority,
     });
@@ -138,6 +142,7 @@ export default function OrdersPage() {
                 quantity: editingOrder.quantity ?? 1,
                 dueDate: editingOrder.dueDate,
                 priority: editingOrder.priority,
+                hierarchy: editingOrder.hierarchy,
               }
             : undefined
         }

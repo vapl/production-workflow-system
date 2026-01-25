@@ -162,6 +162,7 @@ export default function OrderDetailPage() {
                   customerName: values.customerName,
                   productName: values.productName,
                   quantity: values.quantity,
+                  hierarchy: values.hierarchy,
                   dueDate: values.dueDate,
                   priority: values.priority,
                 }
@@ -171,6 +172,7 @@ export default function OrderDetailPage() {
             customerName: values.customerName,
             productName: values.productName,
             quantity: values.quantity,
+            hierarchy: values.hierarchy,
             dueDate: values.dueDate,
             priority: values.priority,
           });
@@ -183,6 +185,7 @@ export default function OrderDetailPage() {
           quantity: orderState.quantity ?? 1,
           dueDate: orderState.dueDate,
           priority: orderState.priority,
+          hierarchy: orderState.hierarchy,
         }}
       />
     </section>

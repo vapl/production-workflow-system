@@ -5,6 +5,7 @@ import { Header } from "@/components/layout/Header";
 import { TabsNav } from "@/components/layout/TabsNav";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { OrdersProvider } from "@/app/orders/OrdersContext";
+import { HierarchyProvider } from "@/app/settings/HierarchyContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,19 +32,21 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <OrdersProvider>
-          <Header />
-          <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
-            {/* Main Content */}
-            <main className="container mx-auto px-4 py-6">
-              <div className="flex justify-between">
-                <TabsNav />
-                <ThemeToggle />
-              </div>
-              {children}
-            </main>
-          </div>
-        </OrdersProvider>
+        <HierarchyProvider>
+          <OrdersProvider>
+            <Header />
+            <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
+              {/* Main Content */}
+              <main className="container mx-auto px-4 py-6">
+                <div className="flex justify-between">
+                  <TabsNav />
+                  <ThemeToggle />
+                </div>
+                {children}
+              </main>
+            </div>
+          </OrdersProvider>
+        </HierarchyProvider>
       </body>
     </html>
   );
