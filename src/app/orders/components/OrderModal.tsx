@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { XIcon } from "lucide-react";
-import { mockConstructionItems } from "@/lib/data/mockData";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 
 export interface OrderFormValues {
@@ -56,11 +55,18 @@ export function OrderModal({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const { levels, nodes } = useHierarchy();
+  const [hierarchyInput, setHierarchyInput] = useState<Record<string, string>>(
+    {},
+  );
+  const { levels, nodes, addNode } = useHierarchy();
   const activeLevels = useMemo(
     () =>
       levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
     [levels],
+  );
+  const productLevel = useMemo(
+    () => activeLevels.find((level) => level.key === "product"),
+    [activeLevels],
   );
   const levelNodeMap = useMemo(() => {
     const map = new Map<string, typeof nodes>();
@@ -73,6 +79,34 @@ export function OrderModal({
     return map;
   }, [activeLevels, nodes]);
 
+  function resolveOrCreateNode(
+    levelId: string,
+    label: string,
+    parentId?: string | null,
+  ) {
+    const trimmed = label.trim();
+    if (!trimmed) {
+      return "";
+    }
+    const existing = nodes.find(
+      (node) =>
+        node.levelId === levelId &&
+        node.label.toLowerCase() === trimmed.toLowerCase() &&
+        (parentId ? node.parentId === parentId : !node.parentId),
+    );
+    if (existing) {
+      return existing.id;
+    }
+    const newNodeId = `node-${levelId}-${Date.now()}`;
+    addNode({
+      id: newNodeId,
+      levelId,
+      label: trimmed,
+      parentId: parentId ?? null,
+    });
+    return newNodeId;
+  }
+
   useEffect(() => {
     if (!open) {
       return;
@@ -81,10 +115,17 @@ export function OrderModal({
       ...defaultValues,
       ...initialValues,
     };
+    let nextProductName = nextValues.productName;
+    if (productLevel && nextValues.hierarchy?.[productLevel.id]) {
+      const selectedNode = nodes.find(
+        (node) => node.id === nextValues.hierarchy?.[productLevel.id],
+      );
+      nextProductName = selectedNode?.label ?? nextProductName;
+    }
     setFormState({
       customerName: nextValues.customerName,
       customerEmail: nextValues.customerEmail ?? "",
-      productName: nextValues.productName,
+      productName: nextProductName,
       quantity: String(nextValues.quantity ?? 1),
       dueDate: nextValues.dueDate,
       priority: nextValues.priority,
@@ -93,6 +134,17 @@ export function OrderModal({
     });
     setErrors({});
     setTouched({});
+    const nextHierarchyInput: Record<string, string> = {};
+    activeLevels.forEach((level) => {
+      const nodeId = nextValues.hierarchy?.[level.id];
+      if (nodeId) {
+        const node = nodes.find((item) => item.id === nodeId);
+        if (node) {
+          nextHierarchyInput[level.id] = node.label;
+        }
+      }
+    });
+    setHierarchyInput(nextHierarchyInput);
   }, [initialValues, open]);
 
   function resetForm() {
@@ -108,6 +160,7 @@ export function OrderModal({
     });
     setErrors({});
     setTouched({});
+    setHierarchyInput({});
   }
 
   function validateField(field: string, value: string) {
@@ -120,7 +173,7 @@ export function OrderModal({
           ? "Customer email must be valid."
           : "";
       case "productName":
-        return value.trim() ? "" : "Product name is required.";
+        return "";
       case "quantity": {
         const parsed = Number(value);
         return Number.isFinite(parsed) && parsed > 0
@@ -150,6 +203,15 @@ export function OrderModal({
           delete nextHierarchy[activeLevels[i].id];
         }
       }
+      const productLevel = activeLevels.find((level) => level.key === "product");
+      if (productLevel && levelId === productLevel.id) {
+        const selectedNode = nodes.find((node) => node.id === value);
+        return {
+          ...prev,
+          hierarchy: nextHierarchy,
+          productName: selectedNode?.label ?? "",
+        };
+      }
       return { ...prev, hierarchy: nextHierarchy };
     });
   }
@@ -177,11 +239,32 @@ export function OrderModal({
           className="mt-6 space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
+            const resolvedHierarchy = { ...formState.hierarchy };
+            activeLevels.forEach((level, index) => {
+              const inputValue = hierarchyInput[level.id]?.trim();
+              if (!inputValue) {
+                return;
+              }
+              if (resolvedHierarchy[level.id]) {
+                return;
+              }
+              const parentLevel = activeLevels[index - 1];
+              const parentId = parentLevel
+                ? resolvedHierarchy[parentLevel.id] ?? null
+                : null;
+              const newNodeId = resolveOrCreateNode(
+                level.id,
+                inputValue,
+                parentId ?? null,
+              );
+              if (newNodeId) {
+                resolvedHierarchy[level.id] = newNodeId;
+              }
+            });
             const nextErrors: Record<string, string> = {};
             ([
               "customerName",
               "customerEmail",
-              "productName",
               "quantity",
               "dueDate",
             ] as const).forEach((field) => {
@@ -191,7 +274,7 @@ export function OrderModal({
               }
             });
             activeLevels.forEach((level) => {
-              if (level.isRequired && !formState.hierarchy[level.id]) {
+              if (level.isRequired && !resolvedHierarchy[level.id]) {
                 nextErrors[`hierarchy.${level.id}`] = `${level.name} is required.`;
               }
             });
@@ -199,7 +282,6 @@ export function OrderModal({
             setTouched({
               customerName: true,
               customerEmail: true,
-              productName: true,
               quantity: true,
               dueDate: true,
               ...activeLevels.reduce<Record<string, boolean>>((acc, level) => {
@@ -224,7 +306,7 @@ export function OrderModal({
                 | "high"
                 | "urgent",
               notes: formState.notes.trim() || undefined,
-              hierarchy: formState.hierarchy,
+              hierarchy: resolvedHierarchy,
             });
             resetForm();
             onClose();
@@ -311,10 +393,8 @@ export function OrderModal({
                   ? formState.hierarchy[parentLevel.id]
                   : null;
                 const options = (levelNodeMap.get(level.id) || []).filter(
-                  (node) =>
-                    parentId ? node.parentId === parentId : !node.parentId,
+                  (node) => (parentId ? node.parentId === parentId : true),
                 );
-                const isDisabled = index > 0 && !parentId;
                 const errorKey = `hierarchy.${level.id}`;
                 return (
                   <label
@@ -323,42 +403,78 @@ export function OrderModal({
                   >
                     {level.name}
                     {level.isRequired ? " *" : ""}
-                    <select
-                      value={formState.hierarchy[level.id] ?? ""}
-                      onChange={(event) =>
-                        handleHierarchyChange(level.id, event.target.value)
-                      }
-                      onBlur={(event) => {
-                        setTouched((prev) => ({
-                          ...prev,
-                          [errorKey]: true,
-                        }));
-                        if (level.isRequired && !event.target.value) {
-                          setErrors((prev) => ({
+                    <>
+                      <input
+                        list={`level-options-${level.id}`}
+                        value={hierarchyInput[level.id] ?? ""}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setHierarchyInput((prev) => ({
                             ...prev,
-                            [errorKey]: `${level.name} is required.`,
+                            [level.id]: value,
                           }));
-                        } else {
+                          const matched = options.find(
+                            (node) =>
+                              node.label.toLowerCase() === value.toLowerCase(),
+                          );
+                          if (matched) {
+                            handleHierarchyChange(level.id, matched.id);
+                          }
+                        }}
+                        onBlur={(event) => {
+                          setTouched((prev) => ({
+                            ...prev,
+                            [errorKey]: true,
+                          }));
+                          const rawValue = event.target.value.trim();
+                          if (!rawValue) {
+                            if (level.isRequired) {
+                              setErrors((prev) => ({
+                                ...prev,
+                                [errorKey]: `${level.name} is required.`,
+                              }));
+                            }
+                            return;
+                          }
+                          const matched = options.find(
+                            (node) =>
+                              node.label.toLowerCase() ===
+                              rawValue.toLowerCase(),
+                          );
+                          const newNodeId = matched
+                            ? matched.id
+                            : resolveOrCreateNode(
+                                level.id,
+                                rawValue,
+                                parentId ?? null,
+                              );
+                          handleHierarchyChange(level.id, newNodeId);
+                          setHierarchyInput((prev) => ({
+                            ...prev,
+                            [level.id]:
+                              matched?.label ??
+                              nodes.find((node) => node.id === newNodeId)
+                                ?.label ??
+                              rawValue,
+                          }));
                           setErrors((prev) => ({
                             ...prev,
                             [errorKey]: "",
                           }));
-                        }
-                      }}
-                      className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
-                        touched[errorKey] && errors[errorKey]
-                          ? "border-destructive"
-                          : "border-border"
-                      } bg-input-background`}
-                      disabled={isDisabled}
-                    >
-                      <option value="">Select {level.name}</option>
-                      {options.map((node) => (
-                        <option key={node.id} value={node.id}>
-                          {node.label}
-                        </option>
-                      ))}
-                    </select>
+                        }}
+                        className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
+                          touched[errorKey] && errors[errorKey]
+                            ? "border-destructive"
+                            : "border-border"
+                        } bg-input-background`}
+                        placeholder={`Search or enter ${level.name}`}
+                      />
+                      <datalist id={`level-options-${level.id}`}>
+                        {options.map((node) => (
+                          <option key={node.id} value={node.label} />
+                        ))}
+                      </datalist>
+                    </>
                     {touched[errorKey] && errors[errorKey] && (
                       <span className="text-xs text-destructive">
                         {errors[errorKey]}
@@ -369,48 +485,6 @@ export function OrderModal({
               })}
             </div>
           )}
-
-          <label className="space-y-2 text-sm font-medium">
-            Product Name *
-            <select
-              value={formState.productName}
-              onChange={(event) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  productName: event.target.value,
-                }))
-              }
-              onBlur={(event) => {
-                const message = validateField(
-                  "productName",
-                  event.target.value,
-                );
-                setErrors((prev) => ({
-                  ...prev,
-                  productName: message,
-                }));
-                setTouched((prev) => ({ ...prev, productName: true }));
-              }}
-              className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
-                touched.productName && errors.productName
-                  ? "border-destructive"
-                  : "border-border"
-              } bg-input-background`}
-              required
-            >
-              <option value="">Select from Construction List</option>
-              {mockConstructionItems.map((item) => (
-                <option key={item.id} value={item.name}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-            {touched.productName && errors.productName && (
-              <span className="text-xs text-destructive">
-                {errors.productName}
-              </span>
-            )}
-          </label>
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 text-sm font-medium">

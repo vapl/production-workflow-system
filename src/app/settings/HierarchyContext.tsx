@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { createContext, useContext, useMemo, useState } from "react";
 
@@ -42,18 +42,10 @@ const defaultLevels: HierarchyLevel[] = [
     isActive: true,
   },
   {
-    id: "level-factory",
-    name: "Factory",
-    key: "factory",
-    order: 2,
-    isRequired: false,
-    isActive: true,
-  },
-  {
     id: "level-category",
     name: "Category",
     key: "category",
-    order: 3,
+    order: 2,
     isRequired: false,
     isActive: true,
   },
@@ -61,7 +53,7 @@ const defaultLevels: HierarchyLevel[] = [
     id: "level-product",
     name: "Product",
     key: "product",
-    order: 4,
+    order: 3,
     isRequired: true,
     isActive: true,
   },
@@ -76,41 +68,27 @@ const defaultNodes: HierarchyNode[] = [
     parentId: null,
   },
   {
-    id: "node-factory-60123",
-    levelId: "level-factory",
-    label: "60123",
-    code: "60123",
-    parentId: "node-contract-vv",
-  },
-  {
-    id: "node-factory-60124",
-    levelId: "level-factory",
-    label: "60124",
-    code: "60124",
-    parentId: "node-contract-vv",
-  },
-  {
     id: "node-category-kitchen",
     levelId: "level-category",
-    label: "Virtuves mēbeles",
-    parentId: "node-factory-60123",
+    label: "Kitchen furniture",
+    parentId: "node-contract-vv",
   },
   {
     id: "node-category-wardrobe",
     levelId: "level-category",
     label: "Skapis",
-    parentId: "node-factory-60123",
+    parentId: "node-contract-vv",
   },
   {
     id: "node-product-sliding",
     levelId: "level-product",
-    label: "Bīdāmās durvis",
+    label: "Sliding doors",
     parentId: "node-category-kitchen",
   },
   {
     id: "node-product-cabinet",
     levelId: "level-product",
-    label: "Skapis",
+    label: "Kitchen furniture",
     parentId: "node-category-wardrobe",
   },
 ];
@@ -163,3 +141,5 @@ export function useHierarchy() {
   }
   return context;
 }
+
+

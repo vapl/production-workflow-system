@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/Badge";
+﻿import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { TableCell, TableRow } from "@/components/ui/Table";
 import {
@@ -10,16 +10,19 @@ import {
 import Link from "next/link";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Order } from "@/types/orders";
+import type { HierarchyLevel } from "@/app/settings/HierarchyContext";
+import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface OrderRowProps {
   order: Order;
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
+  levels: HierarchyLevel[];
 }
 
-export function OrderRow({ order, onEdit, onDelete }: OrderRowProps) {
+export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{
     top: number;
@@ -27,6 +30,14 @@ export function OrderRow({ order, onEdit, onDelete }: OrderRowProps) {
     width: number;
   } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const { nodes } = useHierarchy();
+  const nodeLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    nodes.forEach((node) => {
+      map.set(node.id, node.label);
+    });
+    return map;
+  }, [nodes]);
 
   useEffect(() => {
     function handlePosition() {
@@ -57,8 +68,15 @@ export function OrderRow({ order, onEdit, onDelete }: OrderRowProps) {
     <TableRow>
       <TableCell className="font-medium">{order.orderNumber}</TableCell>
       <TableCell>{order.customerName}</TableCell>
-      <TableCell>{order.productName ?? "—"}</TableCell>
-      <TableCell>{order.quantity ?? "—"}</TableCell>
+      {levels.map((level) => {
+        const value = order.hierarchy?.[level.id];
+        return (
+          <TableCell key={level.id}>
+            {value ? nodeLabelMap.get(value) ?? value : "--"}
+          </TableCell>
+        );
+      })}
+      <TableCell>{order.quantity ?? "--"}</TableCell>
       <TableCell>{formatDate(order.dueDate)}</TableCell>
       <TableCell>
         <Badge variant="outline">{order.priority}</Badge>
@@ -137,3 +155,4 @@ export function OrderRow({ order, onEdit, onDelete }: OrderRowProps) {
     </TableRow>
   );
 }
+

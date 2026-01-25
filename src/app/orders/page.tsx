@@ -9,31 +9,85 @@ import { Button } from "@/components/ui/Button";
 import { PlusIcon } from "lucide-react";
 import { OrderModal } from "./components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
+import { useHierarchy } from "@/app/settings/HierarchyContext";
 
 export default function OrdersPage() {
   const { orders, addOrder, updateOrder, removeOrder } = useOrders();
+  const { nodes, levels } = useHierarchy();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Order | null>(null);
+  const [groupByContract, setGroupByContract] = useState(true);
 
   const filteredOrders = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
+    const nodeLabelMap = new Map(
+      nodes.map((node) => [node.id, node.label.toLowerCase()]),
+    );
 
     return orders.filter((order) => {
+      const hierarchyLabels = Object.values(order.hierarchy ?? {})
+        .map((id) => nodeLabelMap.get(id) ?? "")
+        .join(" ");
       const matchesQuery =
         normalizedQuery.length === 0 ||
         order.orderNumber.toLowerCase().includes(normalizedQuery) ||
         order.customerName.toLowerCase().includes(normalizedQuery) ||
-        (order.productName ?? "").toLowerCase().includes(normalizedQuery);
+        hierarchyLabels.includes(normalizedQuery);
 
       const matchesStatus =
         statusFilter === "all" || order.status === statusFilter;
 
       return matchesQuery && matchesStatus;
     });
-  }, [orders, searchQuery, statusFilter]);
+  }, [nodes, orders, searchQuery, statusFilter]);
+
+  const statusCounts = useMemo(
+    () => ({
+      all: orders.length,
+      pending: orders.filter((order) => order.status === "pending").length,
+      in_progress: orders.filter((order) => order.status === "in_progress")
+        .length,
+      completed: orders.filter((order) => order.status === "completed").length,
+      cancelled: orders.filter((order) => order.status === "cancelled").length,
+    }),
+    [orders],
+  );
+
+  const contractLevel = useMemo(
+    () => levels.find((level) => level.key === "contract"),
+    [levels],
+  );
+  const contractLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    nodes.forEach((node) => {
+      map.set(node.id, node.label);
+    });
+    return map;
+  }, [nodes]);
+  const groupedOrders = useMemo(() => {
+    if (!groupByContract || !contractLevel) {
+      return [];
+    }
+    const groups = new Map<string, Order[]>();
+    filteredOrders.forEach((order) => {
+      const contractId = order.hierarchy?.[contractLevel.id] ?? "none";
+      const label =
+        contractId === "none"
+          ? "No contract"
+          : contractLabelMap.get(contractId) ?? contractId;
+      if (!groups.has(label)) {
+        groups.set(label, []);
+      }
+      groups.get(label)?.push(order);
+    });
+    return Array.from(groups.entries()).map(([label, orders]) => ({
+      label,
+      orders,
+    }));
+  }, [contractLabelMap, contractLevel, filteredOrders, groupByContract]);
 
   function handleCreateOrder(values: {
     customerName: string;
@@ -114,9 +168,15 @@ export default function OrdersPage() {
             statusFilter={statusFilter}
             onSearchChange={setSearchQuery}
             onStatusChange={setStatusFilter}
+            groupByContract={groupByContract}
+            onToggleGroupByContract={() =>
+              setGroupByContract((prev) => !prev)
+            }
+            statusCounts={statusCounts}
           />
           <OrdersTable
             orders={filteredOrders}
+            groups={groupByContract ? groupedOrders : undefined}
             onEdit={(order) => {
               setEditingOrder(order);
               setIsModalOpen(true);
