@@ -10,9 +10,7 @@ import {
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { useHierarchy } from "./HierarchyContext";
-import { mockOperators, mockWorkStations } from "@/lib/data/mockData";
-import type { WorkStation } from "@/types/workstation";
-import type { Operator } from "@/types/operator";
+import { useSettingsData } from "@/hooks/useSettingsData";
 
 function slugify(value: string) {
   return value
@@ -21,16 +19,6 @@ function slugify(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)+/g, "");
 }
-
-function makeId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
-}
-
-const defaultStopReasons = [
-  { id: "sr-1", label: "Missing material", isActive: true },
-  { id: "sr-2", label: "Machine maintenance", isActive: true },
-  { id: "sr-3", label: "Waiting for approval", isActive: true },
-];
 
 const integrations = [
   { id: "int-1", name: "Horizon", status: "Coming soon" },
@@ -72,10 +60,20 @@ export default function SettingsPage() {
   const [nodeParentId, setNodeParentId] = useState<string>("none");
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
-  const [workStations, setWorkStations] =
-    useState<WorkStation[]>(mockWorkStations);
-  const [operators, setOperators] = useState<Operator[]>(mockOperators);
-  const [stopReasons, setStopReasons] = useState(defaultStopReasons);
+  const {
+    workStations,
+    operators,
+    stopReasons,
+    addWorkStation,
+    updateWorkStation,
+    removeWorkStation,
+    addOperator,
+    updateOperator,
+    removeOperator,
+    addStopReason,
+    updateStopReason,
+    removeStopReason,
+  } = useSettingsData();
 
   const [stationName, setStationName] = useState("");
   const [stationDescription, setStationDescription] = useState("");
@@ -154,8 +152,7 @@ export default function SettingsPage() {
       return;
     }
 
-    addLevel({
-      id: makeId("level"),
+    void addLevel({
       name: trimmedName,
       key: normalizedKey,
       order: levelOrder,
@@ -203,8 +200,7 @@ export default function SettingsPage() {
       resetNodeForm();
       return;
     }
-    addNode({
-      id: makeId("node"),
+    void addNode({
       levelId: selectedLevel.id,
       label: trimmedLabel,
       code: nodeCode.trim() || undefined,
@@ -230,31 +226,24 @@ export default function SettingsPage() {
     setEditingStationId(null);
   }
 
-  function handleSaveStation() {
+  async function handleSaveStation() {
     const trimmedName = stationName.trim();
     if (!trimmedName) {
       return;
     }
     if (editingStationId) {
-      setWorkStations((prev) =>
-        prev.map((item) =>
-          item.id === editingStationId
-            ? { ...item, name: trimmedName, description: stationDescription }
-            : item,
-        ),
-      );
+      await updateWorkStation(editingStationId, {
+        name: trimmedName,
+        description: stationDescription.trim() || undefined,
+      });
       resetStationForm();
       return;
     }
-    setWorkStations((prev) => [
-      ...prev,
-      {
-        id: makeId("ws"),
-        name: trimmedName,
-        description: stationDescription.trim() || undefined,
-        isActive: true,
-      },
-    ]);
+    await addWorkStation({
+      name: trimmedName,
+      description: stationDescription.trim() || undefined,
+      isActive: true,
+    });
     resetStationForm();
   }
 
@@ -276,38 +265,27 @@ export default function SettingsPage() {
     setEditingOperatorId(null);
   }
 
-  function handleSaveOperator() {
+  async function handleSaveOperator() {
     const trimmedName = operatorName.trim();
     if (!trimmedName) {
       return;
     }
     if (editingOperatorId) {
-      setOperators((prev) =>
-        prev.map((item) =>
-          item.id === editingOperatorId
-            ? {
-                ...item,
-                name: trimmedName,
-                role: operatorRole.trim() || undefined,
-                stationId: operatorStationId || undefined,
-                isActive: operatorActive,
-              }
-            : item,
-        ),
-      );
-      resetOperatorForm();
-      return;
-    }
-    setOperators((prev) => [
-      ...prev,
-      {
-        id: makeId("op"),
+      await updateOperator(editingOperatorId, {
         name: trimmedName,
         role: operatorRole.trim() || undefined,
         stationId: operatorStationId || undefined,
         isActive: operatorActive,
-      },
-    ]);
+      });
+      resetOperatorForm();
+      return;
+    }
+    await addOperator({
+      name: trimmedName,
+      role: operatorRole.trim() || undefined,
+      stationId: operatorStationId || undefined,
+      isActive: operatorActive,
+    });
     resetOperatorForm();
   }
 
@@ -328,26 +306,17 @@ export default function SettingsPage() {
     setEditingStopReasonId(null);
   }
 
-  function handleSaveStopReason() {
+  async function handleSaveStopReason() {
     const trimmedLabel = stopReasonLabel.trim();
     if (!trimmedLabel) {
       return;
     }
     if (editingStopReasonId) {
-      setStopReasons((prev) =>
-        prev.map((item) =>
-          item.id === editingStopReasonId
-            ? { ...item, label: trimmedLabel }
-            : item,
-        ),
-      );
+      await updateStopReason(editingStopReasonId, { label: trimmedLabel });
       resetStopReasonForm();
       return;
     }
-    setStopReasons((prev) => [
-      ...prev,
-      { id: makeId("sr"), label: trimmedLabel, isActive: true },
-    ]);
+    await addStopReason(trimmedLabel);
     resetStopReasonForm();
   }
 
@@ -713,13 +682,9 @@ export default function SettingsPage() {
                         type="checkbox"
                         checked={station.isActive}
                         onChange={(event) =>
-                          setWorkStations((prev) =>
-                            prev.map((item) =>
-                              item.id === station.id
-                                ? { ...item, isActive: event.target.checked }
-                                : item,
-                            ),
-                          )
+                          updateWorkStation(station.id, {
+                            isActive: event.target.checked,
+                          })
                         }
                       />
                       Active
@@ -734,11 +699,7 @@ export default function SettingsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() =>
-                        setWorkStations((prev) =>
-                          prev.filter((item) => item.id !== station.id),
-                        )
-                      }
+                      onClick={() => removeWorkStation(station.id)}
                     >
                       Remove
                     </Button>
@@ -838,13 +799,9 @@ export default function SettingsPage() {
                         type="checkbox"
                         checked={operator.isActive}
                         onChange={(event) =>
-                          setOperators((prev) =>
-                            prev.map((item) =>
-                              item.id === operator.id
-                                ? { ...item, isActive: event.target.checked }
-                                : item,
-                            ),
-                          )
+                          updateOperator(operator.id, {
+                            isActive: event.target.checked,
+                          })
                         }
                       />
                       Active
@@ -859,11 +816,7 @@ export default function SettingsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() =>
-                        setOperators((prev) =>
-                          prev.filter((item) => item.id !== operator.id),
-                        )
-                      }
+                      onClick={() => removeOperator(operator.id)}
                     >
                       Remove
                     </Button>
@@ -918,13 +871,9 @@ export default function SettingsPage() {
                         type="checkbox"
                         checked={reason.isActive}
                         onChange={(event) =>
-                          setStopReasons((prev) =>
-                            prev.map((item) =>
-                              item.id === reason.id
-                                ? { ...item, isActive: event.target.checked }
-                                : item,
-                            ),
-                          )
+                          updateStopReason(reason.id, {
+                            isActive: event.target.checked,
+                          })
                         }
                       />
                       Active
@@ -939,11 +888,7 @@ export default function SettingsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() =>
-                        setStopReasons((prev) =>
-                          prev.filter((item) => item.id !== reason.id),
-                        )
-                      }
+                      onClick={() => removeStopReason(reason.id)}
                     >
                       Remove
                     </Button>

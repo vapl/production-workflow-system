@@ -1,3 +1,5 @@
+"use client";
+
 import { DashboardView } from "./DashboardView";
 import { useDashboard } from "@/hooks/useDashboard";
 

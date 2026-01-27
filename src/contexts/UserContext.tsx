@@ -10,6 +10,7 @@ export interface CurrentUser {
   name: string;
   email?: string;
   role: UserRole;
+  tenantId?: string | null;
   isAuthenticated: boolean;
   loading: boolean;
 }
@@ -24,6 +25,7 @@ const fallbackUser: CurrentUser = {
   id: "user-1",
   name: "Manager",
   role: "Sales",
+  tenantId: null,
   isAuthenticated: false,
   loading: false,
 };
@@ -36,22 +38,26 @@ const UserContext = createContext<UserContextValue>({
 
 async function fetchUserRole(userId: string) {
   if (!supabase) {
-    return { role: "Sales" as UserRole, fullName: "Manager" };
+    return { role: "Sales" as UserRole, fullName: "Manager", tenantId: null };
   }
   const { data, error } = await supabase
     .from("profiles")
-    .select("role, full_name")
+    .select("role, full_name, tenant_id")
     .eq("id", userId)
     .maybeSingle();
 
   if (error || !data) {
-    return { role: "Sales" as UserRole, fullName: "Manager" };
+    return { role: "Sales" as UserRole, fullName: "Manager", tenantId: null };
   }
 
   const role = ["Sales", "Engineering", "Production"].includes(data.role)
     ? (data.role as UserRole)
     : ("Sales" as UserRole);
-  return { role, fullName: data.full_name ?? "User" };
+  return {
+    role,
+    fullName: data.full_name ?? "User",
+    tenantId: data.tenant_id ?? null,
+  };
 }
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
@@ -87,6 +93,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         name: profile.fullName,
         email: sessionUser.email ?? undefined,
         role: profile.role,
+        tenantId: profile.tenantId ?? null,
         isAuthenticated: true,
         loading: false,
       });
@@ -107,6 +114,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           name: profile.fullName,
           email: sessionUser.email ?? undefined,
           role: profile.role,
+          tenantId: profile.tenantId ?? null,
           isAuthenticated: true,
           loading: false,
         });

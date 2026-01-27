@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { mockBatches } from "@/lib/data/mockData";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Batch } from "@/types/batch";
 import type { OrderAttachment, OrderComment } from "@/types/orders";
@@ -21,6 +20,7 @@ import { OrderModal } from "@/app/orders/components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useBatches } from "@/contexts/BatchesContext";
 import { uploadOrderAttachment } from "@/lib/uploadOrderAttachment";
 
 const MAX_FILE_SIZE_MB = 20;
@@ -35,7 +35,15 @@ export default function OrderDetailPage() {
     ? normalizeId(decodeURIComponent(params.orderId))
     : "";
 
-  const { orders, updateOrder } = useOrders();
+  const {
+    orders,
+    updateOrder,
+    addOrderAttachment,
+    removeOrderAttachment,
+    addOrderComment,
+    removeOrderComment,
+  } = useOrders();
+  const { batches } = useBatches();
   const { levels, nodes, addNode } = useHierarchy();
   const { role, name } = useCurrentUser();
   const [horizonOrders, setHorizonOrders] = useState<
@@ -94,10 +102,8 @@ export default function OrderDetailPage() {
       if (existingId) {
         return existingId;
       }
-      const newId = `node-hz-${Date.now()}-${Math.random()
-        .toString(16)
-        .slice(2, 6)}`;
-      addNode({
+      const newId = crypto.randomUUID();
+      void addNode({
         id: newId,
         levelId,
         label: trimmedLabel,
@@ -228,7 +234,7 @@ export default function OrderDetailPage() {
   }
 
   const isExternalOrder = orderState.id.startsWith("hz-");
-  const batches: Batch[] = mockBatches.filter(
+  const batchesForOrder: Batch[] = batches.filter(
     (batch) => batch.orderId === orderState.id,
   );
   const attachments = orderState.attachments ?? [];
@@ -276,12 +282,17 @@ export default function OrderDetailPage() {
           setAttachmentError(result.error ?? "Upload failed.");
           continue;
         }
-        const attachment: OrderAttachment = {
-          ...result.attachment,
+        const created = await addOrderAttachment(orderState.id, {
+          name: result.attachment.name,
+          url: result.attachment.url,
+          size: result.attachment.size,
+          mimeType: result.attachment.mimeType,
           addedBy: name,
           addedByRole: role,
-        };
-        uploadedAttachments.push(attachment);
+        });
+        if (created) {
+          uploadedAttachments.push(created);
+        }
       }
 
       if (uploadedAttachments.length > 0) {
@@ -289,7 +300,6 @@ export default function OrderDetailPage() {
         setOrderState((prev) =>
           prev ? { ...prev, attachments: nextAttachments } : prev,
         );
-        updateOrder(orderState.id, { attachments: nextAttachments });
         setAttachmentFiles([]);
       }
       if (uploadedAttachments.length === 0 && attachmentError) {
@@ -300,46 +310,49 @@ export default function OrderDetailPage() {
     }
   }
 
-  function handleAddComment() {
+  async function handleAddComment() {
     const trimmedMessage = commentMessage.trim();
     if (!trimmedMessage) {
       return;
     }
-    const newComment: OrderComment = {
-      id: `cmt-${Date.now()}`,
+    const created = await addOrderComment(orderState.id, {
       message: trimmedMessage,
       author: name,
       authorRole: role,
-      createdAt: new Date().toISOString(),
-    };
-    const nextComments = [newComment, ...comments];
-    setOrderState((prev) =>
-      prev ? { ...prev, comments: nextComments } : prev,
-    );
-    updateOrder(orderState.id, { comments: nextComments });
-    setCommentMessage("");
+    });
+    if (created) {
+      const nextComments = [created, ...comments];
+      setOrderState((prev) =>
+        prev ? { ...prev, comments: nextComments } : prev,
+      );
+      setCommentMessage("");
+    }
   }
 
-  function handleRemoveAttachment(attachmentId: string) {
+  async function handleRemoveAttachment(attachmentId: string) {
     const target = attachments.find((attachment) => attachment.id === attachmentId);
     if (target?.url?.startsWith("blob:")) {
       URL.revokeObjectURL(target.url);
     }
-    const nextAttachments = attachments.filter(
-      (attachment) => attachment.id !== attachmentId,
-    );
-    setOrderState((prev) =>
-      prev ? { ...prev, attachments: nextAttachments } : prev,
-    );
-    updateOrder(orderState.id, { attachments: nextAttachments });
+    const removed = await removeOrderAttachment(orderState.id, attachmentId);
+    if (removed) {
+      const nextAttachments = attachments.filter(
+        (attachment) => attachment.id !== attachmentId,
+      );
+      setOrderState((prev) =>
+        prev ? { ...prev, attachments: nextAttachments } : prev,
+      );
+    }
   }
 
-  function handleRemoveComment(commentId: string) {
-    const nextComments = comments.filter((comment) => comment.id !== commentId);
-    setOrderState((prev) =>
-      prev ? { ...prev, comments: nextComments } : prev,
-    );
-    updateOrder(orderState.id, { comments: nextComments });
+  async function handleRemoveComment(commentId: string) {
+    const removed = await removeOrderComment(orderState.id, commentId);
+    if (removed) {
+      const nextComments = comments.filter((comment) => comment.id !== commentId);
+      setOrderState((prev) =>
+        prev ? { ...prev, comments: nextComments } : prev,
+      );
+    }
   }
 
   function renderAttachmentPreview(attachment: OrderAttachment) {
@@ -641,12 +654,12 @@ export default function OrderDetailPage() {
               <CardTitle>Production Batches</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              {batches.length === 0 ? (
+              {batchesForOrder.length === 0 ? (
                 <p className="text-muted-foreground">
                   No production batches created yet.
                 </p>
               ) : (
-                batches.map((batch) => (
+                batchesForOrder.map((batch) => (
                   <div
                     key={batch.id}
                     className="flex items-center justify-between rounded-md border border-border px-3 py-2"
@@ -674,7 +687,7 @@ export default function OrderDetailPage() {
       <OrderModal
         open={isEditOpen}
         onClose={() => setIsEditOpen(false)}
-        onSubmit={(values) => {
+        onSubmit={async (values) => {
           setOrderState((prev) =>
             prev
               ? {
@@ -688,7 +701,7 @@ export default function OrderDetailPage() {
                 }
               : prev,
           );
-          updateOrder(orderState.id, {
+          await updateOrder(orderState.id, {
             customerName: values.customerName,
             productName: values.productName,
             quantity: values.quantity,

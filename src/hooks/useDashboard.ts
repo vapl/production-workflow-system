@@ -1,3 +1,5 @@
+"use client";
+
 import { getBottleneckBatches } from "@/lib/domain/getBottleneckBatches";
 import {
   getActiveOrdersCount,
@@ -11,7 +13,8 @@ import type { Order } from "@/types/orders";
 import type { Batch } from "@/types/batch";
 import type { DashboardKpis } from "@/types/dashboard";
 import type { Activity } from "@/types/activity";
-import { mockBatches, mockOrders } from "@/lib/data/mockData";
+import { useOrders } from "@/app/orders/OrdersContext";
+import { useBatches } from "@/contexts/BatchesContext";
 
 export interface UseDashboardResult {
   orders: Order[];
@@ -22,8 +25,8 @@ export interface UseDashboardResult {
 }
 
 export function useDashboard(): UseDashboardResult {
-  const orders: Order[] = mockOrders;
-  const batches: Batch[] = mockBatches;
+  const { orders } = useOrders();
+  const { batches } = useBatches();
 
   const bottlenecks = getBottleneckBatches(batches);
 

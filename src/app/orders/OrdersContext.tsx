@@ -1,37 +1,574 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
-import type { Order } from "@/types/orders";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import type { Order, OrderAttachment, OrderComment, OrderStatus } from "@/types/orders";
 import { mockOrders } from "@/lib/data/mockData";
+import { supabase } from "@/lib/supabaseClient";
+import { useCurrentUser } from "@/contexts/UserContext";
 
 interface OrdersContextValue {
   orders: Order[];
-  setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
-  addOrder: (order: Order) => void;
-  updateOrder: (orderId: string, patch: Partial<Order>) => void;
-  removeOrder: (orderId: string) => void;
+  isLoading: boolean;
+  error?: string | null;
+  refreshOrders: () => Promise<void>;
+  addOrder: (order: {
+    orderNumber: string;
+    customerName: string;
+    productName?: string;
+    quantity?: number;
+    hierarchy?: Record<string, string>;
+    dueDate: string;
+    priority: "low" | "normal" | "high" | "urgent";
+    status: OrderStatus;
+  }) => Promise<Order | null>;
+  updateOrder: (
+    orderId: string,
+    patch: Partial<{
+      customerName: string;
+      productName?: string;
+      quantity?: number;
+      hierarchy?: Record<string, string>;
+      dueDate: string;
+      priority: "low" | "normal" | "high" | "urgent";
+      status: OrderStatus;
+    }>,
+  ) => Promise<Order | null>;
+  removeOrder: (orderId: string) => Promise<boolean>;
+  addOrderAttachment: (
+    orderId: string,
+    attachment: Omit<OrderAttachment, "id" | "createdAt">,
+  ) => Promise<OrderAttachment | null>;
+  removeOrderAttachment: (
+    orderId: string,
+    attachmentId: string,
+  ) => Promise<boolean>;
+  addOrderComment: (
+    orderId: string,
+    comment: Omit<OrderComment, "id" | "createdAt">,
+  ) => Promise<OrderComment | null>;
+  removeOrderComment: (orderId: string, commentId: string) => Promise<boolean>;
 }
 
 const OrdersContext = createContext<OrdersContextValue | null>(null);
 
 export function OrdersProvider({ children }: { children: React.ReactNode }) {
+  const user = useCurrentUser();
   const [orders, setOrders] = useState<Order[]>(mockOrders);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const mapAttachment = (row: {
+    id: string;
+    name: string;
+    url?: string | null;
+    added_by_name?: string | null;
+    added_by_role?: string | null;
+    created_at: string;
+    size?: number | null;
+    mime_type?: string | null;
+  }): OrderAttachment => ({
+    id: row.id,
+    name: row.name,
+    url: row.url ?? undefined,
+    addedBy: row.added_by_name ?? "Unknown",
+    addedByRole: row.added_by_role ?? undefined,
+    createdAt: row.created_at,
+    size: row.size ?? undefined,
+    mimeType: row.mime_type ?? undefined,
+  });
+
+  const mapComment = (row: {
+    id: string;
+    message: string;
+    author_name?: string | null;
+    author_role?: string | null;
+    created_at: string;
+  }): OrderComment => ({
+    id: row.id,
+    message: row.message,
+    author: row.author_name ?? "Unknown",
+    authorRole: row.author_role ?? undefined,
+    createdAt: row.created_at,
+  });
+
+  const mapOrder = (row: {
+    id: string;
+    order_number: string;
+    customer_name: string;
+    product_name?: string | null;
+    quantity?: number | null;
+    hierarchy?: Record<string, string> | null;
+    due_date: string;
+    priority: "low" | "normal" | "high" | "urgent";
+    status: OrderStatus;
+    order_attachments?: Array<{
+      id: string;
+      name: string;
+      url?: string | null;
+      added_by_name?: string | null;
+      added_by_role?: string | null;
+      created_at: string;
+      size?: number | null;
+      mime_type?: string | null;
+    }>;
+    order_comments?: Array<{
+      id: string;
+      message: string;
+      author_name?: string | null;
+      author_role?: string | null;
+      created_at: string;
+    }>;
+  }): Order => ({
+    id: row.id,
+    orderNumber: row.order_number,
+    customerName: row.customer_name,
+    productName: row.product_name ?? undefined,
+    quantity: row.quantity ?? undefined,
+    hierarchy: row.hierarchy ?? undefined,
+    dueDate: row.due_date,
+    priority: row.priority,
+    status: row.status,
+    attachments: row.order_attachments?.map(mapAttachment) ?? undefined,
+    comments: row.order_comments?.map(mapComment) ?? undefined,
+  });
+
+  const refreshOrders = async () => {
+    if (!supabase) {
+      setOrders(mockOrders);
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    const { data, error: fetchError } = await supabase
+      .from("orders")
+      .select(
+        `
+        id,
+        order_number,
+        customer_name,
+        product_name,
+        quantity,
+        hierarchy,
+        due_date,
+        priority,
+        status,
+        order_attachments (
+          id,
+          name,
+          url,
+          added_by_name,
+          added_by_role,
+          created_at,
+          size,
+          mime_type
+        ),
+        order_comments (
+          id,
+          message,
+          author_name,
+          author_role,
+          created_at
+        )
+      `,
+      )
+      .order("created_at", { ascending: false });
+
+    if (fetchError) {
+      setError(fetchError.message);
+      setIsLoading(false);
+      return;
+    }
+    setOrders((data ?? []).map(mapOrder));
+    setIsLoading(false);
+  };
+
+  useEffect(() => {
+    if (!supabase) {
+      setOrders(mockOrders);
+      return;
+    }
+    if (user.loading) {
+      return;
+    }
+    if (!user.isAuthenticated) {
+      setOrders([]);
+      return;
+    }
+    void refreshOrders();
+  }, [user.isAuthenticated, user.loading, user.tenantId]);
 
   const value = useMemo<OrdersContextValue>(
     () => ({
       orders,
-      setOrders,
-      addOrder: (order) => setOrders((prev) => [order, ...prev]),
-      updateOrder: (orderId, patch) =>
+      isLoading,
+      error,
+      refreshOrders,
+      addOrder: async (order) => {
+        if (!supabase) {
+          const fallback: Order = {
+            id: `o-${Date.now()}`,
+            orderNumber: order.orderNumber,
+            customerName: order.customerName,
+            productName: order.productName,
+            quantity: order.quantity,
+            hierarchy: order.hierarchy,
+            dueDate: order.dueDate,
+            priority: order.priority,
+            status: order.status,
+          };
+          setOrders((prev) => [fallback, ...prev]);
+          return fallback;
+        }
+        if (!user.tenantId) {
+          setError("Missing tenant assignment for this user.");
+          return null;
+        }
+        const { data, error: insertError } = await supabase
+          .from("orders")
+          .insert({
+            tenant_id: user.tenantId,
+            order_number: order.orderNumber,
+            customer_name: order.customerName,
+            product_name: order.productName ?? null,
+            quantity: order.quantity ?? null,
+            hierarchy: order.hierarchy ?? null,
+            due_date: order.dueDate,
+            priority: order.priority,
+            status: order.status,
+          })
+          .select(
+            `
+            id,
+            order_number,
+            customer_name,
+            product_name,
+            quantity,
+            hierarchy,
+            due_date,
+            priority,
+            status,
+            order_attachments (
+              id,
+              name,
+              url,
+              added_by_name,
+              added_by_role,
+              created_at,
+              size,
+              mime_type
+            ),
+            order_comments (
+              id,
+              message,
+              author_name,
+              author_role,
+              created_at
+            )
+          `,
+          )
+          .single();
+        if (insertError) {
+          setError(insertError.message);
+          return null;
+        }
+        const mapped = mapOrder(data);
+        setOrders((prev) => [mapped, ...prev]);
+        return mapped;
+      },
+      updateOrder: async (orderId, patch) => {
+        if (!supabase) {
+          setOrders((prev) =>
+            prev.map((order) =>
+              order.id === orderId ? { ...order, ...patch } : order,
+            ),
+          );
+          return orders.find((order) => order.id === orderId) ?? null;
+        }
+        const updatePayload: Record<string, unknown> = {};
+        if (patch.customerName !== undefined) {
+          updatePayload.customer_name = patch.customerName;
+        }
+        if (patch.productName !== undefined) {
+          updatePayload.product_name = patch.productName;
+        }
+        if (patch.quantity !== undefined) {
+          updatePayload.quantity = patch.quantity;
+        }
+        if (patch.hierarchy !== undefined) {
+          updatePayload.hierarchy = patch.hierarchy;
+        }
+        if (patch.dueDate !== undefined) {
+          updatePayload.due_date = patch.dueDate;
+        }
+        if (patch.priority !== undefined) {
+          updatePayload.priority = patch.priority;
+        }
+        if (patch.status !== undefined) {
+          updatePayload.status = patch.status;
+        }
+        const { data, error: updateError } = await supabase
+          .from("orders")
+          .update(updatePayload)
+          .eq("id", orderId)
+          .select(
+            `
+            id,
+            order_number,
+            customer_name,
+            product_name,
+            quantity,
+            hierarchy,
+            due_date,
+            priority,
+            status,
+            order_attachments (
+              id,
+              name,
+              url,
+              added_by_name,
+              added_by_role,
+              created_at,
+              size,
+              mime_type
+            ),
+            order_comments (
+              id,
+              message,
+              author_name,
+              author_role,
+              created_at
+            )
+          `,
+          )
+          .single();
+        if (updateError) {
+          setError(updateError.message);
+          return null;
+        }
+        const mapped = mapOrder(data);
+        setOrders((prev) =>
+          prev.map((order) => (order.id === orderId ? mapped : order)),
+        );
+        return mapped;
+      },
+      removeOrder: async (orderId) => {
+        if (!supabase) {
+          setOrders((prev) => prev.filter((order) => order.id !== orderId));
+          return true;
+        }
+        const { error: deleteError } = await supabase
+          .from("orders")
+          .delete()
+          .eq("id", orderId);
+        if (deleteError) {
+          setError(deleteError.message);
+          return false;
+        }
+        setOrders((prev) => prev.filter((order) => order.id !== orderId));
+        return true;
+      },
+      addOrderAttachment: async (orderId, attachment) => {
+        if (!supabase) {
+          const fallback: OrderAttachment = {
+            ...attachment,
+            id: `att-${Date.now()}`,
+            createdAt: new Date().toISOString(),
+          };
+          setOrders((prev) =>
+            prev.map((order) =>
+              order.id === orderId
+                ? {
+                    ...order,
+                    attachments: [fallback, ...(order.attachments ?? [])],
+                  }
+                : order,
+            ),
+          );
+          return fallback;
+        }
+        if (!user.tenantId) {
+          setError("Missing tenant assignment for this user.");
+          return null;
+        }
+        const { data, error: insertError } = await supabase
+          .from("order_attachments")
+          .insert({
+            order_id: orderId,
+            tenant_id: user.tenantId,
+            name: attachment.name,
+            url: attachment.url ?? null,
+            added_by_name: attachment.addedBy,
+            added_by_role: attachment.addedByRole ?? null,
+            size: attachment.size ?? null,
+            mime_type: attachment.mimeType ?? null,
+          })
+          .select(
+            `
+            id,
+            name,
+            url,
+            added_by_name,
+            added_by_role,
+            created_at,
+            size,
+            mime_type
+          `,
+          )
+          .single();
+        if (insertError) {
+          setError(insertError.message);
+          return null;
+        }
+        const mapped = mapAttachment(data);
         setOrders((prev) =>
           prev.map((order) =>
-            order.id === orderId ? { ...order, ...patch } : order,
+            order.id === orderId
+              ? {
+                  ...order,
+                  attachments: [mapped, ...(order.attachments ?? [])],
+                }
+              : order,
           ),
-        ),
-      removeOrder: (orderId) =>
-        setOrders((prev) => prev.filter((order) => order.id !== orderId)),
+        );
+        return mapped;
+      },
+      removeOrderAttachment: async (orderId, attachmentId) => {
+        if (!supabase) {
+          setOrders((prev) =>
+            prev.map((order) =>
+              order.id === orderId
+                ? {
+                    ...order,
+                    attachments: (order.attachments ?? []).filter(
+                      (attachment) => attachment.id !== attachmentId,
+                    ),
+                  }
+                : order,
+            ),
+          );
+          return true;
+        }
+        const { error: deleteError } = await supabase
+          .from("order_attachments")
+          .delete()
+          .eq("id", attachmentId);
+        if (deleteError) {
+          setError(deleteError.message);
+          return false;
+        }
+        setOrders((prev) =>
+          prev.map((order) =>
+            order.id === orderId
+              ? {
+                  ...order,
+                  attachments: (order.attachments ?? []).filter(
+                    (attachment) => attachment.id !== attachmentId,
+                  ),
+                }
+              : order,
+          ),
+        );
+        return true;
+      },
+      addOrderComment: async (orderId, comment) => {
+        if (!supabase) {
+          const fallback: OrderComment = {
+            ...comment,
+            id: `cmt-${Date.now()}`,
+            createdAt: new Date().toISOString(),
+          };
+          setOrders((prev) =>
+            prev.map((order) =>
+              order.id === orderId
+                ? {
+                    ...order,
+                    comments: [fallback, ...(order.comments ?? [])],
+                  }
+                : order,
+            ),
+          );
+          return fallback;
+        }
+        if (!user.tenantId) {
+          setError("Missing tenant assignment for this user.");
+          return null;
+        }
+        const { data, error: insertError } = await supabase
+          .from("order_comments")
+          .insert({
+            order_id: orderId,
+            tenant_id: user.tenantId,
+            message: comment.message,
+            author_name: comment.author,
+            author_role: comment.authorRole ?? null,
+          })
+          .select(
+            `
+            id,
+            message,
+            author_name,
+            author_role,
+            created_at
+          `,
+          )
+          .single();
+        if (insertError) {
+          setError(insertError.message);
+          return null;
+        }
+        const mapped = mapComment(data);
+        setOrders((prev) =>
+          prev.map((order) =>
+            order.id === orderId
+              ? {
+                  ...order,
+                  comments: [mapped, ...(order.comments ?? [])],
+                }
+              : order,
+          ),
+        );
+        return mapped;
+      },
+      removeOrderComment: async (orderId, commentId) => {
+        if (!supabase) {
+          setOrders((prev) =>
+            prev.map((order) =>
+              order.id === orderId
+                ? {
+                    ...order,
+                    comments: (order.comments ?? []).filter(
+                      (comment) => comment.id !== commentId,
+                    ),
+                  }
+                : order,
+            ),
+          );
+          return true;
+        }
+        const { error: deleteError } = await supabase
+          .from("order_comments")
+          .delete()
+          .eq("id", commentId);
+        if (deleteError) {
+          setError(deleteError.message);
+          return false;
+        }
+        setOrders((prev) =>
+          prev.map((order) =>
+            order.id === orderId
+              ? {
+                  ...order,
+                  comments: (order.comments ?? []).filter(
+                    (comment) => comment.id !== commentId,
+                  ),
+                }
+              : order,
+          ),
+        );
+        return true;
+      },
     }),
-    [orders],
+    [orders, isLoading, error, user.tenantId],
   );
 
   return (

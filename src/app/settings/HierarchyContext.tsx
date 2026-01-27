@@ -1,6 +1,8 @@
-﻿"use client";
+"use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { useCurrentUser } from "@/contexts/UserContext";
 
 export interface HierarchyLevel {
   id: string;
@@ -22,17 +24,17 @@ export interface HierarchyNode {
 interface HierarchyContextValue {
   levels: HierarchyLevel[];
   nodes: HierarchyNode[];
-  addLevel: (level: HierarchyLevel) => void;
-  updateLevel: (levelId: string, patch: Partial<HierarchyLevel>) => void;
-  removeLevel: (levelId: string) => void;
-  addNode: (node: HierarchyNode) => void;
-  updateNode: (nodeId: string, patch: Partial<HierarchyNode>) => void;
-  removeNode: (nodeId: string) => void;
+  addLevel: (level: Omit<HierarchyLevel, "id">) => Promise<void>;
+  updateLevel: (levelId: string, patch: Partial<HierarchyLevel>) => Promise<void>;
+  removeLevel: (levelId: string) => Promise<void>;
+  addNode: (node: Omit<HierarchyNode, "id"> & { id?: string }) => Promise<void>;
+  updateNode: (nodeId: string, patch: Partial<HierarchyNode>) => Promise<void>;
+  removeNode: (nodeId: string) => Promise<void>;
 }
 
 const HierarchyContext = createContext<HierarchyContextValue | null>(null);
 
-const defaultLevels: HierarchyLevel[] = [
+const fallbackLevels: HierarchyLevel[] = [
   {
     id: "level-contract",
     name: "Contract",
@@ -59,7 +61,7 @@ const defaultLevels: HierarchyLevel[] = [
   },
 ];
 
-const defaultNodes: HierarchyNode[] = [
+const fallbackNodes: HierarchyNode[] = [
   {
     id: "node-contract-vv",
     levelId: "level-contract",
@@ -93,38 +95,235 @@ const defaultNodes: HierarchyNode[] = [
   },
 ];
 
+function mapLevel(row: {
+  id: string;
+  name: string;
+  key: string;
+  sort_order: number;
+  is_required: boolean;
+  is_active: boolean;
+}): HierarchyLevel {
+  return {
+    id: row.id,
+    name: row.name,
+    key: row.key,
+    order: row.sort_order,
+    isRequired: row.is_required,
+    isActive: row.is_active,
+  };
+}
+
+function mapNode(row: {
+  id: string;
+  level_id: string;
+  label: string;
+  code?: string | null;
+  parent_id?: string | null;
+}): HierarchyNode {
+  return {
+    id: row.id,
+    levelId: row.level_id,
+    label: row.label,
+    code: row.code ?? undefined,
+    parentId: row.parent_id ?? null,
+  };
+}
+
 export function HierarchyProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [levels, setLevels] = useState<HierarchyLevel[]>(defaultLevels);
-  const [nodes, setNodes] = useState<HierarchyNode[]>(defaultNodes);
+  const user = useCurrentUser();
+  const [levels, setLevels] = useState<HierarchyLevel[]>(fallbackLevels);
+  const [nodes, setNodes] = useState<HierarchyNode[]>(fallbackNodes);
+
+  const refreshHierarchy = async () => {
+    if (!supabase) {
+      setLevels(fallbackLevels);
+      setNodes(fallbackNodes);
+      return;
+    }
+    const { data: levelData, error: levelError } = await supabase
+      .from("hierarchy_levels")
+      .select("id, name, key, sort_order, is_required, is_active")
+      .order("sort_order", { ascending: true });
+    if (levelError) {
+      return;
+    }
+    const { data: nodeData, error: nodeError } = await supabase
+      .from("hierarchy_nodes")
+      .select("id, level_id, label, code, parent_id")
+      .order("created_at", { ascending: true });
+    if (nodeError) {
+      return;
+    }
+    setLevels((levelData ?? []).map(mapLevel));
+    setNodes((nodeData ?? []).map(mapNode));
+  };
+
+  useEffect(() => {
+    if (!supabase) {
+      setLevels(fallbackLevels);
+      setNodes(fallbackNodes);
+      return;
+    }
+    if (user.loading) {
+      return;
+    }
+    if (!user.isAuthenticated) {
+      setLevels([]);
+      setNodes([]);
+      return;
+    }
+    void refreshHierarchy();
+  }, [user.isAuthenticated, user.loading, user.tenantId]);
 
   const value = useMemo<HierarchyContextValue>(
     () => ({
       levels,
       nodes,
-      addLevel: (level) => setLevels((prev) => [...prev, level]),
-      updateLevel: (levelId, patch) =>
+      addLevel: async (level) => {
+        if (!supabase) {
+          setLevels((prev) => [...prev, { ...level, id: crypto.randomUUID() }]);
+          return;
+        }
+        if (!user.tenantId) {
+          return;
+        }
+        const { data, error } = await supabase
+          .from("hierarchy_levels")
+          .insert({
+            tenant_id: user.tenantId,
+            name: level.name,
+            key: level.key,
+            sort_order: level.order,
+            is_required: level.isRequired,
+            is_active: level.isActive,
+          })
+          .select("id, name, key, sort_order, is_required, is_active")
+          .single();
+        if (error || !data) {
+          return;
+        }
+        setLevels((prev) => [...prev, mapLevel(data)]);
+      },
+      updateLevel: async (levelId, patch) => {
+        if (!supabase) {
+          setLevels((prev) =>
+            prev.map((level) =>
+              level.id === levelId ? { ...level, ...patch } : level,
+            ),
+          );
+          return;
+        }
+        const updatePayload: Record<string, unknown> = {};
+        if (patch.name !== undefined) updatePayload.name = patch.name;
+        if (patch.key !== undefined) updatePayload.key = patch.key;
+        if (patch.order !== undefined) updatePayload.sort_order = patch.order;
+        if (patch.isRequired !== undefined)
+          updatePayload.is_required = patch.isRequired;
+        if (patch.isActive !== undefined)
+          updatePayload.is_active = patch.isActive;
+        const { data, error } = await supabase
+          .from("hierarchy_levels")
+          .update(updatePayload)
+          .eq("id", levelId)
+          .select("id, name, key, sort_order, is_required, is_active")
+          .single();
+        if (error || !data) {
+          return;
+        }
         setLevels((prev) =>
-          prev.map((level) =>
-            level.id === levelId ? { ...level, ...patch } : level,
-          ),
-        ),
-      removeLevel: (levelId) =>
-        setLevels((prev) => prev.filter((level) => level.id !== levelId)),
-      addNode: (node) => setNodes((prev) => [...prev, node]),
-      updateNode: (nodeId, patch) =>
+          prev.map((level) => (level.id === levelId ? mapLevel(data) : level)),
+        );
+      },
+      removeLevel: async (levelId) => {
+        if (!supabase) {
+          setLevels((prev) => prev.filter((level) => level.id !== levelId));
+          setNodes((prev) => prev.filter((node) => node.levelId !== levelId));
+          return;
+        }
+        const { error } = await supabase
+          .from("hierarchy_levels")
+          .delete()
+          .eq("id", levelId);
+        if (error) {
+          return;
+        }
+        setLevels((prev) => prev.filter((level) => level.id !== levelId));
+        setNodes((prev) => prev.filter((node) => node.levelId !== levelId));
+      },
+      addNode: async (node) => {
+        if (!supabase) {
+          const nodeId = node.id ?? crypto.randomUUID();
+          setNodes((prev) => [...prev, { ...node, id: nodeId }]);
+          return;
+        }
+        if (!user.tenantId) {
+          return;
+        }
+        const nodeId = node.id ?? crypto.randomUUID();
+        const { data, error } = await supabase
+          .from("hierarchy_nodes")
+          .insert({
+            tenant_id: user.tenantId,
+            id: nodeId,
+            level_id: node.levelId,
+            label: node.label,
+            code: node.code ?? null,
+            parent_id: node.parentId ?? null,
+          })
+          .select("id, level_id, label, code, parent_id")
+          .single();
+        if (error || !data) {
+          return;
+        }
+        setNodes((prev) => [...prev, mapNode(data)]);
+      },
+      updateNode: async (nodeId, patch) => {
+        if (!supabase) {
+          setNodes((prev) =>
+            prev.map((node) =>
+              node.id === nodeId ? { ...node, ...patch } : node,
+            ),
+          );
+          return;
+        }
+        const updatePayload: Record<string, unknown> = {};
+        if (patch.label !== undefined) updatePayload.label = patch.label;
+        if (patch.code !== undefined) updatePayload.code = patch.code;
+        if (patch.parentId !== undefined)
+          updatePayload.parent_id = patch.parentId;
+        const { data, error } = await supabase
+          .from("hierarchy_nodes")
+          .update(updatePayload)
+          .eq("id", nodeId)
+          .select("id, level_id, label, code, parent_id")
+          .single();
+        if (error || !data) {
+          return;
+        }
         setNodes((prev) =>
-          prev.map((node) =>
-            node.id === nodeId ? { ...node, ...patch } : node,
-          ),
-        ),
-      removeNode: (nodeId) =>
-        setNodes((prev) => prev.filter((node) => node.id !== nodeId)),
+          prev.map((node) => (node.id === nodeId ? mapNode(data) : node)),
+        );
+      },
+      removeNode: async (nodeId) => {
+        if (!supabase) {
+          setNodes((prev) => prev.filter((node) => node.id !== nodeId));
+          return;
+        }
+        const { error } = await supabase
+          .from("hierarchy_nodes")
+          .delete()
+          .eq("id", nodeId);
+        if (error) {
+          return;
+        }
+        setNodes((prev) => prev.filter((node) => node.id !== nodeId));
+      },
     }),
-    [levels, nodes],
+    [levels, nodes, user.tenantId],
   );
 
   return (
@@ -141,5 +340,3 @@ export function useHierarchy() {
   }
   return context;
 }
-
-

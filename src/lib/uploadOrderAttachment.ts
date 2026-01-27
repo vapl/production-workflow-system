@@ -1,4 +1,3 @@
-import type { OrderAttachment } from "@/types/orders";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 
 function sanitizeFileName(name: string) {
@@ -8,7 +7,10 @@ function sanitizeFileName(name: string) {
 export async function uploadOrderAttachment(
   file: File,
   orderId: string,
-): Promise<{ attachment?: OrderAttachment; error?: string }> {
+): Promise<{
+  attachment?: { name: string; url: string; size?: number; mimeType?: string };
+  error?: string;
+}> {
   if (!supabase) {
     return { error: "Supabase is not configured." };
   }
@@ -39,13 +41,10 @@ export async function uploadOrderAttachment(
     const { data } = supabase.storage.from(supabaseBucket).getPublicUrl(path);
     return {
       attachment: {
-        id: `att-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
         name: file.name,
         url: data.publicUrl,
         size: file.size,
         mimeType: file.type,
-        addedBy: "Manager",
-        createdAt: new Date().toISOString(),
       },
     };
   } catch (err) {

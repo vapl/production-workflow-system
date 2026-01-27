@@ -56,8 +56,8 @@ export default function OrdersPage() {
       if (existingId) {
         return existingId;
       }
-      const newId = `node-hz-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
-      addNode({
+      const newId = crypto.randomUUID();
+      void addNode({
         id: newId,
         levelId,
         label: trimmedLabel,
@@ -212,7 +212,7 @@ export default function OrdersPage() {
 
   const isExternalOrder = (order: Order) => order.id.startsWith("hz-");
 
-  function handleCreateOrder(values: {
+  async function handleCreateOrder(values: {
     customerName: string;
     customerEmail?: string;
     productName: string;
@@ -231,7 +231,6 @@ export default function OrdersPage() {
     }, 0);
     const orderNumber = `ORD-${String(maxOrderNumber + 1).padStart(4, "0")}`;
     const newOrder = {
-      id: `o-${Date.now()}`,
       orderNumber,
       customerName: values.customerName,
       productName: values.productName,
@@ -242,10 +241,10 @@ export default function OrdersPage() {
       status: "pending" as const,
     };
 
-    addOrder(newOrder);
+    await addOrder(newOrder);
   }
 
-  function handleEditOrder(values: {
+  async function handleEditOrder(values: {
     customerName: string;
     customerEmail?: string;
     productName: string;
@@ -258,7 +257,7 @@ export default function OrdersPage() {
     if (!editingOrder) {
       return;
     }
-    updateOrder(editingOrder.id, {
+    await updateOrder(editingOrder.id, {
       customerName: values.customerName,
       productName: values.productName,
       quantity: values.quantity,
@@ -356,7 +355,7 @@ export default function OrdersPage() {
               </Button>
               <Button
                 variant="destructive"
-                onClick={() => {
+                onClick={async () => {
                   if (isExternalOrder(pendingDelete)) {
                     setArchivedExternalIds((prev) => {
                       const next = new Set(prev);
@@ -364,7 +363,7 @@ export default function OrdersPage() {
                       return next;
                     });
                   } else {
-                    removeOrder(pendingDelete.id);
+                    await removeOrder(pendingDelete.id);
                   }
                   setPendingDelete(null);
                 }}
