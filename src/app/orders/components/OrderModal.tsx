@@ -23,6 +23,7 @@ interface OrderModalProps {
   title?: string;
   submitLabel?: string;
   initialValues?: Partial<OrderFormValues>;
+  editMode?: "full" | "category-product-only";
 }
 
 const defaultValues: OrderFormValues = {
@@ -42,6 +43,7 @@ export function OrderModal({
   title = "Create New Order",
   submitLabel = "Create Order",
   initialValues,
+  editMode = "full",
 }: OrderModalProps) {
   const [formState, setFormState] = useState({
     customerName: defaultValues.customerName,
@@ -64,6 +66,18 @@ export function OrderModal({
       levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
     [levels],
   );
+  const isCategoryProductOnly = editMode === "category-product-only";
+  const editableLevelIds = useMemo(() => {
+    if (!isCategoryProductOnly) {
+      return new Set(activeLevels.map((level) => level.id));
+    }
+    const allowedKeys = new Set(["category", "product"]);
+    return new Set(
+      activeLevels
+        .filter((level) => allowedKeys.has(level.key))
+        .map((level) => level.id),
+    );
+  }, [activeLevels, isCategoryProductOnly]);
   const productLevel = useMemo(
     () => activeLevels.find((level) => level.key === "product"),
     [activeLevels],
@@ -268,24 +282,37 @@ export function OrderModal({
               "quantity",
               "dueDate",
             ] as const).forEach((field) => {
+              if (isCategoryProductOnly) {
+                return;
+              }
               const message = validateField(field, formState[field]);
               if (message) {
                 nextErrors[field] = message;
               }
             });
             activeLevels.forEach((level) => {
-              if (level.isRequired && !resolvedHierarchy[level.id]) {
+              if (
+                level.isRequired &&
+                !resolvedHierarchy[level.id] &&
+                editableLevelIds.has(level.id)
+              ) {
                 nextErrors[`hierarchy.${level.id}`] = `${level.name} is required.`;
               }
             });
             setErrors(nextErrors);
             setTouched({
-              customerName: true,
-              customerEmail: true,
-              quantity: true,
-              dueDate: true,
+              ...(isCategoryProductOnly
+                ? {}
+                : {
+                    customerName: true,
+                    customerEmail: true,
+                    quantity: true,
+                    dueDate: true,
+                  }),
               ...activeLevels.reduce<Record<string, boolean>>((acc, level) => {
-                acc[`hierarchy.${level.id}`] = true;
+                if (editableLevelIds.has(level.id)) {
+                  acc[`hierarchy.${level.id}`] = true;
+                }
                 return acc;
               }, {}),
             });
@@ -324,6 +351,9 @@ export function OrderModal({
                   }))
                 }
                 onBlur={(event) => {
+                  if (isCategoryProductOnly) {
+                    return;
+                  }
                   const message = validateField(
                     "customerName",
                     event.target.value,
@@ -341,6 +371,7 @@ export function OrderModal({
                 } bg-input-background`}
                 placeholder="Acme Manufacturing"
                 required
+                disabled={isCategoryProductOnly}
               />
               {touched.customerName && errors.customerName && (
                 <span className="text-xs text-destructive">
@@ -359,6 +390,9 @@ export function OrderModal({
                   }))
                 }
                 onBlur={(event) => {
+                  if (isCategoryProductOnly) {
+                    return;
+                  }
                   const message = validateField(
                     "customerEmail",
                     event.target.value,
@@ -376,6 +410,7 @@ export function OrderModal({
                 } bg-input-background`}
                 placeholder="contact@acme.com"
                 type="email"
+                disabled={isCategoryProductOnly}
               />
               {touched.customerEmail && errors.customerEmail && (
                 <span className="text-xs text-destructive">
@@ -403,78 +438,82 @@ export function OrderModal({
                   >
                     {level.name}
                     {level.isRequired ? " *" : ""}
-                    <>
-                      <input
-                        list={`level-options-${level.id}`}
-                        value={hierarchyInput[level.id] ?? ""}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setHierarchyInput((prev) => ({
-                            ...prev,
-                            [level.id]: value,
-                          }));
-                          const matched = options.find(
-                            (node) =>
-                              node.label.toLowerCase() === value.toLowerCase(),
-                          );
-                          if (matched) {
-                            handleHierarchyChange(level.id, matched.id);
+                    <input
+                      list={`level-options-${level.id}`}
+                      value={hierarchyInput[level.id] ?? ""}
+                      onChange={(event) => {
+                        if (!editableLevelIds.has(level.id)) {
+                          return;
+                        }
+                        const value = event.target.value;
+                        setHierarchyInput((prev) => ({
+                          ...prev,
+                          [level.id]: value,
+                        }));
+                        const matched = options.find(
+                          (node) =>
+                            node.label.toLowerCase() === value.toLowerCase(),
+                        );
+                        if (matched) {
+                          handleHierarchyChange(level.id, matched.id);
+                        }
+                      }}
+                      onBlur={(event) => {
+                        if (!editableLevelIds.has(level.id)) {
+                          return;
+                        }
+                        setTouched((prev) => ({
+                          ...prev,
+                          [errorKey]: true,
+                        }));
+                        const rawValue = event.target.value.trim();
+                        if (!rawValue) {
+                          if (level.isRequired) {
+                            setErrors((prev) => ({
+                              ...prev,
+                              [errorKey]: `${level.name} is required.`,
+                            }));
                           }
-                        }}
-                        onBlur={(event) => {
-                          setTouched((prev) => ({
-                            ...prev,
-                            [errorKey]: true,
-                          }));
-                          const rawValue = event.target.value.trim();
-                          if (!rawValue) {
-                            if (level.isRequired) {
-                              setErrors((prev) => ({
-                                ...prev,
-                                [errorKey]: `${level.name} is required.`,
-                              }));
-                            }
-                            return;
-                          }
-                          const matched = options.find(
-                            (node) =>
-                              node.label.toLowerCase() ===
-                              rawValue.toLowerCase(),
-                          );
-                          const newNodeId = matched
-                            ? matched.id
-                            : resolveOrCreateNode(
-                                level.id,
-                                rawValue,
-                                parentId ?? null,
-                              );
-                          handleHierarchyChange(level.id, newNodeId);
-                          setHierarchyInput((prev) => ({
-                            ...prev,
-                            [level.id]:
-                              matched?.label ??
-                              nodes.find((node) => node.id === newNodeId)
-                                ?.label ??
+                          return;
+                        }
+                        const matched = options.find(
+                          (node) =>
+                            node.label.toLowerCase() === rawValue.toLowerCase(),
+                        );
+                        const newNodeId = matched
+                          ? matched.id
+                          : resolveOrCreateNode(
+                              level.id,
                               rawValue,
-                          }));
-                          setErrors((prev) => ({
-                            ...prev,
-                            [errorKey]: "",
-                          }));
-                        }}
-                        className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
-                          touched[errorKey] && errors[errorKey]
-                            ? "border-destructive"
-                            : "border-border"
-                        } bg-input-background`}
-                        placeholder={`Search or enter ${level.name}`}
-                      />
-                      <datalist id={`level-options-${level.id}`}>
-                        {options.map((node) => (
-                          <option key={node.id} value={node.label} />
-                        ))}
-                      </datalist>
-                    </>
+                              parentId ?? null,
+                            );
+                        handleHierarchyChange(level.id, newNodeId);
+                        setHierarchyInput((prev) => ({
+                          ...prev,
+                          [level.id]:
+                            matched?.label ??
+                            nodes.find((node) => node.id === newNodeId)
+                              ?.label ??
+                            rawValue,
+                        }));
+                        setErrors((prev) => ({
+                          ...prev,
+                          [errorKey]: "",
+                        }));
+                      }}
+                      className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
+                        touched[errorKey] && errors[errorKey]
+                          ? "border-destructive"
+                          : "border-border"
+                      } bg-input-background`}
+                      placeholder={`Search or enter ${level.name}`}
+                      disabled={!editableLevelIds.has(level.id)}
+                    />
+                    <datalist id={`level-options-${level.id}`}>
+                      {options.map((node) => (
+                        <option key={node.id} value={node.label} />
+                      ))}
+                    </datalist>
                     {touched[errorKey] && errors[errorKey] && (
                       <span className="text-xs text-destructive">
                         {errors[errorKey]}
@@ -498,6 +537,9 @@ export function OrderModal({
                   }))
                 }
                 onBlur={(event) => {
+                  if (isCategoryProductOnly) {
+                    return;
+                  }
                   const message = validateField(
                     "quantity",
                     event.target.value,
@@ -516,6 +558,7 @@ export function OrderModal({
                 type="number"
                 min={1}
                 required
+                disabled={isCategoryProductOnly}
               />
               {touched.quantity && errors.quantity && (
                 <span className="text-xs text-destructive">
@@ -534,6 +577,9 @@ export function OrderModal({
                   }))
                 }
                 onBlur={(event) => {
+                  if (isCategoryProductOnly) {
+                    return;
+                  }
                   const message = validateField("dueDate", event.target.value);
                   setErrors((prev) => ({
                     ...prev,
@@ -548,6 +594,7 @@ export function OrderModal({
                 } bg-input-background`}
                 type="date"
                 required
+                disabled={isCategoryProductOnly}
               />
               {touched.dueDate && errors.dueDate && (
                 <span className="text-xs text-destructive">
@@ -568,6 +615,7 @@ export function OrderModal({
                 }))
               }
               className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+              disabled={isCategoryProductOnly}
             >
               <option value="low">Low</option>
               <option value="normal">Normal</option>
@@ -585,6 +633,7 @@ export function OrderModal({
               }
               className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
               placeholder="Special requirements or additional information..."
+              disabled={isCategoryProductOnly}
             />
           </label>
 

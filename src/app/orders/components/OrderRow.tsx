@@ -3,7 +3,9 @@ import { Button } from "@/components/ui/Button";
 import { TableCell, TableRow } from "@/components/ui/Table";
 import {
   EyeIcon,
+  MessageCircleIcon,
   MoreVerticalIcon,
+  PaperclipIcon,
   PencilIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -85,7 +87,16 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
         <Badge variant="outline">{formatOrderStatus(order.status)}</Badge>
       </TableCell>
       <TableCell className="text-right">
-        <div className="relative inline-flex">
+        <div className="inline-flex items-center gap-2">
+          <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <PaperclipIcon className="h-3.5 w-3.5" />
+            <span>{order.attachments?.length ?? 0}</span>
+          </div>
+          <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <MessageCircleIcon className="h-3.5 w-3.5" />
+            <span>{order.comments?.length ?? 0}</span>
+          </div>
+          <div className="relative inline-flex">
           <Button
             variant="ghost"
             size="sm"
@@ -96,6 +107,7 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
           >
             <MoreVerticalIcon className="h-4 w-4" />
           </Button>
+          </div>
         </div>
         {menuOpen && menuPosition
           ? createPortal(

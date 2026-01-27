@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { OrdersTable } from "./components/OrdersTable";
 import { OrdersToolbar } from "./components/OrdersToolbar";
 import type { Order, OrderStatus } from "@/types/orders";
@@ -13,13 +13,132 @@ import { useHierarchy } from "@/app/settings/HierarchyContext";
 
 export default function OrdersPage() {
   const { orders, addOrder, updateOrder, removeOrder } = useOrders();
-  const { nodes, levels } = useHierarchy();
+  const { nodes, levels, addNode } = useHierarchy();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Order | null>(null);
+  const [archivedExternalIds, setArchivedExternalIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [groupByContract, setGroupByContract] = useState(true);
+  const [horizonOrders, setHorizonOrders] = useState<Order[]>([]);
+  const horizonLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (horizonLoadedRef.current) {
+      return;
+    }
+    horizonLoadedRef.current = true;
+
+    const contractLevel = levels.find((level) => level.key === "contract");
+    const categoryLevel = levels.find((level) => level.key === "category");
+    const productLevel = levels.find((level) => level.key === "product");
+
+    const nodeLookup = new Map<string, string>();
+    nodes.forEach((node) => {
+      const key = `${node.levelId}|${node.parentId ?? ""}|${node.label.toLowerCase()}`;
+      nodeLookup.set(key, node.id);
+    });
+
+    const ensureNode = (
+      label: string,
+      levelId: string | undefined,
+      parentId?: string | null,
+    ) => {
+      const trimmedLabel = label.trim();
+      if (!levelId || trimmedLabel.length === 0) {
+        return undefined;
+      }
+      const key = `${levelId}|${parentId ?? ""}|${trimmedLabel.toLowerCase()}`;
+      const existingId = nodeLookup.get(key);
+      if (existingId) {
+        return existingId;
+      }
+      const newId = `node-hz-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+      addNode({
+        id: newId,
+        levelId,
+        label: trimmedLabel,
+        parentId: parentId ?? null,
+      });
+      nodeLookup.set(key, newId);
+      return newId;
+    };
+
+    async function loadHorizonOrders() {
+      try {
+        const response = await fetch("/api/horizon/orders");
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const baseDate = new Date();
+        baseDate.setHours(0, 0, 0, 0);
+        const mappedOrders: Order[] = (data.orders ?? []).map(
+          (
+            item: {
+              id: string;
+              contractNo?: string;
+              customer: string;
+              category?: string;
+              product?: string;
+              quantity?: number;
+            },
+            index: number,
+          ) => {
+            const contractId = item.contractNo
+              ? ensureNode(item.contractNo, contractLevel?.id, null)
+              : undefined;
+            const categoryId =
+              item.category && categoryLevel?.id
+                ? ensureNode(item.category, categoryLevel.id, contractId ?? null)
+                : undefined;
+            const productId =
+              item.product && productLevel?.id
+                ? ensureNode(item.product, productLevel.id, categoryId ?? null)
+                : undefined;
+            const dueDate = new Date(baseDate);
+            dueDate.setDate(baseDate.getDate() + 7 + index);
+            const hierarchy: Record<string, string> = {};
+            if (contractId && contractLevel?.id) {
+              hierarchy[contractLevel.id] = contractId;
+            }
+            if (categoryId && categoryLevel?.id) {
+              hierarchy[categoryLevel.id] = categoryId;
+            }
+            if (productId && productLevel?.id) {
+              hierarchy[productLevel.id] = productId;
+            }
+            return {
+              id: `hz-${item.id}`,
+              orderNumber: `HZ-${item.id.replace(/^hz-?/i, "")}`,
+              customerName: item.customer,
+              productName: item.product ?? "",
+              quantity: item.quantity ?? 1,
+              hierarchy,
+              dueDate: dueDate.toISOString().slice(0, 10),
+              priority: "normal",
+              status: "pending",
+            };
+          },
+        );
+        setHorizonOrders(mappedOrders);
+      } catch {
+        // Ignore fetch errors for now.
+      }
+    }
+
+    loadHorizonOrders();
+  }, [addNode, levels, nodes]);
+
+  const mergedOrders = useMemo(() => {
+    const filteredExternal = horizonOrders.filter(
+      (order) => !archivedExternalIds.has(order.id),
+    );
+    return [...orders, ...filteredExternal];
+  }, [archivedExternalIds, orders, horizonOrders]);
 
   const filteredOrders = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -27,7 +146,7 @@ export default function OrdersPage() {
       nodes.map((node) => [node.id, node.label.toLowerCase()]),
     );
 
-    return orders.filter((order) => {
+    return mergedOrders.filter((order) => {
       const hierarchyLabels = Object.values(order.hierarchy ?? {})
         .map((id) => nodeLabelMap.get(id) ?? "")
         .join(" ");
@@ -42,18 +161,20 @@ export default function OrdersPage() {
 
       return matchesQuery && matchesStatus;
     });
-  }, [nodes, orders, searchQuery, statusFilter]);
+  }, [mergedOrders, nodes, searchQuery, statusFilter]);
 
   const statusCounts = useMemo(
     () => ({
-      all: orders.length,
-      pending: orders.filter((order) => order.status === "pending").length,
-      in_progress: orders.filter((order) => order.status === "in_progress")
+      all: mergedOrders.length,
+      pending: mergedOrders.filter((order) => order.status === "pending").length,
+      in_progress: mergedOrders.filter((order) => order.status === "in_progress")
         .length,
-      completed: orders.filter((order) => order.status === "completed").length,
-      cancelled: orders.filter((order) => order.status === "cancelled").length,
+      completed: mergedOrders.filter((order) => order.status === "completed")
+        .length,
+      cancelled: mergedOrders.filter((order) => order.status === "cancelled")
+        .length,
     }),
-    [orders],
+    [mergedOrders],
   );
 
   const contractLevel = useMemo(
@@ -88,6 +209,8 @@ export default function OrdersPage() {
       orders,
     }));
   }, [contractLabelMap, contractLevel, filteredOrders, groupByContract]);
+
+  const isExternalOrder = (order: Order) => order.id.startsWith("hz-");
 
   function handleCreateOrder(values: {
     customerName: string;
@@ -181,7 +304,9 @@ export default function OrdersPage() {
               setEditingOrder(order);
               setIsModalOpen(true);
             }}
-            onDelete={(order) => setPendingDelete(order)}
+            onDelete={(order) => {
+              setPendingDelete(order);
+            }}
           />
         </CardContent>
       </Card>
@@ -194,6 +319,11 @@ export default function OrdersPage() {
         onSubmit={editingOrder ? handleEditOrder : handleCreateOrder}
         title={editingOrder ? "Edit Order" : "Create New Order"}
         submitLabel={editingOrder ? "Save Changes" : "Create Order"}
+        editMode={
+          editingOrder && isExternalOrder(editingOrder)
+            ? "category-product-only"
+            : "full"
+        }
         initialValues={
           editingOrder
             ? {
@@ -210,9 +340,15 @@ export default function OrdersPage() {
       {pendingDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
-            <h2 className="text-lg font-semibold">Delete order?</h2>
+            <h2 className="text-lg font-semibold">
+              {isExternalOrder(pendingDelete)
+                ? "Archive external order?"
+                : "Delete order?"}
+            </h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              This will remove {pendingDelete.orderNumber} from the list.
+              {isExternalOrder(pendingDelete)
+                ? `This will hide ${pendingDelete.orderNumber} in PWS only.`
+                : `This will remove ${pendingDelete.orderNumber} from the list.`}
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="outline" onClick={() => setPendingDelete(null)}>
@@ -221,11 +357,19 @@ export default function OrdersPage() {
               <Button
                 variant="destructive"
                 onClick={() => {
-                  removeOrder(pendingDelete.id);
+                  if (isExternalOrder(pendingDelete)) {
+                    setArchivedExternalIds((prev) => {
+                      const next = new Set(prev);
+                      next.add(pendingDelete.id);
+                      return next;
+                    });
+                  } else {
+                    removeOrder(pendingDelete.id);
+                  }
                   setPendingDelete(null);
                 }}
               >
-                Delete
+                {isExternalOrder(pendingDelete) ? "Archive" : "Delete"}
               </Button>
             </div>
           </div>

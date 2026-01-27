@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -8,40 +8,213 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { mockBatches } from "@/lib/data/mockData";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Batch } from "@/types/batch";
+import type { OrderAttachment, OrderComment } from "@/types/orders";
 import Link from "next/link";
-import { ArrowLeftIcon, PencilIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  FileIcon,
+  FileTextIcon,
+  ImageIcon,
+  PencilIcon,
+} from "lucide-react";
 import { OrderModal } from "@/app/orders/components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
+import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { uploadOrderAttachment } from "@/lib/uploadOrderAttachment";
+
+const MAX_FILE_SIZE_MB = 20;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 export default function OrderDetailPage() {
   const params = useParams<{ orderId?: string }>();
   const normalizeId = (value: string) =>
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/[‐‑‒–—]/g, "-");
+    value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   const decodedOrderId = params?.orderId
     ? normalizeId(decodeURIComponent(params.orderId))
     : "";
 
   const { orders, updateOrder } = useOrders();
+  const { levels, nodes, addNode } = useHierarchy();
+  const { role, name } = useCurrentUser();
+  const [horizonOrders, setHorizonOrders] = useState<
+    Array<{
+      id: string;
+      orderNumber: string;
+      customerName: string;
+      productName: string;
+      quantity: number;
+      hierarchy?: Record<string, string>;
+      dueDate: string;
+      priority: "low" | "normal" | "high" | "urgent";
+      status: "pending";
+      attachments?: OrderAttachment[];
+      comments?: OrderComment[];
+    }>
+  >([]);
+  const horizonLoadedRef = useRef(false);
+  const [isFetchingHorizon, setIsFetchingHorizon] = useState(false);
+  const activeLevels = useMemo(
+    () => levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
+    [levels],
+  );
+  const nodeLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    nodes.forEach((node) => map.set(node.id, node.label));
+    return map;
+  }, [nodes]);
+
+  useEffect(() => {
+    if (horizonLoadedRef.current) {
+      return;
+    }
+    horizonLoadedRef.current = true;
+
+    const contractLevel = levels.find((level) => level.key === "contract");
+    const categoryLevel = levels.find((level) => level.key === "category");
+    const productLevel = levels.find((level) => level.key === "product");
+    const nodeLookup = new Map<string, string>();
+    nodes.forEach((node) => {
+      const key = `${node.levelId}|${node.parentId ?? ""}|${node.label.toLowerCase()}`;
+      nodeLookup.set(key, node.id);
+    });
+
+    const ensureNode = (
+      label: string,
+      levelId: string | undefined,
+      parentId?: string | null,
+    ) => {
+      const trimmedLabel = label.trim();
+      if (!levelId || trimmedLabel.length === 0) {
+        return undefined;
+      }
+      const key = `${levelId}|${parentId ?? ""}|${trimmedLabel.toLowerCase()}`;
+      const existingId = nodeLookup.get(key);
+      if (existingId) {
+        return existingId;
+      }
+      const newId = `node-hz-${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2, 6)}`;
+      addNode({
+        id: newId,
+        levelId,
+        label: trimmedLabel,
+        parentId: parentId ?? null,
+      });
+      nodeLookup.set(key, newId);
+      return newId;
+    };
+
+    async function loadHorizonOrders() {
+      try {
+        setIsFetchingHorizon(true);
+        const response = await fetch("/api/horizon/orders");
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const baseDate = new Date();
+        baseDate.setHours(0, 0, 0, 0);
+        const mapped = (data.orders ?? []).map(
+          (
+            item: {
+              id: string;
+              contractNo?: string;
+              customer: string;
+              category?: string;
+              product?: string;
+              quantity?: number;
+            },
+            index: number,
+          ) => {
+            const contractId = item.contractNo
+              ? ensureNode(item.contractNo, contractLevel?.id, null)
+              : undefined;
+            const categoryId =
+              item.category && categoryLevel?.id
+                ? ensureNode(item.category, categoryLevel.id, contractId ?? null)
+                : undefined;
+            const productId =
+              item.product && productLevel?.id
+                ? ensureNode(item.product, productLevel.id, categoryId ?? null)
+                : undefined;
+            const hierarchy: Record<string, string> = {};
+            if (contractId && contractLevel?.id) {
+              hierarchy[contractLevel.id] = contractId;
+            }
+            if (categoryId && categoryLevel?.id) {
+              hierarchy[categoryLevel.id] = categoryId;
+            }
+            if (productId && productLevel?.id) {
+              hierarchy[productLevel.id] = productId;
+            }
+            const dueDate = new Date(baseDate);
+            dueDate.setDate(baseDate.getDate() + 7 + index);
+            return {
+              id: `hz-${item.id}`,
+              orderNumber: `HZ-${item.id.replace(/^hz-?/i, "")}`,
+              customerName: item.customer,
+              productName: item.product ?? "",
+              quantity: item.quantity ?? 1,
+              hierarchy,
+              dueDate: dueDate.toISOString().slice(0, 10),
+              priority: "normal" as const,
+              status: "pending" as const,
+            };
+          },
+        );
+        setHorizonOrders(mapped);
+      } catch {
+        // Ignore fetch errors for now.
+      } finally {
+        setIsFetchingHorizon(false);
+      }
+    }
+
+    loadHorizonOrders();
+  }, [addNode, levels, nodes]);
+
+  const mergedOrders = useMemo(
+    () => [...orders, ...horizonOrders],
+    [orders, horizonOrders],
+  );
+
   const order = useMemo(
     () =>
-      orders.find(
+      mergedOrders.find(
         (item) =>
           normalizeId(item.id) === decodedOrderId ||
           normalizeId(item.orderNumber) === decodedOrderId,
       ),
-    [decodedOrderId, orders],
+    [decodedOrderId, mergedOrders],
   );
 
   const [orderState, setOrderState] = useState(order);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
+  const [attachmentNotice, setAttachmentNotice] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [commentMessage, setCommentMessage] = useState("");
+  const [isLoadingOrder, setIsLoadingOrder] = useState(true);
 
   useEffect(() => {
     setOrderState(order);
+    setIsLoadingOrder(false);
   }, [order]);
+
+  if (!orderState && (isLoadingOrder || isFetchingHorizon)) {
+    return (
+      <section className="space-y-3">
+        <h1 className="text-xl font-semibold">Loading order...</h1>
+        <p className="text-sm text-muted-foreground">
+          Fetching order details.
+        </p>
+      </section>
+    );
+  }
 
   if (!orderState) {
     return (
@@ -54,9 +227,155 @@ export default function OrderDetailPage() {
     );
   }
 
+  const isExternalOrder = orderState.id.startsWith("hz-");
   const batches: Batch[] = mockBatches.filter(
     (batch) => batch.orderId === orderState.id,
   );
+  const attachments = orderState.attachments ?? [];
+  const comments = orderState.comments ?? [];
+
+  function handleFilesAdded(files: FileList | File[]) {
+    const next = Array.from(files);
+    if (next.length === 0) {
+      return;
+    }
+    const oversized = next.find((file) => file.size > MAX_FILE_SIZE_BYTES);
+    if (oversized) {
+      setAttachmentError(
+        `${oversized.name} exceeds ${MAX_FILE_SIZE_MB}MB limit.`,
+      );
+      return;
+    }
+    setAttachmentError("");
+    setAttachmentFiles((prev) => [...prev, ...next]);
+  }
+
+  function handleRemovePendingFile(index: number) {
+    setAttachmentFiles((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
+  async function handleAddAttachment() {
+    if (attachmentFiles.length === 0) {
+      return;
+    }
+    setAttachmentError("");
+    setAttachmentNotice("");
+    setIsUploading(true);
+
+    const uploadedAttachments: OrderAttachment[] = [];
+    try {
+      for (const file of attachmentFiles) {
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          setAttachmentError(
+            `${file.name} exceeds ${MAX_FILE_SIZE_MB}MB limit.`,
+          );
+          continue;
+        }
+        const result = await uploadOrderAttachment(file, orderState.id);
+        if (result.error || !result.attachment) {
+          setAttachmentError(result.error ?? "Upload failed.");
+          continue;
+        }
+        const attachment: OrderAttachment = {
+          ...result.attachment,
+          addedBy: name,
+          addedByRole: role,
+        };
+        uploadedAttachments.push(attachment);
+      }
+
+      if (uploadedAttachments.length > 0) {
+        const nextAttachments = [...uploadedAttachments, ...attachments];
+        setOrderState((prev) =>
+          prev ? { ...prev, attachments: nextAttachments } : prev,
+        );
+        updateOrder(orderState.id, { attachments: nextAttachments });
+        setAttachmentFiles([]);
+      }
+      if (uploadedAttachments.length === 0 && attachmentError) {
+        setAttachmentNotice("Upload failed. Check Supabase bucket settings.");
+      }
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  function handleAddComment() {
+    const trimmedMessage = commentMessage.trim();
+    if (!trimmedMessage) {
+      return;
+    }
+    const newComment: OrderComment = {
+      id: `cmt-${Date.now()}`,
+      message: trimmedMessage,
+      author: name,
+      authorRole: role,
+      createdAt: new Date().toISOString(),
+    };
+    const nextComments = [newComment, ...comments];
+    setOrderState((prev) =>
+      prev ? { ...prev, comments: nextComments } : prev,
+    );
+    updateOrder(orderState.id, { comments: nextComments });
+    setCommentMessage("");
+  }
+
+  function handleRemoveAttachment(attachmentId: string) {
+    const target = attachments.find((attachment) => attachment.id === attachmentId);
+    if (target?.url?.startsWith("blob:")) {
+      URL.revokeObjectURL(target.url);
+    }
+    const nextAttachments = attachments.filter(
+      (attachment) => attachment.id !== attachmentId,
+    );
+    setOrderState((prev) =>
+      prev ? { ...prev, attachments: nextAttachments } : prev,
+    );
+    updateOrder(orderState.id, { attachments: nextAttachments });
+  }
+
+  function handleRemoveComment(commentId: string) {
+    const nextComments = comments.filter((comment) => comment.id !== commentId);
+    setOrderState((prev) =>
+      prev ? { ...prev, comments: nextComments } : prev,
+    );
+    updateOrder(orderState.id, { comments: nextComments });
+  }
+
+  function renderAttachmentPreview(attachment: OrderAttachment) {
+    const lowerName = attachment.name.toLowerCase();
+    const isPdf = lowerName.endsWith(".pdf");
+    const isImage =
+      lowerName.endsWith(".png") ||
+      lowerName.endsWith(".jpg") ||
+      lowerName.endsWith(".jpeg") ||
+      lowerName.endsWith(".gif") ||
+      lowerName.endsWith(".webp");
+
+    if (isImage && attachment.url) {
+      return (
+        <img
+          src={attachment.url}
+          alt={attachment.name}
+          className="h-12 w-12 rounded-md object-cover"
+        />
+      );
+    }
+
+    if (isPdf) {
+      return (
+        <div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted">
+          <FileTextIcon className="h-5 w-5 text-muted-foreground" />
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted">
+        <FileIcon className="h-5 w-5 text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <section className="space-y-6">
@@ -68,7 +387,8 @@ export default function OrderDetailPage() {
           </Button>
         </Link>
       </div>
-      <div className="flex items-center justify-between">
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">{orderState.orderNumber}</h1>
           <p className="text-sm text-muted-foreground">
@@ -93,64 +413,264 @@ export default function OrderDetailPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Order Summary</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm space-y-1">
-          <p>
-            <strong>Due date:</strong> {formatDate(orderState.dueDate)}
-          </p>
-          <p>
-            <strong>Quantity:</strong> {orderState.quantity ?? "—"}
-          </p>
-        </CardContent>
-      </Card>
+      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Order Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Due date</span>
+                <span>{formatDate(orderState.dueDate)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Quantity</span>
+                <span>{orderState.quantity ?? "--"}</span>
+              </div>
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Items</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex justify-between text-sm">
-            <span>{orderState.productName ?? "—"}</span>
-            <span>x {orderState.quantity ?? "—"}</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Production Batches</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          {batches.length === 0 ? (
-            <p className="text-muted-foreground">
-              No production batches created yet.
-            </p>
-          ) : (
-            batches.map((batch) => (
-              <div
-                key={batch.id}
-                className="flex items-center justify-between rounded-md border border-border px-3 py-2"
-              >
-                <div>
-                  <div className="font-medium">{batch.name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    Station: {batch.workstation}
-                  </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Hierarchy Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {activeLevels.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No hierarchy levels configured.
+                </p>
+              ) : (
+                <div className="grid gap-2 text-sm">
+                  {activeLevels.map((level) => {
+                    const valueId = orderState.hierarchy?.[level.id];
+                    const valueLabel = valueId
+                      ? nodeLabelMap.get(valueId) ?? valueId
+                      : "--";
+                    return (
+                      <div
+                        key={level.id}
+                        className="flex items-center justify-between"
+                      >
+                        <span className="text-muted-foreground">{level.name}</span>
+                        <span className="font-medium">{valueLabel}</span>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="text-right text-xs text-muted-foreground">
-                  <div>
-                    {batch.actualHours ?? 0}h / {batch.estimatedHours}h
-                  </div>
-                  <div>{batch.status.replace("_", " ")}</div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Comments</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-2">
+                <textarea
+                  value={commentMessage}
+                  onChange={(event) => setCommentMessage(event.target.value)}
+                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                  placeholder="Add a note for the next role..."
+                />
+                <div className="flex justify-end">
+                  <Button onClick={handleAddComment}>Add comment</Button>
                 </div>
               </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+              {comments.length === 0 ? (
+                <p className="text-muted-foreground">No comments yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {comments.map((comment) => (
+                    <div
+                      key={comment.id}
+                      className="rounded-md border border-border px-3 py-2"
+                    >
+                      <div className="text-xs text-muted-foreground">
+                        {comment.author}
+                        {comment.authorRole ? ` (${comment.authorRole})` : ""} -{" "}
+                        {formatDate(comment.createdAt.slice(0, 10))}
+                      </div>
+                      <div className="mt-1">{comment.message}</div>
+                      <div className="mt-2 flex justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveComment(comment.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Attachments</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-2">
+                <div
+                  className="flex min-h-[86px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    handleFilesAdded(event.dataTransfer.files);
+                  }}
+                  onClick={() => {
+                    const input = document.getElementById(
+                      "attachment-file-input",
+                    ) as HTMLInputElement | null;
+                    input?.click();
+                  }}
+                >
+                  <ImageIcon className="h-5 w-5" />
+                  <span>Drag files here or click to upload</span>
+                  <input
+                    id="attachment-file-input"
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      if (event.target.files) {
+                        handleFilesAdded(event.target.files);
+                      }
+                      event.target.value = "";
+                    }}
+                  />
+                  <span className="text-[11px]">
+                    Max {MAX_FILE_SIZE_MB}MB per file
+                  </span>
+                </div>
+                {attachmentError && (
+                  <p className="text-xs text-destructive">{attachmentError}</p>
+                )}
+                {attachmentNotice && (
+                  <p className="text-xs text-muted-foreground">
+                    {attachmentNotice}
+                  </p>
+                )}
+              </div>
+
+              {attachmentFiles.length > 0 && (
+                <div className="space-y-2 text-xs text-muted-foreground">
+                  {attachmentFiles.map((file, index) => (
+                    <div
+                      key={`${file.name}-${index}`}
+                      className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2"
+                    >
+                      <span>{file.name}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemovePendingFile(index)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                  <div className="flex justify-end">
+                    <Button onClick={handleAddAttachment} disabled={isUploading}>
+                      {isUploading ? "Uploading..." : "Upload"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {attachments.length === 0 ? (
+                <p className="text-muted-foreground">
+                  No attachments added yet.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {attachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                    >
+                      <div className="flex items-center gap-3">
+                        {renderAttachmentPreview(attachment)}
+                        <div>
+                          <div className="font-medium">{attachment.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Added by {attachment.addedBy}
+                            {attachment.addedByRole
+                              ? ` (${attachment.addedByRole})`
+                              : ""}{" "}
+                            on {formatDate(attachment.createdAt.slice(0, 10))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {attachment.url && (
+                          <a
+                            href={attachment.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-primary underline"
+                          >
+                            Open
+                          </a>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveAttachment(attachment.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Production Batches</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {batches.length === 0 ? (
+                <p className="text-muted-foreground">
+                  No production batches created yet.
+                </p>
+              ) : (
+                batches.map((batch) => (
+                  <div
+                    key={batch.id}
+                    className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                  >
+                    <div>
+                      <div className="font-medium">{batch.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Station: {batch.workstation}
+                      </div>
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground">
+                      <div>
+                        {batch.actualHours ?? 0}h / {batch.estimatedHours}h
+                      </div>
+                      <div>{batch.status.replace("_", " ")}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
       <OrderModal
         open={isEditOpen}
         onClose={() => setIsEditOpen(false)}
@@ -179,6 +699,7 @@ export default function OrderDetailPage() {
         }}
         title="Edit Order"
         submitLabel="Save Changes"
+        editMode={isExternalOrder ? "category-product-only" : "full"}
         initialValues={{
           customerName: orderState.customerName,
           productName: orderState.productName ?? "",
