@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -44,25 +44,8 @@ export default function OrderDetailPage() {
     removeOrderComment,
   } = useOrders();
   const { batches } = useBatches();
-  const { levels, nodes, addNode } = useHierarchy();
+  const { levels, nodes } = useHierarchy();
   const { role, name } = useCurrentUser();
-  const [horizonOrders, setHorizonOrders] = useState<
-    Array<{
-      id: string;
-      orderNumber: string;
-      customerName: string;
-      productName: string;
-      quantity: number;
-      hierarchy?: Record<string, string>;
-      dueDate: string;
-      priority: "low" | "normal" | "high" | "urgent";
-      status: "pending";
-      attachments?: OrderAttachment[];
-      comments?: OrderComment[];
-    }>
-  >([]);
-  const horizonLoadedRef = useRef(false);
-  const [isFetchingHorizon, setIsFetchingHorizon] = useState(false);
   const activeLevels = useMemo(
     () => levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
     [levels],
@@ -73,128 +56,14 @@ export default function OrderDetailPage() {
     return map;
   }, [nodes]);
 
-  useEffect(() => {
-    if (horizonLoadedRef.current) {
-      return;
-    }
-    horizonLoadedRef.current = true;
-
-    const contractLevel = levels.find((level) => level.key === "contract");
-    const categoryLevel = levels.find((level) => level.key === "category");
-    const productLevel = levels.find((level) => level.key === "product");
-    const nodeLookup = new Map<string, string>();
-    nodes.forEach((node) => {
-      const key = `${node.levelId}|${node.parentId ?? ""}|${node.label.toLowerCase()}`;
-      nodeLookup.set(key, node.id);
-    });
-
-    const ensureNode = (
-      label: string,
-      levelId: string | undefined,
-      parentId?: string | null,
-    ) => {
-      const trimmedLabel = label.trim();
-      if (!levelId || trimmedLabel.length === 0) {
-        return undefined;
-      }
-      const key = `${levelId}|${parentId ?? ""}|${trimmedLabel.toLowerCase()}`;
-      const existingId = nodeLookup.get(key);
-      if (existingId) {
-        return existingId;
-      }
-      const newId = crypto.randomUUID();
-      void addNode({
-        id: newId,
-        levelId,
-        label: trimmedLabel,
-        parentId: parentId ?? null,
-      });
-      nodeLookup.set(key, newId);
-      return newId;
-    };
-
-    async function loadHorizonOrders() {
-      try {
-        setIsFetchingHorizon(true);
-        const response = await fetch("/api/horizon/orders");
-        if (!response.ok) {
-          return;
-        }
-        const data = await response.json();
-        const baseDate = new Date();
-        baseDate.setHours(0, 0, 0, 0);
-        const mapped = (data.orders ?? []).map(
-          (
-            item: {
-              id: string;
-              contractNo?: string;
-              customer: string;
-              category?: string;
-              product?: string;
-              quantity?: number;
-            },
-            index: number,
-          ) => {
-            const contractId = item.contractNo
-              ? ensureNode(item.contractNo, contractLevel?.id, null)
-              : undefined;
-            const categoryId =
-              item.category && categoryLevel?.id
-                ? ensureNode(item.category, categoryLevel.id, contractId ?? null)
-                : undefined;
-            const productId =
-              item.product && productLevel?.id
-                ? ensureNode(item.product, productLevel.id, categoryId ?? null)
-                : undefined;
-            const hierarchy: Record<string, string> = {};
-            if (contractId && contractLevel?.id) {
-              hierarchy[contractLevel.id] = contractId;
-            }
-            if (categoryId && categoryLevel?.id) {
-              hierarchy[categoryLevel.id] = categoryId;
-            }
-            if (productId && productLevel?.id) {
-              hierarchy[productLevel.id] = productId;
-            }
-            const dueDate = new Date(baseDate);
-            dueDate.setDate(baseDate.getDate() + 7 + index);
-            return {
-              id: `hz-${item.id}`,
-              orderNumber: `HZ-${item.id.replace(/^hz-?/i, "")}`,
-              customerName: item.customer,
-              productName: item.product ?? "",
-              quantity: item.quantity ?? 1,
-              hierarchy,
-              dueDate: dueDate.toISOString().slice(0, 10),
-              priority: "normal" as const,
-              status: "pending" as const,
-            };
-          },
-        );
-        setHorizonOrders(mapped);
-      } catch {
-        // Ignore fetch errors for now.
-      } finally {
-        setIsFetchingHorizon(false);
-      }
-    }
-
-    loadHorizonOrders();
-  }, [addNode, levels, nodes]);
-
-  const mergedOrders = useMemo(
-    () => [...orders, ...horizonOrders],
-    [orders, horizonOrders],
-  );
-
   const order = useMemo(
     () =>
-      mergedOrders.find(
+      orders.find(
         (item) =>
           normalizeId(item.id) === decodedOrderId ||
           normalizeId(item.orderNumber) === decodedOrderId,
       ),
-    [decodedOrderId, mergedOrders],
+    [decodedOrderId, orders],
   );
 
   const [orderState, setOrderState] = useState(order);
@@ -211,7 +80,7 @@ export default function OrderDetailPage() {
     setIsLoadingOrder(false);
   }, [order]);
 
-  if (!orderState && (isLoadingOrder || isFetchingHorizon)) {
+  if (!orderState && isLoadingOrder) {
     return (
       <section className="space-y-3">
         <h1 className="text-xl font-semibold">Loading order...</h1>
@@ -233,12 +102,29 @@ export default function OrderDetailPage() {
     );
   }
 
-  const isExternalOrder = orderState.id.startsWith("hz-");
   const batchesForOrder: Batch[] = batches.filter(
     (batch) => batch.orderId === orderState.id,
   );
   const attachments = orderState.attachments ?? [];
   const comments = orderState.comments ?? [];
+  const priorityVariant =
+    orderState.priority === "low"
+      ? "priority-low"
+      : orderState.priority === "high"
+        ? "priority-high"
+        : orderState.priority === "urgent"
+          ? "priority-urgent"
+          : "priority-normal";
+  const statusVariant =
+    orderState.status === "pending"
+      ? "status-pending"
+      : orderState.status === "in_progress"
+        ? "status-in_progress"
+        : orderState.status === "completed"
+          ? "status-completed"
+          : orderState.status === "cancelled"
+            ? "status-cancelled"
+            : "status-pending";
 
   function handleFilesAdded(files: FileList | File[]) {
     const next = Array.from(files);
@@ -410,8 +296,8 @@ export default function OrderDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant="outline">{orderState.priority}</Badge>
-          <Badge variant="outline">
+          <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+          <Badge variant={statusVariant}>
             {formatOrderStatus(orderState.status)}
           </Badge>
           <Button
@@ -712,8 +598,9 @@ export default function OrderDetailPage() {
         }}
         title="Edit Order"
         submitLabel="Save Changes"
-        editMode={isExternalOrder ? "category-product-only" : "full"}
+        editMode="full"
         initialValues={{
+          orderNumber: orderState.orderNumber,
           customerName: orderState.customerName,
           productName: orderState.productName ?? "",
           quantity: orderState.quantity ?? 1,

@@ -8,6 +8,7 @@ import { OrdersProvider } from "@/app/orders/OrdersContext";
 import { HierarchyProvider } from "@/app/settings/HierarchyContext";
 import { UserProvider } from "@/contexts/UserContext";
 import { BatchesProvider } from "@/contexts/BatchesContext";
+import { NotificationsProvider, NotificationsViewport } from "@/components/ui/Notifications";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,23 +36,26 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <UserProvider>
-          <HierarchyProvider>
-            <OrdersProvider>
-              <BatchesProvider>
-                <Header />
-                <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
-                  {/* Main Content */}
-                  <main className="container mx-auto px-4 py-6">
-                    <div className="flex justify-between">
-                      <TabsNav />
-                      <ThemeToggle />
-                    </div>
-                    {children}
-                  </main>
-                </div>
-              </BatchesProvider>
-            </OrdersProvider>
-          </HierarchyProvider>
+          <NotificationsProvider>
+            <HierarchyProvider>
+              <OrdersProvider>
+                <BatchesProvider>
+                  <Header />
+                  <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
+                    {/* Main Content */}
+                    <main className="container mx-auto px-4 py-6">
+                      <div className="flex justify-between">
+                        <TabsNav />
+                        <ThemeToggle />
+                      </div>
+                      {children}
+                    </main>
+                  </div>
+                  <NotificationsViewport />
+                </BatchesProvider>
+              </OrdersProvider>
+            </HierarchyProvider>
+          </NotificationsProvider>
         </UserProvider>
       </body>
     </html>

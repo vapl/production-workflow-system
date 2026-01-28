@@ -29,6 +29,19 @@ export function getStatusIcon(status: ActivityStatus) {
   }
 }
 
+function getStatusBadgeVariant(status: ActivityStatus) {
+  switch (status) {
+    case "blocked":
+      return "status-blocked";
+    case "completed":
+      return "status-completed";
+    case "in_progress":
+      return "status-in_progress";
+    default:
+      return "status-pending";
+  }
+}
+
 export function RecentActivityList({ activities }: { activities: Activity[] }) {
   return (
     <>
@@ -60,10 +73,7 @@ export function RecentActivityList({ activities }: { activities: Activity[] }) {
                   </div>
                 </div>
                 <div className="text-right">
-                  <Badge
-                    variant="outline"
-                    className={getStatusColor(activity.status)}
-                  >
+                  <Badge variant={getStatusBadgeVariant(activity.status)}>
                     {formatActivityStatus(activity.status)}
                   </Badge>
                   <div className="text-xs text-muted-foreground mt-1">

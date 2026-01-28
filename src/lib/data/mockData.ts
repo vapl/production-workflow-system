@@ -88,6 +88,7 @@ export const mockOrders: Order[] = [
     dueDate: "2026-01-28",
     priority: "normal",
     status: "pending",
+    source: "manual",
   },
   {
     id: "o-2",
@@ -98,6 +99,7 @@ export const mockOrders: Order[] = [
     dueDate: "2026-02-02",
     priority: "high",
     status: "in_progress",
+    source: "manual",
   },
   {
     id: "o-3",
@@ -108,6 +110,7 @@ export const mockOrders: Order[] = [
     dueDate: "2026-02-10",
     priority: "urgent",
     status: "in_progress",
+    source: "manual",
   },
 ];
 

@@ -6,6 +6,7 @@ import { XIcon } from "lucide-react";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 
 export interface OrderFormValues {
+  orderNumber: string;
   customerName: string;
   customerEmail?: string;
   productName: string;
@@ -27,6 +28,7 @@ interface OrderModalProps {
 }
 
 const defaultValues: OrderFormValues = {
+  orderNumber: "",
   customerName: "",
   customerEmail: "",
   productName: "",
@@ -46,6 +48,7 @@ export function OrderModal({
   editMode = "full",
 }: OrderModalProps) {
   const [formState, setFormState] = useState({
+    orderNumber: defaultValues.orderNumber,
     customerName: defaultValues.customerName,
     customerEmail: defaultValues.customerEmail ?? "",
     productName: defaultValues.productName,
@@ -60,7 +63,7 @@ export function OrderModal({
   const [hierarchyInput, setHierarchyInput] = useState<Record<string, string>>(
     {},
   );
-  const { levels, nodes, addNode } = useHierarchy();
+  const { levels, nodes } = useHierarchy();
   const activeLevels = useMemo(
     () =>
       levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
@@ -92,8 +95,9 @@ export function OrderModal({
     });
     return map;
   }, [activeLevels, nodes]);
+  const isEditingOrderNumber = Boolean(initialValues?.orderNumber);
 
-  function resolveOrCreateNode(
+  function resolveNodeId(
     levelId: string,
     label: string,
     parentId?: string | null,
@@ -108,17 +112,7 @@ export function OrderModal({
         node.label.toLowerCase() === trimmed.toLowerCase() &&
         (parentId ? node.parentId === parentId : !node.parentId),
     );
-    if (existing) {
-      return existing.id;
-    }
-    const newNodeId = `node-${levelId}-${Date.now()}`;
-    addNode({
-      id: newNodeId,
-      levelId,
-      label: trimmed,
-      parentId: parentId ?? null,
-    });
-    return newNodeId;
+    return existing?.id ?? "";
   }
 
   useEffect(() => {
@@ -131,12 +125,13 @@ export function OrderModal({
     };
     let nextProductName = nextValues.productName;
     if (productLevel && nextValues.hierarchy?.[productLevel.id]) {
-      const selectedNode = nodes.find(
-        (node) => node.id === nextValues.hierarchy?.[productLevel.id],
-      );
-      nextProductName = selectedNode?.label ?? nextProductName;
+      const rawValue = nextValues.hierarchy?.[productLevel.id] ?? "";
+      const selectedNode = nodes.find((node) => node.id === rawValue);
+      nextProductName =
+        selectedNode?.label ?? (rawValue || nextProductName);
     }
     setFormState({
+      orderNumber: nextValues.orderNumber ?? "",
       customerName: nextValues.customerName,
       customerEmail: nextValues.customerEmail ?? "",
       productName: nextProductName,
@@ -153,16 +148,15 @@ export function OrderModal({
       const nodeId = nextValues.hierarchy?.[level.id];
       if (nodeId) {
         const node = nodes.find((item) => item.id === nodeId);
-        if (node) {
-          nextHierarchyInput[level.id] = node.label;
-        }
+        nextHierarchyInput[level.id] = node?.label ?? nodeId;
       }
     });
     setHierarchyInput(nextHierarchyInput);
-  }, [initialValues, open]);
+  }, [activeLevels, initialValues, nodes, open, productLevel]);
 
   function resetForm() {
     setFormState({
+      orderNumber: defaultValues.orderNumber,
       customerName: defaultValues.customerName,
       customerEmail: defaultValues.customerEmail ?? "",
       productName: defaultValues.productName,
@@ -181,6 +175,8 @@ export function OrderModal({
     switch (field) {
       case "customerName":
         return value.trim() ? "" : "Customer name is required.";
+      case "orderNumber":
+        return value.trim() ? "" : "Order number is required.";
       case "customerEmail":
         return value.trim() &&
           !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
@@ -198,6 +194,9 @@ export function OrderModal({
         if (!value) {
           return "Due date is required.";
         }
+        if (isEditingOrderNumber) {
+          return "";
+        }
         const today = new Date();
         const dueDate = new Date(value);
         today.setHours(0, 0, 0, 0);
@@ -211,19 +210,14 @@ export function OrderModal({
   function handleHierarchyChange(levelId: string, value: string) {
     setFormState((prev) => {
       const nextHierarchy = { ...prev.hierarchy, [levelId]: value };
-      const levelIndex = activeLevels.findIndex((level) => level.id === levelId);
-      if (levelIndex >= 0) {
-        for (let i = levelIndex + 1; i < activeLevels.length; i += 1) {
-          delete nextHierarchy[activeLevels[i].id];
-        }
-      }
+      // Do not clear lower levels on manual input; many levels are independent.
       const productLevel = activeLevels.find((level) => level.key === "product");
       if (productLevel && levelId === productLevel.id) {
         const selectedNode = nodes.find((node) => node.id === value);
         return {
           ...prev,
           hierarchy: nextHierarchy,
-          productName: selectedNode?.label ?? "",
+          productName: selectedNode?.label ?? value,
         };
       }
       return { ...prev, hierarchy: nextHierarchy };
@@ -236,7 +230,7 @@ export function OrderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-xl rounded-2xl bg-card p-6 shadow-xl">
+      <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button
@@ -259,24 +253,30 @@ export function OrderModal({
               if (!inputValue) {
                 return;
               }
-              if (resolvedHierarchy[level.id]) {
+              const existingId = resolvedHierarchy[level.id];
+              const existingNode = existingId
+                ? nodes.find((node) => node.id === existingId)
+                : undefined;
+              const matchesExisting =
+                existingNode &&
+                existingNode.label.toLowerCase() === inputValue.toLowerCase();
+              if (matchesExisting) {
                 return;
               }
               const parentLevel = activeLevels[index - 1];
               const parentId = parentLevel
                 ? resolvedHierarchy[parentLevel.id] ?? null
                 : null;
-              const newNodeId = resolveOrCreateNode(
+              const matchedId = resolveNodeId(
                 level.id,
                 inputValue,
                 parentId ?? null,
               );
-              if (newNodeId) {
-                resolvedHierarchy[level.id] = newNodeId;
-              }
+              resolvedHierarchy[level.id] = matchedId || inputValue;
             });
             const nextErrors: Record<string, string> = {};
             ([
+              "orderNumber",
               "customerName",
               "customerEmail",
               "quantity",
@@ -304,6 +304,7 @@ export function OrderModal({
               ...(isCategoryProductOnly
                 ? {}
                 : {
+                    orderNumber: true,
                     customerName: true,
                     customerEmail: true,
                     quantity: true,
@@ -322,6 +323,7 @@ export function OrderModal({
 
             const parsedQuantity = Number(formState.quantity);
             onSubmit({
+              orderNumber: formState.orderNumber.trim(),
               customerName: formState.customerName.trim(),
               customerEmail: formState.customerEmail.trim() || undefined,
               productName: formState.productName.trim(),
@@ -340,6 +342,45 @@ export function OrderModal({
           }}
         >
           <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 text-sm font-medium">
+              Order # *
+              <input
+                value={formState.orderNumber}
+                onChange={(event) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    orderNumber: event.target.value,
+                  }))
+                }
+                onBlur={(event) => {
+                  if (isCategoryProductOnly || isEditingOrderNumber) {
+                    return;
+                  }
+                  const message = validateField(
+                    "orderNumber",
+                    event.target.value,
+                  );
+                  setErrors((prev) => ({
+                    ...prev,
+                    orderNumber: message,
+                  }));
+                  setTouched((prev) => ({ ...prev, orderNumber: true }));
+                }}
+                className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
+                  touched.orderNumber && errors.orderNumber
+                    ? "border-destructive"
+                    : "border-border"
+                } bg-input-background`}
+                placeholder="Accounting Order #"
+                required
+                disabled={isCategoryProductOnly || isEditingOrderNumber}
+              />
+              {touched.orderNumber && errors.orderNumber && (
+                <span className="text-xs text-destructive">
+                  {errors.orderNumber}
+                </span>
+              )}
+            </label>
             <label className="space-y-2 text-sm font-medium">
               Customer Name *
               <input
@@ -480,21 +521,12 @@ export function OrderModal({
                           (node) =>
                             node.label.toLowerCase() === rawValue.toLowerCase(),
                         );
-                        const newNodeId = matched
-                          ? matched.id
-                          : resolveOrCreateNode(
-                              level.id,
-                              rawValue,
-                              parentId ?? null,
-                            );
-                        handleHierarchyChange(level.id, newNodeId);
+                        const nextValue = matched ? matched.id : rawValue;
+                        handleHierarchyChange(level.id, nextValue);
                         setHierarchyInput((prev) => ({
                           ...prev,
                           [level.id]:
-                            matched?.label ??
-                            nodes.find((node) => node.id === newNodeId)
-                              ?.label ??
-                            rawValue,
+                            matched?.label ?? rawValue,
                         }));
                         setErrors((prev) => ({
                           ...prev,

@@ -50,6 +50,7 @@ export default function SettingsPage() {
   const [levelOrder, setLevelOrder] = useState<number>(sortedLevels.length + 1);
   const [levelRequired, setLevelRequired] = useState(false);
   const [levelActive, setLevelActive] = useState(true);
+  const [levelShowInTable, setLevelShowInTable] = useState(true);
   const [editingLevelId, setEditingLevelId] = useState<string | null>(null);
 
   const [selectedLevelId, setSelectedLevelId] = useState<string>(
@@ -131,6 +132,7 @@ export default function SettingsPage() {
     setLevelKey("");
     setLevelRequired(false);
     setLevelActive(true);
+    setLevelShowInTable(true);
     setEditingLevelId(null);
   }
 
@@ -147,6 +149,7 @@ export default function SettingsPage() {
         order: levelOrder,
         isRequired: levelRequired,
         isActive: levelActive,
+        showInTable: levelShowInTable,
       });
       resetLevelForm();
       return;
@@ -158,6 +161,7 @@ export default function SettingsPage() {
       order: levelOrder,
       isRequired: levelRequired,
       isActive: levelActive,
+      showInTable: levelShowInTable,
     });
     resetLevelForm();
   }
@@ -173,6 +177,7 @@ export default function SettingsPage() {
     setLevelOrder(level.order);
     setLevelRequired(level.isRequired);
     setLevelActive(level.isActive);
+    setLevelShowInTable(level.showInTable);
   }
 
   function resetNodeForm() {
@@ -375,24 +380,32 @@ export default function SettingsPage() {
                 className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
               />
             </div>
-            <div className="flex flex-wrap items-center gap-4 pt-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={levelRequired}
-                  onChange={(event) => setLevelRequired(event.target.checked)}
-                />
-                Required
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={levelActive}
-                  onChange={(event) => setLevelActive(event.target.checked)}
-                />
-                Active
-              </label>
-            </div>
+          <div className="flex flex-wrap items-center gap-4 pt-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={levelRequired}
+                onChange={(event) => setLevelRequired(event.target.checked)}
+              />
+              Required
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={levelActive}
+                onChange={(event) => setLevelActive(event.target.checked)}
+              />
+              Active
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={levelShowInTable}
+                onChange={(event) => setLevelShowInTable(event.target.checked)}
+              />
+              Show in table
+            </label>
+          </div>
             <div className="flex gap-2">
               <Button onClick={handleSaveLevel}>
                 {editingLevelId ? "Save level" : "Add level"}
@@ -414,6 +427,7 @@ export default function SettingsPage() {
                   <th className="px-4 py-2 text-left font-medium">Order</th>
                   <th className="px-4 py-2 text-left font-medium">Required</th>
                   <th className="px-4 py-2 text-left font-medium">Active</th>
+                  <th className="px-4 py-2 text-left font-medium">In table</th>
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
@@ -453,6 +467,20 @@ export default function SettingsPage() {
                         {level.isActive ? "Active" : "Hidden"}
                       </label>
                     </td>
+                    <td className="px-4 py-2">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={level.showInTable}
+                          onChange={(event) =>
+                            updateLevel(level.id, {
+                              showInTable: event.target.checked,
+                            })
+                          }
+                        />
+                        {level.showInTable ? "Shown" : "Hidden"}
+                      </label>
+                    </td>
                     <td className="px-4 py-2 text-right">
                       <div className="flex justify-end gap-2">
                         <Button
@@ -476,7 +504,7 @@ export default function SettingsPage() {
                 {sortedLevels.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-6 text-center text-muted-foreground"
                     >
                       Add your first hierarchy level.

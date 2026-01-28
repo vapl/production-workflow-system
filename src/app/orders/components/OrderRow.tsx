@@ -41,15 +41,38 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
     return map;
   }, [nodes]);
 
+  const priorityVariant =
+    order.priority === "low"
+      ? "priority-low"
+      : order.priority === "high"
+        ? "priority-high"
+        : order.priority === "urgent"
+          ? "priority-urgent"
+          : "priority-normal";
+  const statusVariant =
+    order.status === "pending"
+      ? "status-pending"
+      : order.status === "in_progress"
+        ? "status-in_progress"
+        : order.status === "completed"
+          ? "status-completed"
+          : order.status === "cancelled"
+            ? "status-cancelled"
+            : "status-pending";
+
   useEffect(() => {
     function handlePosition() {
       if (!triggerRef.current) {
         return;
       }
       const rect = triggerRef.current.getBoundingClientRect();
+      const menuWidth = Math.max(rect.width, 160);
+      const viewportPadding = 8;
+      const maxLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding);
+      const desiredLeft = rect.right - rect.width;
       setMenuPosition({
         top: rect.bottom + 8,
-        left: rect.right - rect.width,
+        left: Math.min(desiredLeft, maxLeft),
         width: rect.width,
       });
     }
@@ -68,12 +91,16 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
 
   return (
     <TableRow>
-      <TableCell className="font-medium">{order.orderNumber}</TableCell>
-      <TableCell>{order.customerName}</TableCell>
+      <TableCell className="font-medium whitespace-normal break-words">
+        {order.orderNumber}
+      </TableCell>
+      <TableCell className="whitespace-normal break-words">
+        {order.customerName}
+      </TableCell>
       {levels.map((level) => {
         const value = order.hierarchy?.[level.id];
         return (
-          <TableCell key={level.id}>
+          <TableCell key={level.id} className="whitespace-normal break-words">
             {value ? nodeLabelMap.get(value) ?? value : "--"}
           </TableCell>
         );
@@ -81,13 +108,20 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
       <TableCell>{order.quantity ?? "--"}</TableCell>
       <TableCell>{formatDate(order.dueDate)}</TableCell>
       <TableCell>
-        <Badge variant="outline">{order.priority}</Badge>
+        <Badge variant={priorityVariant}>{order.priority}</Badge>
       </TableCell>
       <TableCell>
-        <Badge variant="outline">{formatOrderStatus(order.status)}</Badge>
+        <Badge variant={statusVariant}>{formatOrderStatus(order.status)}</Badge>
       </TableCell>
       <TableCell className="text-right">
         <div className="inline-flex items-center gap-2">
+          <Link
+            href={`/orders/${order.id}`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            aria-label="View order"
+          >
+            <EyeIcon className="h-4 w-4" />
+          </Link>
           <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <PaperclipIcon className="h-3.5 w-3.5" />
             <span>{order.attachments?.length ?? 0}</span>
@@ -124,14 +158,6 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
                   }}
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <Link
-                    href={`/orders/${order.id}`}
-                    className="flex items-center gap-2 rounded px-2 py-1.5 text-sm leading-none text-foreground hover:bg-muted/50"
-                    onClick={() => setMenuOpen(false)}
-                  >
-                    <EyeIcon className="h-4 w-4" />
-                    View
-                  </Link>
                   {onEdit && (
                     <button
                       type="button"

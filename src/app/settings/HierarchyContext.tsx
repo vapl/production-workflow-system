@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useNotifications } from "@/components/ui/Notifications";
 
 export interface HierarchyLevel {
   id: string;
@@ -11,6 +12,7 @@ export interface HierarchyLevel {
   order: number;
   isRequired: boolean;
   isActive: boolean;
+  showInTable: boolean;
 }
 
 export interface HierarchyNode {
@@ -42,6 +44,7 @@ const fallbackLevels: HierarchyLevel[] = [
     order: 1,
     isRequired: false,
     isActive: true,
+    showInTable: true,
   },
   {
     id: "level-category",
@@ -50,6 +53,7 @@ const fallbackLevels: HierarchyLevel[] = [
     order: 2,
     isRequired: false,
     isActive: true,
+    showInTable: true,
   },
   {
     id: "level-product",
@@ -58,6 +62,7 @@ const fallbackLevels: HierarchyLevel[] = [
     order: 3,
     isRequired: true,
     isActive: true,
+    showInTable: true,
   },
 ];
 
@@ -102,6 +107,7 @@ function mapLevel(row: {
   sort_order: number;
   is_required: boolean;
   is_active: boolean;
+  show_in_table: boolean;
 }): HierarchyLevel {
   return {
     id: row.id,
@@ -110,6 +116,7 @@ function mapLevel(row: {
     order: row.sort_order,
     isRequired: row.is_required,
     isActive: row.is_active,
+    showInTable: row.show_in_table,
   };
 }
 
@@ -135,6 +142,7 @@ export function HierarchyProvider({
   children: React.ReactNode;
 }) {
   const user = useCurrentUser();
+  const { notify } = useNotifications();
   const [levels, setLevels] = useState<HierarchyLevel[]>(fallbackLevels);
   const [nodes, setNodes] = useState<HierarchyNode[]>(fallbackNodes);
 
@@ -146,7 +154,7 @@ export function HierarchyProvider({
     }
     const { data: levelData, error: levelError } = await supabase
       .from("hierarchy_levels")
-      .select("id, name, key, sort_order, is_required, is_active")
+      .select("id, name, key, sort_order, is_required, is_active, show_in_table")
       .order("sort_order", { ascending: true });
     if (levelError) {
       return;
@@ -200,13 +208,15 @@ export function HierarchyProvider({
             sort_order: level.order,
             is_required: level.isRequired,
             is_active: level.isActive,
+            show_in_table: level.showInTable,
           })
-          .select("id, name, key, sort_order, is_required, is_active")
+          .select("id, name, key, sort_order, is_required, is_active, show_in_table")
           .single();
         if (error || !data) {
           return;
         }
         setLevels((prev) => [...prev, mapLevel(data)]);
+        notify({ title: "Hierarchy level added", variant: "success" });
       },
       updateLevel: async (levelId, patch) => {
         if (!supabase) {
@@ -225,11 +235,13 @@ export function HierarchyProvider({
           updatePayload.is_required = patch.isRequired;
         if (patch.isActive !== undefined)
           updatePayload.is_active = patch.isActive;
+        if (patch.showInTable !== undefined)
+          updatePayload.show_in_table = patch.showInTable;
         const { data, error } = await supabase
           .from("hierarchy_levels")
           .update(updatePayload)
           .eq("id", levelId)
-          .select("id, name, key, sort_order, is_required, is_active")
+          .select("id, name, key, sort_order, is_required, is_active, show_in_table")
           .single();
         if (error || !data) {
           return;
@@ -237,6 +249,7 @@ export function HierarchyProvider({
         setLevels((prev) =>
           prev.map((level) => (level.id === levelId ? mapLevel(data) : level)),
         );
+        notify({ title: "Hierarchy level updated", variant: "success" });
       },
       removeLevel: async (levelId) => {
         if (!supabase) {
@@ -253,6 +266,7 @@ export function HierarchyProvider({
         }
         setLevels((prev) => prev.filter((level) => level.id !== levelId));
         setNodes((prev) => prev.filter((node) => node.levelId !== levelId));
+        notify({ title: "Hierarchy level removed", variant: "success" });
       },
       addNode: async (node) => {
         if (!supabase) {
@@ -280,6 +294,7 @@ export function HierarchyProvider({
           return;
         }
         setNodes((prev) => [...prev, mapNode(data)]);
+        notify({ title: "Hierarchy item added", variant: "success" });
       },
       updateNode: async (nodeId, patch) => {
         if (!supabase) {
@@ -307,6 +322,7 @@ export function HierarchyProvider({
         setNodes((prev) =>
           prev.map((node) => (node.id === nodeId ? mapNode(data) : node)),
         );
+        notify({ title: "Hierarchy item updated", variant: "success" });
       },
       removeNode: async (nodeId) => {
         if (!supabase) {
@@ -321,6 +337,7 @@ export function HierarchyProvider({
           return;
         }
         setNodes((prev) => prev.filter((node) => node.id !== nodeId));
+        notify({ title: "Hierarchy item removed", variant: "success" });
       },
     }),
     [levels, nodes, user.tenantId],

@@ -19,21 +19,12 @@ export async function uploadOrderAttachment(
   const path = `${orderId}/${Date.now()}-${safeName}`;
 
   try {
-    const uploadPromise = supabase.storage
+    const { error } = await supabase.storage
       .from(supabaseBucket)
       .upload(path, file, {
         upsert: true,
         contentType: file.type || "application/octet-stream",
       });
-    const timeoutPromise = new Promise<{ error: { message: string } }>(
-      (resolve) =>
-        setTimeout(
-          () => resolve({ error: { message: "Upload timed out." } }),
-          15000,
-        ),
-    );
-    const { error } = await Promise.race([uploadPromise, timeoutPromise]);
-
     if (error) {
       return { error: error.message };
     }

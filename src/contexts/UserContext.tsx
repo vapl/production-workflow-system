@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-export type UserRole = "Sales" | "Engineering" | "Production";
+export type UserRole = "Sales" | "Engineering" | "Production" | "Admin";
 
 export interface CurrentUser {
   id: string;
@@ -50,7 +50,7 @@ async function fetchUserRole(userId: string) {
     return { role: "Sales" as UserRole, fullName: "Manager", tenantId: null };
   }
 
-  const role = ["Sales", "Engineering", "Production"].includes(data.role)
+  const role = ["Sales", "Engineering", "Production", "Admin"].includes(data.role)
     ? (data.role as UserRole)
     : ("Sales" as UserRole);
   return {

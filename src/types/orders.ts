@@ -29,6 +29,10 @@ export interface Order {
   dueDate: string; // ISO date string
   priority: "low" | "normal" | "high" | "urgent";
   status: OrderStatus;
+  source?: "manual" | "accounting" | "excel";
+  externalId?: string;
+  sourcePayload?: Record<string, unknown>;
+  syncedAt?: string;
   attachments?: OrderAttachment[];
   comments?: OrderComment[];
 }

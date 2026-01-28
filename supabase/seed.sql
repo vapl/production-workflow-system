@@ -19,12 +19,13 @@ levels as (
     key,
     sort_order,
     is_required,
-    is_active
+    is_active,
+    show_in_table
   )
   values
-    ((select id from tenant_row), 'Contract', 'contract', 1, false, true),
-    ((select id from tenant_row), 'Category', 'category', 2, false, true),
-    ((select id from tenant_row), 'Product', 'product', 3, true, true)
+    ((select id from tenant_row), 'Contract', 'contract', 1, false, true, true),
+    ((select id from tenant_row), 'Category', 'category', 2, false, true, true),
+    ((select id from tenant_row), 'Product', 'product', 3, true, true, true)
   returning id, key
 ),
 contract_node as (

@@ -29,7 +29,7 @@ export function OrdersTable({
 }: OrdersTableProps) {
   const { levels } = useHierarchy();
   const activeLevels = levels
-    .filter((level) => level.isActive)
+    .filter((level) => level.isActive && level.showInTable)
     .sort((a, b) => a.order - b.order);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(
     {},
@@ -38,20 +38,22 @@ export function OrdersTable({
   const totalColumns = 7 + activeLevels.length;
 
   return (
-    <div className="rounded-md border">
-      <Table>
+    <div className="rounded-md border overflow-x-hidden">
+      <Table className="w-full">
         <TableHeader>
           <TableRow>
-            <TableHead>Order #</TableHead>
-            <TableHead>Customer</TableHead>
+            <TableHead className="whitespace-normal">Order #</TableHead>
+            <TableHead className="whitespace-normal">Customer</TableHead>
             {activeLevels.map((level) => (
-              <TableHead key={level.id}>{level.name}</TableHead>
+              <TableHead key={level.id} className="whitespace-normal">
+                {level.name}
+              </TableHead>
             ))}
-            <TableHead>Quantity</TableHead>
-            <TableHead>Due Date</TableHead>
-            <TableHead>Priority</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
+            <TableHead className="whitespace-normal">Quantity</TableHead>
+            <TableHead className="whitespace-normal">Due Date</TableHead>
+            <TableHead className="whitespace-normal">Priority</TableHead>
+            <TableHead className="whitespace-normal">Status</TableHead>
+            <TableHead className="text-right whitespace-normal">Actions</TableHead>
           </TableRow>
         </TableHeader>
 

@@ -10,135 +10,57 @@ import { PlusIcon } from "lucide-react";
 import { OrderModal } from "./components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { buildOrdersTemplate } from "@/lib/excel/ordersExcel";
+import { ImportWizard } from "./components/ImportWizard";
 
 export default function OrdersPage() {
-  const { orders, addOrder, updateOrder, removeOrder } = useOrders();
-  const { nodes, levels, addNode } = useHierarchy();
+  const {
+    orders,
+    addOrder,
+    updateOrder,
+    removeOrder,
+    error,
+    syncAccountingOrders,
+  } = useOrders();
+  const { nodes, levels } = useHierarchy();
+  const user = useCurrentUser();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Order | null>(null);
-  const [archivedExternalIds, setArchivedExternalIds] = useState<Set<string>>(
-    () => new Set(),
-  );
   const [groupByContract, setGroupByContract] = useState(true);
-  const [horizonOrders, setHorizonOrders] = useState<Order[]>([]);
-  const horizonLoadedRef = useRef(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const syncStartedRef = useRef(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
+  const importMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (horizonLoadedRef.current) {
+    if (syncStartedRef.current) {
       return;
     }
-    horizonLoadedRef.current = true;
+    if (levels.length === 0) {
+      return;
+    }
+    syncStartedRef.current = true;
+    void syncAccountingOrders();
+  }, [levels, syncAccountingOrders]);
 
-    const contractLevel = levels.find((level) => level.key === "contract");
-    const categoryLevel = levels.find((level) => level.key === "category");
-    const productLevel = levels.find((level) => level.key === "product");
-
-    const nodeLookup = new Map<string, string>();
-    nodes.forEach((node) => {
-      const key = `${node.levelId}|${node.parentId ?? ""}|${node.label.toLowerCase()}`;
-      nodeLookup.set(key, node.id);
-    });
-
-    const ensureNode = (
-      label: string,
-      levelId: string | undefined,
-      parentId?: string | null,
-    ) => {
-      const trimmedLabel = label.trim();
-      if (!levelId || trimmedLabel.length === 0) {
-        return undefined;
-      }
-      const key = `${levelId}|${parentId ?? ""}|${trimmedLabel.toLowerCase()}`;
-      const existingId = nodeLookup.get(key);
-      if (existingId) {
-        return existingId;
-      }
-      const newId = crypto.randomUUID();
-      void addNode({
-        id: newId,
-        levelId,
-        label: trimmedLabel,
-        parentId: parentId ?? null,
-      });
-      nodeLookup.set(key, newId);
-      return newId;
-    };
-
-    async function loadHorizonOrders() {
-      try {
-        const response = await fetch("/api/horizon/orders");
-        if (!response.ok) {
-          return;
-        }
-        const data = await response.json();
-        const baseDate = new Date();
-        baseDate.setHours(0, 0, 0, 0);
-        const mappedOrders: Order[] = (data.orders ?? []).map(
-          (
-            item: {
-              id: string;
-              contractNo?: string;
-              customer: string;
-              category?: string;
-              product?: string;
-              quantity?: number;
-            },
-            index: number,
-          ) => {
-            const contractId = item.contractNo
-              ? ensureNode(item.contractNo, contractLevel?.id, null)
-              : undefined;
-            const categoryId =
-              item.category && categoryLevel?.id
-                ? ensureNode(item.category, categoryLevel.id, contractId ?? null)
-                : undefined;
-            const productId =
-              item.product && productLevel?.id
-                ? ensureNode(item.product, productLevel.id, categoryId ?? null)
-                : undefined;
-            const dueDate = new Date(baseDate);
-            dueDate.setDate(baseDate.getDate() + 7 + index);
-            const hierarchy: Record<string, string> = {};
-            if (contractId && contractLevel?.id) {
-              hierarchy[contractLevel.id] = contractId;
-            }
-            if (categoryId && categoryLevel?.id) {
-              hierarchy[categoryLevel.id] = categoryId;
-            }
-            if (productId && productLevel?.id) {
-              hierarchy[productLevel.id] = productId;
-            }
-            return {
-              id: `hz-${item.id}`,
-              orderNumber: `HZ-${item.id.replace(/^hz-?/i, "")}`,
-              customerName: item.customer,
-              productName: item.product ?? "",
-              quantity: item.quantity ?? 1,
-              hierarchy,
-              dueDate: dueDate.toISOString().slice(0, 10),
-              priority: "normal",
-              status: "pending",
-            };
-          },
-        );
-        setHorizonOrders(mappedOrders);
-      } catch {
-        // Ignore fetch errors for now.
+  useEffect(() => {
+    if (!isImportMenuOpen) {
+      return;
+    }
+    function handleClick(event: MouseEvent) {
+      const target = event.target as Node;
+      if (importMenuRef.current && !importMenuRef.current.contains(target)) {
+        setIsImportMenuOpen(false);
       }
     }
-
-    loadHorizonOrders();
-  }, [addNode, levels, nodes]);
-
-  const mergedOrders = useMemo(() => {
-    const filteredExternal = horizonOrders.filter(
-      (order) => !archivedExternalIds.has(order.id),
-    );
-    return [...orders, ...filteredExternal];
-  }, [archivedExternalIds, orders, horizonOrders]);
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  }, [isImportMenuOpen]);
 
   const filteredOrders = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -146,9 +68,9 @@ export default function OrdersPage() {
       nodes.map((node) => [node.id, node.label.toLowerCase()]),
     );
 
-    return mergedOrders.filter((order) => {
+    return orders.filter((order) => {
       const hierarchyLabels = Object.values(order.hierarchy ?? {})
-        .map((id) => nodeLabelMap.get(id) ?? "")
+        .map((value) => nodeLabelMap.get(value) ?? value ?? "")
         .join(" ");
       const matchesQuery =
         normalizedQuery.length === 0 ||
@@ -161,20 +83,18 @@ export default function OrdersPage() {
 
       return matchesQuery && matchesStatus;
     });
-  }, [mergedOrders, nodes, searchQuery, statusFilter]);
+  }, [nodes, orders, searchQuery, statusFilter]);
 
   const statusCounts = useMemo(
     () => ({
-      all: mergedOrders.length,
-      pending: mergedOrders.filter((order) => order.status === "pending").length,
-      in_progress: mergedOrders.filter((order) => order.status === "in_progress")
+      all: orders.length,
+      pending: orders.filter((order) => order.status === "pending").length,
+      in_progress: orders.filter((order) => order.status === "in_progress")
         .length,
-      completed: mergedOrders.filter((order) => order.status === "completed")
-        .length,
-      cancelled: mergedOrders.filter((order) => order.status === "cancelled")
-        .length,
+      completed: orders.filter((order) => order.status === "completed").length,
+      cancelled: orders.filter((order) => order.status === "cancelled").length,
     }),
-    [mergedOrders],
+    [orders],
   );
 
   const contractLevel = useMemo(
@@ -210,9 +130,8 @@ export default function OrdersPage() {
     }));
   }, [contractLabelMap, contractLevel, filteredOrders, groupByContract]);
 
-  const isExternalOrder = (order: Order) => order.id.startsWith("hz-");
-
   async function handleCreateOrder(values: {
+    orderNumber: string;
     customerName: string;
     customerEmail?: string;
     productName: string;
@@ -222,16 +141,8 @@ export default function OrdersPage() {
     notes?: string;
     hierarchy?: Record<string, string>;
   }) {
-    const maxOrderNumber = orders.reduce((max, order) => {
-      const match = order.orderNumber.match(/\d+/);
-      if (!match) {
-        return max;
-      }
-      return Math.max(max, Number(match[0]));
-    }, 0);
-    const orderNumber = `ORD-${String(maxOrderNumber + 1).padStart(4, "0")}`;
     const newOrder = {
-      orderNumber,
+      orderNumber: values.orderNumber,
       customerName: values.customerName,
       productName: values.productName,
       quantity: values.quantity,
@@ -239,12 +150,16 @@ export default function OrdersPage() {
       dueDate: values.dueDate,
       priority: values.priority,
       status: "pending" as const,
+      notes: values.notes,
+      authorName: user.name,
+      authorRole: user.role,
     };
 
     await addOrder(newOrder);
   }
 
   async function handleEditOrder(values: {
+    orderNumber: string;
     customerName: string;
     customerEmail?: string;
     productName: string;
@@ -273,18 +188,76 @@ export default function OrdersPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Customer Orders</CardTitle>
-          <Button
-            className="gap-2"
-            onClick={() => {
-              setEditingOrder(null);
-              setIsModalOpen(true);
-            }}
-          >
-            <PlusIcon className="h-4 w-4" />
-            New Order
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setIsSyncing(true);
+                await syncAccountingOrders();
+                setIsSyncing(false);
+              }}
+              disabled={isSyncing}
+            >
+              {isSyncing ? "Syncing..." : "Sync Accounting"}
+            </Button>
+            <div className="relative" ref={importMenuRef}>
+              <Button
+                variant="outline"
+                onClick={() => setIsImportMenuOpen((prev) => !prev)}
+              >
+                Import
+              </Button>
+              {isImportMenuOpen && (
+                <div className="absolute right-0 top-11 z-50 w-48 rounded-lg border border-border bg-card p-1 shadow-lg">
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-md px-3 py-2 text-sm hover:bg-muted/50"
+                    onClick={() => {
+                      const levelNames = levels.map((level) => level.name);
+                      const blob = buildOrdersTemplate(levelNames);
+                      const url = URL.createObjectURL(blob);
+                      const anchor = document.createElement("a");
+                      anchor.href = url;
+                      anchor.download = "pws-orders-template.xlsx";
+                      anchor.click();
+                      URL.revokeObjectURL(url);
+                      setIsImportMenuOpen(false);
+                    }}
+                  >
+                    Download template
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-md px-3 py-2 text-sm hover:bg-muted/50"
+                    onClick={() => {
+                      setIsImportOpen(true);
+                      setIsImportMenuOpen(false);
+                    }}
+                  >
+                    Import Excel
+                  </button>
+                </div>
+              )}
+            </div>
+            <Button
+              className="gap-2"
+              onClick={() => {
+                setEditingOrder(null);
+                setIsModalOpen(true);
+              }}
+              disabled={!["Sales", "Admin"].includes(user.role)}
+            >
+              <PlusIcon className="h-4 w-4" />
+              New Order
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {error && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
           <OrdersToolbar
             searchQuery={searchQuery}
             statusFilter={statusFilter}
@@ -318,14 +291,11 @@ export default function OrdersPage() {
         onSubmit={editingOrder ? handleEditOrder : handleCreateOrder}
         title={editingOrder ? "Edit Order" : "Create New Order"}
         submitLabel={editingOrder ? "Save Changes" : "Create Order"}
-        editMode={
-          editingOrder && isExternalOrder(editingOrder)
-            ? "category-product-only"
-            : "full"
-        }
+        editMode="full"
         initialValues={
           editingOrder
             ? {
+                orderNumber: editingOrder.orderNumber,
                 customerName: editingOrder.customerName,
                 productName: editingOrder.productName ?? "",
                 quantity: editingOrder.quantity ?? 1,
@@ -336,18 +306,16 @@ export default function OrdersPage() {
             : undefined
         }
       />
+      <ImportWizard
+        open={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+      />
       {pendingDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
-            <h2 className="text-lg font-semibold">
-              {isExternalOrder(pendingDelete)
-                ? "Archive external order?"
-                : "Delete order?"}
-            </h2>
+            <h2 className="text-lg font-semibold">Delete order?</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              {isExternalOrder(pendingDelete)
-                ? `This will hide ${pendingDelete.orderNumber} in PWS only.`
-                : `This will remove ${pendingDelete.orderNumber} from the list.`}
+              {`This will remove ${pendingDelete.orderNumber} from the list.`}
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="outline" onClick={() => setPendingDelete(null)}>
@@ -356,19 +324,11 @@ export default function OrdersPage() {
               <Button
                 variant="destructive"
                 onClick={async () => {
-                  if (isExternalOrder(pendingDelete)) {
-                    setArchivedExternalIds((prev) => {
-                      const next = new Set(prev);
-                      next.add(pendingDelete.id);
-                      return next;
-                    });
-                  } else {
-                    await removeOrder(pendingDelete.id);
-                  }
+                  await removeOrder(pendingDelete.id);
                   setPendingDelete(null);
                 }}
               >
-                {isExternalOrder(pendingDelete) ? "Archive" : "Delete"}
+                Delete
               </Button>
             </div>
           </div>

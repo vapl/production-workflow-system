@@ -24,6 +24,10 @@ create table if not exists public.orders (
   due_date date not null,
   priority text not null check (priority in ('low', 'normal', 'high', 'urgent')),
   status text not null check (status in ('pending', 'in_progress', 'completed', 'cancelled')),
+  source text not null default 'manual',
+  external_id text,
+  source_payload jsonb,
+  synced_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -31,6 +35,7 @@ create table if not exists public.orders (
 create index if not exists orders_tenant_id_idx on public.orders(tenant_id);
 create index if not exists orders_status_idx on public.orders(status);
 create index if not exists orders_due_date_idx on public.orders(due_date);
+create index if not exists orders_external_id_idx on public.orders(external_id);
 
 create table if not exists public.order_attachments (
   id uuid primary key default gen_random_uuid(),
@@ -245,6 +250,7 @@ create table if not exists public.hierarchy_levels (
   sort_order integer not null default 1,
   is_required boolean not null default false,
   is_active boolean not null default true,
+  show_in_table boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
