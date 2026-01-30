@@ -26,7 +26,42 @@ export default function OrdersPage() {
   const { nodes, levels } = useHierarchy();
   const user = useCurrentUser();
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
+  const roleStatusOptions = useMemo(() => {
+    if (user.role === "Engineering") {
+      return [
+        { value: "ready_for_engineering", label: "Ready for Eng." },
+        { value: "in_engineering", label: "In Eng." },
+        { value: "engineering_blocked", label: "Eng. Blocked" },
+        { value: "ready_for_production", label: "Ready for Prod." },
+      ];
+    }
+    if (user.role === "Production") {
+      return [{ value: "ready_for_production", label: "Ready for Prod." }];
+    }
+    if (user.role === "Sales") {
+      return [
+        { value: "all", label: "All" },
+        { value: "draft", label: "Draft" },
+        { value: "ready_for_engineering", label: "Ready for Eng." },
+        { value: "in_engineering", label: "In Eng." },
+        { value: "engineering_blocked", label: "Eng. Blocked" },
+        { value: "ready_for_production", label: "Ready for Prod." },
+      ];
+    }
+    return [
+      { value: "all", label: "All" },
+      { value: "draft", label: "Draft" },
+      { value: "ready_for_engineering", label: "Ready for Eng." },
+      { value: "in_engineering", label: "In Eng." },
+      { value: "engineering_blocked", label: "Eng. Blocked" },
+      { value: "ready_for_production", label: "Ready for Prod." },
+    ];
+  }, [user.role]);
+  const defaultStatusFilter =
+    roleStatusOptions[0]?.value ?? ("all" as const);
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">(
+    defaultStatusFilter,
+  );
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Order | null>(null);
@@ -62,13 +97,27 @@ export default function OrdersPage() {
     return () => document.removeEventListener("click", handleClick);
   }, [isImportMenuOpen]);
 
+  useEffect(() => {
+    setStatusFilter(defaultStatusFilter);
+  }, [defaultStatusFilter]);
+
+  const roleFilteredOrders = useMemo(() => {
+    const allowedStatuses = roleStatusOptions
+      .map((option) => option.value)
+      .filter((value): value is OrderStatus => value !== "all");
+    if (roleStatusOptions.some((option) => option.value === "all")) {
+      return orders;
+    }
+    return orders.filter((order) => allowedStatuses.includes(order.status));
+  }, [orders, roleStatusOptions]);
+
   const filteredOrders = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const nodeLabelMap = new Map(
       nodes.map((node) => [node.id, node.label.toLowerCase()]),
     );
 
-    return orders.filter((order) => {
+    return roleFilteredOrders.filter((order) => {
       const hierarchyLabels = Object.values(order.hierarchy ?? {})
         .map((value) => nodeLabelMap.get(value) ?? value ?? "")
         .join(" ");
@@ -83,19 +132,28 @@ export default function OrdersPage() {
 
       return matchesQuery && matchesStatus;
     });
-  }, [nodes, orders, searchQuery, statusFilter]);
+  }, [nodes, roleFilteredOrders, searchQuery, statusFilter]);
 
-  const statusCounts = useMemo(
-    () => ({
-      all: orders.length,
-      pending: orders.filter((order) => order.status === "pending").length,
-      in_progress: orders.filter((order) => order.status === "in_progress")
+  const statusCounts = useMemo(() => {
+    const base = {
+      all: roleFilteredOrders.length,
+      draft: roleFilteredOrders.filter((order) => order.status === "draft")
         .length,
-      completed: orders.filter((order) => order.status === "completed").length,
-      cancelled: orders.filter((order) => order.status === "cancelled").length,
-    }),
-    [orders],
-  );
+      ready_for_engineering: roleFilteredOrders.filter(
+        (order) => order.status === "ready_for_engineering",
+      ).length,
+      in_engineering: roleFilteredOrders.filter(
+        (order) => order.status === "in_engineering",
+      ).length,
+      engineering_blocked: roleFilteredOrders.filter(
+        (order) => order.status === "engineering_blocked",
+      ).length,
+      ready_for_production: roleFilteredOrders.filter(
+        (order) => order.status === "ready_for_production",
+      ).length,
+    };
+    return base;
+  }, [roleFilteredOrders]);
 
   const contractLevel = useMemo(
     () => levels.find((level) => level.key === "contract"),
@@ -149,7 +207,7 @@ export default function OrdersPage() {
       hierarchy: values.hierarchy,
       dueDate: values.dueDate,
       priority: values.priority,
-      status: "pending" as const,
+      status: "draft" as const,
       notes: values.notes,
       authorName: user.name,
       authorRole: user.role,
@@ -268,6 +326,7 @@ export default function OrdersPage() {
               setGroupByContract((prev) => !prev)
             }
             statusCounts={statusCounts}
+            statusOptions={roleStatusOptions}
           />
           <OrdersTable
             orders={filteredOrders}
@@ -305,6 +364,7 @@ export default function OrdersPage() {
               }
             : undefined
         }
+        existingOrderNumbers={orders.map((order) => order.orderNumber)}
       />
       <ImportWizard
         open={isImportOpen}

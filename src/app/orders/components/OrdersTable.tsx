@@ -35,17 +35,23 @@ export function OrdersTable({
     {},
   );
 
-  const totalColumns = 7 + activeLevels.length;
+  const totalColumns = 8 + activeLevels.length;
 
   return (
-    <div className="rounded-md border overflow-x-hidden">
-      <Table className="w-full">
+    <div className="rounded-md border overflow-x-auto">
+      <Table className="w-full min-w-[900px]">
         <TableHeader>
           <TableRow>
-            <TableHead className="whitespace-normal">Order #</TableHead>
+            <TableHead className="whitespace-nowrap">Order #</TableHead>
             <TableHead className="whitespace-normal">Customer</TableHead>
+            <TableHead className="whitespace-normal">Engineer</TableHead>
             {activeLevels.map((level) => (
-              <TableHead key={level.id} className="whitespace-normal">
+              <TableHead
+                key={level.id}
+                className={`whitespace-normal ${
+                  level.isRequired ? "table-cell" : "hidden md:table-cell"
+                }`}
+              >
                 {level.name}
               </TableHead>
             ))}

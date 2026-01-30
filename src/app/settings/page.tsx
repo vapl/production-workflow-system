@@ -11,6 +11,9 @@ import {
 import { Button } from "@/components/ui/Button";
 import { useHierarchy } from "./HierarchyContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
+import { useCurrentUser, type UserRole } from "@/contexts/UserContext";
+import { supabase } from "@/lib/supabaseClient";
+import { useWorkflowRules, type WorkflowTargetStatus } from "@/contexts/WorkflowContext";
 
 function slugify(value: string) {
   return value
@@ -29,6 +32,7 @@ const integrations = [
 ];
 
 export default function SettingsPage() {
+  const currentUser = useCurrentUser();
   const {
     levels,
     nodes,
@@ -46,7 +50,6 @@ export default function SettingsPage() {
   );
 
   const [levelName, setLevelName] = useState("");
-  const [levelKey, setLevelKey] = useState("");
   const [levelOrder, setLevelOrder] = useState<number>(sortedLevels.length + 1);
   const [levelRequired, setLevelRequired] = useState(false);
   const [levelActive, setLevelActive] = useState(true);
@@ -92,6 +95,27 @@ export default function SettingsPage() {
   const [editingStopReasonId, setEditingStopReasonId] = useState<string | null>(
     null,
   );
+  const [users, setUsers] = useState<
+    { id: string; name: string; role: UserRole }[]
+  >([]);
+  const [isUsersLoading, setIsUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [devRoleOverride, setDevRoleOverride] = useState(false);
+  const {
+    rules,
+    setRules,
+    addChecklistItem,
+    updateChecklistItem,
+    removeChecklistItem,
+    addReturnReason,
+    removeReturnReason,
+  } = useWorkflowRules();
+  const [newChecklistLabel, setNewChecklistLabel] = useState("");
+  const [newChecklistRequired, setNewChecklistRequired] = useState<
+    WorkflowTargetStatus[]
+  >(["ready_for_engineering"]);
+  const [newReturnReason, setNewReturnReason] = useState("");
 
   useEffect(() => {
     if (!selectedLevelId && sortedLevels[0]?.id) {
@@ -109,6 +133,86 @@ export default function SettingsPage() {
   useEffect(() => {
     setLevelOrder(sortedLevels.length + 1);
   }, [sortedLevels.length]);
+
+  useEffect(() => {
+    if (!supabase) {
+      setUsers([
+        {
+          id: currentUser.id,
+          name: currentUser.name,
+          role: currentUser.role,
+        },
+      ]);
+      return;
+    }
+    if (currentUser.loading || !currentUser.isAuthenticated) {
+      setUsers([]);
+      return;
+    }
+    let isMounted = true;
+    const fetchUsers = async () => {
+      setIsUsersLoading(true);
+      setUsersError(null);
+      const query = supabase
+        .from("profiles")
+        .select("id, full_name, role, tenant_id")
+        .order("full_name", { ascending: true });
+      if (currentUser.tenantId) {
+        query.eq("tenant_id", currentUser.tenantId);
+      }
+      const { data, error } = await query;
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setUsersError(error.message);
+        setIsUsersLoading(false);
+        return;
+      }
+      setUsers(
+        (data ?? []).map((row) => ({
+          id: row.id,
+          name: row.full_name ?? "User",
+          role: (row.role as UserRole) ?? "Sales",
+        })),
+      );
+      setIsUsersLoading(false);
+    };
+    fetchUsers();
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    currentUser.id,
+    currentUser.isAuthenticated,
+    currentUser.loading,
+    currentUser.name,
+    currentUser.role,
+    currentUser.tenantId,
+  ]);
+
+  async function handleUpdateUserRole(userId: string, role: UserRole) {
+    if (!supabase) {
+      setUsers((prev) =>
+        prev.map((user) => (user.id === userId ? { ...user, role } : user)),
+      );
+      return;
+    }
+    setUpdatingUserId(userId);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ role })
+      .eq("id", userId);
+    if (error) {
+      setUsersError(error.message);
+      setUpdatingUserId(null);
+      return;
+    }
+    setUsers((prev) =>
+      prev.map((user) => (user.id === userId ? { ...user, role } : user)),
+    );
+    setUpdatingUserId(null);
+  }
 
   const selectedLevel = levels.find((level) => level.id === selectedLevelId);
   const selectedLevelOrder = selectedLevel?.order ?? 0;
@@ -129,7 +233,6 @@ export default function SettingsPage() {
 
   function resetLevelForm() {
     setLevelName("");
-    setLevelKey("");
     setLevelRequired(false);
     setLevelActive(true);
     setLevelShowInTable(true);
@@ -141,7 +244,10 @@ export default function SettingsPage() {
     if (!trimmedName) {
       return;
     }
-    const normalizedKey = levelKey.trim() || slugify(trimmedName);
+    const existingKey = editingLevelId
+      ? levels.find((level) => level.id === editingLevelId)?.key
+      : undefined;
+    const normalizedKey = existingKey || slugify(trimmedName);
     if (editingLevelId) {
       updateLevel(editingLevelId, {
         name: trimmedName,
@@ -173,7 +279,6 @@ export default function SettingsPage() {
     }
     setEditingLevelId(levelId);
     setLevelName(level.name);
-    setLevelKey(level.key);
     setLevelOrder(level.order);
     setLevelRequired(level.isRequired);
     setLevelActive(level.isActive);
@@ -344,27 +449,15 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(160px,1fr)_minmax(120px,0.5fr)_minmax(120px,0.6fr)_auto] lg:items-end">
+          <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(120px,0.5fr)_minmax(240px,1fr)_auto] lg:items-end">
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Level name</label>
               <input
                 value={levelName}
                 onChange={(event) => {
                   setLevelName(event.target.value);
-                  if (!editingLevelId) {
-                    setLevelKey(slugify(event.target.value));
-                  }
                 }}
                 placeholder="Contract"
-                className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Key</label>
-              <input
-                value={levelKey}
-                onChange={(event) => setLevelKey(event.target.value)}
-                placeholder="contract"
                 className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
               />
             </div>
@@ -423,7 +516,6 @@ export default function SettingsPage() {
               <thead className="bg-muted/40 text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 text-left font-medium">Level</th>
-                  <th className="px-4 py-2 text-left font-medium">Key</th>
                   <th className="px-4 py-2 text-left font-medium">Order</th>
                   <th className="px-4 py-2 text-left font-medium">Required</th>
                   <th className="px-4 py-2 text-left font-medium">Active</th>
@@ -435,9 +527,6 @@ export default function SettingsPage() {
                 {sortedLevels.map((level) => (
                   <tr key={level.id} className="border-t border-border">
                     <td className="px-4 py-2 font-medium">{level.name}</td>
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {level.key}
-                    </td>
                     <td className="px-4 py-2">{level.order}</td>
                     <td className="px-4 py-2">
                       <label className="flex items-center gap-2 text-sm">
@@ -504,7 +593,7 @@ export default function SettingsPage() {
                 {sortedLevels.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={6}
                       className="px-4 py-6 text-center text-muted-foreground"
                     >
                       Add your first hierarchy level.
@@ -855,6 +944,349 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>User Access</CardTitle>
+          <CardDescription>
+            Manage who can access this workspace and their role.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!["Admin"].includes(currentUser.role) && (
+            <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+              Only admins can update user roles.
+            </div>
+          )}
+          {process.env.NODE_ENV !== "production" &&
+            !["Admin"].includes(currentUser.role) && (
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={devRoleOverride}
+                  onChange={(event) => setDevRoleOverride(event.target.checked)}
+                />
+                Dev override: allow changing your own role
+              </label>
+            )}
+          {usersError && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+              {usersError}
+            </div>
+          )}
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium">Name</th>
+                  <th className="px-4 py-2 text-left font-medium">Role</th>
+                  <th className="px-4 py-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isUsersLoading ? (
+                  <tr>
+                    <td
+                      colSpan={3}
+                      className="px-4 py-6 text-center text-muted-foreground"
+                    >
+                      Loading users...
+                    </td>
+                  </tr>
+                ) : users.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={3}
+                      className="px-4 py-6 text-center text-muted-foreground"
+                    >
+                      No users found.
+                    </td>
+                  </tr>
+                ) : (
+                  users.map((user) => (
+                    <tr key={user.id} className="border-t border-border">
+                      <td className="px-4 py-2 font-medium">{user.name}</td>
+                      <td className="px-4 py-2">
+                        <select
+                          value={user.role}
+                          onChange={(event) =>
+                            handleUpdateUserRole(
+                              user.id,
+                              event.target.value as UserRole,
+                            )
+                          }
+                          className="h-9 rounded-md border border-border bg-input-background px-3 text-sm"
+                          disabled={
+                            !["Admin"].includes(currentUser.role) &&
+                            !(devRoleOverride && user.id === currentUser.id)
+                          }
+                        >
+                          <option value="Sales">Sales</option>
+                          <option value="Engineering">Engineering</option>
+                          <option value="Production">Production</option>
+                          <option value="Admin">Admin</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-2 text-right text-xs text-muted-foreground">
+                        {updatingUserId === user.id ? "Saving..." : ""}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Workflow Rules</CardTitle>
+          <CardDescription>
+            Define what must be complete before moving orders forward.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="space-y-2 text-sm font-medium">
+              Min attachments for engineering
+              <input
+                type="number"
+                min={0}
+                value={rules.minAttachmentsForEngineering}
+                onChange={(event) =>
+                  setRules({
+                    minAttachmentsForEngineering:
+                      Number(event.target.value) || 0,
+                  })
+                }
+                className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+              />
+            </label>
+            <label className="space-y-2 text-sm font-medium">
+              Min attachments for production
+              <input
+                type="number"
+                min={0}
+                value={rules.minAttachmentsForProduction}
+                onChange={(event) =>
+                  setRules({
+                    minAttachmentsForProduction:
+                      Number(event.target.value) || 0,
+                  })
+                }
+                className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={rules.requireCommentForEngineering}
+                onChange={(event) =>
+                  setRules({ requireCommentForEngineering: event.target.checked })
+                }
+              />
+              Require comment before engineering
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={rules.requireCommentForProduction}
+                onChange={(event) =>
+                  setRules({ requireCommentForProduction: event.target.checked })
+                }
+              />
+              Require comment before production
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <div className="text-sm font-medium">Checklist items</div>
+            <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
+              <div className="space-y-2">
+                <input
+                  value={newChecklistLabel}
+                  onChange={(event) => setNewChecklistLabel(event.target.value)}
+                  placeholder="Checklist item"
+                  className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                />
+                <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={newChecklistRequired.includes(
+                        "ready_for_engineering",
+                      )}
+                      onChange={(event) => {
+                        setNewChecklistRequired((prev) => {
+                          const next = new Set(prev);
+                          if (event.target.checked) {
+                            next.add("ready_for_engineering");
+                          } else {
+                            next.delete("ready_for_engineering");
+                          }
+                          return Array.from(next);
+                        });
+                      }}
+                    />
+                    Required for engineering
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={newChecklistRequired.includes(
+                        "ready_for_production",
+                      )}
+                      onChange={(event) => {
+                        setNewChecklistRequired((prev) => {
+                          const next = new Set(prev);
+                          if (event.target.checked) {
+                            next.add("ready_for_production");
+                          } else {
+                            next.delete("ready_for_production");
+                          }
+                          return Array.from(next);
+                        });
+                      }}
+                    />
+                    Required for production
+                  </label>
+                </div>
+              </div>
+              <Button
+                onClick={() => {
+                  addChecklistItem(newChecklistLabel, newChecklistRequired);
+                  setNewChecklistLabel("");
+                }}
+              >
+                Add item
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {rules.checklistItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3 text-sm"
+                >
+                  <div className="font-medium">{item.label}</div>
+                  <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={item.requiredFor.includes(
+                          "ready_for_engineering",
+                        )}
+                        onChange={(event) => {
+                          const next = new Set(item.requiredFor);
+                          if (event.target.checked) {
+                            next.add("ready_for_engineering");
+                          } else {
+                            next.delete("ready_for_engineering");
+                          }
+                          updateChecklistItem(item.id, {
+                            requiredFor: Array.from(next),
+                          });
+                        }}
+                      />
+                      Eng.
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={item.requiredFor.includes(
+                          "ready_for_production",
+                        )}
+                        onChange={(event) => {
+                          const next = new Set(item.requiredFor);
+                          if (event.target.checked) {
+                            next.add("ready_for_production");
+                          } else {
+                            next.delete("ready_for_production");
+                          }
+                          updateChecklistItem(item.id, {
+                            requiredFor: Array.from(next),
+                          });
+                        }}
+                      />
+                      Prod.
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={item.isActive}
+                        onChange={(event) =>
+                          updateChecklistItem(item.id, {
+                            isActive: event.target.checked,
+                          })
+                        }
+                      />
+                      Active
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeChecklistItem(item.id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {rules.checklistItems.length === 0 && (
+                <div className="text-sm text-muted-foreground">
+                  No checklist items yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="text-sm font-medium">Return reasons</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={newReturnReason}
+                onChange={(event) => setNewReturnReason(event.target.value)}
+                placeholder="Add reason"
+                className="h-10 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+              />
+              <Button
+                onClick={() => {
+                  addReturnReason(newReturnReason);
+                  setNewReturnReason("");
+                }}
+              >
+                Add reason
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {rules.returnReasons.map((reason) => (
+                <div
+                  key={reason}
+                  className="flex items-center justify-between rounded-lg border border-border px-4 py-2 text-sm"
+                >
+                  <span>{reason}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeReturnReason(reason)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+              {rules.returnReasons.length === 0 && (
+                <div className="text-sm text-muted-foreground">
+                  No return reasons yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <CardHeader>

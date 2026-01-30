@@ -4,13 +4,8 @@ import { SearchIcon } from "lucide-react";
 
 import type { OrderStatus } from "@/types/orders";
 
-const statusOptions: { value: OrderStatus | "all"; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "pending", label: "Pending" },
-  { value: "in_progress", label: "In Progress" },
-  { value: "completed", label: "Completed" },
-];
-type StatusFilter = (typeof statusOptions)[number]["value"];
+export type StatusOption = { value: OrderStatus | "all"; label: string };
+type StatusFilter = StatusOption["value"];
 
 interface OrdersToolbarProps {
   searchQuery: string;
@@ -19,7 +14,8 @@ interface OrdersToolbarProps {
   onStatusChange: (value: StatusFilter) => void;
   groupByContract: boolean;
   onToggleGroupByContract: () => void;
-  statusCounts: Record<StatusFilter, number>;
+  statusCounts: Partial<Record<StatusFilter, number>>;
+  statusOptions: StatusOption[];
 }
 
 export function OrdersToolbar({
@@ -30,6 +26,7 @@ export function OrdersToolbar({
   groupByContract,
   onToggleGroupByContract,
   statusCounts,
+  statusOptions,
 }: OrdersToolbarProps) {
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

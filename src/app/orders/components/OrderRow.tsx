@@ -50,15 +50,25 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
           ? "priority-urgent"
           : "priority-normal";
   const statusVariant =
-    order.status === "pending"
-      ? "status-pending"
-      : order.status === "in_progress"
-        ? "status-in_progress"
-        : order.status === "completed"
-          ? "status-completed"
-          : order.status === "cancelled"
-            ? "status-cancelled"
-            : "status-pending";
+    order.status === "draft"
+      ? "status-draft"
+      : order.status === "ready_for_engineering"
+        ? "status-ready_for_engineering"
+        : order.status === "in_engineering"
+          ? "status-in_engineering"
+          : order.status === "engineering_blocked"
+            ? "status-engineering_blocked"
+      : "status-ready_for_production";
+
+  const engineerInitials = order.assignedEngineerName
+    ? order.assignedEngineerName
+        .split(" ")
+        .filter(Boolean)
+        .map((part) => part[0])
+        .slice(0, 2)
+        .join("")
+        .toUpperCase()
+    : "";
 
   useEffect(() => {
     function handlePosition() {
@@ -66,13 +76,16 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
         return;
       }
       const rect = triggerRef.current.getBoundingClientRect();
-      const menuWidth = Math.max(rect.width, 160);
-      const viewportPadding = 8;
-      const maxLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding);
-      const desiredLeft = rect.right - rect.width;
+      const menuWidth = Math.max(rect.width, 120);
+      const viewportPadding = 0;
+      const maxLeft = Math.max(
+        viewportPadding,
+        window.innerWidth - menuWidth - viewportPadding,
+      );
+      const desiredLeft = rect.right - menuWidth;
       setMenuPosition({
         top: rect.bottom + 8,
-        left: Math.min(desiredLeft, maxLeft),
+        left: Math.min(Math.max(desiredLeft, viewportPadding), maxLeft),
         width: rect.width,
       });
     }
@@ -91,17 +104,34 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
 
   return (
     <TableRow>
-      <TableCell className="font-medium whitespace-normal break-words">
+      <TableCell className="font-medium whitespace-nowrap">
         {order.orderNumber}
       </TableCell>
-      <TableCell className="whitespace-normal break-words">
+      <TableCell className="whitespace-normal wrap-break-word">
         {order.customerName}
+      </TableCell>
+      <TableCell className="whitespace-normal wrap-break-word">
+        {order.assignedEngineerName ? (
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+              {engineerInitials}
+            </div>
+            <span>{order.assignedEngineerName}</span>
+          </div>
+        ) : (
+          "--"
+        )}
       </TableCell>
       {levels.map((level) => {
         const value = order.hierarchy?.[level.id];
         return (
-          <TableCell key={level.id} className="whitespace-normal break-words">
-            {value ? nodeLabelMap.get(value) ?? value : "--"}
+          <TableCell
+            key={level.id}
+            className={`whitespace-normal wrap-break-word ${
+              level.isRequired ? "table-cell" : "hidden md:table-cell"
+            }`}
+          >
+            {value ? (nodeLabelMap.get(value) ?? value) : "--"}
           </TableCell>
         );
       })}
@@ -131,16 +161,16 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
             <span>{order.comments?.length ?? 0}</span>
           </div>
           <div className="relative inline-flex">
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            ref={triggerRef}
-            onClick={() => setMenuOpen((prev) => !prev)}
-          >
-            <MoreVerticalIcon className="h-4 w-4" />
-          </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              ref={triggerRef}
+              onClick={() => setMenuOpen((prev) => !prev)}
+            >
+              <MoreVerticalIcon className="h-4 w-4" />
+            </Button>
           </div>
         </div>
         {menuOpen && menuPosition
@@ -154,7 +184,7 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
                   style={{
                     top: menuPosition.top,
                     left: menuPosition.left,
-                    minWidth: Math.max(menuPosition.width, 160),
+                    minWidth: Math.max(menuPosition.width, 120),
                   }}
                   onClick={(event) => event.stopPropagation()}
                 >
@@ -193,4 +223,3 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
     </TableRow>
   );
 }
-

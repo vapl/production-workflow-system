@@ -25,6 +25,7 @@ interface OrderModalProps {
   submitLabel?: string;
   initialValues?: Partial<OrderFormValues>;
   editMode?: "full" | "category-product-only";
+  existingOrderNumbers?: string[];
 }
 
 const defaultValues: OrderFormValues = {
@@ -46,6 +47,7 @@ export function OrderModal({
   submitLabel = "Create Order",
   initialValues,
   editMode = "full",
+  existingOrderNumbers = [],
 }: OrderModalProps) {
   const [formState, setFormState] = useState({
     orderNumber: defaultValues.orderNumber,
@@ -96,6 +98,18 @@ export function OrderModal({
     return map;
   }, [activeLevels, nodes]);
   const isEditingOrderNumber = Boolean(initialValues?.orderNumber);
+  const normalizedExistingNumbers = useMemo(
+    () =>
+      existingOrderNumbers
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    [existingOrderNumbers],
+  );
+  const normalizedCurrentNumber = formState.orderNumber.trim().toLowerCase();
+  const isDuplicateOrderNumber =
+    normalizedCurrentNumber.length > 0 &&
+    !isEditingOrderNumber &&
+    normalizedExistingNumbers.includes(normalizedCurrentNumber);
 
   function resolveNodeId(
     levelId: string,
@@ -176,7 +190,13 @@ export function OrderModal({
       case "customerName":
         return value.trim() ? "" : "Customer name is required.";
       case "orderNumber":
-        return value.trim() ? "" : "Order number is required.";
+        if (!value.trim()) {
+          return "Order number is required.";
+        }
+        if (isDuplicateOrderNumber) {
+          return "Order number already exists.";
+        }
+        return "";
       case "customerEmail":
         return value.trim() &&
           !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
@@ -227,6 +247,35 @@ export function OrderModal({
   if (!open) {
     return null;
   }
+
+  const requiredFieldsValid = (() => {
+    if (isCategoryProductOnly) {
+      return true;
+    }
+    const baseValid =
+      formState.orderNumber.trim() &&
+      formState.customerName.trim() &&
+      formState.quantity.trim() &&
+      formState.dueDate.trim() &&
+      !isDuplicateOrderNumber &&
+      !validateField("quantity", formState.quantity) &&
+      !validateField("dueDate", formState.dueDate);
+    if (!baseValid) {
+      return false;
+    }
+    const requiredHierarchyOk = activeLevels.every((level) => {
+      if (!level.isRequired || !editableLevelIds.has(level.id)) {
+        return true;
+      }
+      return Boolean(formState.hierarchy[level.id] || hierarchyInput[level.id]?.trim());
+    });
+    return requiredHierarchyOk;
+  })();
+  const hasErrors = Object.values(errors).some(Boolean);
+  const isSubmitDisabled =
+    (!requiredFieldsValid && !isCategoryProductOnly) ||
+    hasErrors ||
+    isDuplicateOrderNumber;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -378,6 +427,11 @@ export function OrderModal({
               {touched.orderNumber && errors.orderNumber && (
                 <span className="text-xs text-destructive">
                   {errors.orderNumber}
+                </span>
+              )}
+              {!touched.orderNumber && isDuplicateOrderNumber && (
+                <span className="text-xs text-destructive">
+                  Order number already exists.
                 </span>
               )}
             </label>
@@ -673,7 +727,9 @@ export function OrderModal({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit">{submitLabel}</Button>
+            <Button type="submit" disabled={isSubmitDisabled}>
+              {submitLabel}
+            </Button>
           </div>
         </form>
       </div>

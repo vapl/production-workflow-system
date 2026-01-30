@@ -45,10 +45,10 @@ export function getRecentActivities(
   }
 
   for (const order of orders) {
-    if (order.status === "completed") {
+    if (order.status === "ready_for_production") {
       activities.push({
-        id: `order-completed-${order.id}`,
-        title: `Order ${order.orderNumber} completed`,
+        id: `order-ready-${order.id}`,
+        title: `Order ${order.orderNumber} ready for production`,
         status: "completed",
         timestamp: new Date().toISOString(),
       });

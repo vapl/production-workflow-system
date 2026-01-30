@@ -6,6 +6,7 @@ import type {
   OrderAttachment,
   OrderComment,
   OrderStatus,
+  OrderStatusEntry,
 } from "@/types/orders";
 import { mockOrders } from "@/lib/data/mockData";
 import { supabase } from "@/lib/supabaseClient";
@@ -46,6 +47,13 @@ interface OrdersContextValue {
       dueDate: string;
       priority: "low" | "normal" | "high" | "urgent";
       status: OrderStatus;
+      assignedEngineerId?: string;
+      assignedEngineerName?: string;
+      assignedEngineerAt?: string;
+      statusChangedBy?: string;
+      statusChangedByRole?: string;
+      statusChangedAt?: string;
+      checklist?: Record<string, boolean>;
     }>,
   ) => Promise<Order | null>;
   removeOrder: (orderId: string) => Promise<boolean>;
@@ -89,6 +97,27 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const normalizeOrderStatus = (value: string): OrderStatus => {
+    switch (value) {
+      case "draft":
+      case "ready_for_engineering":
+      case "in_engineering":
+      case "engineering_blocked":
+      case "ready_for_production":
+        return value;
+      case "pending":
+        return "draft";
+      case "in_progress":
+        return "in_engineering";
+      case "completed":
+        return "ready_for_production";
+      case "cancelled":
+        return "engineering_blocked";
+      default:
+        return "draft";
+    }
+  };
+
   const mapAttachment = (row: {
     id: string;
     name: string;
@@ -123,6 +152,20 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     createdAt: row.created_at,
   });
 
+  const mapStatusEntry = (row: {
+    id: string;
+    status: string;
+    changed_by_name?: string | null;
+    changed_by_role?: string | null;
+    changed_at: string;
+  }): OrderStatusEntry => ({
+    id: row.id,
+    status: normalizeOrderStatus(row.status),
+    changedBy: row.changed_by_name ?? "Unknown",
+    changedByRole: row.changed_by_role ?? undefined,
+    changedAt: row.changed_at,
+  });
+
   const mapOrder = (row: {
     id: string;
     order_number: string;
@@ -132,7 +175,14 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     hierarchy?: Record<string, string> | null;
     due_date: string;
     priority: "low" | "normal" | "high" | "urgent";
-    status: OrderStatus;
+    status: string;
+    assigned_engineer_id?: string | null;
+    assigned_engineer_name?: string | null;
+    assigned_engineer_at?: string | null;
+    status_changed_by?: string | null;
+    status_changed_by_role?: string | null;
+    status_changed_at?: string | null;
+    checklist?: Record<string, boolean> | null;
     source?: "manual" | "accounting" | null;
     external_id?: string | null;
     source_payload?: Record<string, unknown> | null;
@@ -154,6 +204,13 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       author_role?: string | null;
       created_at: string;
     }>;
+    order_status_history?: Array<{
+      id: string;
+      status: string;
+      changed_by_name?: string | null;
+      changed_by_role?: string | null;
+      changed_at: string;
+    }>;
   }): Order => ({
     id: row.id,
     orderNumber: row.order_number,
@@ -163,13 +220,21 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     hierarchy: row.hierarchy ?? undefined,
     dueDate: row.due_date,
     priority: row.priority,
-    status: row.status,
+    status: normalizeOrderStatus(row.status),
+    assignedEngineerId: row.assigned_engineer_id ?? undefined,
+    assignedEngineerName: row.assigned_engineer_name ?? undefined,
+    assignedEngineerAt: row.assigned_engineer_at ?? undefined,
+    statusChangedBy: row.status_changed_by ?? undefined,
+    statusChangedByRole: row.status_changed_by_role ?? undefined,
+    statusChangedAt: row.status_changed_at ?? undefined,
+    checklist: row.checklist ?? undefined,
     source: row.source ?? undefined,
     externalId: row.external_id ?? undefined,
     sourcePayload: row.source_payload ?? undefined,
     syncedAt: row.synced_at ?? undefined,
     attachments: row.order_attachments?.map(mapAttachment) ?? undefined,
     comments: row.order_comments?.map(mapComment) ?? undefined,
+    statusHistory: row.order_status_history?.map(mapStatusEntry) ?? undefined,
   });
 
   const refreshOrders = async () => {
@@ -192,6 +257,20 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         due_date,
         priority,
         status,
+        assigned_engineer_id,
+        assigned_engineer_name,
+        assigned_engineer_at,
+        status_changed_by,
+        status_changed_by_role,
+        status_changed_at,
+        checklist,
+        order_status_history (
+          id,
+          status,
+          changed_by_name,
+          changed_by_role,
+          changed_at
+        ),
         source,
         external_id,
         source_payload,
@@ -278,7 +357,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           hierarchy: Object.keys(hierarchy).length > 0 ? hierarchy : undefined,
           dueDate: order.dueDate,
           priority: order.priority ?? "normal",
-          status: "pending",
+          status: "draft",
           source: "accounting",
           externalId: order.externalId,
           sourcePayload: order.sourcePayload,
@@ -347,7 +426,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         hierarchy: Object.keys(hierarchy).length > 0 ? hierarchy : null,
         due_date: order.dueDate,
         priority: order.priority ?? "normal",
-        status: "pending",
+        status: "draft",
         source: "accounting",
         external_id: order.externalId,
         source_payload: order.sourcePayload ?? null,
@@ -581,6 +660,20 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             due_date,
             priority,
             status,
+            assigned_engineer_id,
+            assigned_engineer_name,
+            assigned_engineer_at,
+            status_changed_by,
+            status_changed_by_role,
+            status_changed_at,
+            checklist,
+            order_status_history (
+              id,
+              status,
+              changed_by_name,
+              changed_by_role,
+              changed_at
+            ),
             source,
             external_id,
             source_payload,
@@ -653,9 +746,32 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       },
       updateOrder: async (orderId, patch) => {
         if (!supabase) {
+          const nextHistory: OrderStatusEntry[] =
+            patch.status !== undefined
+              ? [
+                  {
+                    id: `hst-${Date.now()}`,
+                    status: patch.status,
+                    changedBy: user.name ?? "System",
+                    changedByRole: user.role ?? undefined,
+                    changedAt: new Date().toISOString(),
+                  },
+                ]
+              : [];
           setOrders((prev) =>
             prev.map((order) =>
-              order.id === orderId ? { ...order, ...patch } : order,
+              order.id === orderId
+                ? {
+                    ...order,
+                    ...patch,
+                    statusHistory: patch.status
+                      ? [
+                          ...nextHistory,
+                          ...(order.statusHistory ?? []),
+                        ]
+                      : order.statusHistory,
+                  }
+                : order,
             ),
           );
           return orders.find((order) => order.id === orderId) ?? null;
@@ -683,6 +799,27 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (patch.status !== undefined) {
           updatePayload.status = patch.status;
         }
+        if (patch.statusChangedBy !== undefined) {
+          updatePayload.status_changed_by = patch.statusChangedBy;
+        }
+        if (patch.statusChangedByRole !== undefined) {
+          updatePayload.status_changed_by_role = patch.statusChangedByRole;
+        }
+        if (patch.statusChangedAt !== undefined) {
+          updatePayload.status_changed_at = patch.statusChangedAt;
+        }
+        if (patch.checklist !== undefined) {
+          updatePayload.checklist = patch.checklist;
+        }
+        if (patch.assignedEngineerId !== undefined) {
+          updatePayload.assigned_engineer_id = patch.assignedEngineerId;
+        }
+        if (patch.assignedEngineerName !== undefined) {
+          updatePayload.assigned_engineer_name = patch.assignedEngineerName;
+        }
+        if (patch.assignedEngineerAt !== undefined) {
+          updatePayload.assigned_engineer_at = patch.assignedEngineerAt;
+        }
         if (existingOrder?.source === "accounting") {
           updatePayload.source = "manual";
         }
@@ -701,6 +838,20 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             due_date,
             priority,
             status,
+            assigned_engineer_id,
+            assigned_engineer_name,
+            assigned_engineer_at,
+            status_changed_by,
+            status_changed_by_role,
+            status_changed_at,
+            checklist,
+            order_status_history (
+              id,
+              status,
+              changed_by_name,
+              changed_by_role,
+              changed_at
+            ),
             source,
             external_id,
             source_payload,
@@ -733,6 +884,16 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             variant: "error",
           });
           return null;
+        }
+        if (patch.status !== undefined && user.tenantId) {
+          await supabase.from("order_status_history").insert({
+            order_id: orderId,
+            tenant_id: user.tenantId,
+            status: patch.status,
+            changed_by_name: user.name ?? "System",
+            changed_by_role: user.role ?? null,
+            changed_at: patch.statusChangedAt ?? new Date().toISOString(),
+          });
         }
         const mapped = mapOrder(data);
         setOrders((prev) =>

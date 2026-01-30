@@ -1,4 +1,9 @@
-export type OrderStatus = "pending" | "in_progress" | "completed" | "cancelled";
+export type OrderStatus =
+  | "draft"
+  | "ready_for_engineering"
+  | "in_engineering"
+  | "engineering_blocked"
+  | "ready_for_production";
 
 export interface OrderAttachment {
   id: string;
@@ -19,6 +24,14 @@ export interface OrderComment {
   createdAt: string;
 }
 
+export interface OrderStatusEntry {
+  id: string;
+  status: OrderStatus;
+  changedBy: string;
+  changedByRole?: string;
+  changedAt: string;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -29,6 +42,14 @@ export interface Order {
   dueDate: string; // ISO date string
   priority: "low" | "normal" | "high" | "urgent";
   status: OrderStatus;
+  assignedEngineerId?: string;
+  assignedEngineerName?: string;
+  assignedEngineerAt?: string;
+  statusChangedBy?: string;
+  statusChangedByRole?: string;
+  statusChangedAt?: string;
+  checklist?: Record<string, boolean>;
+  statusHistory?: OrderStatusEntry[];
   source?: "manual" | "accounting" | "excel";
   externalId?: string;
   sourcePayload?: Record<string, unknown>;

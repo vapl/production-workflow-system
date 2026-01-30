@@ -2,10 +2,10 @@ import type { Order } from "@/types/orders";
 import type { Batch } from "@/types/batch";
 
 /**
- * Active orders = orders that are not completed
+ * Active orders = orders not yet ready for production
  */
 export function getActiveOrdersCount(orders: Order[]): number {
-  return orders.filter((o) => o.status !== "completed").length;
+  return orders.filter((o) => o.status !== "ready_for_production").length;
 }
 
 /**

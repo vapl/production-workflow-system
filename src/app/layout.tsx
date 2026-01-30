@@ -9,6 +9,7 @@ import { HierarchyProvider } from "@/app/settings/HierarchyContext";
 import { UserProvider } from "@/contexts/UserContext";
 import { BatchesProvider } from "@/contexts/BatchesContext";
 import { NotificationsProvider, NotificationsViewport } from "@/components/ui/Notifications";
+import { WorkflowProvider } from "@/contexts/WorkflowContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -37,9 +38,10 @@ export default function RootLayout({
       >
         <UserProvider>
           <NotificationsProvider>
-            <HierarchyProvider>
-              <OrdersProvider>
-                <BatchesProvider>
+            <WorkflowProvider>
+              <HierarchyProvider>
+                <OrdersProvider>
+                  <BatchesProvider>
                   <Header />
                   <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
                     {/* Main Content */}
@@ -52,9 +54,10 @@ export default function RootLayout({
                     </main>
                   </div>
                   <NotificationsViewport />
-                </BatchesProvider>
-              </OrdersProvider>
-            </HierarchyProvider>
+                  </BatchesProvider>
+                </OrdersProvider>
+              </HierarchyProvider>
+            </WorkflowProvider>
           </NotificationsProvider>
         </UserProvider>
       </body>

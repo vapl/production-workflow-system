@@ -19,7 +19,20 @@ export function formatTime(value: string | Date): string {
 }
 
 export function formatOrderStatus(status: OrderStatus): string {
-  return status.replace("_", " ");
+  switch (status) {
+    case "draft":
+      return "Draft";
+    case "ready_for_engineering":
+      return "Ready for engineering";
+    case "in_engineering":
+      return "In engineering";
+    case "engineering_blocked":
+      return "Engineering blocked";
+    case "ready_for_production":
+      return "Ready for production";
+    default:
+      return status.replace(/_/g, " ");
+  }
 }
 
 export function formatBatchStatus(status: BatchStatus): string {

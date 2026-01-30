@@ -179,17 +179,18 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
         if (next[value]) {
           return;
         }
-        const normalized = normalizeEnum(value);
-        if (
-          normalized === "pending" ||
-          normalized === "in_progress" ||
-          normalized === "completed" ||
-          normalized === "cancelled"
-        ) {
-          next[value] = normalized as OrderStatus;
-        } else {
-          next[value] = "pending";
-        }
+          const normalized = normalizeEnum(value);
+          if (
+            normalized === "draft" ||
+            normalized === "ready_for_engineering" ||
+            normalized === "in_engineering" ||
+            normalized === "engineering_blocked" ||
+            normalized === "ready_for_production"
+          ) {
+            next[value] = normalized as OrderStatus;
+          } else {
+            next[value] = "draft";
+          }
       });
       return next;
     });
@@ -301,17 +302,18 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                 ? (normalized as "low" | "normal" | "high" | "urgent")
                 : "normal";
             })();
-      const status =
+        const status =
         rawStatus && statusMapping[rawStatus]
           ? statusMapping[rawStatus]
           : (() => {
               const normalized = normalizeEnum(rawStatus);
-              return normalized === "pending" ||
-                normalized === "in_progress" ||
-                normalized === "completed" ||
-                normalized === "cancelled"
+              return normalized === "draft" ||
+                normalized === "ready_for_engineering" ||
+                normalized === "in_engineering" ||
+                normalized === "engineering_blocked" ||
+                normalized === "ready_for_production"
                 ? (normalized as OrderStatus)
-                : "pending";
+                : "draft";
             })();
 
       const quantityValue = String(getMappedValue(row, "quantity")).trim();
@@ -613,20 +615,29 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                             {value}
                           </span>
                           <select
-                            value={statusMapping[value] ?? "pending"}
-                            onChange={(event) =>
-                              setStatusMapping((prev) => ({
-                                ...prev,
-                                [value]: event.target.value as OrderStatus,
-                              }))
-                            }
-                            className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-xs"
-                          >
-                            <option value="pending">pending</option>
-                            <option value="in_progress">in progress</option>
-                            <option value="completed">completed</option>
-                            <option value="cancelled">cancelled</option>
-                          </select>
+                            value={statusMapping[value] ?? "draft"}
+                              onChange={(event) =>
+                                setStatusMapping((prev) => ({
+                                  ...prev,
+                                  [value]: event.target.value as OrderStatus,
+                                }))
+                              }
+                              className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-xs"
+                            >
+                              <option value="draft">draft</option>
+                              <option value="ready_for_engineering">
+                                ready for engineering
+                              </option>
+                              <option value="in_engineering">
+                                in engineering
+                              </option>
+                              <option value="engineering_blocked">
+                                engineering blocked
+                              </option>
+                              <option value="ready_for_production">
+                                ready for production
+                              </option>
+                            </select>
                         </label>
                       ))}
                     </div>

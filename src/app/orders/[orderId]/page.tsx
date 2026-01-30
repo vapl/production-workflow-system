@@ -22,6 +22,8 @@ import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useBatches } from "@/contexts/BatchesContext";
 import { uploadOrderAttachment } from "@/lib/uploadOrderAttachment";
+import { supabase } from "@/lib/supabaseClient";
+import { useWorkflowRules } from "@/contexts/WorkflowContext";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -45,7 +47,8 @@ export default function OrderDetailPage() {
   } = useOrders();
   const { batches } = useBatches();
   const { levels, nodes } = useHierarchy();
-  const { role, name } = useCurrentUser();
+  const { role, name, id: userId, tenantId } = useCurrentUser();
+  const { rules } = useWorkflowRules();
   const activeLevels = useMemo(
     () => levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
     [levels],
@@ -74,10 +77,103 @@ export default function OrderDetailPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [commentMessage, setCommentMessage] = useState("");
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
+  const [engineers, setEngineers] = useState<
+    { id: string; name: string }[]
+  >([]);
+  const [selectedEngineerId, setSelectedEngineerId] = useState("");
+  const [checklistState, setChecklistState] = useState<
+    Record<string, boolean>
+  >({});
+  const [isReturnOpen, setIsReturnOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnNote, setReturnNote] = useState("");
+
+  const canTakeOrder =
+    role === "Engineering" &&
+    !orderState?.assignedEngineerId &&
+    orderState?.status === "ready_for_engineering";
+  const canSendToEngineering =
+    role === "Sales" && orderState?.status === "draft";
+  const canStartEngineering =
+    role === "Engineering" && orderState?.status === "ready_for_engineering";
+  const canBlockEngineering =
+    role === "Engineering" && orderState?.status === "in_engineering";
+  const canSendToProduction =
+    role === "Engineering" && orderState?.status === "in_engineering";
+  const canAssignEngineer = ["Sales", "Admin"].includes(role);
+  const canSendBack =
+    (role === "Sales" &&
+      (orderState?.status === "ready_for_engineering" ||
+        orderState?.status === "in_engineering" ||
+        orderState?.status === "engineering_blocked")) ||
+    (role === "Engineering" && orderState?.status === "ready_for_production");
+  const returnTargetStatus =
+    role === "Engineering" && orderState?.status === "ready_for_production"
+      ? "in_engineering"
+      : "draft";
+
+  const activeChecklistItems = rules.checklistItems.filter(
+    (item) => item.isActive,
+  );
+  const requiredForEngineering = activeChecklistItems.filter((item) =>
+    item.requiredFor.includes("ready_for_engineering"),
+  );
+  const requiredForProduction = activeChecklistItems.filter((item) =>
+    item.requiredFor.includes("ready_for_production"),
+  );
+
+  useEffect(() => {
+    if (!orderState?.assignedEngineerId) {
+      setSelectedEngineerId("");
+      return;
+    }
+    setSelectedEngineerId(orderState.assignedEngineerId);
+  }, [orderState?.assignedEngineerId]);
+
+  useEffect(() => {
+    if (!supabase) {
+      setEngineers([
+        { id: "eng-1", name: "Engineer 1" },
+        { id: "eng-2", name: "Engineer 2" },
+      ]);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchEngineers = async () => {
+      const query = supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("role", "Engineering");
+      if (tenantId) {
+        query.eq("tenant_id", tenantId);
+      }
+      const { data, error } = await query;
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setEngineers([]);
+        return;
+      }
+      setEngineers(
+        (data ?? []).map((row) => ({
+          id: row.id,
+          name: row.full_name ?? "Engineer",
+        })),
+      );
+    };
+
+    fetchEngineers();
+    return () => {
+      isMounted = false;
+    };
+  }, [tenantId]);
 
   useEffect(() => {
     setOrderState(order);
     setIsLoadingOrder(false);
+    setChecklistState(order?.checklist ?? {});
   }, [order]);
 
   if (!orderState && isLoadingOrder) {
@@ -116,15 +212,15 @@ export default function OrderDetailPage() {
           ? "priority-urgent"
           : "priority-normal";
   const statusVariant =
-    orderState.status === "pending"
-      ? "status-pending"
-      : orderState.status === "in_progress"
-        ? "status-in_progress"
-        : orderState.status === "completed"
-          ? "status-completed"
-          : orderState.status === "cancelled"
-            ? "status-cancelled"
-            : "status-pending";
+    orderState.status === "draft"
+      ? "status-draft"
+      : orderState.status === "ready_for_engineering"
+        ? "status-ready_for_engineering"
+        : orderState.status === "in_engineering"
+          ? "status-in_engineering"
+          : orderState.status === "engineering_blocked"
+            ? "status-engineering_blocked"
+            : "status-ready_for_production";
 
   function handleFilesAdded(files: FileList | File[]) {
     const next = Array.from(files);
@@ -241,6 +337,144 @@ export default function OrderDetailPage() {
     }
   }
 
+  async function handleTakeOrder() {
+    if (!orderState) {
+      return;
+    }
+    const now = new Date().toISOString();
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            assignedEngineerId: userId,
+            assignedEngineerName: name,
+            assignedEngineerAt: now,
+          }
+        : prev,
+    );
+    await updateOrder(orderState.id, {
+      assignedEngineerId: userId,
+      assignedEngineerName: name,
+      assignedEngineerAt: now,
+    });
+  }
+
+  async function handleStatusChange(
+    nextStatus:
+      | "draft"
+      | "ready_for_engineering"
+      | "in_engineering"
+      | "engineering_blocked"
+      | "ready_for_production",
+  ) {
+    if (!orderState) {
+      return;
+    }
+    const now = new Date().toISOString();
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: nextStatus,
+            statusChangedBy: name,
+            statusChangedByRole: role,
+            statusChangedAt: now,
+            statusHistory: [
+              {
+                id: `hst-${Date.now()}`,
+                status: nextStatus,
+                changedBy: name,
+                changedByRole: role,
+                changedAt: now,
+              },
+              ...(prev.statusHistory ?? []),
+            ],
+          }
+        : prev,
+    );
+    await updateOrder(orderState.id, {
+      status: nextStatus,
+      statusChangedBy: name,
+      statusChangedByRole: role,
+      statusChangedAt: now,
+    });
+  }
+
+  async function handleAssignEngineer() {
+    if (!orderState || !selectedEngineerId) {
+      return;
+    }
+    const engineer = engineers.find((item) => item.id === selectedEngineerId);
+    const now = new Date().toISOString();
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            assignedEngineerId: selectedEngineerId,
+            assignedEngineerName: engineer?.name ?? prev.assignedEngineerName,
+            assignedEngineerAt: now,
+          }
+        : prev,
+    );
+    await updateOrder(orderState.id, {
+      assignedEngineerId: selectedEngineerId,
+      assignedEngineerName: engineer?.name ?? orderState.assignedEngineerName,
+      assignedEngineerAt: now,
+    });
+  }
+
+  async function handleClearEngineer() {
+    if (!orderState) {
+      return;
+    }
+    setSelectedEngineerId("");
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            assignedEngineerId: undefined,
+            assignedEngineerName: undefined,
+            assignedEngineerAt: undefined,
+          }
+        : prev,
+    );
+    await updateOrder(orderState.id, {
+      assignedEngineerId: "",
+      assignedEngineerName: "",
+      assignedEngineerAt: "",
+    });
+  }
+
+  async function handleChecklistToggle(id: string, checked: boolean) {
+    const next = { ...checklistState, [id]: checked };
+    setChecklistState(next);
+    setOrderState((prev) => (prev ? { ...prev, checklist: next } : prev));
+    await updateOrder(orderState.id, { checklist: next });
+  }
+
+  const meetsEngineeringChecklist = requiredForEngineering.every(
+    (item) => checklistState[item.id],
+  );
+  const meetsProductionChecklist = requiredForProduction.every(
+    (item) => checklistState[item.id],
+  );
+  const meetsEngineeringAttachments =
+    attachments.length >= rules.minAttachmentsForEngineering;
+  const meetsProductionAttachments =
+    attachments.length >= rules.minAttachmentsForProduction;
+  const meetsEngineeringComment =
+    !rules.requireCommentForEngineering || comments.length > 0;
+  const meetsProductionComment =
+    !rules.requireCommentForProduction || comments.length > 0;
+  const canAdvanceToEngineering =
+    meetsEngineeringChecklist &&
+    meetsEngineeringAttachments &&
+    meetsEngineeringComment;
+  const canAdvanceToProduction =
+    meetsProductionChecklist &&
+    meetsProductionAttachments &&
+    meetsProductionComment;
+
   function renderAttachmentPreview(attachment: OrderAttachment) {
     const lowerName = attachment.name.toLowerCase();
     const isPdf = lowerName.endsWith(".pdf");
@@ -295,20 +529,125 @@ export default function OrderDetailPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Badge variant={priorityVariant}>{orderState.priority}</Badge>
-          <Badge variant={statusVariant}>
-            {formatOrderStatus(orderState.status)}
-          </Badge>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2"
-            onClick={() => setIsEditOpen(true)}
-          >
-            <PencilIcon className="h-4 w-4" />
-            Edit
-          </Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+            <Badge variant={statusVariant}>
+              {formatOrderStatus(orderState.status)}
+            </Badge>
+            {canSendToEngineering && (
+              <Button
+                size="sm"
+                disabled={!canAdvanceToEngineering}
+                onClick={() => handleStatusChange("ready_for_engineering")}
+              >
+                Send to engineering
+              </Button>
+            )}
+            {canStartEngineering && (
+              <Button
+                size="sm"
+                onClick={() => handleStatusChange("in_engineering")}
+              >
+                Start engineering
+              </Button>
+            )}
+            {canBlockEngineering && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleStatusChange("engineering_blocked")}
+              >
+                Block engineering
+              </Button>
+            )}
+            {canSendToProduction && (
+              <Button
+                size="sm"
+                disabled={!canAdvanceToProduction}
+                onClick={() => handleStatusChange("ready_for_production")}
+              >
+                Ready for production
+              </Button>
+            )}
+            {canSendBack && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsReturnOpen(true)}
+              >
+                Send back
+              </Button>
+            )}
+            {canTakeOrder && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTakeOrder}
+              >
+                Take order
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2"
+              onClick={() => setIsEditOpen(true)}
+            >
+              <PencilIcon className="h-4 w-4" />
+              Edit
+            </Button>
+          </div>
+          <div className="text-xs text-muted-foreground space-y-2">
+            {orderState.assignedEngineerName && (
+              <div>Engineer: {orderState.assignedEngineerName}</div>
+            )}
+            {canAssignEngineer && (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <select
+                  value={selectedEngineerId}
+                  onChange={(event) => setSelectedEngineerId(event.target.value)}
+                  className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                >
+                  <option value="">Assign engineer...</option>
+                  {engineers.map((engineer) => (
+                    <option key={engineer.id} value={engineer.id}>
+                      {engineer.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAssignEngineer}
+                  disabled={!selectedEngineerId}
+                >
+                  Assign
+                </Button>
+                {orderState.assignedEngineerId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearEngineer}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            )}
+            {orderState.statusChangedAt && (
+              <div>
+                Status updated{" "}
+                {orderState.statusChangedBy
+                  ? `by ${orderState.statusChangedBy}`
+                  : ""}
+                {orderState.statusChangedByRole
+                  ? ` (${orderState.statusChangedByRole})`
+                  : ""}
+                {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -357,6 +696,47 @@ export default function OrderDetailPage() {
                     );
                   })}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Preparation Checklist</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {activeChecklistItems.length === 0 ? (
+                <p className="text-muted-foreground">
+                  No checklist items configured.
+                </p>
+              ) : (
+                activeChecklistItems.map((item) => (
+                  <label
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                  >
+                    <span className="font-medium">{item.label}</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(checklistState[item.id])}
+                      onChange={(event) =>
+                        handleChecklistToggle(item.id, event.target.checked)
+                      }
+                    />
+                  </label>
+                ))
+              )}
+              {canSendToEngineering && !canAdvanceToEngineering && (
+                <p className="text-xs text-muted-foreground">
+                  Complete required attachments, comments, and checklist items
+                  before sending to engineering.
+                </p>
+              )}
+              {canSendToProduction && !canAdvanceToProduction && (
+                <p className="text-xs text-muted-foreground">
+                  Complete required attachments, comments, and checklist items
+                  before sending to production.
+                </p>
               )}
             </CardContent>
           </Card>
@@ -537,6 +917,57 @@ export default function OrderDetailPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Status History</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {orderState.statusHistory && orderState.statusHistory.length > 0 ? (
+                <div className="space-y-4">
+                  {orderState.statusHistory.map((entry, index) => (
+                    <div key={entry.id} className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className="h-2.5 w-2.5 rounded-full bg-primary" />
+                        {index < orderState.statusHistory.length - 1 && (
+                          <div className="mt-1 h-full w-px bg-border" />
+                        )}
+                      </div>
+                      <div className="flex-1 rounded-md border border-border px-3 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <Badge variant={`status-${entry.status}`}>
+                            {formatOrderStatus(entry.status)}
+                          </Badge>
+                          <div className="text-xs text-muted-foreground">
+                            {formatDate(entry.changedAt.slice(0, 10))}
+                          </div>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {entry.changedBy}
+                          {entry.changedByRole ? ` (${entry.changedByRole})` : ""}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : orderState.statusChangedAt ? (
+                <div className="rounded-md border border-border px-3 py-2">
+                  <div className="font-medium">
+                    {formatOrderStatus(orderState.status)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {orderState.statusChangedBy ?? "Unknown"}
+                    {orderState.statusChangedByRole
+                      ? ` (${orderState.statusChangedByRole})`
+                      : ""}
+                    {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-muted-foreground">No status changes yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Production Batches</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
@@ -609,6 +1040,81 @@ export default function OrderDetailPage() {
           hierarchy: orderState.hierarchy,
         }}
       />
+
+      {isReturnOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
+            <h2 className="text-lg font-semibold">Send order back</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Choose a reason and add a note. The order will return to{" "}
+              {formatOrderStatus(returnTargetStatus)}.
+            </p>
+            <div className="mt-4 space-y-3">
+              <label className="space-y-2 text-sm font-medium">
+                Reason
+                <select
+                  value={returnReason}
+                  onChange={(event) => setReturnReason(event.target.value)}
+                  className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                >
+                  <option value="">Select reason</option>
+                  {rules.returnReasons.map((reason) => (
+                    <option key={reason} value={reason}>
+                      {reason}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2 text-sm font-medium">
+                Comment
+                <textarea
+                  value={returnNote}
+                  onChange={(event) => setReturnNote(event.target.value)}
+                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                  placeholder="Add context for the previous role..."
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsReturnOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  const trimmedNote = returnNote.trim();
+                  if (!returnReason && !trimmedNote) {
+                    return;
+                  }
+                  const reasonLabel = returnReason || "No reason selected";
+                  const created = await addOrderComment(orderState.id, {
+                    message: `Returned: ${reasonLabel}${
+                      trimmedNote ? ` - ${trimmedNote}` : ""
+                    }`,
+                    author: name,
+                    authorRole: role,
+                  });
+                  if (created) {
+                    setOrderState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            comments: [created, ...(prev.comments ?? [])],
+                          }
+                        : prev,
+                    );
+                  }
+                  setReturnReason("");
+                  setReturnNote("");
+                  setIsReturnOpen(false);
+                  await handleStatusChange(returnTargetStatus);
+                }}
+              >
+                Send back
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
