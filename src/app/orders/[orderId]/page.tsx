@@ -5,9 +5,20 @@ import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/Tabs";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Batch } from "@/types/batch";
-import type { OrderAttachment, OrderComment } from "@/types/orders";
+import type {
+  ExternalJobAttachment,
+  ExternalJobStatus,
+  OrderAttachment,
+  OrderComment,
+} from "@/types/orders";
 import Link from "next/link";
 import {
   ArrowLeftIcon,
@@ -22,8 +33,10 @@ import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useBatches } from "@/contexts/BatchesContext";
 import { uploadOrderAttachment } from "@/lib/uploadOrderAttachment";
+import { uploadExternalJobAttachment } from "@/lib/uploadExternalJobAttachment";
 import { supabase } from "@/lib/supabaseClient";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
+import { usePartners } from "@/hooks/usePartners";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -44,11 +57,17 @@ export default function OrderDetailPage() {
     removeOrderAttachment,
     addOrderComment,
     removeOrderComment,
+    addExternalJob,
+    updateExternalJob,
+    removeExternalJob,
+    addExternalJobAttachment,
+    removeExternalJobAttachment,
   } = useOrders();
   const { batches } = useBatches();
   const { levels, nodes } = useHierarchy();
   const { role, name, id: userId, tenantId } = useCurrentUser();
   const { rules } = useWorkflowRules();
+  const { activePartners, activeGroups } = usePartners();
   const activeLevels = useMemo(
     () => levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
     [levels],
@@ -87,6 +106,23 @@ export default function OrderDetailPage() {
   const [isReturnOpen, setIsReturnOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnNote, setReturnNote] = useState("");
+  const [externalPartnerId, setExternalPartnerId] = useState("");
+  const [externalPartnerGroupId, setExternalPartnerGroupId] = useState("");
+  const [externalOrderNumber, setExternalOrderNumber] = useState("");
+  const [externalQuantity, setExternalQuantity] = useState("");
+  const [externalDueDate, setExternalDueDate] = useState("");
+  const [externalStatus, setExternalStatus] =
+    useState<ExternalJobStatus>("requested");
+  const [externalError, setExternalError] = useState("");
+  const [externalJobFiles, setExternalJobFiles] = useState<
+    Record<string, File[]>
+  >({});
+  const [externalJobUpload, setExternalJobUpload] = useState<
+    Record<string, { isUploading: boolean; error?: string }>
+  >({});
+  const [expandedExternalHistory, setExpandedExternalHistory] = useState<
+    Record<string, boolean>
+  >({});
 
   const canTakeOrder =
     role === "Engineering" &&
@@ -221,6 +257,35 @@ export default function OrderDetailPage() {
           : orderState.status === "engineering_blocked"
             ? "status-engineering_blocked"
             : "status-ready_for_production";
+  const externalJobStatusLabels: Record<ExternalJobStatus, string> = {
+    requested: "Requested",
+    ordered: "Ordered",
+    in_progress: "In progress",
+    delivered: "Delivered",
+    approved: "Approved",
+    cancelled: "Cancelled",
+  };
+  const externalJobStatusVariant = (status: ExternalJobStatus) => {
+    switch (status) {
+      case "requested":
+        return "status-pending";
+      case "ordered":
+        return "status-planned";
+      case "in_progress":
+        return "status-in_progress";
+      case "delivered":
+      case "approved":
+        return "status-completed";
+      case "cancelled":
+        return "status-cancelled";
+      default:
+        return "secondary";
+    }
+  };
+  const externalMinAttachmentsForStatus = (status: ExternalJobStatus) => {
+    const rule = rules.externalJobRules.find((item) => item.status === status);
+    return rule?.minAttachments ?? 0;
+  };
 
   function handleFilesAdded(files: FileList | File[]) {
     const next = Array.from(files);
@@ -333,6 +398,206 @@ export default function OrderDetailPage() {
       const nextComments = comments.filter((comment) => comment.id !== commentId);
       setOrderState((prev) =>
         prev ? { ...prev, comments: nextComments } : prev,
+      );
+    }
+  }
+
+  async function handleAddExternalJob() {
+    const trimmedOrderNumber = externalOrderNumber.trim();
+    if (!externalPartnerId || !trimmedOrderNumber || !externalDueDate) {
+      setExternalError("Partner, order number, and due date are required.");
+      return;
+    }
+    const partner = activePartners.find((item) => item.id === externalPartnerId);
+    if (!partner) {
+      setExternalError("Select a valid partner.");
+      return;
+    }
+    setExternalError("");
+    const created = await addExternalJob(orderState.id, {
+      partnerId: partner.id,
+      partnerName: partner.name,
+      externalOrderNumber: trimmedOrderNumber,
+      quantity: externalQuantity ? Number(externalQuantity) : undefined,
+      dueDate: externalDueDate,
+      status: externalStatus,
+    });
+    if (created) {
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              externalJobs: [created, ...(prev.externalJobs ?? [])],
+            }
+          : prev,
+      );
+      setExternalPartnerId("");
+      setExternalPartnerGroupId("");
+      setExternalOrderNumber("");
+      setExternalQuantity("");
+      setExternalDueDate("");
+      setExternalStatus("requested");
+    }
+  }
+
+  async function handleExternalStatusChange(
+    externalJobId: string,
+    status: ExternalJobStatus,
+  ) {
+    const targetJob = orderState.externalJobs?.find(
+      (job) => job.id === externalJobId,
+    );
+    const minAttachments = externalMinAttachmentsForStatus(status);
+    if ((targetJob?.attachments ?? []).length < minAttachments) {
+      setExternalJobUpload((prev) => ({
+        ...prev,
+        [externalJobId]: {
+          isUploading: false,
+          error: `Add at least ${minAttachments} attachment(s) before setting this status.`,
+        },
+      }));
+      return;
+    }
+    const updated = await updateExternalJob(externalJobId, { status });
+    if (updated) {
+      setExternalJobUpload((prev) => ({
+        ...prev,
+        [externalJobId]: { isUploading: false },
+      }));
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              externalJobs: (prev.externalJobs ?? []).map((job) =>
+                job.id === externalJobId ? updated : job,
+              ),
+            }
+          : prev,
+      );
+    }
+  }
+
+  async function handleRemoveExternalJob(externalJobId: string) {
+    const removed = await removeExternalJob(externalJobId);
+    if (removed) {
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              externalJobs: (prev.externalJobs ?? []).filter(
+                (job) => job.id !== externalJobId,
+              ),
+            }
+          : prev,
+      );
+    }
+  }
+
+  function handleExternalFilesAdded(externalJobId: string, files: FileList) {
+    const list = Array.from(files);
+    if (list.length === 0) {
+      return;
+    }
+    const oversized = list.find((file) => file.size > MAX_FILE_SIZE_BYTES);
+    if (oversized) {
+      setExternalJobUpload((prev) => ({
+        ...prev,
+        [externalJobId]: {
+          isUploading: false,
+          error: `${oversized.name} exceeds ${MAX_FILE_SIZE_MB}MB limit.`,
+        },
+      }));
+      return;
+    }
+    setExternalJobUpload((prev) => ({
+      ...prev,
+      [externalJobId]: { isUploading: false },
+    }));
+    setExternalJobFiles((prev) => ({
+      ...prev,
+      [externalJobId]: [...(prev[externalJobId] ?? []), ...list],
+    }));
+  }
+
+  async function handleUploadExternalFiles(externalJobId: string) {
+    const pending = externalJobFiles[externalJobId] ?? [];
+    if (pending.length === 0) {
+      return;
+    }
+    setExternalJobUpload((prev) => ({
+      ...prev,
+      [externalJobId]: { isUploading: true },
+    }));
+    for (const file of pending) {
+      const result = await uploadExternalJobAttachment(file, externalJobId);
+      if (result.error || !result.attachment) {
+        setExternalJobUpload((prev) => ({
+          ...prev,
+          [externalJobId]: { isUploading: false, error: result.error },
+        }));
+        continue;
+      }
+      const created = await addExternalJobAttachment(externalJobId, {
+        name: result.attachment.name,
+        url: result.attachment.url,
+        size: result.attachment.size,
+        mimeType: result.attachment.mimeType,
+        addedBy: name,
+        addedByRole: role,
+      });
+      if (created) {
+        setOrderState((prev) =>
+          prev
+            ? {
+                ...prev,
+                externalJobs: (prev.externalJobs ?? []).map((job) =>
+                  job.id === externalJobId
+                    ? {
+                        ...job,
+                        attachments: [
+                          created,
+                          ...(job.attachments ?? []),
+                        ],
+                      }
+                    : job,
+                ),
+              }
+            : prev,
+        );
+      }
+    }
+    setExternalJobFiles((prev) => ({ ...prev, [externalJobId]: [] }));
+    setExternalJobUpload((prev) => ({
+      ...prev,
+      [externalJobId]: { isUploading: false },
+    }));
+  }
+
+  async function handleRemoveExternalFile(
+    externalJobId: string,
+    attachmentId: string,
+  ) {
+    const removed = await removeExternalJobAttachment(
+      externalJobId,
+      attachmentId,
+    );
+    if (removed) {
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              externalJobs: (prev.externalJobs ?? []).map((job) =>
+                job.id === externalJobId
+                  ? {
+                      ...job,
+                      attachments: (job.attachments ?? []).filter(
+                        (file) => file.id !== attachmentId,
+                      ),
+                    }
+                  : job,
+              ),
+            }
+          : prev,
       );
     }
   }
@@ -510,150 +775,82 @@ export default function OrderDetailPage() {
     );
   }
 
+  const nextGate =
+    orderState.status === "draft"
+      ? "engineering"
+      : orderState.status === "in_engineering"
+        ? "production"
+        : null;
+  const nextChecklistItems =
+    nextGate === "engineering"
+      ? requiredForEngineering
+      : nextGate === "production"
+        ? requiredForProduction
+        : [];
+  const nextChecklistDone = nextChecklistItems.filter(
+    (item) => checklistState[item.id],
+  ).length;
+  const nextChecklistTotal = nextChecklistItems.length;
+  const nextMinAttachments =
+    nextGate === "engineering"
+      ? rules.minAttachmentsForEngineering
+      : nextGate === "production"
+        ? rules.minAttachmentsForProduction
+        : 0;
+  const nextRequireComment =
+    nextGate === "engineering"
+      ? rules.requireCommentForEngineering
+      : nextGate === "production"
+        ? rules.requireCommentForProduction
+        : false;
+
   return (
     <section className="space-y-6">
-      <div>
-        <Link href="/orders">
-          <Button variant="ghost" size="sm" className="gap-2">
+      <Tabs defaultValue="overview" className="gap-4">
+        <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
+          <Link
+            href="/orders"
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--tabs-border)] bg-[var(--tabs-bg)] px-3 text-sm font-medium text-[var(--tabs-text)] shadow-sm transition hover:text-[var(--tabs-hover-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tabs-ring)]"
+          >
             <ArrowLeftIcon className="h-4 w-4" />
             Back to Orders
-          </Button>
-        </Link>
-      </div>
+          </Link>
+          <TabsList className="min-w-max">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="workflow">Workflow</TabsTrigger>
+            <TabsTrigger value="files">Files & Comments</TabsTrigger>
+            <TabsTrigger value="external">External Jobs</TabsTrigger>
+            <TabsTrigger value="production">Production</TabsTrigger>
+          </TabsList>
+        </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-xl font-semibold">{orderState.orderNumber}</h1>
           <p className="text-sm text-muted-foreground">
             {orderState.customerName}
           </p>
         </div>
-
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Badge variant={priorityVariant}>{orderState.priority}</Badge>
-            <Badge variant={statusVariant}>
-              {formatOrderStatus(orderState.status)}
-            </Badge>
-            {canSendToEngineering && (
-              <Button
-                size="sm"
-                disabled={!canAdvanceToEngineering}
-                onClick={() => handleStatusChange("ready_for_engineering")}
-              >
-                Send to engineering
-              </Button>
-            )}
-            {canStartEngineering && (
-              <Button
-                size="sm"
-                onClick={() => handleStatusChange("in_engineering")}
-              >
-                Start engineering
-              </Button>
-            )}
-            {canBlockEngineering && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleStatusChange("engineering_blocked")}
-              >
-                Block engineering
-              </Button>
-            )}
-            {canSendToProduction && (
-              <Button
-                size="sm"
-                disabled={!canAdvanceToProduction}
-                onClick={() => handleStatusChange("ready_for_production")}
-              >
-                Ready for production
-              </Button>
-            )}
-            {canSendBack && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setIsReturnOpen(true)}
-              >
-                Send back
-              </Button>
-            )}
-            {canTakeOrder && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleTakeOrder}
-              >
-                Take order
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-2"
-              onClick={() => setIsEditOpen(true)}
-            >
-              <PencilIcon className="h-4 w-4" />
-              Edit
-            </Button>
-          </div>
-          <div className="text-xs text-muted-foreground space-y-2">
-            {orderState.assignedEngineerName && (
-              <div>Engineer: {orderState.assignedEngineerName}</div>
-            )}
-            {canAssignEngineer && (
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <select
-                  value={selectedEngineerId}
-                  onChange={(event) => setSelectedEngineerId(event.target.value)}
-                  className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
-                >
-                  <option value="">Assign engineer...</option>
-                  {engineers.map((engineer) => (
-                    <option key={engineer.id} value={engineer.id}>
-                      {engineer.name}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAssignEngineer}
-                  disabled={!selectedEngineerId}
-                >
-                  Assign
-                </Button>
-                {orderState.assignedEngineerId && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleClearEngineer}
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
-            )}
-            {orderState.statusChangedAt && (
-              <div>
-                Status updated{" "}
-                {orderState.statusChangedBy
-                  ? `by ${orderState.statusChangedBy}`
-                  : ""}
-                {orderState.statusChangedByRole
-                  ? ` (${orderState.statusChangedByRole})`
-                  : ""}
-                {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
-              </div>
-            )}
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+          <Badge variant={statusVariant}>
+            {formatOrderStatus(orderState.status)}
+          </Badge>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-2"
+            onClick={() => setIsEditOpen(true)}
+          >
+            <PencilIcon className="h-4 w-4" />
+            Edit
+          </Button>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="space-y-6">
-          <Card>
+        <TabsContent value="overview">
+          <div className="space-y-6">
+            <Card>
             <CardHeader>
               <CardTitle>Order Summary</CardTitle>
             </CardHeader>
@@ -667,9 +864,8 @@ export default function OrderDetailPage() {
                 <span>{orderState.quantity ?? "--"}</span>
               </div>
             </CardContent>
-          </Card>
-
-          <Card>
+            </Card>
+            <Card>
             <CardHeader>
               <CardTitle>Hierarchy Details</CardTitle>
             </CardHeader>
@@ -698,98 +894,163 @@ export default function OrderDetailPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+            </Card>
+          </div>
+        </TabsContent>
 
-          <Card>
+        <TabsContent value="workflow">
+          <div className="space-y-6">
+          <Card className="lg:sticky lg:top-6">
             <CardHeader>
-              <CardTitle>Preparation Checklist</CardTitle>
+              <CardTitle>Workflow</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              {activeChecklistItems.length === 0 ? (
-                <p className="text-muted-foreground">
-                  No checklist items configured.
-                </p>
-              ) : (
-                activeChecklistItems.map((item) => (
-                  <label
-                    key={item.id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                  >
-                    <span className="font-medium">{item.label}</span>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(checklistState[item.id])}
-                      onChange={(event) =>
-                        handleChecklistToggle(item.id, event.target.checked)
-                      }
-                    />
-                  </label>
-                ))
-              )}
-              {canSendToEngineering && !canAdvanceToEngineering && (
-                <p className="text-xs text-muted-foreground">
-                  Complete required attachments, comments, and checklist items
-                  before sending to engineering.
-                </p>
-              )}
-              {canSendToProduction && !canAdvanceToProduction && (
-                <p className="text-xs text-muted-foreground">
-                  Complete required attachments, comments, and checklist items
-                  before sending to production.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Comments</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="space-y-2">
-                <textarea
-                  value={commentMessage}
-                  onChange={(event) => setCommentMessage(event.target.value)}
-                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                  placeholder="Add a note for the next role..."
-                />
-                <div className="flex justify-end">
-                  <Button onClick={handleAddComment}>Add comment</Button>
-                </div>
+            <CardContent className="space-y-4 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+                <Badge variant={statusVariant}>
+                  {formatOrderStatus(orderState.status)}
+                </Badge>
               </div>
-              {comments.length === 0 ? (
-                <p className="text-muted-foreground">No comments yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {comments.map((comment) => (
-                    <div
-                      key={comment.id}
-                      className="rounded-md border border-border px-3 py-2"
+
+              <div className="flex flex-wrap items-center gap-2">
+                {canSendToEngineering && (
+                  <Button
+                    size="sm"
+                    disabled={!canAdvanceToEngineering}
+                    onClick={() => handleStatusChange("ready_for_engineering")}
+                  >
+                    Send to engineering
+                  </Button>
+                )}
+                {canStartEngineering && (
+                  <Button
+                    size="sm"
+                    onClick={() => handleStatusChange("in_engineering")}
+                  >
+                    Start engineering
+                  </Button>
+                )}
+                {canBlockEngineering && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleStatusChange("engineering_blocked")}
+                  >
+                    Block engineering
+                  </Button>
+                )}
+                {canSendToProduction && (
+                  <Button
+                    size="sm"
+                    disabled={!canAdvanceToProduction}
+                    onClick={() => handleStatusChange("ready_for_production")}
+                  >
+                    Ready for production
+                  </Button>
+                )}
+                {canSendBack && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsReturnOpen(true)}
+                  >
+                    Send back
+                  </Button>
+                )}
+                {canTakeOrder && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTakeOrder}
+                  >
+                    Take order
+                  </Button>
+                )}
+              </div>
+
+              <div className="space-y-2 text-xs text-muted-foreground">
+                {orderState.assignedEngineerName && (
+                  <div>Engineer: {orderState.assignedEngineerName}</div>
+                )}
+                {canAssignEngineer && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={selectedEngineerId}
+                      onChange={(event) =>
+                        setSelectedEngineerId(event.target.value)
+                      }
+                      className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
                     >
-                      <div className="text-xs text-muted-foreground">
-                        {comment.author}
-                        {comment.authorRole ? ` (${comment.authorRole})` : ""} -{" "}
-                        {formatDate(comment.createdAt.slice(0, 10))}
-                      </div>
-                      <div className="mt-1">{comment.message}</div>
-                      <div className="mt-2 flex justify-end">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveComment(comment.id)}
-                        >
-                          Remove
-                        </Button>
-                      </div>
+                      <option value="">Assign engineer...</option>
+                      {engineers.map((engineer) => (
+                        <option key={engineer.id} value={engineer.id}>
+                          {engineer.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAssignEngineer}
+                      disabled={!selectedEngineerId}
+                    >
+                      Assign
+                    </Button>
+                    {orderState.assignedEngineerId && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleClearEngineer}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {orderState.statusChangedAt && (
+                  <div>
+                    Status updated{" "}
+                    {orderState.statusChangedBy
+                      ? `by ${orderState.statusChangedBy}`
+                      : ""}
+                    {orderState.statusChangedByRole
+                      ? ` (${orderState.statusChangedByRole})`
+                      : ""}
+                    {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
+                  </div>
+                )}
+              </div>
+
+              {nextGate && (
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  <div className="font-medium text-foreground">
+                    Next step readiness
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    <div>
+                      Checklist: {nextChecklistDone}/{nextChecklistTotal || 0}
                     </div>
-                  ))}
+                    <div>
+                      Attachments: {attachments.length}/{nextMinAttachments}
+                    </div>
+                    <div>
+                      Comment:{" "}
+                      {nextRequireComment
+                        ? comments.length > 0
+                          ? "Added"
+                          : "Required"
+                        : "Optional"}
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
-        </div>
+          </div>
+        </TabsContent>
 
-        <div className="space-y-6">
+        <TabsContent value="files">
+          <div className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Attachments</CardTitle>
@@ -917,6 +1178,411 @@ export default function OrderDetailPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Comments</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-2">
+                <textarea
+                  value={commentMessage}
+                  onChange={(event) => setCommentMessage(event.target.value)}
+                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                  placeholder="Add a note for the next role..."
+                />
+                <div className="flex justify-end">
+                  <Button onClick={handleAddComment}>Add comment</Button>
+                </div>
+              </div>
+              {comments.length === 0 ? (
+                <p className="text-muted-foreground">No comments yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {comments.map((comment) => (
+                    <div
+                      key={comment.id}
+                      className="rounded-md border border-border px-3 py-2"
+                    >
+                      <div className="text-xs text-muted-foreground">
+                        {comment.author}
+                        {comment.authorRole ? ` (${comment.authorRole})` : ""} -{" "}
+                        {formatDate(comment.createdAt.slice(0, 10))}
+                      </div>
+                      <div className="mt-1">{comment.message}</div>
+                      <div className="mt-2 flex justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveComment(comment.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="external">
+          <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>External Jobs</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm">
+              <div className="grid gap-3 lg:grid-cols-2">
+                <label className="space-y-2 text-sm font-medium">
+                  Partner group
+                  <select
+                    value={externalPartnerGroupId}
+                    onChange={(event) =>
+                      setExternalPartnerGroupId(event.target.value)
+                    }
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  >
+                    <option value="">All groups</option>
+                    {activeGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  Partner
+                  <select
+                    value={externalPartnerId}
+                    onChange={(event) =>
+                      setExternalPartnerId(event.target.value)
+                    }
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  >
+                    <option value="">Select partner</option>
+                    {activePartners
+                      .filter((partner) =>
+                        externalPartnerGroupId
+                          ? partner.groupId === externalPartnerGroupId
+                          : true,
+                      )
+                      .map((partner) => (
+                        <option key={partner.id} value={partner.id}>
+                          {partner.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  External order #
+                  <input
+                    value={externalOrderNumber}
+                    onChange={(event) =>
+                      setExternalOrderNumber(event.target.value)
+                    }
+                    placeholder="BG-5512"
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  Quantity
+                  <input
+                    type="number"
+                    min={0}
+                    value={externalQuantity}
+                    onChange={(event) => setExternalQuantity(event.target.value)}
+                    placeholder="1"
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  Due date
+                  <input
+                    type="date"
+                    value={externalDueDate}
+                    onChange={(event) => setExternalDueDate(event.target.value)}
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  Status
+                  <select
+                    value={externalStatus}
+                    onChange={(event) =>
+                      setExternalStatus(event.target.value as ExternalJobStatus)
+                    }
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  >
+                    {Object.entries(externalJobStatusLabels).map(
+                      ([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </label>
+              </div>
+              {externalError && (
+                <p className="text-xs text-destructive">{externalError}</p>
+              )}
+              <div className="flex justify-end">
+                <Button onClick={handleAddExternalJob}>Add external job</Button>
+              </div>
+
+              {(orderState.externalJobs ?? []).length === 0 ? (
+                <p className="text-muted-foreground">
+                  No external jobs added yet.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {(orderState.externalJobs ?? []).map((job) => {
+                    const pendingFiles = externalJobFiles[job.id] ?? [];
+                    const uploadState = externalJobUpload[job.id];
+                    return (
+                      <div
+                        key={job.id}
+                        className="space-y-3 rounded-lg border border-border px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="font-medium">{job.partnerName}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {job.externalOrderNumber} • Due{" "}
+                              {formatDate(job.dueDate)}
+                            </div>
+                            {job.quantity !== undefined && (
+                              <div className="text-xs text-muted-foreground">
+                                Qty: {job.quantity}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={externalJobStatusVariant(job.status)}>
+                              {externalJobStatusLabels[job.status]}
+                            </Badge>
+                            <select
+                              value={job.status}
+                              onChange={(event) =>
+                                handleExternalStatusChange(
+                                  job.id,
+                                  event.target.value as ExternalJobStatus,
+                                )
+                              }
+                              className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                            >
+                              {Object.entries(externalJobStatusLabels).map(
+                                ([value, label]) => (
+                                  <option key={value} value={value}>
+                                    {label}
+                                  </option>
+                                ),
+                              )}
+                            </select>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveExternalJob(job.id)}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-xs text-muted-foreground">
+                              Attachments
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                id={`external-files-${job.id}`}
+                                type="file"
+                                multiple
+                                className="hidden"
+                                onChange={(event) => {
+                                  if (event.target.files) {
+                                    handleExternalFilesAdded(
+                                      job.id,
+                                      event.target.files,
+                                    );
+                                  }
+                                  event.target.value = "";
+                                }}
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const input = document.getElementById(
+                                    `external-files-${job.id}`,
+                                  ) as HTMLInputElement | null;
+                                  input?.click();
+                                }}
+                              >
+                                Add files
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => handleUploadExternalFiles(job.id)}
+                                disabled={
+                                  pendingFiles.length === 0 ||
+                                  uploadState?.isUploading
+                                }
+                              >
+                                {uploadState?.isUploading
+                                  ? "Uploading..."
+                                  : "Upload"}
+                              </Button>
+                            </div>
+                          </div>
+                          {uploadState?.error && (
+                            <p className="text-xs text-destructive">
+                              {uploadState.error}
+                            </p>
+                          )}
+                          {pendingFiles.length > 0 && (
+                            <div className="space-y-2 text-xs text-muted-foreground">
+                              {pendingFiles.map((file, index) => (
+                                <div
+                                  key={`${file.name}-${index}`}
+                                  className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2"
+                                >
+                                  <span>{file.name}</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      setExternalJobFiles((prev) => ({
+                                        ...prev,
+                                        [job.id]: (prev[job.id] ?? []).filter(
+                                          (_, idx) => idx !== index,
+                                        ),
+                                      }))
+                                    }
+                                  >
+                                    Remove
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {(job.attachments ?? []).length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              No files uploaded yet.
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              {(job.attachments ?? []).map((file) => (
+                                <div
+                                  key={file.id}
+                                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    {renderAttachmentPreview(file as ExternalJobAttachment)}
+                                    <span className="font-medium">
+                                      {file.name}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {file.url && (
+                                      <a
+                                        href={file.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs text-primary underline"
+                                      >
+                                        Open
+                                      </a>
+                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() =>
+                                        handleRemoveExternalFile(job.id, file.id)
+                                      }
+                                    >
+                                      Remove
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-xs text-muted-foreground">
+                            Status history
+                          </div>
+                          {job.statusHistory && job.statusHistory.length > 0 ? (
+                            <div className="space-y-2">
+                              {(expandedExternalHistory[job.id]
+                                ? job.statusHistory
+                                : job.statusHistory.slice(0, 3)
+                              ).map((entry) => (
+                                <div
+                                  key={entry.id}
+                                  className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Badge
+                                      variant={externalJobStatusVariant(
+                                        entry.status,
+                                      )}
+                                    >
+                                      {externalJobStatusLabels[entry.status]}
+                                    </Badge>
+                                    <span className="text-muted-foreground">
+                                      {entry.changedBy}
+                                      {entry.changedByRole
+                                        ? ` (${entry.changedByRole})`
+                                        : ""}
+                                    </span>
+                                  </div>
+                                  <span className="text-muted-foreground">
+                                    {formatDate(entry.changedAt.slice(0, 10))}
+                                  </span>
+                                </div>
+                              ))}
+                              {job.statusHistory.length > 3 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedExternalHistory((prev) => ({
+                                      ...prev,
+                                      [job.id]: !prev[job.id],
+                                    }))
+                                  }
+                                  className="text-xs text-primary underline"
+                                >
+                                  {expandedExternalHistory[job.id]
+                                    ? "Show less"
+                                    : `Show all (${job.statusHistory.length})`}
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              No status updates yet.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          </div>
+        </TabsContent>
+
+        <TabsContent value="workflow">
+          <div className="space-y-6">
+          <Card>
+            <CardHeader>
               <CardTitle>Status History</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
@@ -968,6 +1634,52 @@ export default function OrderDetailPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Preparation Checklist</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {activeChecklistItems.length === 0 ? (
+                <p className="text-muted-foreground">
+                  No checklist items configured.
+                </p>
+              ) : (
+                activeChecklistItems.map((item) => (
+                  <label
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                  >
+                    <span className="font-medium">{item.label}</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(checklistState[item.id])}
+                      onChange={(event) =>
+                        handleChecklistToggle(item.id, event.target.checked)
+                      }
+                    />
+                  </label>
+                ))
+              )}
+              {canSendToEngineering && !canAdvanceToEngineering && (
+                <p className="text-xs text-muted-foreground">
+                  Complete required attachments, comments, and checklist items
+                  before sending to engineering.
+                </p>
+              )}
+              {canSendToProduction && !canAdvanceToProduction && (
+                <p className="text-xs text-muted-foreground">
+                  Complete required attachments, comments, and checklist items
+                  before sending to production.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          </div>
+        </TabsContent>
+
+        <TabsContent value="production">
+          <div className="space-y-6">
+          <Card>
+            <CardHeader>
               <CardTitle>Production Batches</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
@@ -998,8 +1710,9 @@ export default function OrderDetailPage() {
               )}
             </CardContent>
           </Card>
-        </div>
-      </div>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       <OrderModal
         open={isEditOpen}
