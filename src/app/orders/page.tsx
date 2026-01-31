@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { OrdersTable } from "./components/OrdersTable";
 import { OrdersToolbar } from "./components/OrdersToolbar";
 import type { Order, OrderStatus } from "@/types/orders";
@@ -13,6 +14,9 @@ import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { buildOrdersTemplate } from "@/lib/excel/ordersExcel";
 import { ImportWizard } from "./components/ImportWizard";
+import { usePartners } from "@/hooks/usePartners";
+import { supabase } from "@/lib/supabaseClient";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 export default function OrdersPage() {
   const {
@@ -25,6 +29,7 @@ export default function OrdersPage() {
   } = useOrders();
   const { nodes, levels } = useHierarchy();
   const user = useCurrentUser();
+  const { activeGroups, partners } = usePartners();
   const [searchQuery, setSearchQuery] = useState("");
   const roleStatusOptions = useMemo(() => {
     if (user.role === "Engineering") {
@@ -71,6 +76,12 @@ export default function OrdersPage() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
+  const [partnerGroupFilter, setPartnerGroupFilter] = useState("");
+  const [visibleOrders, setVisibleOrders] = useState<Order[]>([]);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [isListLoading, setIsListLoading] = useState(false);
+  const [listOffset, setListOffset] = useState(0);
+  const pageSize = 20;
 
   useEffect(() => {
     if (syncStartedRef.current) {
@@ -101,59 +112,9 @@ export default function OrdersPage() {
     setStatusFilter(defaultStatusFilter);
   }, [defaultStatusFilter]);
 
-  const roleFilteredOrders = useMemo(() => {
-    const allowedStatuses = roleStatusOptions
-      .map((option) => option.value)
-      .filter((value): value is OrderStatus => value !== "all");
-    if (roleStatusOptions.some((option) => option.value === "all")) {
-      return orders;
-    }
-    return orders.filter((order) => allowedStatuses.includes(order.status));
-  }, [orders, roleStatusOptions]);
-
-  const filteredOrders = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-    const nodeLabelMap = new Map(
-      nodes.map((node) => [node.id, node.label.toLowerCase()]),
-    );
-
-    return roleFilteredOrders.filter((order) => {
-      const hierarchyLabels = Object.values(order.hierarchy ?? {})
-        .map((value) => nodeLabelMap.get(value) ?? value ?? "")
-        .join(" ");
-      const matchesQuery =
-        normalizedQuery.length === 0 ||
-        order.orderNumber.toLowerCase().includes(normalizedQuery) ||
-        order.customerName.toLowerCase().includes(normalizedQuery) ||
-        hierarchyLabels.includes(normalizedQuery);
-
-      const matchesStatus =
-        statusFilter === "all" || order.status === statusFilter;
-
-      return matchesQuery && matchesStatus;
-    });
-  }, [nodes, roleFilteredOrders, searchQuery, statusFilter]);
-
-  const statusCounts = useMemo(() => {
-    const base = {
-      all: roleFilteredOrders.length,
-      draft: roleFilteredOrders.filter((order) => order.status === "draft")
-        .length,
-      ready_for_engineering: roleFilteredOrders.filter(
-        (order) => order.status === "ready_for_engineering",
-      ).length,
-      in_engineering: roleFilteredOrders.filter(
-        (order) => order.status === "in_engineering",
-      ).length,
-      engineering_blocked: roleFilteredOrders.filter(
-        (order) => order.status === "engineering_blocked",
-      ).length,
-      ready_for_production: roleFilteredOrders.filter(
-        (order) => order.status === "ready_for_production",
-      ).length,
-    };
-    return base;
-  }, [roleFilteredOrders]);
+  const [statusCounts, setStatusCounts] = useState<
+    Partial<Record<OrderStatus | "all", number>>
+  >({});
 
   const contractLevel = useMemo(
     () => levels.find((level) => level.key === "contract"),
@@ -171,7 +132,7 @@ export default function OrdersPage() {
       return [];
     }
     const groups = new Map<string, Order[]>();
-    filteredOrders.forEach((order) => {
+    visibleOrders.forEach((order) => {
       const contractId = order.hierarchy?.[contractLevel.id] ?? "none";
       const label =
         contractId === "none"
@@ -186,7 +147,207 @@ export default function OrdersPage() {
       label,
       orders,
     }));
-  }, [contractLabelMap, contractLevel, filteredOrders, groupByContract]);
+  }, [contractLabelMap, contractLevel, visibleOrders, groupByContract]);
+
+  async function getOrderIdsForPartnerGroup(groupId: string) {
+    if (!supabase || !user.tenantId) {
+      return [];
+    }
+    const partnerIds = partners
+      .filter((partner) => partner.groupId === groupId)
+      .map((partner) => partner.id);
+    if (partnerIds.length === 0) {
+      return [];
+    }
+    const { data, error } = await supabase
+      .from("external_jobs")
+      .select("order_id")
+      .in("partner_id", partnerIds)
+      .eq("tenant_id", user.tenantId);
+    if (error || !data) {
+      return [];
+    }
+    return Array.from(new Set(data.map((row) => row.order_id)));
+  }
+
+  useEffect(() => {
+    if (!supabase || user.loading || !user.isAuthenticated) {
+      setVisibleOrders(orders);
+      setTotalOrders(orders.length);
+      const fallbackCounts: Partial<Record<OrderStatus | "all", number>> = {};
+      roleStatusOptions.forEach((option) => {
+        if (option.value === "all") {
+          fallbackCounts.all = orders.length;
+          return;
+        }
+        fallbackCounts[option.value] = orders.filter(
+          (order) => order.status === option.value,
+        ).length;
+      });
+      setStatusCounts(fallbackCounts);
+      return;
+    }
+    let isMounted = true;
+
+    const fetchOrdersPage = async (offset: number, append: boolean) => {
+      setIsListLoading(true);
+      const query = supabase
+        .from("orders")
+        .select(
+          `
+          id,
+          order_number,
+          customer_name,
+          product_name,
+          quantity,
+          hierarchy,
+          due_date,
+          priority,
+          status,
+          assigned_engineer_name,
+          order_attachments ( id ),
+          order_comments ( id ),
+          external_jobs ( partner_id, due_date, status )
+        `,
+          { count: "exact" },
+        )
+        .order("created_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (user.tenantId) {
+        query.eq("tenant_id", user.tenantId);
+      }
+      if (statusFilter !== "all") {
+        query.eq("status", statusFilter);
+      }
+      if (searchQuery.trim().length > 0) {
+        const q = `%${searchQuery.trim()}%`;
+        query.or(
+          `order_number.ilike.${q},customer_name.ilike.${q},product_name.ilike.${q}`,
+        );
+      }
+      if (partnerGroupFilter) {
+        const orderIds = await getOrderIdsForPartnerGroup(partnerGroupFilter);
+        if (orderIds.length === 0) {
+          setVisibleOrders([]);
+          setTotalOrders(0);
+          setIsListLoading(false);
+          return;
+        }
+        query.in("id", orderIds);
+      }
+
+      const { data, error: fetchError, count } = await query;
+      if (!isMounted) {
+        return;
+      }
+      if (fetchError) {
+        setIsListLoading(false);
+        return;
+      }
+      const mapped = (data ?? []).map((row) => ({
+        id: row.id,
+        orderNumber: row.order_number,
+        customerName: row.customer_name,
+        productName: row.product_name ?? undefined,
+        quantity: row.quantity ?? undefined,
+        hierarchy: row.hierarchy ?? undefined,
+        dueDate: row.due_date,
+        priority: row.priority,
+        status: row.status,
+        assignedEngineerName: row.assigned_engineer_name ?? undefined,
+        attachments: row.order_attachments?.map((item) => ({
+          id: item.id,
+          name: "Attachment",
+          addedBy: "",
+          createdAt: "",
+        })),
+        comments: row.order_comments?.map((item) => ({
+          id: item.id,
+          message: "",
+          author: "",
+          createdAt: "",
+        })),
+        attachmentCount: row.order_attachments?.length ?? 0,
+        commentCount: row.order_comments?.length ?? 0,
+        externalJobs: row.external_jobs?.map((job, index) => ({
+          id: `${row.id}-ext-${index}`,
+          orderId: row.id,
+          partnerName: "Partner",
+          externalOrderNumber: "",
+          dueDate: job.due_date,
+          status: job.status,
+          createdAt: "",
+          partnerId: job.partner_id ?? undefined,
+        })),
+      })) as Order[];
+
+      setVisibleOrders((prev) => (append ? [...prev, ...mapped] : mapped));
+      setTotalOrders(count ?? mapped.length);
+      setIsListLoading(false);
+    };
+
+    void fetchOrdersPage(0, false);
+    setListOffset(0);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    orders,
+    partnerGroupFilter,
+    partners,
+    searchQuery,
+    roleStatusOptions,
+    statusFilter,
+    user.isAuthenticated,
+    user.loading,
+    user.tenantId,
+  ]);
+
+  useEffect(() => {
+    if (!supabase || user.loading || !user.isAuthenticated) {
+      return;
+    }
+    let isMounted = true;
+
+    const fetchCounts = async () => {
+      const baseQuery = supabase.from("orders");
+      const counts: Partial<Record<OrderStatus | "all", number>> = {};
+      const tasks = roleStatusOptions.map(async (option) => {
+        if (option.value === "all") {
+          let query = baseQuery
+            .select("id", { count: "exact", head: true })
+            .order("created_at", { ascending: false });
+          if (user.tenantId) {
+            query = query.eq("tenant_id", user.tenantId);
+          }
+          const { count } = await query;
+          counts.all = count ?? 0;
+          return;
+        }
+        let query = baseQuery
+          .select("id", { count: "exact", head: true })
+          .eq("status", option.value);
+        if (user.tenantId) {
+          query = query.eq("tenant_id", user.tenantId);
+        }
+        const { count } = await query;
+        counts[option.value] = count ?? 0;
+      });
+
+      await Promise.all(tasks);
+      if (!isMounted) {
+        return;
+      }
+      setStatusCounts(counts);
+    };
+
+    void fetchCounts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [roleStatusOptions, user.isAuthenticated, user.loading, user.tenantId]);
 
   async function handleCreateOrder(values: {
     orderNumber: string;
@@ -247,6 +408,9 @@ export default function OrdersPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Customer Orders</CardTitle>
           <div className="flex items-center gap-2">
+            <Link href="/orders/external">
+              <Button variant="outline">External Jobs</Button>
+            </Link>
             <Button
               variant="outline"
               onClick={async () => {
@@ -327,9 +491,15 @@ export default function OrdersPage() {
             }
             statusCounts={statusCounts}
             statusOptions={roleStatusOptions}
+            partnerGroupOptions={activeGroups.map((group) => ({
+              value: group.id,
+              label: group.name,
+            }))}
+            partnerGroupFilter={partnerGroupFilter}
+            onPartnerGroupChange={setPartnerGroupFilter}
           />
           <OrdersTable
-            orders={filteredOrders}
+            orders={visibleOrders}
             groups={groupByContract ? groupedOrders : undefined}
             onEdit={(order) => {
               setEditingOrder(order);
@@ -339,6 +509,111 @@ export default function OrdersPage() {
               setPendingDelete(order);
             }}
           />
+          {isListLoading ? (
+            <LoadingSpinner label="Loading orders..." />
+          ) : (
+            visibleOrders.length < totalOrders && (
+              <div className="flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    const nextOffset = listOffset + pageSize;
+                    setListOffset(nextOffset);
+                    setIsListLoading(true);
+                    if (!supabase || user.loading || !user.isAuthenticated) {
+                      setIsListLoading(false);
+                      return;
+                    }
+                    const query = supabase
+                      .from("orders")
+                      .select(
+                        `
+                        id,
+                        order_number,
+                        customer_name,
+                        product_name,
+                        quantity,
+                        hierarchy,
+                        due_date,
+                        priority,
+                        status,
+                        assigned_engineer_name,
+                        order_attachments ( id ),
+                        order_comments ( id ),
+                        external_jobs ( partner_id, due_date, status )
+                      `,
+                        { count: "exact" },
+                      )
+                      .order("created_at", { ascending: false })
+                      .range(nextOffset, nextOffset + pageSize - 1);
+                    if (user.tenantId) {
+                      query.eq("tenant_id", user.tenantId);
+                    }
+                    if (statusFilter !== "all") {
+                      query.eq("status", statusFilter);
+                    }
+                    if (searchQuery.trim().length > 0) {
+                      const q = `%${searchQuery.trim()}%`;
+                      query.or(
+                        `order_number.ilike.${q},customer_name.ilike.${q},product_name.ilike.${q}`,
+                      );
+                    }
+                    if (partnerGroupFilter) {
+                      const orderIds = await getOrderIdsForPartnerGroup(
+                        partnerGroupFilter,
+                      );
+                      if (orderIds.length === 0) {
+                        setIsListLoading(false);
+                        return;
+                      }
+                      query.in("id", orderIds);
+                    }
+                    const { data } = await query;
+                    const mapped = (data ?? []).map((row) => ({
+                      id: row.id,
+                      orderNumber: row.order_number,
+                      customerName: row.customer_name,
+                      productName: row.product_name ?? undefined,
+                      quantity: row.quantity ?? undefined,
+                      hierarchy: row.hierarchy ?? undefined,
+                      dueDate: row.due_date,
+                      priority: row.priority,
+                      status: row.status,
+                      assignedEngineerName: row.assigned_engineer_name ?? undefined,
+                      attachments: row.order_attachments?.map((item) => ({
+                        id: item.id,
+                        name: "Attachment",
+                        addedBy: "",
+                        createdAt: "",
+                      })),
+                      comments: row.order_comments?.map((item) => ({
+                        id: item.id,
+                        message: "",
+                        author: "",
+                        createdAt: "",
+                      })),
+                      attachmentCount: row.order_attachments?.length ?? 0,
+                      commentCount: row.order_comments?.length ?? 0,
+                      externalJobs: row.external_jobs?.map((job, index) => ({
+                        id: `${row.id}-ext-${index}`,
+                        orderId: row.id,
+                        partnerName: "Partner",
+                        externalOrderNumber: "",
+                        dueDate: job.due_date,
+                        status: job.status,
+                        createdAt: "",
+                        partnerId: job.partner_id ?? undefined,
+                      })),
+                    })) as Order[];
+                    setVisibleOrders((prev) => [...prev, ...mapped]);
+                    setIsListLoading(false);
+                  }}
+                >
+                  Load more
+                </Button>
+              </div>
+            )
+          )}
         </CardContent>
       </Card>
       <OrderModal

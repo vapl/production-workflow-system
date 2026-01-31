@@ -1,6 +1,7 @@
 "use client";
 
-import { SearchIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { SearchIcon, SlidersHorizontalIcon } from "lucide-react";
 
 import type { OrderStatus } from "@/types/orders";
 
@@ -16,6 +17,9 @@ interface OrdersToolbarProps {
   onToggleGroupByContract: () => void;
   statusCounts: Partial<Record<StatusFilter, number>>;
   statusOptions: StatusOption[];
+  partnerGroupOptions?: { value: string; label: string }[];
+  partnerGroupFilter?: string;
+  onPartnerGroupChange?: (value: string) => void;
 }
 
 export function OrdersToolbar({
@@ -27,7 +31,27 @@ export function OrdersToolbar({
   onToggleGroupByContract,
   statusCounts,
   statusOptions,
+  partnerGroupOptions = [],
+  partnerGroupFilter = "",
+  onPartnerGroupChange,
 }: OrdersToolbarProps) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!filtersOpen) {
+      return;
+    }
+    function handleClick(event: MouseEvent) {
+      const target = event.target as Node;
+      if (filtersRef.current && !filtersRef.current.contains(target)) {
+        setFiltersOpen(false);
+      }
+    }
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  }, [filtersOpen]);
+
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div className="relative w-full lg:flex-1">
@@ -41,46 +65,81 @@ export function OrdersToolbar({
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
-        {statusOptions.map((option) => {
-          const isActive = statusFilter === option.value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => onStatusChange(option.value)}
-              className={`h-9 rounded-full border px-4 text-sm font-medium transition ${
-                isActive
-                  ? "border-transparent bg-primary text-primary-foreground shadow-sm"
-                  : "border-border bg-background text-foreground hover:bg-muted/50"
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                {option.label}
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs ${
-                    isActive
-                      ? "bg-primary-foreground/15 text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {statusCounts[option.value] ?? 0}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={onToggleGroupByContract}
-          className={`h-9 rounded-full border px-4 text-sm font-medium transition ${
-            groupByContract
-              ? "border-transparent bg-primary text-primary-foreground shadow-sm"
-              : "border-border bg-background text-foreground hover:bg-muted/50"
-          }`}
-        >
-          Group by Contract
-        </button>
+      <div className="flex items-center gap-2 lg:shrink-0">
+        <div className="relative" ref={filtersRef}>
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((prev) => !prev)}
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium text-foreground shadow-sm transition hover:bg-muted/50"
+          >
+            <SlidersHorizontalIcon className="h-4 w-4" />
+            Filters
+          </button>
+          {filtersOpen && (
+            <div className="absolute right-0 top-11 z-50 w-[320px] rounded-xl border border-border bg-card p-4 shadow-lg">
+              <div className="space-y-3">
+                {partnerGroupOptions.length > 0 && onPartnerGroupChange && (
+                  <label className="space-y-2 text-sm font-medium">
+                    Partner group
+                    <select
+                      value={partnerGroupFilter}
+                      onChange={(event) => onPartnerGroupChange(event.target.value)}
+                      className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    >
+                      <option value="">All partner groups</option>
+                      {partnerGroupOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Status</div>
+                  <div className="flex flex-wrap gap-2">
+                    {statusOptions.map((option) => {
+                      const isActive = statusFilter === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => onStatusChange(option.value)}
+                          className={`h-8 rounded-full border px-3 text-xs font-medium transition ${
+                            isActive
+                              ? "border-transparent bg-primary text-primary-foreground shadow-sm"
+                              : "border-border bg-background text-foreground hover:bg-muted/50"
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            {option.label}
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[11px] ${
+                                isActive
+                                  ? "bg-primary-foreground/15 text-primary-foreground"
+                                  : "bg-muted text-muted-foreground"
+                              }`}
+                            >
+                              {statusCounts[option.value] ?? 0}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={groupByContract}
+                    onChange={onToggleGroupByContract}
+                  />
+                  Group by Contract
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

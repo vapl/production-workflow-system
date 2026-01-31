@@ -59,6 +59,13 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
           : order.status === "engineering_blocked"
             ? "status-engineering_blocked"
       : "status-ready_for_production";
+  const today = new Date().toISOString().slice(0, 10);
+  const hasOverdueExternal =
+    (order.externalJobs ?? []).some(
+      (job) =>
+        job.dueDate < today &&
+        !["delivered", "approved", "cancelled"].includes(job.status),
+    );
 
   const engineerInitials = order.assignedEngineerName
     ? order.assignedEngineerName
@@ -141,7 +148,16 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
         <Badge variant={priorityVariant}>{order.priority}</Badge>
       </TableCell>
       <TableCell>
-        <Badge variant={statusVariant}>{formatOrderStatus(order.status)}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={statusVariant}>
+            {formatOrderStatus(order.status)}
+          </Badge>
+          {hasOverdueExternal && (
+            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
+              Overdue
+            </span>
+          )}
+        </div>
       </TableCell>
       <TableCell className="text-right">
         <div className="inline-flex items-center gap-2">
@@ -154,11 +170,11 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
           </Link>
           <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <PaperclipIcon className="h-3.5 w-3.5" />
-            <span>{order.attachments?.length ?? 0}</span>
+            <span>{order.attachmentCount ?? order.attachments?.length ?? 0}</span>
           </div>
           <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <MessageCircleIcon className="h-3.5 w-3.5" />
-            <span>{order.comments?.length ?? 0}</span>
+            <span>{order.commentCount ?? order.comments?.length ?? 0}</span>
           </div>
           <div className="relative inline-flex">
             <Button
