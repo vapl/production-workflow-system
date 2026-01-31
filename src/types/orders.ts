@@ -5,6 +5,14 @@ export type OrderStatus =
   | "engineering_blocked"
   | "ready_for_production";
 
+export type ExternalJobStatus =
+  | "requested"
+  | "ordered"
+  | "in_progress"
+  | "delivered"
+  | "approved"
+  | "cancelled";
+
 export interface OrderAttachment {
   id: string;
   name: string;
@@ -14,6 +22,25 @@ export interface OrderAttachment {
   createdAt: string;
   size?: number;
   mimeType?: string;
+}
+
+export interface ExternalJobAttachment {
+  id: string;
+  name: string;
+  url?: string;
+  addedBy: string;
+  addedByRole?: string;
+  createdAt: string;
+  size?: number;
+  mimeType?: string;
+}
+
+export interface ExternalJobStatusEntry {
+  id: string;
+  status: ExternalJobStatus;
+  changedBy: string;
+  changedByRole?: string;
+  changedAt: string;
 }
 
 export interface OrderComment {
@@ -30,6 +57,20 @@ export interface OrderStatusEntry {
   changedBy: string;
   changedByRole?: string;
   changedAt: string;
+}
+
+export interface ExternalJob {
+  id: string;
+  orderId: string;
+  partnerId?: string;
+  partnerName: string;
+  externalOrderNumber: string;
+  quantity?: number;
+  dueDate: string;
+  status: ExternalJobStatus;
+  attachments?: ExternalJobAttachment[];
+  statusHistory?: ExternalJobStatusEntry[];
+  createdAt: string;
 }
 
 export interface Order {
@@ -56,4 +97,7 @@ export interface Order {
   syncedAt?: string;
   attachments?: OrderAttachment[];
   comments?: OrderComment[];
+  attachmentCount?: number;
+  commentCount?: number;
+  externalJobs?: ExternalJob[];
 }

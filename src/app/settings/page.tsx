@@ -68,6 +68,8 @@ export default function SettingsPage() {
     workStations,
     operators,
     stopReasons,
+    partners,
+    partnerGroups,
     addWorkStation,
     updateWorkStation,
     removeWorkStation,
@@ -77,6 +79,12 @@ export default function SettingsPage() {
     addStopReason,
     updateStopReason,
     removeStopReason,
+    addPartner,
+    updatePartner,
+    removePartner,
+    addPartnerGroup,
+    updatePartnerGroup,
+    removePartnerGroup,
   } = useSettingsData();
 
   const [stationName, setStationName] = useState("");
@@ -95,6 +103,13 @@ export default function SettingsPage() {
   const [editingStopReasonId, setEditingStopReasonId] = useState<string | null>(
     null,
   );
+  const [partnerName, setPartnerName] = useState("");
+  const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
+  const [partnerGroupId, setPartnerGroupId] = useState<string>("");
+  const [partnerGroupName, setPartnerGroupName] = useState("");
+  const [editingPartnerGroupId, setEditingPartnerGroupId] = useState<
+    string | null
+  >(null);
   const [users, setUsers] = useState<
     { id: string; name: string; role: UserRole }[]
   >([]);
@@ -110,6 +125,7 @@ export default function SettingsPage() {
     removeChecklistItem,
     addReturnReason,
     removeReturnReason,
+    updateExternalJobRule,
   } = useWorkflowRules();
   const [newChecklistLabel, setNewChecklistLabel] = useState("");
   const [newChecklistRequired, setNewChecklistRequired] = useState<
@@ -437,6 +453,67 @@ export default function SettingsPage() {
     }
     setEditingStopReasonId(reasonId);
     setStopReasonLabel(reason.label);
+  }
+
+  function resetPartnerForm() {
+    setPartnerName("");
+    setPartnerGroupId("");
+    setEditingPartnerId(null);
+  }
+
+  async function handleSavePartner() {
+    const trimmedName = partnerName.trim();
+    if (!trimmedName) {
+      return;
+    }
+    if (editingPartnerId) {
+      await updatePartner(editingPartnerId, {
+        name: trimmedName,
+        groupId: partnerGroupId || undefined,
+      });
+      resetPartnerForm();
+      return;
+    }
+    await addPartner(trimmedName, partnerGroupId || undefined);
+    resetPartnerForm();
+  }
+
+  function handleEditPartner(partnerId: string) {
+    const partner = partners.find((item) => item.id === partnerId);
+    if (!partner) {
+      return;
+    }
+    setEditingPartnerId(partnerId);
+    setPartnerName(partner.name);
+    setPartnerGroupId(partner.groupId ?? "");
+  }
+
+  function resetPartnerGroupForm() {
+    setPartnerGroupName("");
+    setEditingPartnerGroupId(null);
+  }
+
+  async function handleSavePartnerGroup() {
+    const trimmedName = partnerGroupName.trim();
+    if (!trimmedName) {
+      return;
+    }
+    if (editingPartnerGroupId) {
+      await updatePartnerGroup(editingPartnerGroupId, { name: trimmedName });
+      resetPartnerGroupForm();
+      return;
+    }
+    await addPartnerGroup(trimmedName);
+    resetPartnerGroupForm();
+  }
+
+  function handleEditPartnerGroup(groupId: string) {
+    const group = partnerGroups.find((item) => item.id === groupId);
+    if (!group) {
+      return;
+    }
+    setEditingPartnerGroupId(groupId);
+    setPartnerGroupName(group.name);
   }
 
   return (
@@ -947,6 +1024,175 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Partners</CardTitle>
+          <CardDescription>
+            Maintain external suppliers for outsourced steps.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(180px,0.7fr)_auto] lg:items-end">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium">Partner name</label>
+              <input
+                value={partnerName}
+                onChange={(event) => setPartnerName(event.target.value)}
+                placeholder="Baltic Glass"
+                className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium">Group</label>
+              <select
+                value={partnerGroupId}
+                onChange={(event) => setPartnerGroupId(event.target.value)}
+                className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+              >
+                <option value="">No group</option>
+                {partnerGroups
+                  .filter((group) => group.isActive)
+                  .map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={handleSavePartner}>
+                {editingPartnerId ? "Save partner" : "Add partner"}
+              </Button>
+              {editingPartnerId && (
+                <Button variant="outline" onClick={resetPartnerForm}>
+                  Cancel
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {partners.map((partner) => (
+              <div
+                key={partner.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+              >
+                <div>
+                  <div className="font-medium">{partner.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {partner.groupId
+                      ? partnerGroups.find((group) => group.id === partner.groupId)
+                          ?.name ?? "Group"
+                      : "No group"}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={partner.isActive}
+                      onChange={(event) =>
+                        updatePartner(partner.id, {
+                          isActive: event.target.checked,
+                        })
+                      }
+                    />
+                    Active
+                  </label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEditPartner(partner.id)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removePartner(partner.id)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {partners.length === 0 && (
+              <div className="text-sm text-muted-foreground">
+                No partners yet.
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <div className="text-sm font-medium">Partner groups</div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Group name</label>
+                <input
+                  value={partnerGroupName}
+                  onChange={(event) => setPartnerGroupName(event.target.value)}
+                  placeholder="Glass"
+                  className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleSavePartnerGroup}>
+                  {editingPartnerGroupId ? "Save group" : "Add group"}
+                </Button>
+                {editingPartnerGroupId && (
+                  <Button variant="outline" onClick={resetPartnerGroupForm}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="mt-3 space-y-2">
+              {partnerGroups.map((group) => (
+                <div
+                  key={group.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                >
+                  <div className="font-medium">{group.name}</div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={group.isActive}
+                        onChange={(event) =>
+                          updatePartnerGroup(group.id, {
+                            isActive: event.target.checked,
+                          })
+                        }
+                      />
+                      Active
+                    </label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleEditPartnerGroup(group.id)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removePartnerGroup(group.id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {partnerGroups.length === 0 && (
+                <div className="text-sm text-muted-foreground">
+                  No partner groups yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>User Access</CardTitle>
           <CardDescription>
             Manage who can access this workspace and their role.
@@ -1281,6 +1527,41 @@ export default function SettingsPage() {
               {rules.returnReasons.length === 0 && (
                 <div className="text-sm text-muted-foreground">
                   No return reasons yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="text-sm font-medium">External job rules</div>
+            <div className="space-y-2">
+              {rules.externalJobRules.map((rule) => (
+                <div
+                  key={rule.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                >
+                  <div className="font-medium capitalize">
+                    {rule.status.replace("_", " ")}
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>Min attachments</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={rule.minAttachments}
+                      onChange={(event) =>
+                        updateExternalJobRule(rule.id, {
+                          minAttachments: Number(event.target.value) || 0,
+                        })
+                      }
+                      className="h-9 w-20 rounded-md border border-border bg-input-background px-2 text-sm text-foreground"
+                    />
+                  </div>
+                </div>
+              ))}
+              {rules.externalJobRules.length === 0 && (
+                <div className="text-sm text-muted-foreground">
+                  No external job rules yet.
                 </div>
               )}
             </div>

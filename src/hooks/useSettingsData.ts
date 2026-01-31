@@ -5,7 +5,9 @@ import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import type { WorkStation } from "@/types/workstation";
 import type { Operator } from "@/types/operator";
+import type { Partner, PartnerGroup } from "@/types/partner";
 import { useNotifications } from "@/components/ui/Notifications";
+import { mockPartnerGroups, mockPartners } from "@/lib/data/mockData";
 
 export interface StopReason {
   id: string;
@@ -17,6 +19,8 @@ interface SettingsDataState {
   workStations: WorkStation[];
   operators: Operator[];
   stopReasons: StopReason[];
+  partners: Partner[];
+  partnerGroups: PartnerGroup[];
   isLoading: boolean;
   error?: string | null;
   addWorkStation: (payload: Omit<WorkStation, "id">) => Promise<void>;
@@ -31,6 +35,15 @@ interface SettingsDataState {
   addStopReason: (label: string) => Promise<void>;
   updateStopReason: (reasonId: string, patch: Partial<StopReason>) => Promise<void>;
   removeStopReason: (reasonId: string) => Promise<void>;
+  addPartner: (name: string, groupId?: string) => Promise<void>;
+  updatePartner: (partnerId: string, patch: Partial<Partner>) => Promise<void>;
+  removePartner: (partnerId: string) => Promise<void>;
+  addPartnerGroup: (name: string) => Promise<void>;
+  updatePartnerGroup: (
+    groupId: string,
+    patch: Partial<PartnerGroup>,
+  ) => Promise<void>;
+  removePartnerGroup: (groupId: string) => Promise<void>;
 }
 
 function mapWorkStation(row: {
@@ -75,22 +88,58 @@ function mapStopReason(row: {
   };
 }
 
+function mapPartner(row: {
+  id: string;
+  name: string;
+  group_id?: string | null;
+  is_active: boolean;
+}): Partner {
+  return {
+    id: row.id,
+    name: row.name,
+    groupId: row.group_id ?? undefined,
+    isActive: row.is_active,
+  };
+}
+
+function mapPartnerGroup(row: {
+  id: string;
+  name: string;
+  is_active: boolean;
+}): PartnerGroup {
+  return {
+    id: row.id,
+    name: row.name,
+    isActive: row.is_active,
+  };
+}
+
 export function useSettingsData(): SettingsDataState {
   const user = useCurrentUser();
   const { notify } = useNotifications();
   const [workStations, setWorkStations] = useState<WorkStation[]>([]);
   const [operators, setOperators] = useState<Operator[]>([]);
   const [stopReasons, setStopReasons] = useState<StopReason[]>([]);
+  const [partners, setPartners] = useState<Partner[]>([]);
+  const [partnerGroups, setPartnerGroups] = useState<PartnerGroup[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refreshAll = async () => {
     if (!supabase) {
+      setPartners(mockPartners);
+      setPartnerGroups(mockPartnerGroups);
       return;
     }
     setIsLoading(true);
     setError(null);
-    const [stationsResult, operatorsResult, reasonsResult] = await Promise.all([
+    const [
+      stationsResult,
+      operatorsResult,
+      reasonsResult,
+      partnersResult,
+      partnerGroupsResult,
+    ] = await Promise.all([
       supabase
         .from("workstations")
         .select("id, name, description, is_active")
@@ -103,13 +152,29 @@ export function useSettingsData(): SettingsDataState {
         .from("stop_reasons")
         .select("id, label, is_active")
         .order("created_at", { ascending: true }),
+      supabase
+        .from("partners")
+        .select("id, name, group_id, is_active")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("partner_groups")
+        .select("id, name, is_active")
+        .order("created_at", { ascending: true }),
     ]);
 
-    if (stationsResult.error || operatorsResult.error || reasonsResult.error) {
+    if (
+      stationsResult.error ||
+      operatorsResult.error ||
+      reasonsResult.error ||
+      partnersResult.error ||
+      partnerGroupsResult.error
+    ) {
       setError(
         stationsResult.error?.message ||
           operatorsResult.error?.message ||
           reasonsResult.error?.message ||
+          partnersResult.error?.message ||
+          partnerGroupsResult.error?.message ||
           "Failed to load settings data.",
       );
       setIsLoading(false);
@@ -119,11 +184,14 @@ export function useSettingsData(): SettingsDataState {
     setWorkStations((stationsResult.data ?? []).map(mapWorkStation));
     setOperators((operatorsResult.data ?? []).map(mapOperator));
     setStopReasons((reasonsResult.data ?? []).map(mapStopReason));
+    setPartners((partnersResult.data ?? []).map(mapPartner));
+    setPartnerGroups((partnerGroupsResult.data ?? []).map(mapPartnerGroup));
     setIsLoading(false);
   };
 
   useEffect(() => {
     if (!supabase) {
+      setPartners(mockPartners);
       return;
     }
     if (user.loading) {
@@ -133,6 +201,8 @@ export function useSettingsData(): SettingsDataState {
       setWorkStations([]);
       setOperators([]);
       setStopReasons([]);
+      setPartners([]);
+      setPartnerGroups([]);
       return;
     }
     void refreshAll();
@@ -143,6 +213,8 @@ export function useSettingsData(): SettingsDataState {
       workStations,
       operators,
       stopReasons,
+      partners,
+      partnerGroups,
       isLoading,
       error,
       addWorkStation: async (payload) => {
@@ -384,8 +456,181 @@ export function useSettingsData(): SettingsDataState {
         );
         notify({ title: "Stop reason deleted", variant: "success" });
       },
+      addPartner: async (name, groupId) => {
+        const trimmedName = name.trim();
+        if (!supabase || !user.tenantId || !trimmedName) {
+          return;
+        }
+        const { data, error: insertError } = await supabase
+          .from("partners")
+          .insert({
+            tenant_id: user.tenantId,
+            name: trimmedName,
+            group_id: groupId ?? null,
+            is_active: true,
+          })
+          .select("id, name, group_id, is_active")
+          .single();
+        if (insertError || !data) {
+          setError(insertError?.message ?? "Failed to add partner.");
+          notify({
+            title: "Partner not added",
+            description: insertError?.message,
+            variant: "error",
+          });
+          return;
+        }
+        setPartners((prev) => [...prev, mapPartner(data)]);
+        notify({ title: "Partner added", variant: "success" });
+      },
+      updatePartner: async (partnerId, patch) => {
+        if (!supabase) {
+          return;
+        }
+        const updatePayload: Record<string, unknown> = {};
+        if (patch.name !== undefined) updatePayload.name = patch.name;
+        if (patch.groupId !== undefined)
+          updatePayload.group_id = patch.groupId || null;
+        if (patch.isActive !== undefined)
+          updatePayload.is_active = patch.isActive;
+        const { data, error: updateError } = await supabase
+          .from("partners")
+          .update(updatePayload)
+          .eq("id", partnerId)
+          .select("id, name, group_id, is_active")
+          .single();
+        if (updateError || !data) {
+          setError(updateError?.message ?? "Failed to update partner.");
+          notify({
+            title: "Partner not updated",
+            description: updateError?.message,
+            variant: "error",
+          });
+          return;
+        }
+        setPartners((prev) =>
+          prev.map((partner) =>
+            partner.id === partnerId ? mapPartner(data) : partner,
+          ),
+        );
+        notify({ title: "Partner updated", variant: "success" });
+      },
+      removePartner: async (partnerId) => {
+        if (!supabase) {
+          return;
+        }
+        const { error: deleteError } = await supabase
+          .from("partners")
+          .delete()
+          .eq("id", partnerId);
+        if (deleteError) {
+          setError(deleteError.message);
+          notify({
+            title: "Partner not deleted",
+            description: deleteError.message,
+            variant: "error",
+          });
+          return;
+        }
+        setPartners((prev) => prev.filter((partner) => partner.id !== partnerId));
+        notify({ title: "Partner deleted", variant: "success" });
+      },
+      addPartnerGroup: async (name) => {
+        const trimmedName = name.trim();
+        if (!supabase || !user.tenantId || !trimmedName) {
+          return;
+        }
+        const { data, error: insertError } = await supabase
+          .from("partner_groups")
+          .insert({
+            tenant_id: user.tenantId,
+            name: trimmedName,
+            is_active: true,
+          })
+          .select("id, name, is_active")
+          .single();
+        if (insertError || !data) {
+          setError(insertError?.message ?? "Failed to add partner group.");
+          notify({
+            title: "Partner group not added",
+            description: insertError?.message,
+            variant: "error",
+          });
+          return;
+        }
+        setPartnerGroups((prev) => [...prev, mapPartnerGroup(data)]);
+        notify({ title: "Partner group added", variant: "success" });
+      },
+      updatePartnerGroup: async (groupId, patch) => {
+        if (!supabase) {
+          return;
+        }
+        const updatePayload: Record<string, unknown> = {};
+        if (patch.name !== undefined) updatePayload.name = patch.name;
+        if (patch.isActive !== undefined)
+          updatePayload.is_active = patch.isActive;
+        const { data, error: updateError } = await supabase
+          .from("partner_groups")
+          .update(updatePayload)
+          .eq("id", groupId)
+          .select("id, name, is_active")
+          .single();
+        if (updateError || !data) {
+          setError(updateError?.message ?? "Failed to update partner group.");
+          notify({
+            title: "Partner group not updated",
+            description: updateError?.message,
+            variant: "error",
+          });
+          return;
+        }
+        setPartnerGroups((prev) =>
+          prev.map((group) =>
+            group.id === groupId ? mapPartnerGroup(data) : group,
+          ),
+        );
+        notify({ title: "Partner group updated", variant: "success" });
+      },
+      removePartnerGroup: async (groupId) => {
+        if (!supabase) {
+          return;
+        }
+        const { error: deleteError } = await supabase
+          .from("partner_groups")
+          .delete()
+          .eq("id", groupId);
+        if (deleteError) {
+          setError(deleteError.message);
+          notify({
+            title: "Partner group not deleted",
+            description: deleteError.message,
+            variant: "error",
+          });
+          return;
+        }
+        setPartnerGroups((prev) =>
+          prev.filter((group) => group.id !== groupId),
+        );
+        setPartners((prev) =>
+          prev.map((partner) =>
+            partner.groupId === groupId
+              ? { ...partner, groupId: undefined }
+              : partner,
+          ),
+        );
+        notify({ title: "Partner group deleted", variant: "success" });
+      },
     }),
-    [workStations, operators, stopReasons, isLoading, error, user.tenantId],
+    [
+      workStations,
+      operators,
+      stopReasons,
+      partners,
+      partnerGroups,
+      isLoading,
+      error,
+      user.tenantId,
+    ],
   );
 
   return value;

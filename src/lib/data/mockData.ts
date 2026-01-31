@@ -3,6 +3,7 @@ import type { Batch } from "@/types/batch";
 import type { Operator } from "@/types/operator";
 import type { WorkStation } from "@/types/workstation";
 import type { ConstructionItem } from "@/types/constructionItem";
+import type { Partner, PartnerGroup } from "@/types/partner";
 
 export const mockWorkStations: WorkStation[] = [
   { id: "ws-1", name: "Cutting", description: "Sawing and prep", isActive: true },
@@ -16,6 +17,19 @@ export const mockOperators: Operator[] = [
   { id: "op-2", name: "Andris", role: "Operator", stationId: "ws-2", isActive: true },
   { id: "op-3", name: "Liga", role: "Assembler", stationId: "ws-3", isActive: true },
   { id: "op-4", name: "Marta", role: "Finisher", stationId: "ws-4", isActive: true },
+];
+
+export const mockPartnerGroups: PartnerGroup[] = [
+  { id: "pg-1", name: "Glass", isActive: true },
+  { id: "pg-2", name: "Coatings", isActive: true },
+  { id: "pg-3", name: "Metal parts", isActive: true },
+];
+
+export const mockPartners: Partner[] = [
+  { id: "p-1", name: "Baltic Glass", groupId: "pg-1", isActive: true },
+  { id: "p-2", name: "Glassens", groupId: "pg-1", isActive: true },
+  { id: "p-3", name: "Nordic Coatings", groupId: "pg-2", isActive: true },
+  { id: "p-4", name: "Metalworks GmbH", groupId: "pg-3", isActive: true },
 ];
 
 export const mockConstructionItems: ConstructionItem[] = [
@@ -89,6 +103,19 @@ export const mockOrders: Order[] = [
     priority: "normal",
     status: "draft",
     source: "manual",
+    externalJobs: [
+      {
+        id: "ext-1",
+        orderId: "o-1",
+        partnerName: "Baltic Glass",
+        externalOrderNumber: "BG-5512",
+        quantity: 1,
+        dueDate: "2026-02-01",
+        status: "ordered",
+        createdAt: "2026-01-29",
+        attachments: [],
+      },
+    ],
   },
   {
     id: "o-2",
