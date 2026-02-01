@@ -15,6 +15,8 @@ export function KPIStats({
     activeBatches: number;
     completedToday: number;
     lateBatches: number;
+    dueSoonOrders: number;
+    overdueOrders: number;
   };
 }) {
   const {
@@ -23,10 +25,12 @@ export function KPIStats({
     activeBatches,
     completedToday,
     lateBatches,
+    dueSoonOrders,
+    overdueOrders,
   } = kpis;
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Active Orders</CardTitle>
@@ -77,6 +81,36 @@ export function KPIStats({
             </div>
             <p className="text-xs text-muted-foreground">
               Batches over estimate
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm">Due Soon</CardTitle>
+            <ClockIcon className="w-4 h-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">
+              {dueSoonOrders}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Orders approaching due date
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm">Overdue</CardTitle>
+            <AlertTriangleIcon className="w-4 h-4 text-rose-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-rose-600">
+              {overdueOrders}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Orders past due date
             </p>
           </CardContent>
         </Card>
