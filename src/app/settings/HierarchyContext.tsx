@@ -36,9 +36,8 @@ interface HierarchyContextValue {
 
 const HierarchyContext = createContext<HierarchyContextValue | null>(null);
 
-const fallbackLevels: HierarchyLevel[] = [
+const defaultLevelTemplates: Omit<HierarchyLevel, "id">[] = [
   {
-    id: "level-contract",
     name: "Contract",
     key: "contract",
     order: 1,
@@ -47,8 +46,7 @@ const fallbackLevels: HierarchyLevel[] = [
     showInTable: true,
   },
   {
-    id: "level-category",
-    name: "Category",
+    name: "Product category",
     key: "category",
     order: 2,
     isRequired: false,
@@ -56,7 +54,6 @@ const fallbackLevels: HierarchyLevel[] = [
     showInTable: true,
   },
   {
-    id: "level-product",
     name: "Product",
     key: "product",
     order: 3,
@@ -64,7 +61,28 @@ const fallbackLevels: HierarchyLevel[] = [
     isActive: true,
     showInTable: true,
   },
+  {
+    name: "Sales management",
+    key: "manager",
+    order: 4,
+    isRequired: false,
+    isActive: true,
+    showInTable: false,
+  },
+  {
+    name: "Engineering",
+    key: "engineer",
+    order: 5,
+    isRequired: false,
+    isActive: true,
+    showInTable: false,
+  },
 ];
+
+const fallbackLevels: HierarchyLevel[] = defaultLevelTemplates.map((level) => ({
+  ...level,
+  id: `level-${level.key}`,
+}));
 
 const fallbackNodes: HierarchyNode[] = [
   {
@@ -166,7 +184,32 @@ export function HierarchyProvider({
     if (nodeError) {
       return;
     }
-    setLevels((levelData ?? []).map(mapLevel));
+    let nextLevels = (levelData ?? []).map(mapLevel);
+    const existingKeys = new Set(nextLevels.map((level) => level.key));
+    const missingDefaults = defaultLevelTemplates.filter(
+      (level) => !existingKeys.has(level.key),
+    );
+    if (missingDefaults.length > 0 && user.tenantId) {
+      const { data: inserted, error: insertError } = await supabase
+        .from("hierarchy_levels")
+        .insert(
+          missingDefaults.map((level) => ({
+            tenant_id: user.tenantId,
+            name: level.name,
+            key: level.key,
+            sort_order: level.order,
+            is_required: level.isRequired,
+            is_active: level.isActive,
+            show_in_table: level.showInTable,
+          })),
+        )
+        .select("id, name, key, sort_order, is_required, is_active, show_in_table");
+      if (!insertError && inserted) {
+        nextLevels = [...nextLevels, ...inserted.map(mapLevel)];
+        nextLevels.sort((a, b) => a.order - b.order);
+      }
+    }
+    setLevels(nextLevels);
     setNodes((nodeData ?? []).map(mapNode));
   };
 

@@ -9,11 +9,16 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { useHierarchy } from "./HierarchyContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
 import { useCurrentUser, type UserRole } from "@/contexts/UserContext";
 import { supabase } from "@/lib/supabaseClient";
-import { useWorkflowRules, type WorkflowTargetStatus } from "@/contexts/WorkflowContext";
+import {
+  useWorkflowRules,
+  type WorkflowTargetStatus,
+} from "@/contexts/WorkflowContext";
+import type { OrderStatus } from "@/types/orders";
 
 function slugify(value: string) {
   return value
@@ -30,6 +35,30 @@ const integrations = [
   { id: "int-4", name: "QuickBooks", status: "Coming soon" },
   { id: "int-5", name: "Custom API", status: "Coming soon" },
 ];
+
+const workflowStatusOptions: { value: OrderStatus; label: string }[] = [
+  { value: "draft", label: "Draft" },
+  { value: "ready_for_engineering", label: "Ready for engineering" },
+  { value: "in_engineering", label: "In engineering" },
+  { value: "engineering_blocked", label: "Engineering blocked" },
+  { value: "ready_for_production", label: "Ready for production" },
+];
+
+const lockedLevelKeys = new Set([
+  "contract",
+  "category",
+  "product",
+  "manager",
+  "engineer",
+]);
+
+const defaultLevelDescriptions: Record<string, string> = {
+  contract: "Customer or project contract identifier.",
+  category: "High-level product category or group.",
+  product: "Specific product or item type.",
+  manager: "Sales/lead owner responsible for the order.",
+  engineer: "Assigned engineer or designer handling the order.",
+};
 
 export default function SettingsPage() {
   const currentUser = useCurrentUser();
@@ -48,6 +77,13 @@ export default function SettingsPage() {
     () => [...levels].sort((a, b) => a.order - b.order),
     [levels],
   );
+  const selectableLevels = useMemo(
+    () =>
+      sortedLevels.filter(
+        (level) => level.key !== "engineer" && level.key !== "manager",
+      ),
+    [sortedLevels],
+  );
 
   const [levelName, setLevelName] = useState("");
   const [levelOrder, setLevelOrder] = useState<number>(sortedLevels.length + 1);
@@ -57,7 +93,7 @@ export default function SettingsPage() {
   const [editingLevelId, setEditingLevelId] = useState<string | null>(null);
 
   const [selectedLevelId, setSelectedLevelId] = useState<string>(
-    sortedLevels[0]?.id ?? "",
+    selectableLevels[0]?.id ?? "",
   );
   const [nodeLabel, setNodeLabel] = useState("");
   const [nodeCode, setNodeCode] = useState("");
@@ -132,19 +168,128 @@ export default function SettingsPage() {
     WorkflowTargetStatus[]
   >(["ready_for_engineering"]);
   const [newReturnReason, setNewReturnReason] = useState("");
+  const [statusLabelDrafts, setStatusLabelDrafts] = useState<Record<OrderStatus, string>>(rules.statusLabels);
+  const [statusLabelState, setStatusLabelState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [statusLabelMessage, setStatusLabelMessage] = useState("");
+  const [assignmentLabelDrafts, setAssignmentLabelDrafts] = useState({
+    engineer: rules.assignmentLabels?.engineer ?? "Engineer",
+    manager: rules.assignmentLabels?.manager ?? "Manager",
+  });
+  const [assignmentLabelState, setAssignmentLabelState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [assignmentLabelMessage, setAssignmentLabelMessage] = useState("");
+  const hasStatusLabelChanges = useMemo(() => {
+    const keys = new Set([
+      ...Object.keys(rules.statusLabels),
+      ...Object.keys(statusLabelDrafts),
+    ]);
+    for (const key of keys) {
+      if ((rules.statusLabels as Record<string, string>)[key] !==
+          (statusLabelDrafts as Record<string, string>)[key]) {
+        return true;
+      }
+    }
+    return false;
+  }, [rules.statusLabels, statusLabelDrafts]);
+  const hasAssignmentLabelChanges =
+    assignmentLabelDrafts.engineer.trim() !==
+      (rules.assignmentLabels?.engineer ?? "Engineer") ||
+    assignmentLabelDrafts.manager.trim() !==
+      (rules.assignmentLabels?.manager ?? "Manager");
 
   useEffect(() => {
-    if (!selectedLevelId && sortedLevels[0]?.id) {
-      setSelectedLevelId(sortedLevels[0].id);
+    setStatusLabelDrafts(rules.statusLabels);
+  }, [rules.statusLabels]);
+  useEffect(() => {
+    setAssignmentLabelDrafts({
+      engineer: rules.assignmentLabels?.engineer ?? "Engineer",
+      manager: rules.assignmentLabels?.manager ?? "Manager",
+    });
+  }, [rules.assignmentLabels]);
+
+  async function handleSaveStatusLabels() {
+    if (!hasStatusLabelChanges) {
+      setStatusLabelState("idle");
+      setStatusLabelMessage("");
+      return;
+    }
+    setStatusLabelState("saving");
+    setStatusLabelMessage("");
+    setRules({ statusLabels: statusLabelDrafts });
+    if (!supabase || !currentUser.tenantId) {
+      setStatusLabelState("saved");
+      setStatusLabelMessage("Saved locally.");
+      return;
+    }
+    const { error } = await supabase.from("workflow_rules").upsert({
+      tenant_id: currentUser.tenantId,
+      status_labels: statusLabelDrafts,
+    });
+    if (error) {
+      setStatusLabelState("error");
+      setStatusLabelMessage(error.message);
+      return;
+    }
+    setStatusLabelState("saved");
+    setStatusLabelMessage("Status labels saved.");
+  }
+
+  async function handleSaveAssignmentLabels() {
+    if (!hasAssignmentLabelChanges) {
+      setAssignmentLabelState("idle");
+      setAssignmentLabelMessage("");
+      return;
+    }
+    const nextEngineer =
+      assignmentLabelDrafts.engineer.trim() || "Engineer";
+    const nextManager =
+      assignmentLabelDrafts.manager.trim() || "Manager";
+    setAssignmentLabelState("saving");
+    setAssignmentLabelMessage("");
+    setRules({
+      assignmentLabels: {
+        ...rules.assignmentLabels,
+        engineer: nextEngineer,
+        manager: nextManager,
+      },
+    });
+    if (!supabase || !currentUser.tenantId) {
+      setAssignmentLabelState("saved");
+      setAssignmentLabelMessage("Saved locally.");
+      return;
+    }
+    const { error } = await supabase.from("workflow_rules").upsert({
+      tenant_id: currentUser.tenantId,
+      assignment_labels: {
+        ...rules.assignmentLabels,
+        engineer: nextEngineer,
+        manager: nextManager,
+      },
+    });
+    if (error) {
+      setAssignmentLabelState("error");
+      setAssignmentLabelMessage(error.message);
+      return;
+    }
+    setAssignmentLabelState("saved");
+    setAssignmentLabelMessage("Assignment labels saved.");
+  }
+
+  useEffect(() => {
+    if (!selectedLevelId && selectableLevels[0]?.id) {
+      setSelectedLevelId(selectableLevels[0].id);
       return;
     }
     if (
       selectedLevelId &&
       !levels.some((level) => level.id === selectedLevelId)
     ) {
-      setSelectedLevelId(sortedLevels[0]?.id ?? "");
+      setSelectedLevelId(selectableLevels[0]?.id ?? "");
     }
-  }, [levels, selectedLevelId, sortedLevels]);
+  }, [levels, selectableLevels, selectedLevelId]);
 
   useEffect(() => {
     setLevelOrder(sortedLevels.length + 1);
@@ -234,10 +379,10 @@ export default function SettingsPage() {
   const selectedLevelOrder = selectedLevel?.order ?? 0;
   const parentLevel = useMemo(
     () =>
-      sortedLevels
+      selectableLevels
         .filter((level) => level.order < selectedLevelOrder && level.isActive)
         .at(-1),
-    [selectedLevelOrder, sortedLevels],
+    [selectableLevels, selectedLevelOrder],
   );
 
   const parentNodes = parentLevel
@@ -518,7 +663,19 @@ export default function SettingsPage() {
 
   return (
     <section className="space-y-6">
-      <Card>
+      <Tabs defaultValue="structure" className="space-y-6">
+        <TabsList className="w-full justify-start overflow-x-auto flex-nowrap">
+          <TabsTrigger value="structure">Structure</TabsTrigger>
+          <TabsTrigger value="operations">Operations</TabsTrigger>
+          <TabsTrigger value="partners">Partners</TabsTrigger>
+          <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="workflow">Workflow</TabsTrigger>
+          <TabsTrigger value="integrations">Integrations</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="structure">
+          <div className="space-y-6">
+<Card>
         <CardHeader>
           <CardTitle>Hierarchy Levels</CardTitle>
           <CardDescription>
@@ -526,20 +683,20 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(120px,0.5fr)_minmax(240px,1fr)_auto] lg:items-end">
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Level name</label>
-              <input
-                value={levelName}
-                onChange={(event) => {
-                  setLevelName(event.target.value);
-                }}
-                placeholder="Contract"
-                className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Order</label>
+            <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(120px,0.5fr)_minmax(240px,1fr)_auto] lg:items-end">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Level name</label>
+                <input
+                  value={levelName}
+                  onChange={(event) => {
+                    setLevelName(event.target.value);
+                  }}
+                  placeholder="Contract"
+                  className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Order</label>
               <input
                 type="number"
                 min={1}
@@ -550,43 +707,50 @@ export default function SettingsPage() {
                 className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
               />
             </div>
-          <div className="flex flex-wrap items-center gap-4 pt-2">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={levelRequired}
-                onChange={(event) => setLevelRequired(event.target.checked)}
-              />
-              Required
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={levelActive}
-                onChange={(event) => setLevelActive(event.target.checked)}
-              />
-              Active
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={levelShowInTable}
-                onChange={(event) => setLevelShowInTable(event.target.checked)}
-              />
-              Show in table
-            </label>
-          </div>
-            <div className="flex gap-2">
-              <Button onClick={handleSaveLevel}>
-                {editingLevelId ? "Save level" : "Add level"}
-              </Button>
-              {editingLevelId && (
-                <Button variant="outline" onClick={resetLevelForm}>
-                  Cancel
-                </Button>
-              )}
+            <div className="flex flex-wrap items-center gap-4 pt-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={levelRequired}
+                  onChange={(event) => setLevelRequired(event.target.checked)}
+                />
+                Required
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={levelActive}
+                  onChange={(event) => setLevelActive(event.target.checked)}
+                />
+                Active
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={levelShowInTable}
+                  onChange={(event) =>
+                    setLevelShowInTable(event.target.checked)
+                  }
+                />
+                Show in table
+              </label>
             </div>
-          </div>
+              <div className="flex gap-2">
+                <Button onClick={handleSaveLevel}>
+                  {editingLevelId ? "Save level" : "Add level"}
+                </Button>
+                {editingLevelId && (
+                  <Button variant="outline" onClick={resetLevelForm}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Default meanings (do not repurpose): Contract, Product category,
+              Product, Sales management, Engineering. You can rename the labels,
+              but keep their meaning.
+            </p>
 
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-sm">
@@ -601,9 +765,24 @@ export default function SettingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedLevels.map((level) => (
-                  <tr key={level.id} className="border-t border-border">
-                    <td className="px-4 py-2 font-medium">{level.name}</td>
+                  {sortedLevels.map((level) => (
+                    <tr key={level.id} className="border-t border-border">
+                      <td className="px-4 py-2">
+                        <div className="font-medium">
+                          {level.name}
+                          {lockedLevelKeys.has(level.key) && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              Default
+                            </span>
+                          )}
+                        </div>
+                        {lockedLevelKeys.has(level.key) &&
+                          defaultLevelDescriptions[level.key] && (
+                            <div className="text-xs text-muted-foreground">
+                              {defaultLevelDescriptions[level.key]}
+                            </div>
+                          )}
+                      </td>
                     <td className="px-4 py-2">{level.order}</td>
                     <td className="px-4 py-2">
                       <label className="flex items-center gap-2 text-sm">
@@ -656,13 +835,14 @@ export default function SettingsPage() {
                         >
                           Edit
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeLevel(level.id)}
-                        >
-                          Remove
-                        </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeLevel(level.id)}
+                            disabled={lockedLevelKeys.has(level.key)}
+                          >
+                            Remove
+                          </Button>
                       </div>
                     </td>
                   </tr>
@@ -683,7 +863,7 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+<Card>
         <CardHeader>
           <CardTitle>Reference Lists</CardTitle>
           <CardDescription>
@@ -694,16 +874,16 @@ export default function SettingsPage() {
           <div className="flex flex-wrap gap-3">
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Level</label>
-              <select
-                value={selectedLevelId}
-                onChange={(event) => setSelectedLevelId(event.target.value)}
-                className="h-10 min-w-50 rounded-lg border border-border bg-input-background px-3 text-sm"
-              >
-                {sortedLevels.map((level) => (
-                  <option key={level.id} value={level.id}>
-                    {level.name}
-                  </option>
-                ))}
+                <select
+                  value={selectedLevelId}
+                  onChange={(event) => setSelectedLevelId(event.target.value)}
+                  className="h-10 min-w-50 rounded-lg border border-border bg-input-background px-3 text-sm"
+                >
+                  {selectableLevels.map((level) => (
+                    <option key={level.id} value={level.id}>
+                      {level.name}
+                    </option>
+                  ))}
               </select>
             </div>
             {parentLevel && (
@@ -816,7 +996,12 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
-      <div className="grid gap-6 lg:grid-cols-2">
+          </div>
+        </TabsContent>
+
+        <TabsContent value="operations">
+          <div className="space-y-6">
+<div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Work Stations</CardTitle>
@@ -1022,7 +1207,85 @@ export default function SettingsPage() {
         </Card>
       </div>
 
-      <Card>
+      
+
+<Card>
+          <CardHeader>
+            <CardTitle>Stop Reasons</CardTitle>
+            <CardDescription>
+              Reasons appear when a station pauses a task.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto] lg:items-end">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Reason</label>
+                <input
+                  value={stopReasonLabel}
+                  onChange={(event) => setStopReasonLabel(event.target.value)}
+                  placeholder="Missing material"
+                  className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleSaveStopReason}>
+                  {editingStopReasonId ? "Save reason" : "Add reason"}
+                </Button>
+                {editingStopReasonId && (
+                  <Button variant="outline" onClick={resetStopReasonForm}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {stopReasons.map((reason) => (
+                <div
+                  key={reason.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                >
+                  <div className="font-medium">{reason.label}</div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={reason.isActive}
+                        onChange={(event) =>
+                          updateStopReason(reason.id, {
+                            isActive: event.target.checked,
+                          })
+                        }
+                      />
+                      Active
+                    </label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleEditStopReason(reason.id)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeStopReason(reason.id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        
+          </div>
+        </TabsContent>
+
+        <TabsContent value="partners">
+<Card>
         <CardHeader>
           <CardTitle>Partners</CardTitle>
           <CardDescription>
@@ -1079,8 +1342,9 @@ export default function SettingsPage() {
                   <div className="font-medium">{partner.name}</div>
                   <div className="text-xs text-muted-foreground">
                     {partner.groupId
-                      ? partnerGroups.find((group) => group.id === partner.groupId)
-                          ?.name ?? "Group"
+                      ? (partnerGroups.find(
+                          (group) => group.id === partner.groupId,
+                        )?.name ?? "Group")
                       : "No group"}
                   </div>
                 </div>
@@ -1190,8 +1454,10 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+        </TabsContent>
 
-      <Card>
+        <TabsContent value="users">
+<Card>
         <CardHeader>
           <CardTitle>User Access</CardTitle>
           <CardDescription>
@@ -1284,8 +1550,10 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+        </TabsContent>
 
-      <Card>
+        <TabsContent value="workflow">
+<Card>
         <CardHeader>
           <CardTitle>Workflow Rules</CardTitle>
           <CardDescription>
@@ -1324,14 +1592,179 @@ export default function SettingsPage() {
                 className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
               />
             </label>
+            <label className="space-y-2 text-sm font-medium">
+              Due soon threshold (days)
+              <input
+                type="number"
+                min={0}
+                value={rules.dueSoonDays}
+                onChange={(event) =>
+                  setRules({
+                    dueSoonDays: Math.max(0, Number(event.target.value) || 0),
+                  })
+                }
+                className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+              />
+            </label>
           </div>
+          <div className="space-y-2 text-sm">
+            <label className="flex items-center gap-2 font-medium">
+              <input
+                type="checkbox"
+                checked={rules.dueIndicatorEnabled}
+                onChange={(event) =>
+                  setRules({ dueIndicatorEnabled: event.target.checked })
+                }
+              />
+              Enable due date indicators
+            </label>
+            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              {workflowStatusOptions.map((option) => {
+                const isChecked = rules.dueIndicatorStatuses.includes(
+                  option.value,
+                );
+                return (
+                  <label key={option.value} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      disabled={!rules.dueIndicatorEnabled}
+                      onChange={(event) => {
+                        setRules({
+                          dueIndicatorStatuses: event.target.checked
+                            ? [...rules.dueIndicatorStatuses, option.value]
+                            : rules.dueIndicatorStatuses.filter(
+                                (status) => status !== option.value,
+                              ),
+                        });
+                      }}
+                    />
+                    {option.label}
+                  </label>
+                );
+              })}
+            </div>
+            </div>
+            <div className="space-y-3">
+              <div className="text-sm font-medium">Assignment labels</div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-2 text-sm font-medium">
+                  Engineer
+                  <input
+                    value={assignmentLabelDrafts.engineer}
+                    onChange={(event) =>
+                      setAssignmentLabelDrafts((prev) => ({
+                        ...prev,
+                        engineer: event.target.value,
+                      }))
+                    }
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  Manager
+                  <input
+                    value={assignmentLabelDrafts.manager}
+                    onChange={(event) =>
+                      setAssignmentLabelDrafts((prev) => ({
+                        ...prev,
+                        manager: event.target.value,
+                      }))
+                    }
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setAssignmentLabelDrafts({
+                      engineer: rules.assignmentLabels?.engineer ?? "Engineer",
+                      manager: rules.assignmentLabels?.manager ?? "Manager",
+                    })
+                  }
+                  disabled={!hasAssignmentLabelChanges}
+                >
+                  Reset
+                </Button>
+                <Button
+                  onClick={handleSaveAssignmentLabels}
+                  disabled={!hasAssignmentLabelChanges || assignmentLabelState === "saving"}
+                >
+                  {assignmentLabelState === "saving" ? "Saving..." : "Save assignment labels"}
+                </Button>
+                {assignmentLabelState !== "idle" && assignmentLabelMessage && (
+                  <span
+                    className={`text-xs ${
+                      assignmentLabelState === "error"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {assignmentLabelMessage}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="text-sm font-medium">Status labels</div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {workflowStatusOptions.map((option) => (
+                  <label
+                    key={option.value}
+                    className="space-y-2 text-sm font-medium"
+                  >
+                    {option.label}
+                    <input
+                      value={statusLabelDrafts[option.value] ?? option.label}
+                      onChange={(event) =>
+                        setStatusLabelDrafts({
+                          ...statusLabelDrafts,
+                          [option.value]: event.target.value,
+                        })
+                      }
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setStatusLabelDrafts(rules.statusLabels)}
+                  disabled={!hasStatusLabelChanges}
+                >
+                  Reset
+                </Button>
+                <Button
+                  onClick={handleSaveStatusLabels}
+                  disabled={!hasStatusLabelChanges || statusLabelState === "saving"}
+                >
+                  {statusLabelState === "saving" ? "Saving..." : "Save status labels"}
+                </Button>
+                {statusLabelState !== "idle" && statusLabelMessage && (
+                  <span
+                    className={`text-xs ${
+                      statusLabelState === "error"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {statusLabelMessage}
+                  </span>
+                )}
+              </div>
+            </div>
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
                 checked={rules.requireCommentForEngineering}
                 onChange={(event) =>
-                  setRules({ requireCommentForEngineering: event.target.checked })
+                  setRules({
+                    requireCommentForEngineering: event.target.checked,
+                  })
                 }
               />
               Require comment before engineering
@@ -1341,7 +1774,9 @@ export default function SettingsPage() {
                 type="checkbox"
                 checked={rules.requireCommentForProduction}
                 onChange={(event) =>
-                  setRules({ requireCommentForProduction: event.target.checked })
+                  setRules({
+                    requireCommentForProduction: event.target.checked,
+                  })
                 }
               />
               Require comment before production
@@ -1358,6 +1793,14 @@ export default function SettingsPage() {
                   placeholder="Checklist item"
                   className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                 />
+                <Button
+                  onClick={() => {
+                    addChecklistItem(newChecklistLabel, newChecklistRequired);
+                    setNewChecklistLabel("");
+                  }}
+                >
+                  Add item
+                </Button>
                 <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                   <label className="flex items-center gap-2">
                     <input
@@ -1401,14 +1844,6 @@ export default function SettingsPage() {
                   </label>
                 </div>
               </div>
-              <Button
-                onClick={() => {
-                  addChecklistItem(newChecklistLabel, newChecklistRequired);
-                  setNewChecklistLabel("");
-                }}
-              >
-                Add item
-              </Button>
             </div>
             <div className="space-y-2">
               {rules.checklistItems.map((item) => (
@@ -1568,106 +2003,38 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Stop Reasons</CardTitle>
-            <CardDescription>
-              Reasons appear when a station pauses a task.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto] lg:items-end">
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Reason</label>
-                <input
-                  value={stopReasonLabel}
-                  onChange={(event) => setStopReasonLabel(event.target.value)}
-                  placeholder="Missing material"
-                  className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleSaveStopReason}>
-                  {editingStopReasonId ? "Save reason" : "Add reason"}
-                </Button>
-                {editingStopReasonId && (
-                  <Button variant="outline" onClick={resetStopReasonForm}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
-            </div>
+        </TabsContent>
 
-            <div className="space-y-2">
-              {stopReasons.map((reason) => (
+        <TabsContent value="integrations">
+          <Card>
+            <CardHeader>
+              <CardTitle>Integrations</CardTitle>
+              <CardDescription>
+                Orders can sync from accounting tools to PWS - coming soon.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {integrations.map((integration) => (
                 <div
-                  key={reason.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                  key={integration.id}
+                  className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
                 >
-                  <div className="font-medium">{reason.label}</div>
-                  <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={reason.isActive}
-                        onChange={(event) =>
-                          updateStopReason(reason.id, {
-                            isActive: event.target.checked,
-                          })
-                        }
-                      />
-                      Active
-                    </label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEditStopReason(reason.id)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeStopReason(reason.id)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
+                  <div className="font-medium">{integration.name}</div>
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                    {integration.status}
+                  </span>
                 </div>
               ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Integrations</CardTitle>
-            <CardDescription>
-              Orders can sync from accounting tools to PWS - coming soon.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {integrations.map((integration) => (
-              <div
-                key={integration.id}
-                className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
-              >
-                <div className="font-medium">{integration.name}</div>
-                <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                  {integration.status}
-                </span>
+              <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+                Expected flow: accounting order to PWS to production stations.
               </div>
-            ))}
-            <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-              Expected flow: accounting order to PWS to production stations.
-            </div>
-            <Button variant="outline" className="w-full">
-              Request integration
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+              <Button variant="outline" className="w-full">
+                Request integration
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </section>
   );
 }
