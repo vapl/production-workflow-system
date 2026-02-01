@@ -168,6 +168,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     created_at: string;
     size?: number | null;
     mime_type?: string | null;
+    category?: string | null;
   }): OrderAttachment => ({
     id: row.id,
     name: row.name,
@@ -177,6 +178,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     createdAt: row.created_at,
     size: row.size ?? undefined,
     mimeType: row.mime_type ?? undefined,
+    category: row.category ?? undefined,
   });
 
   const mapExternalJobAttachment = (row: {
@@ -433,7 +435,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           added_by_role,
           created_at,
           size,
-          mime_type
+          mime_type,
+          category
         ),
         order_comments (
           id,
@@ -876,16 +879,17 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             external_id,
             source_payload,
             synced_at,
-            order_attachments (
-              id,
-              name,
-              url,
-              added_by_name,
-              added_by_role,
-              created_at,
-              size,
-              mime_type
-            ),
+              order_attachments (
+                id,
+                name,
+                url,
+                added_by_name,
+                added_by_role,
+                created_at,
+                size,
+                mime_type,
+                category
+              ),
         order_comments (
           id,
           message,
@@ -1095,16 +1099,17 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             external_id,
             source_payload,
             synced_at,
-            order_attachments (
-              id,
-              name,
-              url,
-              added_by_name,
-              added_by_role,
-              created_at,
-              size,
-              mime_type
-            ),
+              order_attachments (
+                id,
+                name,
+                url,
+                added_by_name,
+                added_by_role,
+                created_at,
+                size,
+                mime_type,
+                category
+              ),
         order_comments (
           id,
           message,
@@ -1234,6 +1239,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             added_by_role: attachment.addedByRole ?? null,
             size: attachment.size ?? null,
             mime_type: attachment.mimeType ?? null,
+            category: attachment.category ?? "order_documents",
           })
           .select(
             `
@@ -1244,8 +1250,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             added_by_role,
             created_at,
             size,
-            mime_type
-          `,
+            mime_type,
+            category
+            `,
           )
           .single();
         if (insertError) {

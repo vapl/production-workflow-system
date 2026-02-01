@@ -22,6 +22,7 @@ export interface OrderAttachment {
   createdAt: string;
   size?: number;
   mimeType?: string;
+  category?: string;
 }
 
 export interface ExternalJobAttachment {

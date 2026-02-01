@@ -29,6 +29,8 @@ export interface WorkflowRules {
     engineer: string;
     manager: string;
   };
+  attachmentCategories: { id: string; label: string }[];
+  attachmentCategoryDefaults: Record<string, string>;
   checklistItems: ChecklistItem[];
   returnReasons: string[];
   externalJobRules: ExternalJobRule[];
@@ -80,6 +82,18 @@ const defaultRules: WorkflowRules = {
   assignmentLabels: {
     engineer: "Engineer",
     manager: "Manager",
+  },
+  attachmentCategories: [
+    { id: "order_documents", label: "Order documents" },
+    { id: "technical_docs", label: "Technical documentation" },
+    { id: "photos", label: "Site photos" },
+    { id: "other", label: "Other" },
+  ],
+  attachmentCategoryDefaults: {
+    Sales: "order_documents",
+    Engineering: "technical_docs",
+    Production: "other",
+    Admin: "order_documents",
   },
   checklistItems: [
     {
@@ -142,7 +156,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           supabase
             .from("workflow_rules")
             .select(
-              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, assignment_labels",
+              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, assignment_labels, attachment_categories, attachment_category_defaults",
             )
             .eq("tenant_id", user.tenantId)
             .maybeSingle(),
@@ -195,6 +209,13 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           ...prev.assignmentLabels,
           ...(rulesData?.assignment_labels ?? {}),
         },
+        attachmentCategories:
+          (rulesData?.attachment_categories as { id: string; label: string }[] | null) ??
+          prev.attachmentCategories,
+        attachmentCategoryDefaults: {
+          ...prev.attachmentCategoryDefaults,
+          ...(rulesData?.attachment_category_defaults ?? {}),
+        },
         checklistItems: (checklistData ?? []).map((row) => ({
           id: row.id,
           label: row.label,
@@ -226,6 +247,8 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           due_indicator_statuses: defaultRules.dueIndicatorStatuses,
           status_labels: defaultRules.statusLabels,
           assignment_labels: defaultRules.assignmentLabels,
+          attachment_categories: defaultRules.attachmentCategories,
+          attachment_category_defaults: defaultRules.attachmentCategoryDefaults,
         });
       }
 
@@ -258,6 +281,10 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         externalJobRules: patch.externalJobRules ?? prev.externalJobRules,
         statusLabels: patch.statusLabels ?? prev.statusLabels,
         assignmentLabels: patch.assignmentLabels ?? prev.assignmentLabels,
+        attachmentCategories:
+          patch.attachmentCategories ?? prev.attachmentCategories,
+        attachmentCategoryDefaults:
+          patch.attachmentCategoryDefaults ?? prev.attachmentCategoryDefaults,
       };
       if (supabase && user.tenantId) {
         void supabase.from("workflow_rules").upsert({
@@ -271,6 +298,8 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           due_indicator_statuses: next.dueIndicatorStatuses,
           status_labels: next.statusLabels,
           assignment_labels: next.assignmentLabels,
+          attachment_categories: next.attachmentCategories,
+          attachment_category_defaults: next.attachmentCategoryDefaults,
         });
       }
       return next;

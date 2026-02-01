@@ -71,7 +71,7 @@ export function OrderRow({
           ? "status-in_engineering"
           : order.status === "engineering_blocked"
             ? "status-engineering_blocked"
-      : "status-ready_for_production";
+            : "status-ready_for_production";
   const today = new Date().toISOString().slice(0, 10);
   const dueDate = order.dueDate ? order.dueDate.slice(0, 10) : "";
   const dueSoonDate = new Date();
@@ -87,12 +87,11 @@ export function OrderRow({
           ? "due-soon"
           : null
       : null;
-  const hasOverdueExternal =
-    (order.externalJobs ?? []).some(
-      (job) =>
-        job.dueDate < today &&
-        !["delivered", "approved", "cancelled"].includes(job.status),
-    );
+  const hasOverdueExternal = (order.externalJobs ?? []).some(
+    (job) =>
+      job.dueDate < today &&
+      !["delivered", "approved", "cancelled"].includes(job.status),
+  );
 
   const engineerInitials = order.assignedEngineerName
     ? order.assignedEngineerName
@@ -217,7 +216,8 @@ export function OrderRow({
       <TableCell>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={statusVariant}>
-            {rules.statusLabels[order.status] ?? formatOrderStatus(order.status)}
+            {rules.statusLabels[order.status] ??
+              formatOrderStatus(order.status)}
           </Badge>
           {hasOverdueExternal && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
@@ -226,18 +226,20 @@ export function OrderRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="text-right">
-        <div className="inline-flex items-center gap-2">
+      <TableCell className="text-right align-middle">
+        <div className="flex items-center justify-between gap-2">
           <Link
             href={`/orders/${order.id}`}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-muted/40 text-foreground shadow-sm hover:bg-muted hover:text-foreground"
             aria-label="View order"
           >
             <EyeIcon className="h-4 w-4" />
           </Link>
           <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <PaperclipIcon className="h-3.5 w-3.5" />
-            <span>{order.attachmentCount ?? order.attachments?.length ?? 0}</span>
+            <span>
+              {order.attachmentCount ?? order.attachments?.length ?? 0}
+            </span>
           </div>
           <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <MessageCircleIcon className="h-3.5 w-3.5" />

@@ -41,6 +41,12 @@ import { usePartners } from "@/hooks/usePartners";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const defaultAttachmentCategories = [
+  { id: "order_documents", label: "Order documents" },
+  { id: "technical_docs", label: "Technical documentation" },
+  { id: "photos", label: "Site photos" },
+  { id: "other", label: "Other" },
+];
 
 export default function OrderDetailPage() {
   const params = useParams<{ orderId?: string }>();
@@ -71,6 +77,25 @@ export default function OrderDetailPage() {
   const { activePartners, activeGroups } = usePartners();
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
+  const attachmentCategories = useMemo(
+    () =>
+      rules.attachmentCategories && rules.attachmentCategories.length > 0
+        ? rules.attachmentCategories
+        : defaultAttachmentCategories,
+    [rules.attachmentCategories],
+  );
+  const attachmentCategoryLabels = useMemo(
+    () =>
+      attachmentCategories.reduce<Record<string, string>>((acc, item) => {
+        acc[item.id] = item.label;
+        return acc;
+      }, {}),
+    [attachmentCategories],
+  );
+  const defaultAttachmentCategory =
+    rules.attachmentCategoryDefaults?.[role] ??
+    attachmentCategories[0]?.id ??
+    "order_documents";
   const getInitials = (value?: string) =>
     value
       ? value
@@ -117,6 +142,10 @@ export default function OrderDetailPage() {
   const [attachmentError, setAttachmentError] = useState("");
   const [attachmentNotice, setAttachmentNotice] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [attachmentCategory, setAttachmentCategory] =
+    useState<string>(defaultAttachmentCategory);
+  const [isAttachmentCategoryManual, setIsAttachmentCategoryManual] =
+    useState(false);
   const [commentMessage, setCommentMessage] = useState("");
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
   const [engineers, setEngineers] = useState<
@@ -298,6 +327,61 @@ export default function OrderDetailPage() {
     setChecklistState(order?.checklist ?? {});
   }, [order]);
 
+  useEffect(() => {
+    if (isAttachmentCategoryManual) {
+      return;
+    }
+    if (!attachmentCategories.some((item) => item.id === attachmentCategory)) {
+      setAttachmentCategory(defaultAttachmentCategory);
+      return;
+    }
+    setAttachmentCategory(defaultAttachmentCategory);
+  }, [
+    attachmentCategories,
+    attachmentCategory,
+    defaultAttachmentCategory,
+    isAttachmentCategoryManual,
+  ]);
+
+  const attachments = orderState?.attachments ?? [];
+  const comments = orderState?.comments ?? [];
+  const meetsEngineeringChecklist = requiredForEngineering.every(
+    (item) => checklistState[item.id],
+  );
+  const meetsProductionChecklist = requiredForProduction.every(
+    (item) => checklistState[item.id],
+  );
+  const meetsEngineeringAttachments =
+    attachments.length >= rules.minAttachmentsForEngineering;
+  const meetsProductionAttachments =
+    attachments.length >= rules.minAttachmentsForProduction;
+  const meetsEngineeringComment =
+    !rules.requireCommentForEngineering || comments.length > 0;
+  const meetsProductionComment =
+    !rules.requireCommentForProduction || comments.length > 0;
+  const attachmentGroups = useMemo(() => {
+    const groups = new Map<string, OrderAttachment[]>();
+    attachments.forEach((attachment) => {
+      const key = attachment.category ?? "uncategorized";
+      const current = groups.get(key) ?? [];
+      current.push(attachment);
+      groups.set(key, current);
+    });
+    return Array.from(groups.entries()).map(([key, items]) => ({
+      key,
+      label: attachmentCategoryLabels[key] ?? "Uncategorized",
+      items,
+    }));
+  }, [attachments]);
+  const canAdvanceToEngineering =
+    meetsEngineeringChecklist &&
+    meetsEngineeringAttachments &&
+    meetsEngineeringComment;
+  const canAdvanceToProduction =
+    meetsProductionChecklist &&
+    meetsProductionAttachments &&
+    meetsProductionComment;
+
   if (!orderState && isLoadingOrder) {
     return (
       <section className="space-y-3">
@@ -323,8 +407,6 @@ export default function OrderDetailPage() {
   const batchesForOrder: Batch[] = batches.filter(
     (batch) => batch.orderId === orderState.id,
   );
-  const attachments = orderState.attachments ?? [];
-  const comments = orderState.comments ?? [];
   const priorityVariant =
     orderState.priority === "low"
       ? "priority-low"
@@ -422,6 +504,7 @@ export default function OrderDetailPage() {
           mimeType: result.attachment.mimeType,
           addedBy: name,
           addedByRole: role,
+          category: attachmentCategory,
         });
         if (created) {
           uploadedAttachments.push(created);
@@ -894,29 +977,6 @@ export default function OrderDetailPage() {
     await updateOrder(orderState.id, { checklist: next });
   }
 
-  const meetsEngineeringChecklist = requiredForEngineering.every(
-    (item) => checklistState[item.id],
-  );
-  const meetsProductionChecklist = requiredForProduction.every(
-    (item) => checklistState[item.id],
-  );
-  const meetsEngineeringAttachments =
-    attachments.length >= rules.minAttachmentsForEngineering;
-  const meetsProductionAttachments =
-    attachments.length >= rules.minAttachmentsForProduction;
-  const meetsEngineeringComment =
-    !rules.requireCommentForEngineering || comments.length > 0;
-  const meetsProductionComment =
-    !rules.requireCommentForProduction || comments.length > 0;
-  const canAdvanceToEngineering =
-    meetsEngineeringChecklist &&
-    meetsEngineeringAttachments &&
-    meetsEngineeringComment;
-  const canAdvanceToProduction =
-    meetsProductionChecklist &&
-    meetsProductionAttachments &&
-    meetsProductionComment;
-
   function renderAttachmentPreview(attachment: OrderAttachment) {
     const lowerName = attachment.name.toLowerCase();
     const isPdf = lowerName.endsWith(".pdf");
@@ -1291,9 +1351,29 @@ export default function OrderDetailPage() {
           <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Attachments</CardTitle>
-            </CardHeader>
+            <CardTitle>Attachments</CardTitle>
+          </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              <label className="space-y-2 text-sm font-medium">
+                Category
+                <select
+                  value={attachmentCategory}
+                  onChange={(event) => {
+                    setAttachmentCategory(event.target.value);
+                    setIsAttachmentCategoryManual(true);
+                  }}
+                  className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                >
+                  {attachmentCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-muted-foreground">
+                  Pick the best bucket before uploading files.
+                </span>
+              </label>
               <div className="space-y-2">
                 <div
                   className="flex min-h-[86px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
@@ -1369,44 +1449,51 @@ export default function OrderDetailPage() {
                   No attachments added yet.
                 </p>
               ) : (
-                <div className="space-y-2">
-                  {attachments.map((attachment) => (
-                    <div
-                      key={attachment.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                    >
-                      <div className="flex items-center gap-3">
-                        {renderAttachmentPreview(attachment)}
-                        <div>
-                          <div className="font-medium">{attachment.name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            Added by {attachment.addedBy}
-                            {attachment.addedByRole
-                              ? ` (${attachment.addedByRole})`
-                              : ""}{" "}
-                            on {formatDate(attachment.createdAt.slice(0, 10))}
+                <div className="space-y-4">
+                  {attachmentGroups.map((group) => (
+                    <div key={group.key} className="space-y-2">
+                      <div className="text-xs font-semibold text-muted-foreground">
+                        {group.label}
+                      </div>
+                      {group.items.map((attachment) => (
+                        <div
+                          key={attachment.id}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                        >
+                          <div className="flex items-center gap-3">
+                            {renderAttachmentPreview(attachment)}
+                            <div>
+                              <div className="font-medium">{attachment.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                Added by {attachment.addedBy}
+                                {attachment.addedByRole
+                                  ? ` (${attachment.addedByRole})`
+                                  : ""}{" "}
+                                on {formatDate(attachment.createdAt.slice(0, 10))}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {attachment.url && (
+                              <a
+                                href={attachment.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-primary underline"
+                              >
+                                Open
+                              </a>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveAttachment(attachment.id)}
+                            >
+                              Remove
+                            </Button>
                           </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {attachment.url && (
-                          <a
-                            href={attachment.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs text-primary underline"
-                          >
-                            Open
-                          </a>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveAttachment(attachment.id)}
-                        >
-                          Remove
-                        </Button>
-                      </div>
+                      ))}
                     </div>
                   ))}
                 </div>
