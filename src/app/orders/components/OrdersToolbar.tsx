@@ -7,6 +7,7 @@ import type { OrderStatus } from "@/types/orders";
 
 export type StatusOption = { value: OrderStatus | "all"; label: string };
 type StatusFilter = StatusOption["value"];
+type AssignmentFilter = "queue" | "my";
 
 interface OrdersToolbarProps {
   searchQuery: string;
@@ -20,6 +21,8 @@ interface OrdersToolbarProps {
   partnerGroupOptions?: { value: string; label: string }[];
   partnerGroupFilter?: string;
   onPartnerGroupChange?: (value: string) => void;
+  assignmentFilter?: AssignmentFilter;
+  onAssignmentChange?: (value: AssignmentFilter) => void;
 }
 
 export function OrdersToolbar({
@@ -34,6 +37,8 @@ export function OrdersToolbar({
   partnerGroupOptions = [],
   partnerGroupFilter = "",
   onPartnerGroupChange,
+  assignmentFilter,
+  onAssignmentChange,
 }: OrdersToolbarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filtersRef = useRef<HTMLDivElement | null>(null);
@@ -78,6 +83,33 @@ export function OrdersToolbar({
           {filtersOpen && (
             <div className="absolute right-0 top-11 z-50 w-[320px] rounded-xl border border-border bg-card p-4 shadow-lg">
               <div className="space-y-3">
+                {assignmentFilter && onAssignmentChange && (
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Engineering</div>
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        { value: "queue", label: "Queue" },
+                        { value: "my", label: "My work" },
+                      ] as const).map((option) => {
+                        const isActive = assignmentFilter === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => onAssignmentChange(option.value)}
+                            className={`h-8 rounded-full border px-3 text-xs font-medium transition ${
+                              isActive
+                                ? "border-transparent bg-primary text-primary-foreground shadow-sm"
+                                : "border-border bg-background text-foreground hover:bg-muted/50"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {partnerGroupOptions.length > 0 && onPartnerGroupChange && (
                   <label className="space-y-2 text-sm font-medium">
                     Partner group
