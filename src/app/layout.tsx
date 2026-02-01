@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Header } from "@/components/layout/Header";
-import { TabsNav } from "@/components/layout/TabsNav";
-import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { OrdersProvider } from "@/app/orders/OrdersContext";
 import { HierarchyProvider } from "@/app/settings/HierarchyContext";
 import { UserProvider } from "@/contexts/UserContext";
 import { BatchesProvider } from "@/contexts/BatchesContext";
 import { NotificationsProvider, NotificationsViewport } from "@/components/ui/Notifications";
 import { WorkflowProvider } from "@/contexts/WorkflowContext";
+import { AppShell } from "@/components/layout/AppShell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,17 +40,7 @@ export default function RootLayout({
               <HierarchyProvider>
                 <OrdersProvider>
                   <BatchesProvider>
-                  <Header />
-                  <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
-                    {/* Main Content */}
-                    <main className="container mx-auto px-4 py-6">
-                      <div className="flex justify-between">
-                        <TabsNav />
-                        <ThemeToggle />
-                      </div>
-                      {children}
-                    </main>
-                  </div>
+                  <AppShell>{children}</AppShell>
                   <NotificationsViewport />
                   </BatchesProvider>
                 </OrdersProvider>

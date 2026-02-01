@@ -10,3 +10,6 @@ export const supabase =
 
 export const supabaseBucket =
   process.env.NEXT_PUBLIC_SUPABASE_BUCKET || "order-attachments";
+
+export const supabaseAvatarBucket =
+  process.env.NEXT_PUBLIC_SUPABASE_AVATAR_BUCKET || "user-avatars";

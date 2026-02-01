@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { FactoryIcon } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
+import Link from "next/link";
 
 export function Header() {
   const user = useCurrentUser();
@@ -54,7 +55,9 @@ export function Header() {
 
           <div className="flex flex-col items-end gap-2 text-right">
             <div>
-              <div className="text-sm font-medium">Demo Manufacturing Co.</div>
+              <div className="text-sm font-medium">
+                {user.tenantName ?? "Company workspace"}
+              </div>
               <div className="text-xs text-muted-foreground">
                 Shift: Day | {currentDate ?? "--"}
               </div>
@@ -68,6 +71,12 @@ export function Header() {
                   <span className="text-foreground">
                     {user.name} ({user.role})
                   </span>
+                  <Link
+                    href="/profile"
+                    className="text-xs text-muted-foreground underline"
+                  >
+                    Profile
+                  </Link>
                   <Button variant="ghost" size="sm" onClick={signOut}>
                     Sign out
                   </Button>
