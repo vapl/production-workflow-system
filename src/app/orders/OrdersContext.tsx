@@ -7,6 +7,10 @@ import type {
   OrderComment,
   OrderStatus,
   OrderStatusEntry,
+  ExternalJob,
+  ExternalJobAttachment,
+  ExternalJobStatus,
+  ExternalJobStatusEntry,
 } from "@/types/orders";
 import { mockOrders } from "@/lib/data/mockData";
 import { supabase } from "@/lib/supabaseClient";
@@ -36,6 +40,9 @@ interface OrdersContextValue {
     notes?: string;
     authorName?: string;
     authorRole?: string;
+    assignedManagerId?: string;
+    assignedManagerName?: string;
+    assignedManagerAt?: string;
   }) => Promise<Order | null>;
   updateOrder: (
     orderId: string,
@@ -50,6 +57,9 @@ interface OrdersContextValue {
       assignedEngineerId?: string;
       assignedEngineerName?: string;
       assignedEngineerAt?: string;
+      assignedManagerId?: string;
+      assignedManagerName?: string;
+      assignedManagerAt?: string;
       statusChangedBy?: string;
       statusChangedByRole?: string;
       statusChangedAt?: string;
@@ -70,6 +80,37 @@ interface OrdersContextValue {
     comment: Omit<OrderComment, "id" | "createdAt">,
   ) => Promise<OrderComment | null>;
   removeOrderComment: (orderId: string, commentId: string) => Promise<boolean>;
+  addExternalJob: (
+    orderId: string,
+    payload: {
+      partnerId?: string;
+      partnerName: string;
+      externalOrderNumber: string;
+      quantity?: number;
+      dueDate: string;
+      status: ExternalJobStatus;
+    },
+  ) => Promise<ExternalJob | null>;
+  updateExternalJob: (
+    externalJobId: string,
+    patch: Partial<{
+      partnerId?: string;
+      partnerName: string;
+      externalOrderNumber: string;
+      quantity?: number;
+      dueDate: string;
+      status: ExternalJobStatus;
+    }>,
+  ) => Promise<ExternalJob | null>;
+  removeExternalJob: (externalJobId: string) => Promise<boolean>;
+  addExternalJobAttachment: (
+    externalJobId: string,
+    attachment: Omit<ExternalJobAttachment, "id" | "createdAt">,
+  ) => Promise<ExternalJobAttachment | null>;
+  removeExternalJobAttachment: (
+    externalJobId: string,
+    attachmentId: string,
+  ) => Promise<boolean>;
   syncAccountingOrders: () => Promise<number>;
 }
 
@@ -138,6 +179,40 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     mimeType: row.mime_type ?? undefined,
   });
 
+  const mapExternalJobAttachment = (row: {
+    id: string;
+    name: string;
+    url?: string | null;
+    added_by_name?: string | null;
+    added_by_role?: string | null;
+    created_at: string;
+    size?: number | null;
+    mime_type?: string | null;
+  }): ExternalJobAttachment => ({
+    id: row.id,
+    name: row.name,
+    url: row.url ?? undefined,
+    addedBy: row.added_by_name ?? "Unknown",
+    addedByRole: row.added_by_role ?? undefined,
+    createdAt: row.created_at,
+    size: row.size ?? undefined,
+    mimeType: row.mime_type ?? undefined,
+  });
+
+  const mapExternalJobStatusEntry = (row: {
+    id: string;
+    status: ExternalJobStatus;
+    changed_by_name?: string | null;
+    changed_by_role?: string | null;
+    changed_at: string;
+  }): ExternalJobStatusEntry => ({
+    id: row.id,
+    status: row.status,
+    changedBy: row.changed_by_name ?? "Unknown",
+    changedByRole: row.changed_by_role ?? undefined,
+    changedAt: row.changed_at,
+  });
+
   const mapComment = (row: {
     id: string;
     message: string;
@@ -166,6 +241,50 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     changedAt: row.changed_at,
   });
 
+  const mapExternalJob = (row: {
+    id: string;
+    order_id: string;
+    partner_id?: string | null;
+    partner_name?: string | null;
+    external_order_number: string;
+    quantity?: number | null;
+    due_date: string;
+    status: ExternalJobStatus;
+    created_at: string;
+    external_job_status_history?: Array<{
+      id: string;
+      status: ExternalJobStatus;
+      changed_by_name?: string | null;
+      changed_by_role?: string | null;
+      changed_at: string;
+    }>;
+    external_job_attachments?: Array<{
+      id: string;
+      name: string;
+      url?: string | null;
+      added_by_name?: string | null;
+      added_by_role?: string | null;
+      created_at: string;
+      size?: number | null;
+      mime_type?: string | null;
+    }>;
+  }): ExternalJob => ({
+    id: row.id,
+    orderId: row.order_id,
+    partnerId: row.partner_id ?? undefined,
+    partnerName: row.partner_name ?? "Partner",
+    externalOrderNumber: row.external_order_number,
+    quantity: row.quantity ?? undefined,
+    dueDate: row.due_date,
+    status: row.status,
+    createdAt: row.created_at,
+    statusHistory:
+      row.external_job_status_history?.map(mapExternalJobStatusEntry) ??
+      undefined,
+    attachments:
+      row.external_job_attachments?.map(mapExternalJobAttachment) ?? undefined,
+  });
+
   const mapOrder = (row: {
     id: string;
     order_number: string;
@@ -179,6 +298,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     assigned_engineer_id?: string | null;
     assigned_engineer_name?: string | null;
     assigned_engineer_at?: string | null;
+    assigned_manager_id?: string | null;
+    assigned_manager_name?: string | null;
+    assigned_manager_at?: string | null;
     status_changed_by?: string | null;
     status_changed_by_role?: string | null;
     status_changed_at?: string | null;
@@ -211,6 +333,27 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       changed_by_role?: string | null;
       changed_at: string;
     }>;
+    external_jobs?: Array<{
+      id: string;
+      order_id: string;
+      partner_id?: string | null;
+      partner_name?: string | null;
+      external_order_number: string;
+      quantity?: number | null;
+      due_date: string;
+      status: ExternalJobStatus;
+      created_at: string;
+      external_job_attachments?: Array<{
+        id: string;
+        name: string;
+        url?: string | null;
+        added_by_name?: string | null;
+        added_by_role?: string | null;
+        created_at: string;
+        size?: number | null;
+        mime_type?: string | null;
+      }>;
+    }>;
   }): Order => ({
     id: row.id,
     orderNumber: row.order_number,
@@ -224,6 +367,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     assignedEngineerId: row.assigned_engineer_id ?? undefined,
     assignedEngineerName: row.assigned_engineer_name ?? undefined,
     assignedEngineerAt: row.assigned_engineer_at ?? undefined,
+    assignedManagerId: row.assigned_manager_id ?? undefined,
+    assignedManagerName: row.assigned_manager_name ?? undefined,
+    assignedManagerAt: row.assigned_manager_at ?? undefined,
     statusChangedBy: row.status_changed_by ?? undefined,
     statusChangedByRole: row.status_changed_by_role ?? undefined,
     statusChangedAt: row.status_changed_at ?? undefined,
@@ -235,6 +381,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     attachments: row.order_attachments?.map(mapAttachment) ?? undefined,
     comments: row.order_comments?.map(mapComment) ?? undefined,
     statusHistory: row.order_status_history?.map(mapStatusEntry) ?? undefined,
+    externalJobs: row.external_jobs?.map(mapExternalJob) ?? undefined,
   });
 
   const refreshOrders = async () => {
@@ -260,6 +407,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         assigned_engineer_id,
         assigned_engineer_name,
         assigned_engineer_at,
+        assigned_manager_id,
+        assigned_manager_name,
+        assigned_manager_at,
         status_changed_by,
         status_changed_by_role,
         status_changed_at,
@@ -291,6 +441,35 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           author_name,
           author_role,
           created_at
+        )
+        ,
+        external_jobs (
+          id,
+          order_id,
+          partner_id,
+          partner_name,
+          external_order_number,
+          quantity,
+          due_date,
+          status,
+          created_at,
+          external_job_status_history (
+            id,
+            status,
+            changed_by_name,
+            changed_by_role,
+            changed_at
+          ),
+          external_job_attachments (
+            id,
+            name,
+            url,
+            added_by_name,
+            added_by_role,
+            created_at,
+            size,
+            mime_type
+          )
         )
       `,
       )
@@ -610,6 +789,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             dueDate: order.dueDate,
             priority: order.priority,
             status: order.status,
+            assignedManagerId:
+              order.assignedManagerId ??
+              (user.role === "Sales" || user.role === "Admin" ? user.id : undefined),
+            assignedManagerName:
+              order.assignedManagerName ??
+              (user.role === "Sales" || user.role === "Admin"
+                ? user.name ?? "Manager"
+                : undefined),
+            assignedManagerAt:
+              order.assignedManagerAt ??
+              (user.role === "Sales" || user.role === "Admin"
+                ? new Date().toISOString()
+                : undefined),
             source: "manual",
             comments: order.notes
               ? [
@@ -647,6 +839,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             due_date: order.dueDate,
             priority: order.priority,
             status: order.status,
+            assigned_manager_id: order.assignedManagerId ?? (user.role === "Sales" || user.role === "Admin" ? user.id : null),
+            assigned_manager_name: order.assignedManagerName ?? (user.role === "Sales" || user.role === "Admin" ? user.name : null),
+            assigned_manager_at: order.assignedManagerAt ?? (user.role === "Sales" || user.role === "Admin" ? new Date().toISOString() : null),
             source: "manual",
           })
           .select(
@@ -663,6 +858,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             assigned_engineer_id,
             assigned_engineer_name,
             assigned_engineer_at,
+            assigned_manager_id,
+            assigned_manager_name,
+            assigned_manager_at,
             status_changed_by,
             status_changed_by_role,
             status_changed_at,
@@ -688,14 +886,43 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
               size,
               mime_type
             ),
-            order_comments (
-              id,
-              message,
-              author_name,
-              author_role,
-              created_at
-            )
-          `,
+        order_comments (
+          id,
+          message,
+          author_name,
+          author_role,
+          created_at
+        )
+        ,
+        external_jobs (
+          id,
+          order_id,
+          partner_id,
+          partner_name,
+          external_order_number,
+          quantity,
+          due_date,
+          status,
+          created_at,
+          external_job_status_history (
+            id,
+            status,
+            changed_by_name,
+            changed_by_role,
+            changed_at
+          ),
+          external_job_attachments (
+            id,
+            name,
+            url,
+            added_by_name,
+            added_by_role,
+            created_at,
+            size,
+            mime_type
+          )
+        )
+      `,
           )
           .single();
         if (insertError) {
@@ -820,6 +1047,15 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (patch.assignedEngineerAt !== undefined) {
           updatePayload.assigned_engineer_at = patch.assignedEngineerAt;
         }
+        if (patch.assignedManagerId !== undefined) {
+          updatePayload.assigned_manager_id = patch.assignedManagerId;
+        }
+        if (patch.assignedManagerName !== undefined) {
+          updatePayload.assigned_manager_name = patch.assignedManagerName;
+        }
+        if (patch.assignedManagerAt !== undefined) {
+          updatePayload.assigned_manager_at = patch.assignedManagerAt;
+        }
         if (existingOrder?.source === "accounting") {
           updatePayload.source = "manual";
         }
@@ -841,6 +1077,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             assigned_engineer_id,
             assigned_engineer_name,
             assigned_engineer_at,
+            assigned_manager_id,
+            assigned_manager_name,
+            assigned_manager_at,
             status_changed_by,
             status_changed_by_role,
             status_changed_at,
@@ -866,14 +1105,43 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
               size,
               mime_type
             ),
-            order_comments (
-              id,
-              message,
-              author_name,
-              author_role,
-              created_at
-            )
-          `,
+        order_comments (
+          id,
+          message,
+          author_name,
+          author_role,
+          created_at
+        )
+        ,
+        external_jobs (
+          id,
+          order_id,
+          partner_id,
+          partner_name,
+          external_order_number,
+          quantity,
+          due_date,
+          status,
+          created_at,
+          external_job_status_history (
+            id,
+            status,
+            changed_by_name,
+            changed_by_role,
+            changed_at
+          ),
+          external_job_attachments (
+            id,
+            name,
+            url,
+            added_by_name,
+            added_by_role,
+            created_at,
+            size,
+            mime_type
+          )
+        )
+      `,
           )
           .single();
         if (updateError) {
@@ -1129,6 +1397,348 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
                 }
               : order,
           ),
+        );
+        return true;
+      },
+      addExternalJob: async (orderId, payload) => {
+        if (!supabase || !user.tenantId) {
+          const fallback: ExternalJob = {
+            id: `ext-${Date.now()}`,
+            orderId,
+            partnerId: payload.partnerId,
+            partnerName: payload.partnerName,
+            externalOrderNumber: payload.externalOrderNumber,
+            quantity: payload.quantity,
+            dueDate: payload.dueDate,
+            status: payload.status,
+            createdAt: new Date().toISOString(),
+            statusHistory: [
+              {
+                id: `ext-h-${Date.now()}`,
+                status: payload.status,
+                changedBy: user.name || "User",
+                changedByRole: user.role,
+                changedAt: new Date().toISOString(),
+              },
+            ],
+            attachments: [],
+          };
+          setOrders((prev) =>
+            prev.map((order) =>
+              order.id === orderId
+                ? {
+                    ...order,
+                    externalJobs: [fallback, ...(order.externalJobs ?? [])],
+                  }
+                : order,
+            ),
+          );
+          return fallback;
+        }
+
+        const { data, error: insertError } = await supabase
+          .from("external_jobs")
+          .insert({
+            tenant_id: user.tenantId,
+            order_id: orderId,
+            partner_id: payload.partnerId ?? null,
+            partner_name: payload.partnerName,
+            external_order_number: payload.externalOrderNumber,
+            quantity: payload.quantity ?? null,
+            due_date: payload.dueDate,
+            status: payload.status,
+          })
+          .select(
+            `
+            id,
+            order_id,
+            partner_id,
+            partner_name,
+            external_order_number,
+            quantity,
+            due_date,
+            status,
+            created_at
+          `,
+          )
+          .single();
+        if (insertError || !data) {
+          setError(insertError?.message ?? "Failed to add external job.");
+          return null;
+        }
+        await supabase.from("external_job_status_history").insert({
+          tenant_id: user.tenantId,
+          external_job_id: data.id,
+          status: payload.status,
+          changed_by_name: user.name,
+          changed_by_role: user.role,
+        });
+        const mapped = mapExternalJob({
+          ...data,
+          external_job_status_history: [
+            {
+              id: `ext-h-${Date.now()}`,
+              status: payload.status,
+              changed_by_name: user.name,
+              changed_by_role: user.role,
+              changed_at: new Date().toISOString(),
+            },
+          ],
+          external_job_attachments: [],
+        });
+        setOrders((prev) =>
+          prev.map((order) =>
+            order.id === orderId
+              ? {
+                  ...order,
+                  externalJobs: [mapped, ...(order.externalJobs ?? [])],
+                }
+              : order,
+          ),
+        );
+        return mapped;
+      },
+      updateExternalJob: async (externalJobId, patch) => {
+        if (!supabase) {
+          let updated: ExternalJob | null = null;
+          setOrders((prev) =>
+            prev.map((order) => ({
+              ...order,
+              externalJobs: (order.externalJobs ?? []).map((job) => {
+                if (job.id !== externalJobId) {
+                  return job;
+                }
+                updated = {
+                  ...job,
+                  ...patch,
+                  statusHistory:
+                    patch.status && patch.status !== job.status
+                      ? [
+                          {
+                            id: `ext-h-${Date.now()}`,
+                            status: patch.status,
+                            changedBy: user.name || "User",
+                            changedByRole: user.role,
+                            changedAt: new Date().toISOString(),
+                          },
+                          ...(job.statusHistory ?? []),
+                        ]
+                      : job.statusHistory,
+                } as ExternalJob;
+                return updated;
+              }),
+            })),
+          );
+          return updated;
+        }
+
+        const updatePayload: Record<string, unknown> = {};
+        if (patch.partnerId !== undefined)
+          updatePayload.partner_id = patch.partnerId || null;
+        if (patch.partnerName !== undefined)
+          updatePayload.partner_name = patch.partnerName;
+        if (patch.externalOrderNumber !== undefined)
+          updatePayload.external_order_number = patch.externalOrderNumber;
+        if (patch.quantity !== undefined) updatePayload.quantity = patch.quantity;
+        if (patch.dueDate !== undefined) updatePayload.due_date = patch.dueDate;
+        if (patch.status !== undefined) updatePayload.status = patch.status;
+
+        const { data, error: updateError } = await supabase
+          .from("external_jobs")
+          .update(updatePayload)
+          .eq("id", externalJobId)
+          .select(
+            `
+            id,
+            order_id,
+            partner_id,
+            partner_name,
+            external_order_number,
+            quantity,
+            due_date,
+            status,
+            created_at,
+            external_job_attachments (
+              id,
+              name,
+              url,
+              added_by_name,
+              added_by_role,
+              created_at,
+              size,
+              mime_type
+            )
+          `,
+          )
+          .single();
+        if (updateError || !data) {
+          setError(updateError?.message ?? "Failed to update external job.");
+          return null;
+        }
+        if (patch.status !== undefined) {
+          await supabase.from("external_job_status_history").insert({
+            tenant_id: user.tenantId,
+            external_job_id: externalJobId,
+            status: patch.status,
+            changed_by_name: user.name,
+            changed_by_role: user.role,
+          });
+        }
+        const mapped = mapExternalJob(data);
+        setOrders((prev) =>
+          prev.map((order) => ({
+            ...order,
+            externalJobs: (order.externalJobs ?? []).map((job) =>
+              job.id === externalJobId ? mapped : job,
+            ),
+          })),
+        );
+        return mapped;
+      },
+      removeExternalJob: async (externalJobId) => {
+        if (!supabase) {
+          setOrders((prev) =>
+            prev.map((order) => ({
+              ...order,
+              externalJobs: (order.externalJobs ?? []).filter(
+                (job) => job.id !== externalJobId,
+              ),
+            })),
+          );
+          return true;
+        }
+        const { error: deleteError } = await supabase
+          .from("external_jobs")
+          .delete()
+          .eq("id", externalJobId);
+        if (deleteError) {
+          setError(deleteError.message);
+          return false;
+        }
+        setOrders((prev) =>
+          prev.map((order) => ({
+            ...order,
+            externalJobs: (order.externalJobs ?? []).filter(
+              (job) => job.id !== externalJobId,
+            ),
+          })),
+        );
+        return true;
+      },
+      addExternalJobAttachment: async (externalJobId, attachment) => {
+        if (!supabase || !user.tenantId) {
+          const fallback: ExternalJobAttachment = {
+            id: `ext-att-${Date.now()}`,
+            name: attachment.name,
+            url: attachment.url,
+            addedBy: attachment.addedBy,
+            addedByRole: attachment.addedByRole,
+            createdAt: new Date().toISOString(),
+            size: attachment.size,
+            mimeType: attachment.mimeType,
+          };
+          setOrders((prev) =>
+            prev.map((order) => ({
+              ...order,
+              externalJobs: (order.externalJobs ?? []).map((job) =>
+                job.id === externalJobId
+                  ? {
+                      ...job,
+                      attachments: [fallback, ...(job.attachments ?? [])],
+                    }
+                  : job,
+              ),
+            })),
+          );
+          return fallback;
+        }
+
+        const { data, error: insertError } = await supabase
+          .from("external_job_attachments")
+          .insert({
+            tenant_id: user.tenantId,
+            external_job_id: externalJobId,
+            name: attachment.name,
+            url: attachment.url ?? null,
+            size: attachment.size ?? null,
+            mime_type: attachment.mimeType ?? null,
+            added_by_name: attachment.addedBy,
+            added_by_role: attachment.addedByRole ?? null,
+          })
+          .select(
+            `
+            id,
+            name,
+            url,
+            added_by_name,
+            added_by_role,
+            created_at,
+            size,
+            mime_type
+          `,
+          )
+          .single();
+        if (insertError || !data) {
+          setError(insertError?.message ?? "Failed to add attachment.");
+          return null;
+        }
+        const mapped = mapExternalJobAttachment(data);
+        setOrders((prev) =>
+          prev.map((order) => ({
+            ...order,
+            externalJobs: (order.externalJobs ?? []).map((job) =>
+              job.id === externalJobId
+                ? {
+                    ...job,
+                    attachments: [mapped, ...(job.attachments ?? [])],
+                  }
+                : job,
+            ),
+          })),
+        );
+        return mapped;
+      },
+      removeExternalJobAttachment: async (externalJobId, attachmentId) => {
+        if (!supabase) {
+          setOrders((prev) =>
+            prev.map((order) => ({
+              ...order,
+              externalJobs: (order.externalJobs ?? []).map((job) =>
+                job.id === externalJobId
+                  ? {
+                      ...job,
+                      attachments: (job.attachments ?? []).filter(
+                        (file) => file.id !== attachmentId,
+                      ),
+                    }
+                  : job,
+              ),
+            })),
+          );
+          return true;
+        }
+        const { error: deleteError } = await supabase
+          .from("external_job_attachments")
+          .delete()
+          .eq("id", attachmentId);
+        if (deleteError) {
+          setError(deleteError.message);
+          return false;
+        }
+        setOrders((prev) =>
+          prev.map((order) => ({
+            ...order,
+            externalJobs: (order.externalJobs ?? []).map((job) =>
+              job.id === externalJobId
+                ? {
+                    ...job,
+                    attachments: (job.attachments ?? []).filter(
+                      (file) => file.id !== attachmentId,
+                    ),
+                  }
+                : job,
+            ),
+          })),
         );
         return true;
       },

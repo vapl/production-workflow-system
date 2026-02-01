@@ -12,11 +12,13 @@ import { OrderModal } from "./components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { buildOrdersTemplate } from "@/lib/excel/ordersExcel";
 import { ImportWizard } from "./components/ImportWizard";
 import { usePartners } from "@/hooks/usePartners";
 import { supabase } from "@/lib/supabaseClient";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { formatOrderStatus } from "@/lib/domain/formatters";
 
 export default function OrdersPage() {
   const {
@@ -29,39 +31,44 @@ export default function OrdersPage() {
   } = useOrders();
   const { nodes, levels } = useHierarchy();
   const user = useCurrentUser();
+  const { rules } = useWorkflowRules();
   const { activeGroups, partners } = usePartners();
+  const statusLabel = (status: OrderStatus) =>
+    rules.statusLabels?.[status] ?? formatOrderStatus(status);
+  const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
+  const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
   const [searchQuery, setSearchQuery] = useState("");
   const roleStatusOptions = useMemo(() => {
     if (user.role === "Engineering") {
       return [
-        { value: "ready_for_engineering", label: "Ready for Eng." },
-        { value: "in_engineering", label: "In Eng." },
-        { value: "engineering_blocked", label: "Eng. Blocked" },
-        { value: "ready_for_production", label: "Ready for Prod." },
+        { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
+        { value: "in_engineering", label: statusLabel("in_engineering") },
+        { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
+        { value: "ready_for_production", label: statusLabel("ready_for_production") },
       ];
     }
     if (user.role === "Production") {
-      return [{ value: "ready_for_production", label: "Ready for Prod." }];
+      return [{ value: "ready_for_production", label: statusLabel("ready_for_production") }];
     }
     if (user.role === "Sales") {
       return [
         { value: "all", label: "All" },
-        { value: "draft", label: "Draft" },
-        { value: "ready_for_engineering", label: "Ready for Eng." },
-        { value: "in_engineering", label: "In Eng." },
-        { value: "engineering_blocked", label: "Eng. Blocked" },
-        { value: "ready_for_production", label: "Ready for Prod." },
+        { value: "draft", label: statusLabel("draft") },
+        { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
+        { value: "in_engineering", label: statusLabel("in_engineering") },
+        { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
+        { value: "ready_for_production", label: statusLabel("ready_for_production") },
       ];
     }
     return [
       { value: "all", label: "All" },
-      { value: "draft", label: "Draft" },
-      { value: "ready_for_engineering", label: "Ready for Eng." },
-      { value: "in_engineering", label: "In Eng." },
-      { value: "engineering_blocked", label: "Eng. Blocked" },
-      { value: "ready_for_production", label: "Ready for Prod." },
+      { value: "draft", label: statusLabel("draft") },
+      { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
+      { value: "in_engineering", label: statusLabel("in_engineering") },
+      { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
+      { value: "ready_for_production", label: statusLabel("ready_for_production") },
     ];
-  }, [user.role]);
+  }, [rules.statusLabels, user.role]);
   const defaultStatusFilter =
     roleStatusOptions[0]?.value ?? ("all" as const);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">(
@@ -77,6 +84,9 @@ export default function OrdersPage() {
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
   const [partnerGroupFilter, setPartnerGroupFilter] = useState("");
+  const [assignmentFilter, setAssignmentFilter] = useState<"queue" | "my">(
+    "queue",
+  );
   const [visibleOrders, setVisibleOrders] = useState<Order[]>([]);
   const [totalOrders, setTotalOrders] = useState(0);
   const [isListLoading, setIsListLoading] = useState(false);
@@ -111,6 +121,11 @@ export default function OrdersPage() {
   useEffect(() => {
     setStatusFilter(defaultStatusFilter);
   }, [defaultStatusFilter]);
+  useEffect(() => {
+    if (user.role === "Engineering") {
+      setAssignmentFilter("queue");
+    }
+  }, [user.role]);
 
   const [statusCounts, setStatusCounts] = useState<
     Partial<Record<OrderStatus | "all", number>>
@@ -172,15 +187,23 @@ export default function OrdersPage() {
 
   useEffect(() => {
     if (!supabase || user.loading || !user.isAuthenticated) {
-      setVisibleOrders(orders);
-      setTotalOrders(orders.length);
+      const localFiltered =
+        user.role === "Engineering"
+          ? orders.filter((order) =>
+              assignmentFilter === "queue"
+                ? !order.assignedEngineerId
+                : order.assignedEngineerId === user.id,
+            )
+          : orders;
+      setVisibleOrders(localFiltered);
+      setTotalOrders(localFiltered.length);
       const fallbackCounts: Partial<Record<OrderStatus | "all", number>> = {};
       roleStatusOptions.forEach((option) => {
         if (option.value === "all") {
-          fallbackCounts.all = orders.length;
+          fallbackCounts.all = localFiltered.length;
           return;
         }
-        fallbackCounts[option.value] = orders.filter(
+        fallbackCounts[option.value] = localFiltered.filter(
           (order) => order.status === option.value,
         ).length;
       });
@@ -205,6 +228,7 @@ export default function OrdersPage() {
           priority,
           status,
           assigned_engineer_name,
+          assigned_manager_name,
           order_attachments ( id ),
           order_comments ( id ),
           external_jobs ( partner_id, due_date, status )
@@ -218,6 +242,13 @@ export default function OrdersPage() {
       }
       if (statusFilter !== "all") {
         query.eq("status", statusFilter);
+      }
+      if (user.role === "Engineering") {
+        if (assignmentFilter === "queue") {
+          query.is("assigned_engineer_id", null);
+        } else {
+          query.eq("assigned_engineer_id", user.id);
+        }
       }
       if (searchQuery.trim().length > 0) {
         const q = `%${searchQuery.trim()}%`;
@@ -255,6 +286,7 @@ export default function OrdersPage() {
         priority: row.priority,
         status: row.status,
         assignedEngineerName: row.assigned_engineer_name ?? undefined,
+        assignedManagerName: row.assigned_manager_name ?? undefined,
         attachments: row.order_attachments?.map((item) => ({
           id: item.id,
           name: "Attachment",
@@ -294,6 +326,7 @@ export default function OrdersPage() {
     };
   }, [
     orders,
+    assignmentFilter,
     partnerGroupFilter,
     partners,
     searchQuery,
@@ -302,6 +335,8 @@ export default function OrdersPage() {
     user.isAuthenticated,
     user.loading,
     user.tenantId,
+    user.role,
+    user.id,
   ]);
 
   useEffect(() => {
@@ -497,10 +532,21 @@ export default function OrdersPage() {
             }))}
             partnerGroupFilter={partnerGroupFilter}
             onPartnerGroupChange={setPartnerGroupFilter}
+            assignmentFilter={
+              user.role === "Engineering" ? assignmentFilter : undefined
+            }
+            onAssignmentChange={
+              user.role === "Engineering" ? setAssignmentFilter : undefined
+            }
           />
           <OrdersTable
             orders={visibleOrders}
             groups={groupByContract ? groupedOrders : undefined}
+            dueSoonDays={rules.dueSoonDays}
+            dueIndicatorEnabled={rules.dueIndicatorEnabled}
+            dueIndicatorStatuses={rules.dueIndicatorStatuses}
+            engineerLabel={engineerLabel}
+            managerLabel={managerLabel}
             onEdit={(order) => {
               setEditingOrder(order);
               setIsModalOpen(true);
@@ -551,6 +597,13 @@ export default function OrdersPage() {
                     }
                     if (statusFilter !== "all") {
                       query.eq("status", statusFilter);
+                    }
+                    if (user.role === "Engineering") {
+                      if (assignmentFilter === "queue") {
+                        query.is("assigned_engineer_id", null);
+                      } else {
+                        query.eq("assigned_engineer_id", user.id);
+                      }
                     }
                     if (searchQuery.trim().length > 0) {
                       const q = `%${searchQuery.trim()}%`;

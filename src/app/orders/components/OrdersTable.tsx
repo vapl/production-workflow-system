@@ -19,6 +19,11 @@ interface OrdersTableProps {
     label: string;
     orders: Order[];
   }[];
+  dueSoonDays?: number;
+  dueIndicatorEnabled?: boolean;
+  dueIndicatorStatuses?: Order["status"][];
+  engineerLabel?: string;
+  managerLabel?: string;
 }
 
 export function OrdersTable({
@@ -26,16 +31,27 @@ export function OrdersTable({
   onEdit,
   onDelete,
   groups,
+  dueSoonDays,
+  dueIndicatorEnabled,
+  dueIndicatorStatuses,
+  engineerLabel = "Engineer",
+  managerLabel = "Manager",
 }: OrdersTableProps) {
   const { levels } = useHierarchy();
   const activeLevels = levels
-    .filter((level) => level.isActive && level.showInTable)
+    .filter(
+      (level) =>
+        level.isActive &&
+        level.showInTable &&
+        level.key !== "engineer" &&
+        level.key !== "manager",
+    )
     .sort((a, b) => a.order - b.order);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(
     {},
   );
 
-  const totalColumns = 8 + activeLevels.length;
+  const totalColumns = 9 + activeLevels.length;
 
   return (
     <div className="rounded-md border overflow-x-auto">
@@ -44,7 +60,6 @@ export function OrdersTable({
           <TableRow>
             <TableHead className="whitespace-nowrap">Order #</TableHead>
             <TableHead className="whitespace-normal">Customer</TableHead>
-            <TableHead className="whitespace-normal">Engineer</TableHead>
             {activeLevels.map((level) => (
               <TableHead
                 key={level.id}
@@ -57,6 +72,12 @@ export function OrdersTable({
             ))}
             <TableHead className="whitespace-normal">Quantity</TableHead>
             <TableHead className="whitespace-normal">Due Date</TableHead>
+            <TableHead className="whitespace-normal">
+              {engineerLabel}
+            </TableHead>
+            <TableHead className="whitespace-normal">
+              {managerLabel}
+            </TableHead>
             <TableHead className="whitespace-normal">Priority</TableHead>
             <TableHead className="whitespace-normal">Status</TableHead>
             <TableHead className="text-right whitespace-normal">Actions</TableHead>
@@ -104,6 +125,9 @@ export function OrdersTable({
                         onEdit={onEdit}
                         onDelete={onDelete}
                         levels={activeLevels}
+                        dueSoonDays={dueSoonDays}
+                        dueIndicatorEnabled={dueIndicatorEnabled}
+                        dueIndicatorStatuses={dueIndicatorStatuses}
                       />
                     ))}
                 </Fragment>
@@ -126,6 +150,9 @@ export function OrdersTable({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 levels={activeLevels}
+                dueSoonDays={dueSoonDays}
+                dueIndicatorEnabled={dueIndicatorEnabled}
+                dueIndicatorStatuses={dueIndicatorStatuses}
               />
             ))
           )}

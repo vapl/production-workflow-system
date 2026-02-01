@@ -14,6 +14,7 @@ import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Order } from "@/types/orders";
 import type { HierarchyLevel } from "@/app/settings/HierarchyContext";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -22,9 +23,20 @@ interface OrderRowProps {
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
   levels: HierarchyLevel[];
+  dueSoonDays?: number;
+  dueIndicatorEnabled?: boolean;
+  dueIndicatorStatuses?: Order["status"][];
 }
 
-export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
+export function OrderRow({
+  order,
+  onEdit,
+  onDelete,
+  levels,
+  dueSoonDays = 5,
+  dueIndicatorEnabled = true,
+  dueIndicatorStatuses,
+}: OrderRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{
     top: number;
@@ -33,6 +45,7 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
   } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const { nodes } = useHierarchy();
+  const { rules } = useWorkflowRules();
   const nodeLabelMap = useMemo(() => {
     const map = new Map<string, string>();
     nodes.forEach((node) => {
@@ -60,6 +73,20 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
             ? "status-engineering_blocked"
       : "status-ready_for_production";
   const today = new Date().toISOString().slice(0, 10);
+  const dueDate = order.dueDate ? order.dueDate.slice(0, 10) : "";
+  const dueSoonDate = new Date();
+  dueSoonDate.setDate(dueSoonDate.getDate() + Math.max(0, dueSoonDays));
+  const dueSoonStr = dueSoonDate.toISOString().slice(0, 10);
+  const isDueStatusAllowed =
+    !dueIndicatorStatuses || dueIndicatorStatuses.includes(order.status);
+  const dueState =
+    dueIndicatorEnabled && isDueStatusAllowed
+      ? dueDate && dueDate < today
+        ? "overdue"
+        : dueDate && dueSoonDays > 0 && dueDate <= dueSoonStr
+          ? "due-soon"
+          : null
+      : null;
   const hasOverdueExternal =
     (order.externalJobs ?? []).some(
       (job) =>
@@ -69,6 +96,15 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
 
   const engineerInitials = order.assignedEngineerName
     ? order.assignedEngineerName
+        .split(" ")
+        .filter(Boolean)
+        .map((part) => part[0])
+        .slice(0, 2)
+        .join("")
+        .toUpperCase()
+    : "";
+  const managerInitials = order.assignedManagerName
+    ? order.assignedManagerName
         .split(" ")
         .filter(Boolean)
         .map((part) => part[0])
@@ -117,18 +153,6 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
       <TableCell className="whitespace-normal wrap-break-word">
         {order.customerName}
       </TableCell>
-      <TableCell className="whitespace-normal wrap-break-word">
-        {order.assignedEngineerName ? (
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
-              {engineerInitials}
-            </div>
-            <span>{order.assignedEngineerName}</span>
-          </div>
-        ) : (
-          "--"
-        )}
-      </TableCell>
       {levels.map((level) => {
         const value = order.hierarchy?.[level.id];
         return (
@@ -143,14 +167,57 @@ export function OrderRow({ order, onEdit, onDelete, levels }: OrderRowProps) {
         );
       })}
       <TableCell>{order.quantity ?? "--"}</TableCell>
-      <TableCell>{formatDate(order.dueDate)}</TableCell>
+      <TableCell>
+        <span
+          className={`inline-flex items-center rounded-md px-2 py-0.5 text-sm ${
+            dueState === "overdue"
+              ? "border border-rose-500 text-rose-600"
+              : dueState === "due-soon"
+                ? "border border-amber-400 text-amber-700"
+                : "text-foreground"
+          }`}
+          title={
+            dueState === "overdue"
+              ? "Overdue"
+              : dueState === "due-soon"
+                ? "Due soon"
+                : undefined
+          }
+        >
+          {formatDate(order.dueDate)}
+        </span>
+      </TableCell>
+      <TableCell className="whitespace-normal wrap-break-word">
+        {order.assignedEngineerName ? (
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+              {engineerInitials}
+            </div>
+            <span>{order.assignedEngineerName}</span>
+          </div>
+        ) : (
+          "--"
+        )}
+      </TableCell>
+      <TableCell className="whitespace-normal wrap-break-word">
+        {order.assignedManagerName ? (
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+              {managerInitials}
+            </div>
+            <span>{order.assignedManagerName}</span>
+          </div>
+        ) : (
+          "--"
+        )}
+      </TableCell>
       <TableCell>
         <Badge variant={priorityVariant}>{order.priority}</Badge>
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={statusVariant}>
-            {formatOrderStatus(order.status)}
+            {rules.statusLabels[order.status] ?? formatOrderStatus(order.status)}
           </Badge>
           {hasOverdueExternal && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">

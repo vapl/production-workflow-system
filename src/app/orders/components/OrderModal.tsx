@@ -68,7 +68,14 @@ export function OrderModal({
   const { levels, nodes } = useHierarchy();
   const activeLevels = useMemo(
     () =>
-      levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
+      levels
+        .filter(
+          (level) =>
+            level.isActive &&
+            level.key !== "engineer" &&
+            level.key !== "manager",
+        )
+        .sort((a, b) => a.order - b.order),
     [levels],
   );
   const isCategoryProductOnly = editMode === "category-product-only";

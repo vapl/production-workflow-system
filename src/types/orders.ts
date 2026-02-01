@@ -86,6 +86,9 @@ export interface Order {
   assignedEngineerId?: string;
   assignedEngineerName?: string;
   assignedEngineerAt?: string;
+  assignedManagerId?: string;
+  assignedManagerName?: string;
+  assignedManagerAt?: string;
   statusChangedBy?: string;
   statusChangedByRole?: string;
   statusChangedAt?: string;

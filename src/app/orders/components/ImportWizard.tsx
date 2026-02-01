@@ -90,11 +90,13 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
 
   const hierarchyFields = useMemo(
     () =>
-      levels.map((level) => ({
-        key: `hierarchy:${level.id}`,
-        label: `Hierarchy:${level.name}`,
-        levelId: level.id,
-      })),
+      levels
+        .filter((level) => level.key !== "engineer" && level.key !== "manager")
+        .map((level) => ({
+          key: `hierarchy:${level.id}`,
+          label: `Hierarchy:${level.name}`,
+          levelId: level.id,
+        })),
     [levels],
   );
 

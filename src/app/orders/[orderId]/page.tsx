@@ -18,6 +18,7 @@ import type {
   ExternalJobStatus,
   OrderAttachment,
   OrderComment,
+  OrderStatus,
 } from "@/types/orders";
 import Link from "next/link";
 import {
@@ -68,8 +69,30 @@ export default function OrderDetailPage() {
   const { role, name, id: userId, tenantId } = useCurrentUser();
   const { rules } = useWorkflowRules();
   const { activePartners, activeGroups } = usePartners();
+  const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
+  const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
+  const getInitials = (value?: string) =>
+    value
+      ? value
+          .split(" ")
+          .filter(Boolean)
+          .map((part) => part[0])
+          .slice(0, 2)
+          .join("")
+          .toUpperCase()
+      : "";
+  const statusLabel = (status: OrderStatus) =>
+    rules.statusLabels?.[status] ?? formatOrderStatus(status);
   const activeLevels = useMemo(
-    () => levels.filter((level) => level.isActive).sort((a, b) => a.order - b.order),
+    () =>
+      levels
+        .filter(
+          (level) =>
+            level.isActive &&
+            level.key !== "engineer" &&
+            level.key !== "manager",
+        )
+        .sort((a, b) => a.order - b.order),
     [levels],
   );
   const nodeLabelMap = useMemo(() => {
@@ -100,6 +123,8 @@ export default function OrderDetailPage() {
     { id: string; name: string }[]
   >([]);
   const [selectedEngineerId, setSelectedEngineerId] = useState("");
+  const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
+  const [selectedManagerId, setSelectedManagerId] = useState("");
   const [checklistState, setChecklistState] = useState<
     Record<string, boolean>
   >({});
@@ -128,6 +153,12 @@ export default function OrderDetailPage() {
     role === "Engineering" &&
     !orderState?.assignedEngineerId &&
     orderState?.status === "ready_for_engineering";
+  const canReturnToQueue =
+    role === "Engineering" &&
+    orderState?.assignedEngineerId === userId &&
+    (orderState?.status === "in_engineering" ||
+      orderState?.status === "engineering_blocked" ||
+      orderState?.status === "ready_for_engineering");
   const canSendToEngineering =
     role === "Sales" && orderState?.status === "draft";
   const canStartEngineering =
@@ -137,15 +168,24 @@ export default function OrderDetailPage() {
   const canSendToProduction =
     role === "Engineering" && orderState?.status === "in_engineering";
   const canAssignEngineer = ["Sales", "Admin"].includes(role);
+  const canAssignManager = ["Sales", "Admin"].includes(role);
   const canSendBack =
     (role === "Sales" &&
       (orderState?.status === "ready_for_engineering" ||
         orderState?.status === "in_engineering" ||
         orderState?.status === "engineering_blocked")) ||
-    (role === "Engineering" && orderState?.status === "ready_for_production");
+    (role === "Engineering" &&
+      (orderState?.status === "in_engineering" ||
+        orderState?.status === "engineering_blocked" ||
+        orderState?.status === "ready_for_production"));
   const returnTargetStatus =
-    role === "Engineering" && orderState?.status === "ready_for_production"
-      ? "in_engineering"
+    role === "Engineering"
+      ? orderState?.status === "ready_for_production"
+        ? "in_engineering"
+        : orderState?.status === "in_engineering" ||
+            orderState?.status === "engineering_blocked"
+          ? "ready_for_engineering"
+          : "draft"
       : "draft";
 
   const activeChecklistItems = rules.checklistItems.filter(
@@ -167,10 +207,18 @@ export default function OrderDetailPage() {
   }, [orderState?.assignedEngineerId]);
 
   useEffect(() => {
+    if (!orderState?.assignedManagerId) {
+      setSelectedManagerId("");
+      return;
+    }
+    setSelectedManagerId(orderState.assignedManagerId);
+  }, [orderState?.assignedManagerId]);
+
+  useEffect(() => {
     if (!supabase) {
       setEngineers([
-        { id: "eng-1", name: "Engineer 1" },
-        { id: "eng-2", name: "Engineer 2" },
+        { id: "eng-1", name: `${engineerLabel} 1` },
+        { id: "eng-2", name: `${engineerLabel} 2` },
       ]);
       return;
     }
@@ -195,7 +243,7 @@ export default function OrderDetailPage() {
       setEngineers(
         (data ?? []).map((row) => ({
           id: row.id,
-          name: row.full_name ?? "Engineer",
+          name: row.full_name ?? engineerLabel,
         })),
       );
     };
@@ -204,7 +252,45 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [tenantId]);
+  }, [engineerLabel, tenantId]);
+
+  useEffect(() => {
+    if (!supabase) {
+      setManagers([
+        { id: "mgr-1", name: `${managerLabel} 1` },
+        { id: "mgr-2", name: `${managerLabel} 2` },
+      ]);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchManagers = async () => {
+      const query = supabase.from("profiles").select("id, full_name, role");
+      query.in("role", ["Sales", "Admin"]);
+      if (tenantId) {
+        query.eq("tenant_id", tenantId);
+      }
+      const { data, error } = await query;
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setManagers([]);
+        return;
+      }
+      setManagers(
+        (data ?? []).map((row) => ({
+          id: row.id,
+          name: row.full_name ?? managerLabel,
+        })),
+      );
+    };
+
+    fetchManagers();
+    return () => {
+      isMounted = false;
+    };
+  }, [managerLabel, tenantId]);
 
   useEffect(() => {
     setOrderState(order);
@@ -624,6 +710,52 @@ export default function OrderDetailPage() {
     });
   }
 
+  async function handleReturnToQueue() {
+    if (!orderState) {
+      return;
+    }
+    const shouldResetStatus =
+      orderState.status === "in_engineering" ||
+      orderState.status === "engineering_blocked";
+    const nextStatus = shouldResetStatus
+      ? "ready_for_engineering"
+      : orderState.status;
+    const now = new Date().toISOString();
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            assignedEngineerId: undefined,
+            assignedEngineerName: undefined,
+            assignedEngineerAt: undefined,
+            status: nextStatus,
+            statusChangedBy: name,
+            statusChangedByRole: role,
+            statusChangedAt: now,
+            statusHistory: [
+              {
+                id: `hst-${Date.now()}`,
+                status: nextStatus,
+                changedBy: name,
+                changedByRole: role,
+                changedAt: now,
+              },
+              ...(prev.statusHistory ?? []),
+            ],
+          }
+        : prev,
+    );
+    await updateOrder(orderState.id, {
+      assignedEngineerId: null,
+      assignedEngineerName: null,
+      assignedEngineerAt: null,
+      status: nextStatus,
+      statusChangedBy: name,
+      statusChangedByRole: role,
+      statusChangedAt: now,
+    });
+  }
+
   async function handleStatusChange(
     nextStatus:
       | "draft"
@@ -707,6 +839,51 @@ export default function OrderDetailPage() {
       assignedEngineerId: "",
       assignedEngineerName: "",
       assignedEngineerAt: "",
+    });
+  }
+
+  async function handleAssignManager() {
+    if (!orderState || !selectedManagerId) {
+      return;
+    }
+    const manager = managers.find((item) => item.id === selectedManagerId);
+    const now = new Date().toISOString();
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            assignedManagerId: selectedManagerId,
+            assignedManagerName: manager?.name ?? prev.assignedManagerName,
+            assignedManagerAt: now,
+          }
+        : prev,
+    );
+    await updateOrder(orderState.id, {
+      assignedManagerId: selectedManagerId,
+      assignedManagerName: manager?.name ?? orderState.assignedManagerName,
+      assignedManagerAt: now,
+    });
+  }
+
+  async function handleClearManager() {
+    if (!orderState) {
+      return;
+    }
+    setSelectedManagerId("");
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            assignedManagerId: undefined,
+            assignedManagerName: undefined,
+            assignedManagerAt: undefined,
+          }
+        : prev,
+    );
+    await updateOrder(orderState.id, {
+      assignedManagerId: "",
+      assignedManagerName: "",
+      assignedManagerAt: "",
     });
   }
 
@@ -834,7 +1011,7 @@ export default function OrderDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={priorityVariant}>{orderState.priority}</Badge>
           <Badge variant={statusVariant}>
-            {formatOrderStatus(orderState.status)}
+            {statusLabel(orderState.status)}
           </Badge>
           <Button
             variant="ghost"
@@ -908,7 +1085,7 @@ export default function OrderDetailPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={priorityVariant}>{orderState.priority}</Badge>
                 <Badge variant={statusVariant}>
-                  {formatOrderStatus(orderState.status)}
+                  {statusLabel(orderState.status)}
                 </Badge>
               </div>
 
@@ -944,9 +1121,9 @@ export default function OrderDetailPage() {
                     size="sm"
                     disabled={!canAdvanceToProduction}
                     onClick={() => handleStatusChange("ready_for_production")}
-                  >
-                    Ready for production
-                  </Button>
+                    >
+                      {statusLabel("ready_for_production")}
+                    </Button>
                 )}
                 {canSendBack && (
                   <Button
@@ -966,11 +1143,72 @@ export default function OrderDetailPage() {
                     Take order
                   </Button>
                 )}
+                {canReturnToQueue && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReturnToQueue}
+                  >
+                    Return to queue
+                  </Button>
+                )}
               </div>
 
               <div className="space-y-2 text-xs text-muted-foreground">
+                {orderState.assignedManagerName && (
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
+                      {getInitials(orderState.assignedManagerName)}
+                    </div>
+                    <span>
+                      {managerLabel}: {orderState.assignedManagerName}
+                    </span>
+                  </div>
+                )}
+                {canAssignManager && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={selectedManagerId}
+                      onChange={(event) =>
+                        setSelectedManagerId(event.target.value)
+                      }
+                      className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                    >
+                      <option value="">Assign {managerLabel.toLowerCase()}...</option>
+                      {managers.map((manager) => (
+                        <option key={manager.id} value={manager.id}>
+                          {manager.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAssignManager}
+                      disabled={!selectedManagerId}
+                    >
+                      Assign
+                    </Button>
+                    {orderState.assignedManagerId && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleClearManager}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                )}
                 {orderState.assignedEngineerName && (
-                  <div>Engineer: {orderState.assignedEngineerName}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
+                      {getInitials(orderState.assignedEngineerName)}
+                    </div>
+                    <span>
+                      {engineerLabel}: {orderState.assignedEngineerName}
+                    </span>
+                  </div>
                 )}
                 {canAssignEngineer && (
                   <div className="flex flex-wrap items-center gap-2">
@@ -981,7 +1219,7 @@ export default function OrderDetailPage() {
                       }
                       className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
                     >
-                      <option value="">Assign engineer...</option>
+                      <option value="">Assign {engineerLabel.toLowerCase()}...</option>
                       {engineers.map((engineer) => (
                         <option key={engineer.id} value={engineer.id}>
                           {engineer.name}
@@ -1339,6 +1577,14 @@ export default function OrderDetailPage() {
                   {(orderState.externalJobs ?? []).map((job) => {
                     const pendingFiles = externalJobFiles[job.id] ?? [];
                     const uploadState = externalJobUpload[job.id];
+                    const partnerGroupName =
+                      activeGroups.find(
+                        (group) =>
+                          group.id ===
+                          activePartners.find(
+                            (partner) => partner.id === job.partnerId,
+                          )?.groupId,
+                      )?.name ?? "";
                     return (
                       <div
                         key={job.id}
@@ -1346,7 +1592,14 @@ export default function OrderDetailPage() {
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <div className="font-medium">{job.partnerName}</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="font-medium">{job.partnerName}</div>
+                              {partnerGroupName ? (
+                                <span className="text-xs text-muted-foreground">
+                                  {partnerGroupName}
+                                </span>
+                              ) : null}
+                            </div>
                             <div className="text-xs text-muted-foreground">
                               {job.externalOrderNumber} • Due{" "}
                               {formatDate(job.dueDate)}
@@ -1599,7 +1852,7 @@ export default function OrderDetailPage() {
                       <div className="flex-1 rounded-md border border-border px-3 py-2">
                         <div className="flex items-center justify-between gap-2">
                           <Badge variant={`status-${entry.status}`}>
-                            {formatOrderStatus(entry.status)}
+                            {statusLabel(entry.status)}
                           </Badge>
                           <div className="text-xs text-muted-foreground">
                             {formatDate(entry.changedAt.slice(0, 10))}
@@ -1616,7 +1869,7 @@ export default function OrderDetailPage() {
               ) : orderState.statusChangedAt ? (
                 <div className="rounded-md border border-border px-3 py-2">
                   <div className="font-medium">
-                    {formatOrderStatus(orderState.status)}
+                    {statusLabel(orderState.status)}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {orderState.statusChangedBy ?? "Unknown"}
@@ -1760,7 +2013,7 @@ export default function OrderDetailPage() {
             <h2 className="text-lg font-semibold">Send order back</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Choose a reason and add a note. The order will return to{" "}
-              {formatOrderStatus(returnTargetStatus)}.
+              {statusLabel(returnTargetStatus)}.
             </p>
             <div className="mt-4 space-y-3">
               <label className="space-y-2 text-sm font-medium">
