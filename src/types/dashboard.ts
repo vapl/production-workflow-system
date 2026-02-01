@@ -4,4 +4,6 @@ export interface DashboardKpis {
   completedToday: number;
   lateBatches: number;
   totalOrders: number;
+  dueSoonOrders: number;
+  overdueOrders: number;
 }

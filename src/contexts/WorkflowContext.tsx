@@ -21,6 +21,14 @@ export interface WorkflowRules {
   minAttachmentsForProduction: number;
   requireCommentForEngineering: boolean;
   requireCommentForProduction: boolean;
+  dueSoonDays: number;
+  dueIndicatorEnabled: boolean;
+  dueIndicatorStatuses: OrderStatus[];
+  statusLabels: Record<OrderStatus, string>;
+  assignmentLabels: {
+    engineer: string;
+    manager: string;
+  };
   checklistItems: ChecklistItem[];
   returnReasons: string[];
   externalJobRules: ExternalJobRule[];
@@ -54,6 +62,25 @@ const defaultRules: WorkflowRules = {
   minAttachmentsForProduction: 1,
   requireCommentForEngineering: true,
   requireCommentForProduction: true,
+  dueSoonDays: 5,
+  dueIndicatorEnabled: true,
+  dueIndicatorStatuses: [
+    "ready_for_engineering",
+    "in_engineering",
+    "engineering_blocked",
+    "ready_for_production",
+  ],
+  statusLabels: {
+    draft: "Draft",
+    ready_for_engineering: "Ready for eng.",
+    in_engineering: "In eng.",
+    engineering_blocked: "Eng. blocked",
+    ready_for_production: "Ready for prod.",
+  },
+  assignmentLabels: {
+    engineer: "Engineer",
+    manager: "Manager",
+  },
   checklistItems: [
     {
       id: "cl-brief",
@@ -115,7 +142,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           supabase
             .from("workflow_rules")
             .select(
-              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production",
+              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, assignment_labels",
             )
             .eq("tenant_id", user.tenantId)
             .maybeSingle(),
@@ -154,6 +181,20 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         requireCommentForProduction:
           rulesData?.require_comment_production ??
           prev.requireCommentForProduction,
+        dueSoonDays: rulesData?.due_soon_days ?? prev.dueSoonDays,
+        dueIndicatorEnabled:
+          rulesData?.due_indicator_enabled ?? prev.dueIndicatorEnabled,
+        dueIndicatorStatuses:
+          (rulesData?.due_indicator_statuses as OrderStatus[] | null) ??
+          prev.dueIndicatorStatuses,
+        statusLabels: {
+          ...prev.statusLabels,
+          ...(rulesData?.status_labels ?? {}),
+        },
+        assignmentLabels: {
+          ...prev.assignmentLabels,
+          ...(rulesData?.assignment_labels ?? {}),
+        },
         checklistItems: (checklistData ?? []).map((row) => ({
           id: row.id,
           label: row.label,
@@ -180,6 +221,11 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           min_attachments_production: defaultRules.minAttachmentsForProduction,
           require_comment_engineering: defaultRules.requireCommentForEngineering,
           require_comment_production: defaultRules.requireCommentForProduction,
+          due_soon_days: defaultRules.dueSoonDays,
+          due_indicator_enabled: defaultRules.dueIndicatorEnabled,
+          due_indicator_statuses: defaultRules.dueIndicatorStatuses,
+          status_labels: defaultRules.statusLabels,
+          assignment_labels: defaultRules.assignmentLabels,
         });
       }
 
@@ -203,23 +249,31 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
   }, [user.isAuthenticated, user.loading, user.tenantId]);
 
   const setRules = (patch: Partial<WorkflowRules>) => {
-    setRulesState((prev) => ({
-      ...prev,
-      ...patch,
-      checklistItems: patch.checklistItems ?? prev.checklistItems,
-      returnReasons: patch.returnReasons ?? prev.returnReasons,
-      externalJobRules: patch.externalJobRules ?? prev.externalJobRules,
-    }));
-    if (!supabase || !user.tenantId) {
-      return;
-    }
-    const next = { ...rules, ...patch };
-    void supabase.from("workflow_rules").upsert({
-      tenant_id: user.tenantId,
-      min_attachments_engineering: next.minAttachmentsForEngineering,
-      min_attachments_production: next.minAttachmentsForProduction,
-      require_comment_engineering: next.requireCommentForEngineering,
-      require_comment_production: next.requireCommentForProduction,
+    setRulesState((prev) => {
+      const next = {
+        ...prev,
+        ...patch,
+        checklistItems: patch.checklistItems ?? prev.checklistItems,
+        returnReasons: patch.returnReasons ?? prev.returnReasons,
+        externalJobRules: patch.externalJobRules ?? prev.externalJobRules,
+        statusLabels: patch.statusLabels ?? prev.statusLabels,
+        assignmentLabels: patch.assignmentLabels ?? prev.assignmentLabels,
+      };
+      if (supabase && user.tenantId) {
+        void supabase.from("workflow_rules").upsert({
+          tenant_id: user.tenantId,
+          min_attachments_engineering: next.minAttachmentsForEngineering,
+          min_attachments_production: next.minAttachmentsForProduction,
+          require_comment_engineering: next.requireCommentForEngineering,
+          require_comment_production: next.requireCommentForProduction,
+          due_soon_days: next.dueSoonDays,
+          due_indicator_enabled: next.dueIndicatorEnabled,
+          due_indicator_statuses: next.dueIndicatorStatuses,
+          status_labels: next.statusLabels,
+          assignment_labels: next.assignmentLabels,
+        });
+      }
+      return next;
     });
   };
 

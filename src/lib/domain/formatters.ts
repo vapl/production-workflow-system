@@ -23,13 +23,13 @@ export function formatOrderStatus(status: OrderStatus): string {
     case "draft":
       return "Draft";
     case "ready_for_engineering":
-      return "Ready for engineering";
+      return "Ready for eng.";
     case "in_engineering":
-      return "In engineering";
+      return "In eng.";
     case "engineering_blocked":
-      return "Engineering blocked";
+      return "Eng. blocked";
     case "ready_for_production":
-      return "Ready for production";
+      return "Ready for prod.";
     default:
       return status.replace(/_/g, " ");
   }
