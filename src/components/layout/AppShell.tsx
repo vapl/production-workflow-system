@@ -15,6 +15,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isAuthRoute = pathname?.startsWith("/auth");
 
   useEffect(() => {
+    const errorHandler = (event: ErrorEvent) => {
+      const message = event.error?.message ?? event.message ?? "";
+      if (
+        event.error?.name === "AbortError" ||
+        message.includes("signal is aborted without reason")
+      ) {
+        event.preventDefault();
+      }
+    };
+    const handler = (event: PromiseRejectionEvent) => {
+      const reason = event.reason as { message?: string; name?: string } | null;
+      if (
+        reason?.name === "AbortError" ||
+        reason?.message?.includes("signal is aborted without reason")
+      ) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("error", errorHandler);
+    window.addEventListener("unhandledrejection", handler);
+    return () => {
+      window.removeEventListener("error", errorHandler);
+      window.removeEventListener("unhandledrejection", handler);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!user.loading && !user.isAuthenticated && !isAuthRoute) {
       router.replace("/auth");
     }
@@ -36,7 +63,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user.isAuthenticated && isAuthRoute) {
+  if (isAuthRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;
   }
 

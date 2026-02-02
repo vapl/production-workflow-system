@@ -70,17 +70,5 @@ export async function POST(request: Request) {
     }
   }
 
-  const origin = getOrigin(request);
-  const redirectTo = origin ? `${origin}/auth` : undefined;
-
-  const { error } = await admin.auth.signInWithOtp({
-    email,
-    options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
-  });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
-  }
-
   return NextResponse.json({ success: true });
 }
