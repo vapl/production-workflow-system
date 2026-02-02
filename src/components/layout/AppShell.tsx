@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { TabsNav } from "@/components/layout/TabsNav";
-import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
@@ -13,6 +12,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isAuthRoute = pathname?.startsWith("/auth");
+  const hideTabsNav = pathname?.startsWith("/profile");
 
   useEffect(() => {
     const errorHandler = (event: ErrorEvent) => {
@@ -87,8 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
         <main className="container mx-auto px-4 py-6">
           <div className="flex justify-between">
-            <TabsNav />
-            <ThemeToggle />
+            {!hideTabsNav ? <TabsNav /> : <div />}
           </div>
           {children}
         </main>

@@ -21,6 +21,7 @@ export interface CurrentUser {
   id: string;
   name: string;
   email?: string;
+  phone?: string | null;
   role: UserRole;
   isAdmin: boolean;
   tenantId?: string | null;
@@ -41,6 +42,7 @@ const fallbackUser: CurrentUser = {
   name: "Manager",
   role: "Sales",
   isAdmin: false,
+  phone: null,
   tenantId: null,
   tenantLogoUrl: null,
   avatarUrl: null,
@@ -104,7 +106,7 @@ async function fetchUserRole(userId: string) {
   }
   const { data, error } = await supabase
     .from("profiles")
-    .select("role, full_name, tenant_id, avatar_url, is_admin")
+    .select("role, full_name, tenant_id, avatar_url, is_admin, phone")
     .eq("id", userId)
     .maybeSingle();
 
@@ -116,6 +118,7 @@ async function fetchUserRole(userId: string) {
       tenantId: null,
       avatarUrl: null,
       tenantName: null,
+      phone: null,
     };
   }
 
@@ -144,6 +147,7 @@ async function fetchUserRole(userId: string) {
       avatarUrl: resolvedAvatarUrl,
       tenantName,
       tenantLogoUrl: resolvedTenantLogo,
+      phone: data.phone ?? null,
     };
   }
 
@@ -155,6 +159,7 @@ async function fetchUserRole(userId: string) {
     avatarUrl: resolvedAvatarUrl,
     tenantName,
     tenantLogoUrl: null,
+    phone: data.phone ?? null,
   };
 }
 
@@ -199,6 +204,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       avatarUrl?: string | null;
       tenantName?: string | null;
       tenantLogoUrl?: string | null;
+      phone?: string | null;
     },
   ) {
     if (!supabase) {
@@ -333,6 +339,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           id: sessionUser.id,
           name: ensuredProfile.fullName,
           email: sessionUser.email ?? undefined,
+          phone: ensuredProfile.phone ?? null,
           role: ensuredProfile.role,
           isAdmin: ensuredProfile.isAdmin,
           tenantId: ensuredProfile.tenantId ?? null,
@@ -363,9 +370,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           const profile = await fetchUserRole(sessionUser.id);
           const ensuredProfile = await ensureProfileSetup(sessionUser, profile);
           setUser({
-            id: sessionUser.id,
+          id: sessionUser.id,
           name: ensuredProfile.fullName,
           email: sessionUser.email ?? undefined,
+          phone: ensuredProfile.phone ?? null,
           role: ensuredProfile.role,
           isAdmin: ensuredProfile.isAdmin,
           tenantId: ensuredProfile.tenantId ?? null,

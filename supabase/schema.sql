@@ -11,6 +11,9 @@ create table if not exists public.tenants (
 alter table public.profiles
   add column if not exists tenant_id uuid references public.tenants(id) on delete restrict;
 
+alter table public.profiles
+  add column if not exists phone text;
+
 create index if not exists profiles_tenant_id_idx on public.profiles(tenant_id);
 
 create table if not exists public.orders (

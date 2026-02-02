@@ -10,6 +10,7 @@ import {
 import { useCurrentUser } from "@/contexts/UserContext";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import Link from "next/link";
+import { ArrowLeftIcon, PencilIcon, XIcon } from "lucide-react";
 
 function getStoragePathFromUrl(url: string, bucket: string) {
   if (!url) {
@@ -35,12 +36,14 @@ export default function ProfilePage() {
   const user = useCurrentUser();
   const [fullName, setFullName] = useState(user.name ?? "");
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
+  const [phone, setPhone] = useState(user.phone ?? "");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarState, setAvatarState] = useState<
     "idle" | "uploading" | "uploaded" | "error"
   >("idle");
   const [avatarMessage, setAvatarMessage] = useState("");
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
   );
@@ -49,6 +52,7 @@ export default function ProfilePage() {
   useEffect(() => {
     setFullName(user.name ?? "");
     setAvatarUrl(user.avatarUrl ?? "");
+    setPhone(user.phone ?? "");
     setAvatarFile(null);
     if (avatarPreview) {
       URL.revokeObjectURL(avatarPreview);
@@ -80,6 +84,7 @@ export default function ProfilePage() {
       .update({
         full_name: fullName.trim(),
         avatar_url: avatarUrl.trim() || null,
+        phone: phone.trim() || null,
       })
       .eq("id", user.id);
     if (error) {
@@ -172,32 +177,55 @@ export default function ProfilePage() {
 
   return (
     <section className="space-y-6">
+      <div className="flex items-center">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeftIcon className="h-4 w-4" />
+          Back to dashboard
+        </Link>
+      </div>
       <Card>
         <CardHeader>
           <CardTitle>My Profile</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center gap-4">
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={fullName || "User avatar"}
-                className="h-14 w-14 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-base font-semibold text-foreground">
-                {initials}
-              </div>
-            )}
+            <button
+              type="button"
+              className="group relative h-14 w-14 rounded-full"
+              onClick={() => setAvatarModalOpen(true)}
+              aria-label="Edit avatar"
+            >
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={fullName || "User avatar"}
+                  className="h-14 w-14 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-base font-semibold text-foreground">
+                  {initials}
+                </div>
+              )}
+              <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm transition group-hover:bg-muted">
+                <PencilIcon className="h-3.5 w-3.5" />
+              </span>
+            </button>
             <div>
               <div className="text-sm font-medium">{fullName || "User"}</div>
               <div className="text-xs text-muted-foreground">
                 {user.email ?? "--"}
               </div>
+              <div className="text-xs text-muted-foreground">
+                Role: {user.role}
+                {user.isAdmin ? " / Admin" : ""}
+              </div>
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <label className="space-y-2 text-sm font-medium">
               Full name
               <input
@@ -214,13 +242,75 @@ export default function ProfilePage() {
                 className="h-11 w-full rounded-lg border border-border bg-muted px-3 text-sm text-muted-foreground"
               />
             </label>
+            <label className="space-y-2 text-sm font-medium">
+              Phone
+              <input
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+              />
+            </label>
           </div>
 
-          <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
-            <div className="text-sm font-medium">Avatar image</div>
-            <div className="flex flex-wrap items-center gap-4 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <Button onClick={handleSave} disabled={status === "saving"}>
+              {status === "saving" ? "Saving..." : "Save profile"}
+            </Button>
+            {message && (
+              <span
+                className={`text-xs ${
+                  status === "error"
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {message}
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+      {user.isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Company & Billing</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-muted-foreground">
+              Manage company legal details and subscription settings.
+            </div>
+            <Link
+              href="/settings?tab=company"
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+            >
+              Open company settings
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+      {avatarModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          onClick={() => setAvatarModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg border border-border bg-card p-4 shadow-lg"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold">Edit avatar</div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setAvatarModalOpen(false)}
+                aria-label="Close"
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="mt-4 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="h-16 w-16 overflow-hidden rounded-full border border-border bg-background">
+                <div className="h-20 w-20 overflow-hidden rounded-full border border-border bg-background">
                   {avatarPreview || avatarUrl ? (
                     <img
                       src={avatarPreview ?? avatarUrl}
@@ -285,56 +375,21 @@ export default function ProfilePage() {
                   Delete
                 </Button>
               </div>
+              {avatarMessage && (
+                <span
+                  className={`text-xs ${
+                    avatarState === "error"
+                      ? "text-destructive"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {avatarMessage}
+                </span>
+              )}
             </div>
-            {avatarMessage && (
-              <span
-                className={`text-xs ${
-                  avatarState === "error"
-                    ? "text-destructive"
-                    : "text-muted-foreground"
-                }`}
-              >
-                {avatarMessage}
-              </span>
-            )}
           </div>
-
-          <div className="flex items-center gap-3">
-            <Button onClick={handleSave} disabled={status === "saving"}>
-              {status === "saving" ? "Saving..." : "Save profile"}
-            </Button>
-            {message && (
-              <span
-                className={`text-xs ${
-                  status === "error"
-                    ? "text-destructive"
-                    : "text-muted-foreground"
-                }`}
-              >
-                {message}
-              </span>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-      {user.isAdmin && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Company & Billing</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm text-muted-foreground">
-              Manage company legal details and subscription settings.
-            </div>
-            <Link
-              href="/settings?tab=company"
-              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            >
-              Open company settings
-            </Link>
-          </CardContent>
-        </Card>
-      )}
+        </div>
+      ) : null}
     </section>
   );
 }

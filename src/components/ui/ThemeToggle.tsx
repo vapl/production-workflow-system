@@ -23,7 +23,13 @@ function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
 }
 
-export function ThemeToggle() {
+export function ThemeToggle({
+  variant = "tabs",
+  className,
+}: {
+  variant?: "tabs" | "menu";
+  className?: string;
+}) {
   const [theme, setTheme] = useState<Theme>("light");
   const [mounted, setMounted] = useState(false);
 
@@ -53,7 +59,11 @@ export function ThemeToggle() {
   if (!mounted) {
     return (
       <button
-        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--tabs-border)] bg-[var(--tabs-bg)] px-3 text-sm font-medium text-[var(--tabs-text)] opacity-70 shadow-sm"
+        className={
+          variant === "menu"
+            ? `flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-muted-foreground opacity-70 ${className ?? ""}`.trim()
+            : `inline-flex h-9 items-center gap-2 rounded-full border border-[var(--tabs-border)] bg-[var(--tabs-bg)] px-3 text-sm font-medium text-[var(--tabs-text)] opacity-70 shadow-sm ${className ?? ""}`.trim()
+        }
         type="button"
         aria-label="Toggle theme"
         disabled
@@ -66,7 +76,11 @@ export function ThemeToggle() {
 
   return (
     <button
-      className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--tabs-border)] bg-[var(--tabs-bg)] px-3 text-sm font-medium text-[var(--tabs-text)] shadow-sm transition hover:text-[var(--tabs-hover-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tabs-ring)]"
+      className={
+        variant === "menu"
+          ? `flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/50 ${className ?? ""}`.trim()
+          : `inline-flex h-9 items-center gap-2 rounded-full border border-[var(--tabs-border)] bg-[var(--tabs-bg)] px-3 text-sm font-medium text-[var(--tabs-text)] shadow-sm transition hover:text-[var(--tabs-hover-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tabs-ring)] ${className ?? ""}`.trim()
+      }
       type="button"
       onClick={handleToggle}
       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
