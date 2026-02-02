@@ -29,11 +29,10 @@ export async function uploadOrderAttachment(
       return { error: error.message };
     }
 
-    const { data } = supabase.storage.from(supabaseBucket).getPublicUrl(path);
     return {
       attachment: {
         name: file.name,
-        url: data.publicUrl,
+        url: path,
         size: file.size,
         mimeType: file.type,
       },

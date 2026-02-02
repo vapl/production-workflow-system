@@ -502,7 +502,7 @@ export default function OrdersPage() {
                 setEditingOrder(null);
                 setIsModalOpen(true);
               }}
-              disabled={!["Sales", "Admin"].includes(user.role)}
+              disabled={!(user.role === "Sales" || user.isAdmin)}
             >
               <PlusIcon className="h-4 w-4" />
               New Order

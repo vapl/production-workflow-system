@@ -794,15 +794,15 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             status: order.status,
             assignedManagerId:
               order.assignedManagerId ??
-              (user.role === "Sales" || user.role === "Admin" ? user.id : undefined),
+              (user.role === "Sales" || user.isAdmin ? user.id : undefined),
             assignedManagerName:
               order.assignedManagerName ??
-              (user.role === "Sales" || user.role === "Admin"
+              (user.role === "Sales" || user.isAdmin
                 ? user.name ?? "Manager"
                 : undefined),
             assignedManagerAt:
               order.assignedManagerAt ??
-              (user.role === "Sales" || user.role === "Admin"
+              (user.role === "Sales" || user.isAdmin
                 ? new Date().toISOString()
                 : undefined),
             source: "manual",
@@ -842,9 +842,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             due_date: order.dueDate,
             priority: order.priority,
             status: order.status,
-            assigned_manager_id: order.assignedManagerId ?? (user.role === "Sales" || user.role === "Admin" ? user.id : null),
-            assigned_manager_name: order.assignedManagerName ?? (user.role === "Sales" || user.role === "Admin" ? user.name : null),
-            assigned_manager_at: order.assignedManagerAt ?? (user.role === "Sales" || user.role === "Admin" ? new Date().toISOString() : null),
+            assigned_manager_id: order.assignedManagerId ?? (user.role === "Sales" || user.isAdmin ? user.id : null),
+            assigned_manager_name: order.assignedManagerName ?? (user.role === "Sales" || user.isAdmin ? user.name : null),
+            assigned_manager_at: order.assignedManagerAt ?? (user.role === "Sales" || user.isAdmin ? new Date().toISOString() : null),
             source: "manual",
           })
           .select(
@@ -1776,3 +1776,4 @@ export function useOrders() {
   }
   return context;
 }
+

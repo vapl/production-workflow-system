@@ -35,7 +35,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import { useBatches } from "@/contexts/BatchesContext";
 import { uploadOrderAttachment } from "@/lib/uploadOrderAttachment";
 import { uploadExternalJobAttachment } from "@/lib/uploadExternalJobAttachment";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { usePartners } from "@/hooks/usePartners";
 
@@ -72,7 +72,7 @@ export default function OrderDetailPage() {
   } = useOrders();
   const { batches } = useBatches();
   const { levels, nodes } = useHierarchy();
-  const { role, name, id: userId, tenantId } = useCurrentUser();
+  const { role, isAdmin, name, id: userId, tenantId } = useCurrentUser();
   const { rules } = useWorkflowRules();
   const { activePartners, activeGroups } = usePartners();
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
@@ -92,10 +92,14 @@ export default function OrderDetailPage() {
       }, {}),
     [attachmentCategories],
   );
+  const defaultAttachmentRole = isAdmin ? "Admin" : role;
   const defaultAttachmentCategory =
-    rules.attachmentCategoryDefaults?.[role] ??
+    rules.attachmentCategoryDefaults?.[defaultAttachmentRole] ??
     attachmentCategories[0]?.id ??
     "order_documents";
+  const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
+    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
+    : "";
   const getInitials = (value?: string) =>
     value
       ? value
@@ -177,6 +181,11 @@ export default function OrderDetailPage() {
   const [expandedExternalHistory, setExpandedExternalHistory] = useState<
     Record<string, boolean>
   >({});
+  const [signedAttachmentUrls, setSignedAttachmentUrls] = useState<
+    Record<string, string>
+  >({});
+  const [signedExternalAttachmentUrls, setSignedExternalAttachmentUrls] =
+    useState<Record<string, string>>({});
 
   const canTakeOrder =
     role === "Engineering" &&
@@ -196,8 +205,8 @@ export default function OrderDetailPage() {
     role === "Engineering" && orderState?.status === "in_engineering";
   const canSendToProduction =
     role === "Engineering" && orderState?.status === "in_engineering";
-  const canAssignEngineer = ["Sales", "Admin"].includes(role);
-  const canAssignManager = ["Sales", "Admin"].includes(role);
+  const canAssignEngineer = role === "Sales" || isAdmin;
+  const canAssignManager = role === "Sales" || isAdmin;
   const canSendBack =
     (role === "Sales" &&
       (orderState?.status === "ready_for_engineering" ||
@@ -295,7 +304,7 @@ export default function OrderDetailPage() {
     let isMounted = true;
     const fetchManagers = async () => {
       const query = supabase.from("profiles").select("id, full_name, role");
-      query.in("role", ["Sales", "Admin"]);
+      query.in("role", ["Sales"]);
       if (tenantId) {
         query.eq("tenant_id", tenantId);
       }
@@ -345,6 +354,96 @@ export default function OrderDetailPage() {
 
   const attachments = orderState?.attachments ?? [];
   const comments = orderState?.comments ?? [];
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+    const pending = attachments.filter(
+      (attachment) =>
+        attachment.url && !signedAttachmentUrls[attachment.id],
+    );
+    if (pending.length === 0) {
+      return;
+    }
+    let isMounted = true;
+    const signAll = async () => {
+      const results = await Promise.all(
+        pending.map(async (attachment) => {
+          let path = attachment.url as string;
+          if (storagePublicPrefix && path.startsWith(storagePublicPrefix)) {
+            path = path.slice(storagePublicPrefix.length);
+          }
+          const { data } = await supabase.storage
+            .from(supabaseBucket)
+            .createSignedUrl(path, 60 * 60);
+          return { id: attachment.id, url: data?.signedUrl };
+        }),
+      );
+      if (!isMounted) {
+        return;
+      }
+      setSignedAttachmentUrls((prev) => {
+        const next = { ...prev };
+        results.forEach((result) => {
+          if (result.url) {
+            next[result.id] = result.url;
+          }
+        });
+        return next;
+      });
+    };
+    signAll();
+    return () => {
+      isMounted = false;
+    };
+  }, [attachments, signedAttachmentUrls]);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+    const externalAttachments = (orderState?.externalJobs ?? []).flatMap(
+      (job) => job.attachments ?? [],
+    );
+    const pending = externalAttachments.filter(
+      (attachment) =>
+        attachment.url && !signedExternalAttachmentUrls[attachment.id],
+    );
+    if (pending.length === 0) {
+      return;
+    }
+    let isMounted = true;
+    const signAll = async () => {
+      const results = await Promise.all(
+        pending.map(async (attachment) => {
+          let path = attachment.url as string;
+          if (storagePublicPrefix && path.startsWith(storagePublicPrefix)) {
+            path = path.slice(storagePublicPrefix.length);
+          }
+          const { data } = await supabase.storage
+            .from(supabaseBucket)
+            .createSignedUrl(path, 60 * 60);
+          return { id: attachment.id, url: data?.signedUrl };
+        }),
+      );
+      if (!isMounted) {
+        return;
+      }
+      setSignedExternalAttachmentUrls((prev) => {
+        const next = { ...prev };
+        results.forEach((result) => {
+          if (result.url) {
+            next[result.id] = result.url;
+          }
+        });
+        return next;
+      });
+    };
+    signAll();
+    return () => {
+      isMounted = false;
+    };
+  }, [orderState?.externalJobs, signedExternalAttachmentUrls]);
   const meetsEngineeringChecklist = requiredForEngineering.every(
     (item) => checklistState[item.id],
   );
@@ -977,7 +1076,42 @@ export default function OrderDetailPage() {
     await updateOrder(orderState.id, { checklist: next });
   }
 
-  function renderAttachmentPreview(attachment: OrderAttachment) {
+  const resolveAttachmentUrl = (attachment: OrderAttachment) => {
+    if (!attachment.url) {
+      return undefined;
+    }
+    if (!supabase) {
+      return attachment.url;
+    }
+    if (storagePublicPrefix && attachment.url.startsWith(storagePublicPrefix)) {
+      return signedAttachmentUrls[attachment.id];
+    }
+    if (attachment.url.startsWith("http")) {
+      return attachment.url;
+    }
+    return signedAttachmentUrls[attachment.id];
+  };
+
+  const resolveExternalAttachmentUrl = (attachment: ExternalJobAttachment) => {
+    if (!attachment.url) {
+      return undefined;
+    }
+    if (!supabase) {
+      return attachment.url;
+    }
+    if (storagePublicPrefix && attachment.url.startsWith(storagePublicPrefix)) {
+      return signedExternalAttachmentUrls[attachment.id];
+    }
+    if (attachment.url.startsWith("http")) {
+      return attachment.url;
+    }
+    return signedExternalAttachmentUrls[attachment.id];
+  };
+
+  function renderAttachmentPreview(
+    attachment: OrderAttachment | ExternalJobAttachment,
+    resolvedUrl?: string,
+  ) {
     const lowerName = attachment.name.toLowerCase();
     const isPdf = lowerName.endsWith(".pdf");
     const isImage =
@@ -987,10 +1121,10 @@ export default function OrderDetailPage() {
       lowerName.endsWith(".gif") ||
       lowerName.endsWith(".webp");
 
-    if (isImage && attachment.url) {
+    if (isImage && resolvedUrl) {
       return (
         <img
-          src={attachment.url}
+          src={resolvedUrl}
           alt={attachment.name}
           className="h-12 w-12 rounded-md object-cover"
         />
@@ -1461,7 +1595,10 @@ export default function OrderDetailPage() {
                           className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
                         >
                           <div className="flex items-center gap-3">
-                            {renderAttachmentPreview(attachment)}
+                            {renderAttachmentPreview(
+                              attachment,
+                              resolveAttachmentUrl(attachment),
+                            )}
                             <div>
                               <div className="font-medium">{attachment.name}</div>
                               <div className="text-xs text-muted-foreground">
@@ -1474,9 +1611,9 @@ export default function OrderDetailPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            {attachment.url && (
+                            {resolveAttachmentUrl(attachment) && (
                               <a
-                                href={attachment.url}
+                                href={resolveAttachmentUrl(attachment)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="text-xs text-primary underline"
@@ -1819,15 +1956,24 @@ export default function OrderDetailPage() {
                                   className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
                                 >
                                   <div className="flex items-center gap-2">
-                                    {renderAttachmentPreview(file as ExternalJobAttachment)}
+                                    {renderAttachmentPreview(
+                                      file as ExternalJobAttachment,
+                                      resolveExternalAttachmentUrl(
+                                        file as ExternalJobAttachment,
+                                      ),
+                                    )}
                                     <span className="font-medium">
                                       {file.name}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    {file.url && (
+                                    {resolveExternalAttachmentUrl(
+                                      file as ExternalJobAttachment,
+                                    ) && (
                                       <a
-                                        href={file.url}
+                                        href={resolveExternalAttachmentUrl(
+                                          file as ExternalJobAttachment,
+                                        )}
                                         target="_blank"
                                         rel="noreferrer"
                                         className="text-xs text-primary underline"
