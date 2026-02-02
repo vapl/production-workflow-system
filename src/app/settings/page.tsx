@@ -14,7 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { useHierarchy } from "./HierarchyContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
 import { useCurrentUser, type UserRole } from "@/contexts/UserContext";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
+import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
 import {
   useWorkflowRules,
   type WorkflowTargetStatus,
@@ -27,6 +28,34 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)+/g, "");
+}
+
+function getStoragePathFromUrl(url: string, bucket: string) {
+  if (!url) {
+    return null;
+  }
+  if (!url.startsWith("http")) {
+    return url;
+  }
+  try {
+    const parsed = new URL(url);
+    const marker = `/storage/v1/object/public/${bucket}/`;
+    const idx = parsed.pathname.indexOf(marker);
+    if (idx === -1) {
+      return null;
+    }
+    return parsed.pathname.slice(idx + marker.length);
+  } catch {
+    return null;
+  }
+}
+
+const userRoleOptions: UserRole[] = ["Sales", "Engineering", "Production"];
+
+function normalizeUserRole(value?: string | null): UserRole {
+  return userRoleOptions.includes(value as UserRole)
+    ? (value as UserRole)
+    : "Sales";
 }
 
 const integrations = [
@@ -44,6 +73,8 @@ const workflowStatusOptions: { value: OrderStatus; label: string }[] = [
   { value: "engineering_blocked", label: "Engineering blocked" },
   { value: "ready_for_production", label: "Ready for production" },
 ];
+
+type AttachmentRole = UserRole | "Admin";
 
 const lockedLevelKeys = new Set([
   "contract",
@@ -149,7 +180,7 @@ export default function SettingsPage() {
     string | null
   >(null);
   const [users, setUsers] = useState<
-    { id: string; name: string; role: UserRole }[]
+    { id: string; name: string; role: UserRole; isAdmin: boolean }[]
   >([]);
   const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
@@ -161,11 +192,21 @@ export default function SettingsPage() {
   const [companyVatNo, setCompanyVatNo] = useState("");
   const [companyBillingEmail, setCompanyBillingEmail] = useState("");
   const [companyAddress, setCompanyAddress] = useState("");
+  const [companyLogoUrl, setCompanyLogoUrl] = useState("");
+  const [companyLogoFile, setCompanyLogoFile] = useState<File | null>(null);
+  const [companyLogoPreview, setCompanyLogoPreview] = useState<string | null>(
+    null,
+  );
+  const [companyLogoState, setCompanyLogoState] = useState<
+    "idle" | "uploading" | "uploaded" | "error"
+  >("idle");
+  const [companyLogoMessage, setCompanyLogoMessage] = useState("");
   const [companyState, setCompanyState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [companyMessage, setCompanyMessage] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteFullName, setInviteFullName] = useState("");
   const [inviteRole, setInviteRole] = useState<UserRole>("Sales");
   const [inviteState, setInviteState] = useState<
     "idle" | "sending" | "sent" | "error"
@@ -175,6 +216,7 @@ export default function SettingsPage() {
     {
       id: string;
       email: string;
+      fullName?: string | null;
       role: UserRole;
       invitedAt: string;
       acceptedAt?: string | null;
@@ -224,7 +266,7 @@ export default function SettingsPage() {
     useState("");
   const [newAttachmentCategoryLabel, setNewAttachmentCategoryLabel] =
     useState("");
-  const attachmentRoles: UserRole[] = [
+  const attachmentRoles: AttachmentRole[] = [
     "Sales",
     "Engineering",
     "Production",
@@ -245,6 +287,8 @@ export default function SettingsPage() {
     }
     return false;
   }, [rules.statusLabels, statusLabelDrafts]);
+
+  const maxLogoBytes = 2 * 1024 * 1024;
   const hasAssignmentLabelChanges =
     assignmentLabelDrafts.engineer.trim() !==
       (rules.assignmentLabels?.engineer ?? "Engineer") ||
@@ -291,7 +335,7 @@ export default function SettingsPage() {
       const { data, error } = await supabase
         .from("tenants")
         .select(
-          "name, legal_name, registration_no, vat_no, billing_email, address",
+          "name, legal_name, registration_no, vat_no, billing_email, address, logo_url",
         )
         .eq("id", currentUser.tenantId)
         .maybeSingle();
@@ -304,9 +348,18 @@ export default function SettingsPage() {
       setCompanyVatNo(data.vat_no ?? "");
       setCompanyBillingEmail(data.billing_email ?? "");
       setCompanyAddress(data.address ?? "");
+      setCompanyLogoUrl(data.logo_url ?? "");
     };
     fetchCompany();
   }, [currentUser.tenantId]);
+
+  useEffect(() => {
+    return () => {
+      if (companyLogoPreview) {
+        URL.revokeObjectURL(companyLogoPreview);
+      }
+    };
+  }, [companyLogoPreview]);
 
   useEffect(() => {
     if (!supabase || !currentUser.tenantId) {
@@ -316,7 +369,7 @@ export default function SettingsPage() {
       setIsInvitesLoading(true);
       const { data, error } = await supabase
         .from("user_invites")
-        .select("id, email, role, invited_at, accepted_at")
+        .select("id, email, full_name, role, invited_at, accepted_at")
         .eq("tenant_id", currentUser.tenantId)
         .order("invited_at", { ascending: false });
       if (!error) {
@@ -324,7 +377,8 @@ export default function SettingsPage() {
           (data ?? []).map((row) => ({
             id: row.id,
             email: row.email,
-            role: row.role as UserRole,
+            fullName: row.full_name ?? null,
+            role: normalizeUserRole(row.role),
             invitedAt: row.invited_at,
             acceptedAt: row.accepted_at,
           })),
@@ -447,6 +501,7 @@ export default function SettingsPage() {
         vat_no: companyVatNo.trim() || null,
         billing_email: companyBillingEmail.trim() || null,
         address: companyAddress.trim() || null,
+        logo_url: companyLogoUrl.trim() || null,
       })
       .eq("id", currentUser.tenantId);
     if (error) {
@@ -470,10 +525,11 @@ export default function SettingsPage() {
       .insert({
         tenant_id: currentUser.tenantId,
         email: trimmed,
+        full_name: inviteFullName.trim() || null,
         role: inviteRole,
         invited_by: currentUser.id,
       })
-      .select("id, email, role, invited_at, accepted_at")
+      .select("id, email, full_name, role, invited_at, accepted_at")
       .single();
     if (insertError || !inviteRow) {
       setInviteState("error");
@@ -496,16 +552,91 @@ export default function SettingsPage() {
     setInviteState("sent");
     setInviteMessage("Invite sent.");
     setInviteEmail("");
+    setInviteFullName("");
     setInvites((prev) => [
       {
         id: inviteRow.id,
         email: inviteRow.email,
-        role: inviteRow.role as UserRole,
+        fullName: inviteRow.full_name ?? null,
+        role: normalizeUserRole(inviteRow.role),
         invitedAt: inviteRow.invited_at,
         acceptedAt: inviteRow.accepted_at,
       },
       ...prev,
     ]);
+  }
+
+  async function handleUploadCompanyLogo() {
+    if (!companyLogoFile || !currentUser.tenantId) {
+      return;
+    }
+    setCompanyLogoState("uploading");
+    setCompanyLogoMessage("");
+    const result = await uploadTenantLogo(
+      companyLogoFile,
+      currentUser.tenantId,
+    );
+    if (!result.url || result.error) {
+      setCompanyLogoState("error");
+      const rawMessage = result.error ?? "Upload failed.";
+      if (rawMessage.toLowerCase().includes("bucket")) {
+        setCompanyLogoMessage(
+          `Bucket not found. Create a "${process.env.NEXT_PUBLIC_SUPABASE_TENANT_BUCKET || "tenant-logos"}" bucket in Supabase Storage.`,
+        );
+      } else {
+        setCompanyLogoMessage(rawMessage);
+      }
+      return;
+    }
+    setCompanyLogoState("uploaded");
+    setCompanyLogoMessage("Logo uploaded.");
+    setCompanyLogoUrl(result.url);
+    setCompanyLogoFile(null);
+    if (companyLogoPreview) {
+      URL.revokeObjectURL(companyLogoPreview);
+      setCompanyLogoPreview(null);
+    }
+    if (!supabase) {
+      return;
+    }
+    await supabase
+      .from("tenants")
+      .update({ logo_url: result.url })
+      .eq("id", currentUser.tenantId);
+  }
+
+  async function handleDeleteCompanyLogo() {
+    if (!supabase || !currentUser.tenantId || !companyLogoUrl) {
+      return;
+    }
+    setCompanyLogoState("uploading");
+    setCompanyLogoMessage("");
+    const storagePath = getStoragePathFromUrl(
+      companyLogoUrl,
+      supabaseTenantLogoBucket,
+    );
+    if (storagePath) {
+      await supabase.storage
+        .from(supabaseTenantLogoBucket)
+        .remove([storagePath]);
+    }
+    const { error } = await supabase
+      .from("tenants")
+      .update({ logo_url: null })
+      .eq("id", currentUser.tenantId);
+    if (error) {
+      setCompanyLogoState("error");
+      setCompanyLogoMessage(error.message);
+      return;
+    }
+    setCompanyLogoUrl("");
+    setCompanyLogoFile(null);
+    if (companyLogoPreview) {
+      URL.revokeObjectURL(companyLogoPreview);
+      setCompanyLogoPreview(null);
+    }
+    setCompanyLogoState("uploaded");
+    setCompanyLogoMessage("Logo removed.");
   }
 
   async function handleResendInvite(email: string) {
@@ -612,6 +743,7 @@ export default function SettingsPage() {
           id: currentUser.id,
           name: currentUser.name,
           role: currentUser.role,
+          isAdmin: currentUser.isAdmin,
         },
       ]);
       return;
@@ -626,7 +758,7 @@ export default function SettingsPage() {
       setUsersError(null);
       const query = supabase
         .from("profiles")
-        .select("id, full_name, role, tenant_id")
+        .select("id, full_name, role, tenant_id, is_admin")
         .order("full_name", { ascending: true });
       if (currentUser.tenantId) {
         query.eq("tenant_id", currentUser.tenantId);
@@ -644,7 +776,8 @@ export default function SettingsPage() {
         (data ?? []).map((row) => ({
           id: row.id,
           name: row.full_name ?? "User",
-          role: (row.role as UserRole) ?? "Sales",
+          role: normalizeUserRole(row.role),
+          isAdmin: row.is_admin ?? false,
         })),
       );
       setIsUsersLoading(false);
@@ -659,6 +792,7 @@ export default function SettingsPage() {
     currentUser.loading,
     currentUser.name,
     currentUser.role,
+    currentUser.isAdmin,
     currentUser.tenantId,
   ]);
 
@@ -681,6 +815,29 @@ export default function SettingsPage() {
     }
     setUsers((prev) =>
       prev.map((user) => (user.id === userId ? { ...user, role } : user)),
+    );
+    setUpdatingUserId(null);
+  }
+
+  async function handleUpdateUserAdmin(userId: string, isAdmin: boolean) {
+    if (!supabase) {
+      setUsers((prev) =>
+        prev.map((user) => (user.id === userId ? { ...user, isAdmin } : user)),
+      );
+      return;
+    }
+    setUpdatingUserId(userId);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ is_admin: isAdmin })
+      .eq("id", userId);
+    if (error) {
+      setUsersError(error.message);
+      setUpdatingUserId(null);
+      return;
+    }
+    setUsers((prev) =>
+      prev.map((user) => (user.id === userId ? { ...user, isAdmin } : user)),
     );
     setUpdatingUserId(null);
   }
@@ -1010,7 +1167,7 @@ export default function SettingsPage() {
                       value={companyName}
                       onChange={(event) => setCompanyName(event.target.value)}
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={currentUser.role !== "Admin"}
+                      disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
@@ -1021,7 +1178,7 @@ export default function SettingsPage() {
                         setCompanyLegalName(event.target.value)
                       }
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={currentUser.role !== "Admin"}
+                      disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
@@ -1032,7 +1189,7 @@ export default function SettingsPage() {
                         setCompanyRegistrationNo(event.target.value)
                       }
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={currentUser.role !== "Admin"}
+                      disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
@@ -1041,7 +1198,7 @@ export default function SettingsPage() {
                       value={companyVatNo}
                       onChange={(event) => setCompanyVatNo(event.target.value)}
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={currentUser.role !== "Admin"}
+                      disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
@@ -1053,7 +1210,7 @@ export default function SettingsPage() {
                         setCompanyBillingEmail(event.target.value)
                       }
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={currentUser.role !== "Admin"}
+                      disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
@@ -1064,15 +1221,122 @@ export default function SettingsPage() {
                         setCompanyAddress(event.target.value)
                       }
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={currentUser.role !== "Admin"}
+                      disabled={!currentUser.isAdmin}
                     />
                   </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    Logo URL
+                    <input
+                      value={companyLogoUrl}
+                      onChange={(event) =>
+                        setCompanyLogoUrl(event.target.value)
+                      }
+                      placeholder="https://"
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                      disabled={!currentUser.isAdmin}
+                    />
+                  </label>
+                  <div className="space-y-3 text-sm font-medium">
+                    Upload logo
+                    <div className="flex flex-wrap items-center gap-4 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-16 w-16 overflow-hidden rounded-full border border-border bg-background">
+                          {companyLogoPreview || companyLogoUrl ? (
+                            <img
+                              src={companyLogoPreview ?? companyLogoUrl}
+                              alt="Logo preview"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+                              Logo
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          <div>
+                            {companyLogoFile
+                              ? companyLogoFile.name
+                              : "Choose an image file to upload."}
+                          </div>
+                          <div>PNG or JPG up to 2MB.</div>
+                        </div>
+                      </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm">
+                            Select file
+                            <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (companyLogoPreview) {
+                                URL.revokeObjectURL(companyLogoPreview);
+                              }
+                              if (file && file.size > maxLogoBytes) {
+                                setCompanyLogoFile(null);
+                                setCompanyLogoPreview(null);
+                                setCompanyLogoState("error");
+                                setCompanyLogoMessage(
+                                  "Logo file is too large. Max 2MB.",
+                                );
+                                return;
+                              }
+                              setCompanyLogoFile(file ?? null);
+                              setCompanyLogoPreview(
+                                file ? URL.createObjectURL(file) : null,
+                              );
+                              setCompanyLogoState("idle");
+                              setCompanyLogoMessage("");
+                            }}
+                            disabled={!currentUser.isAdmin}
+                              className="sr-only"
+                            />
+                          </label>
+                          <Button
+                            variant="outline"
+                            onClick={handleUploadCompanyLogo}
+                            disabled={
+                              !currentUser.isAdmin ||
+                              !companyLogoFile ||
+                              companyLogoState === "uploading"
+                            }
+                          >
+                            {companyLogoState === "uploading"
+                              ? "Uploading..."
+                              : "Upload logo"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={handleDeleteCompanyLogo}
+                            disabled={
+                              !currentUser.isAdmin ||
+                              !companyLogoUrl ||
+                              companyLogoState === "uploading"
+                            }
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                    </div>
+                    {companyLogoMessage && (
+                      <span
+                        className={`text-xs ${
+                          companyLogoState === "error"
+                            ? "text-destructive"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {companyLogoMessage}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     onClick={handleSaveCompany}
                     disabled={
-                      currentUser.role !== "Admin" || companyState === "saving"
+                      !currentUser.isAdmin || companyState === "saving"
                     }
                   >
                     {companyState === "saving" ? "Saving..." : "Save company"}
@@ -1944,7 +2208,7 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <div className="text-sm font-medium">Invite user</div>
-                <div className="mt-3 grid gap-3 items-center md:grid-cols-[minmax(220px,1.2fr)_minmax(140px,0.5fr)_auto] md:items-end">
+                <div className="mt-3 grid gap-3 items-center md:grid-cols-[minmax(220px,1.2fr)_minmax(200px,1fr)_minmax(140px,0.5fr)_auto] md:items-end">
                   <label className="space-y-2 text-sm font-medium">
                     Email
                     <input
@@ -1953,7 +2217,17 @@ export default function SettingsPage() {
                       onChange={(event) => setInviteEmail(event.target.value)}
                       placeholder="user@company.com"
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={!["Admin"].includes(currentUser.role)}
+                      disabled={!currentUser.isAdmin}
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    Full name
+                    <input
+                      value={inviteFullName}
+                      onChange={(event) => setInviteFullName(event.target.value)}
+                      placeholder="Full name"
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                      disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
@@ -1964,18 +2238,19 @@ export default function SettingsPage() {
                         setInviteRole(event.target.value as UserRole)
                       }
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={!["Admin"].includes(currentUser.role)}
+                      disabled={!currentUser.isAdmin}
                     >
-                      <option value="Sales">Sales</option>
-                      <option value="Engineering">Engineering</option>
-                      <option value="Production">Production</option>
-                      <option value="Admin">Admin</option>
+                      {userRoleOptions.map((roleOption) => (
+                        <option key={roleOption} value={roleOption}>
+                          {roleOption}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <Button
                     onClick={handleInviteUser}
                     disabled={
-                      !["Admin"].includes(currentUser.role) ||
+                      !currentUser.isAdmin ||
                       inviteState === "sending"
                     }
                   >
@@ -1994,13 +2269,13 @@ export default function SettingsPage() {
                   </p>
                 )}
               </div>
-              {!["Admin"].includes(currentUser.role) && (
+              {!currentUser.isAdmin && (
                 <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                  Only admins can update user roles.
+                  Only admins can update user roles or admin access.
                 </div>
               )}
               {process.env.NODE_ENV !== "production" &&
-                !["Admin"].includes(currentUser.role) && (
+                !currentUser.isAdmin && (
                   <label className="flex items-center gap-2 text-sm text-muted-foreground">
                     <input
                       type="checkbox"
@@ -2023,6 +2298,7 @@ export default function SettingsPage() {
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Name</th>
                       <th className="px-4 py-2 text-left font-medium">Role</th>
+                      <th className="px-4 py-2 text-left font-medium">Admin</th>
                       <th className="px-4 py-2 text-right font-medium">
                         Actions
                       </th>
@@ -2032,7 +2308,7 @@ export default function SettingsPage() {
                     {isUsersLoading ? (
                       <tr>
                         <td
-                          colSpan={3}
+                          colSpan={4}
                           className="px-4 py-6 text-center text-muted-foreground"
                         >
                           Loading users...
@@ -2041,7 +2317,7 @@ export default function SettingsPage() {
                     ) : users.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={3}
+                          colSpan={4}
                           className="px-4 py-6 text-center text-muted-foreground"
                         >
                           No users found.
@@ -2062,15 +2338,32 @@ export default function SettingsPage() {
                               }
                               className="h-9 rounded-md border border-border bg-input-background px-3 text-sm"
                               disabled={
-                                !["Admin"].includes(currentUser.role) &&
+                                !currentUser.isAdmin &&
                                 !(devRoleOverride && user.id === currentUser.id)
                               }
                             >
-                              <option value="Sales">Sales</option>
-                              <option value="Engineering">Engineering</option>
-                              <option value="Production">Production</option>
-                              <option value="Admin">Admin</option>
+                              {userRoleOptions.map((roleOption) => (
+                                <option key={roleOption} value={roleOption}>
+                                  {roleOption}
+                                </option>
+                              ))}
                             </select>
+                          </td>
+                          <td className="px-4 py-2">
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                checked={user.isAdmin}
+                                onChange={(event) =>
+                                  handleUpdateUserAdmin(
+                                    user.id,
+                                    event.target.checked,
+                                  )
+                                }
+                                disabled={!currentUser.isAdmin}
+                              />
+                              Admin
+                            </label>
                           </td>
                           <td className="px-4 py-2 text-right text-xs text-muted-foreground">
                             {updatingUserId === user.id ? "Saving..." : ""}
@@ -2088,6 +2381,9 @@ export default function SettingsPage() {
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">Email</th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Full name
+                        </th>
                         <th className="px-4 py-2 text-left font-medium">Role</th>
                         <th className="px-4 py-2 text-left font-medium">Status</th>
                         <th className="px-4 py-2 text-right font-medium">
@@ -2099,7 +2395,7 @@ export default function SettingsPage() {
                       {isInvitesLoading ? (
                         <tr>
                           <td
-                            colSpan={4}
+                            colSpan={5}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
                             Loading invites...
@@ -2108,7 +2404,7 @@ export default function SettingsPage() {
                       ) : invites.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={4}
+                            colSpan={5}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
                             No invites yet.
@@ -2118,6 +2414,9 @@ export default function SettingsPage() {
                         invites.map((invite) => (
                           <tr key={invite.id} className="border-t border-border">
                             <td className="px-4 py-2">{invite.email}</td>
+                            <td className="px-4 py-2">
+                              {invite.fullName ?? "--"}
+                            </td>
                             <td className="px-4 py-2">{invite.role}</td>
                             <td className="px-4 py-2 text-xs text-muted-foreground">
                               {invite.acceptedAt ? "Accepted" : "Pending"}
@@ -2130,7 +2429,7 @@ export default function SettingsPage() {
                                   onClick={() => handleResendInvite(invite.email)}
                                   disabled={
                                     invite.acceptedAt !== null ||
-                                    !["Admin"].includes(currentUser.role)
+                                    !currentUser.isAdmin
                                   }
                                 >
                                   Resend
@@ -2141,7 +2440,7 @@ export default function SettingsPage() {
                                   onClick={() => handleCancelInvite(invite.id)}
                                   disabled={
                                     invite.acceptedAt !== null ||
-                                    !["Admin"].includes(currentUser.role)
+                                    !currentUser.isAdmin
                                   }
                                 >
                                   Cancel
@@ -2788,3 +3087,4 @@ export default function SettingsPage() {
     </section>
   );
 }
+

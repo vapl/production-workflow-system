@@ -3,16 +3,40 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { supabase } from "@/lib/supabaseClient";
+import {
+  supabase,
+  supabaseAvatarBucket,
+} from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import Link from "next/link";
+
+function getStoragePathFromUrl(url: string, bucket: string) {
+  if (!url) {
+    return null;
+  }
+  if (!url.startsWith("http")) {
+    return url;
+  }
+  try {
+    const parsed = new URL(url);
+    const marker = `/storage/v1/object/public/${bucket}/`;
+    const idx = parsed.pathname.indexOf(marker);
+    if (idx === -1) {
+      return null;
+    }
+    return parsed.pathname.slice(idx + marker.length);
+  } catch {
+    return null;
+  }
+}
 
 export default function ProfilePage() {
   const user = useCurrentUser();
   const [fullName, setFullName] = useState(user.name ?? "");
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarState, setAvatarState] = useState<
     "idle" | "uploading" | "uploaded" | "error"
   >("idle");
@@ -26,9 +50,22 @@ export default function ProfilePage() {
     setFullName(user.name ?? "");
     setAvatarUrl(user.avatarUrl ?? "");
     setAvatarFile(null);
+    if (avatarPreview) {
+      URL.revokeObjectURL(avatarPreview);
+    }
+    setAvatarPreview(null);
     setAvatarState("idle");
     setAvatarMessage("");
+    // Only reset when user changes, not when preview changes.
   }, [user.name, user.avatarUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) {
+        URL.revokeObjectURL(avatarPreview);
+      }
+    };
+  }, [avatarPreview]);
 
   async function handleSave() {
     if (!supabase || !user.id) {
@@ -66,14 +103,62 @@ export default function ProfilePage() {
       setAvatarMessage(result.error ?? "Upload failed.");
       return;
     }
+    const storagePath = getStoragePathFromUrl(
+      result.url,
+      supabaseAvatarBucket,
+    );
+    let displayUrl = result.url;
+    if (storagePath && supabase) {
+      const { data } = await supabase.storage
+        .from(supabaseAvatarBucket)
+        .createSignedUrl(storagePath, 60 * 60);
+      if (data?.signedUrl) {
+        displayUrl = data.signedUrl;
+      }
+    }
     setAvatarState("uploaded");
     setAvatarMessage("Avatar uploaded.");
-    setAvatarUrl(result.url);
+    setAvatarUrl(displayUrl);
     await supabase
       .from("profiles")
       .update({ avatar_url: result.url })
       .eq("id", user.id);
   }
+
+  async function handleDeleteAvatar() {
+    if (!supabase || !user.id || !avatarUrl) {
+      return;
+    }
+    setAvatarState("uploading");
+    setAvatarMessage("");
+    const { supabaseAvatarBucket } = await import("@/lib/supabaseClient");
+    const storagePath = getStoragePathFromUrl(
+      avatarUrl,
+      supabaseAvatarBucket,
+    );
+    if (storagePath) {
+      await supabase.storage.from(supabaseAvatarBucket).remove([storagePath]);
+    }
+    const { error } = await supabase
+      .from("profiles")
+      .update({ avatar_url: null })
+      .eq("id", user.id);
+    if (error) {
+      setAvatarState("error");
+      setAvatarMessage(error.message);
+      return;
+    }
+    setAvatarUrl("");
+    setAvatarFile(null);
+    if (avatarPreview) {
+      URL.revokeObjectURL(avatarPreview);
+    }
+    setAvatarPreview(null);
+    setAvatarState("uploaded");
+    setAvatarMessage("Avatar removed.");
+  }
+
+  const maxAvatarBytes = 2 * 1024 * 1024;
 
   const initials = fullName
     ? fullName
@@ -133,41 +218,84 @@ export default function ProfilePage() {
 
           <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
             <div className="text-sm font-medium">Avatar image</div>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                setAvatarFile(file ?? null);
-                setAvatarState("idle");
-                setAvatarMessage("");
-              }}
-              className="text-sm"
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={handleAvatarUpload}
-                disabled={!avatarFile || avatarState === "uploading"}
-              >
-                {avatarState === "uploading" ? "Uploading..." : "Upload avatar"}
-              </Button>
-              {avatarMessage && (
-                <span
-                  className={`text-xs ${
-                    avatarState === "error"
-                      ? "text-destructive"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  {avatarMessage}
-                </span>
-              )}
-            </div>
-            {avatarUrl && (
-              <div className="text-xs text-muted-foreground">
-                Current avatar URL: {avatarUrl}
+            <div className="flex flex-wrap items-center gap-4 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="h-16 w-16 overflow-hidden rounded-full border border-border bg-background">
+                  {avatarPreview || avatarUrl ? (
+                    <img
+                      src={avatarPreview ?? avatarUrl}
+                      alt="Avatar preview"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+                      Avatar
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <div>
+                    {avatarFile
+                      ? avatarFile.name
+                      : "Choose an image file to upload."}
+                  </div>
+                  <div>PNG or JPG up to 2MB.</div>
+                </div>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm">
+                  Select file
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (avatarPreview) {
+                        URL.revokeObjectURL(avatarPreview);
+                      }
+                      if (file && file.size > maxAvatarBytes) {
+                        setAvatarFile(null);
+                        setAvatarPreview(null);
+                        setAvatarState("error");
+                        setAvatarMessage("Avatar file is too large. Max 2MB.");
+                        return;
+                      }
+                      setAvatarFile(file ?? null);
+                      setAvatarPreview(file ? URL.createObjectURL(file) : null);
+                      setAvatarState("idle");
+                      setAvatarMessage("");
+                    }}
+                    className="sr-only"
+                  />
+                </label>
+                <Button
+                  variant="outline"
+                  onClick={handleAvatarUpload}
+                  disabled={!avatarFile || avatarState === "uploading"}
+                >
+                  {avatarState === "uploading"
+                    ? "Uploading..."
+                    : "Upload avatar"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={handleDeleteAvatar}
+                  disabled={!avatarUrl || avatarState === "uploading"}
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+            {avatarMessage && (
+              <span
+                className={`text-xs ${
+                  avatarState === "error"
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {avatarMessage}
+              </span>
             )}
           </div>
 
@@ -189,7 +317,7 @@ export default function ProfilePage() {
           </div>
         </CardContent>
       </Card>
-      {user.role === "Admin" && (
+      {user.isAdmin && (
         <Card>
           <CardHeader>
             <CardTitle>Company & Billing</CardTitle>

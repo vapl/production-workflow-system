@@ -1,17 +1,31 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import {
+  supabase,
+  supabaseAvatarBucket,
+  supabaseTenantLogoBucket,
+} from "@/lib/supabaseClient";
 
-export type UserRole = "Sales" | "Engineering" | "Production" | "Admin";
+export type UserRole = "Sales" | "Engineering" | "Production";
+
+const userRoleOptions: UserRole[] = ["Sales", "Engineering", "Production"];
+
+function normalizeUserRole(value?: string | null): UserRole {
+  return userRoleOptions.includes(value as UserRole)
+    ? (value as UserRole)
+    : "Sales";
+}
 
 export interface CurrentUser {
   id: string;
   name: string;
   email?: string;
   role: UserRole;
+  isAdmin: boolean;
   tenantId?: string | null;
   tenantName?: string | null;
+  tenantLogoUrl?: string | null;
   avatarUrl?: string | null;
   isAuthenticated: boolean;
   loading: boolean;
@@ -20,17 +34,15 @@ export interface CurrentUser {
 interface UserContextValue {
   user: CurrentUser;
   signOut: () => Promise<void>;
-  signInWithMagicLink: (
-    email: string,
-    options?: { mode?: "signin" | "signup"; companyName?: string },
-  ) => Promise<string | null>;
 }
 
 const fallbackUser: CurrentUser = {
   id: "user-1",
   name: "Manager",
   role: "Sales",
+  isAdmin: false,
   tenantId: null,
+  tenantLogoUrl: null,
   avatarUrl: null,
   isAuthenticated: false,
   loading: false,
@@ -39,22 +51,67 @@ const fallbackUser: CurrentUser = {
 const UserContext = createContext<UserContextValue>({
   user: fallbackUser,
   signOut: async () => undefined,
-  signInWithMagicLink: async () => "Supabase is not configured.",
 });
+
+function getStoragePathFromUrl(url: string, bucket: string) {
+  if (!url) {
+    return null;
+  }
+  if (!url.startsWith("http")) {
+    return url;
+  }
+  try {
+    const parsed = new URL(url);
+    const marker = `/storage/v1/object/public/${bucket}/`;
+    const idx = parsed.pathname.indexOf(marker);
+    if (idx === -1) {
+      return null;
+    }
+    return parsed.pathname.slice(idx + marker.length);
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSignedUrl(
+  url: string | null | undefined,
+  bucket: string,
+) {
+  if (!supabase || !url) {
+    return url ?? null;
+  }
+  const storagePath = getStoragePathFromUrl(url, bucket);
+  if (!storagePath) {
+    return url;
+  }
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(storagePath, 60 * 60);
+  if (error || !data?.signedUrl) {
+    return url;
+  }
+  return data.signedUrl;
+}
 
 async function fetchUserRole(userId: string) {
   if (!supabase) {
-    return { role: "Sales" as UserRole, fullName: "Manager", tenantId: null };
+    return {
+      role: "Sales" as UserRole,
+      isAdmin: false,
+      fullName: "Manager",
+      tenantId: null,
+    };
   }
   const { data, error } = await supabase
     .from("profiles")
-    .select("role, full_name, tenant_id, avatar_url")
+    .select("role, full_name, tenant_id, avatar_url, is_admin")
     .eq("id", userId)
     .maybeSingle();
 
   if (error || !data) {
     return {
       role: "Sales" as UserRole,
+      isAdmin: false,
       fullName: "Manager",
       tenantId: null,
       avatarUrl: null,
@@ -62,25 +119,42 @@ async function fetchUserRole(userId: string) {
     };
   }
 
+  const role = normalizeUserRole(data.role);
+  const resolvedAvatarUrl = await resolveSignedUrl(
+    data.avatar_url ?? null,
+    supabaseAvatarBucket,
+  );
   let tenantName: string | null = null;
   if (data.tenant_id) {
     const { data: tenantData } = await supabase
       .from("tenants")
-      .select("name")
+      .select("name, logo_url")
       .eq("id", data.tenant_id)
       .maybeSingle();
     tenantName = tenantData?.name ?? null;
+    const resolvedTenantLogo = await resolveSignedUrl(
+      tenantData?.logo_url ?? null,
+      supabaseTenantLogoBucket,
+    );
+    return {
+      role,
+      isAdmin: data.is_admin ?? false,
+      fullName: data.full_name ?? "User",
+      tenantId: data.tenant_id ?? null,
+      avatarUrl: resolvedAvatarUrl,
+      tenantName,
+      tenantLogoUrl: resolvedTenantLogo,
+    };
   }
 
-  const role = ["Sales", "Engineering", "Production", "Admin"].includes(data.role)
-    ? (data.role as UserRole)
-    : ("Sales" as UserRole);
   return {
     role,
+    isAdmin: data.is_admin ?? false,
     fullName: data.full_name ?? "User",
     tenantId: data.tenant_id ?? null,
-    avatarUrl: data.avatar_url ?? null,
+    avatarUrl: resolvedAvatarUrl,
     tenantName,
+    tenantLogoUrl: null,
   };
 }
 
@@ -119,10 +193,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     sessionUser: { id: string; email?: string | null },
     profile: {
       role: UserRole;
+      isAdmin: boolean;
       fullName: string;
       tenantId: string | null;
       avatarUrl?: string | null;
       tenantName?: string | null;
+      tenantLogoUrl?: string | null;
     },
   ) {
     if (!supabase) {
@@ -147,14 +223,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           await supabase.from("profiles").upsert({
             id: sessionUser.id,
             full_name: fullName,
-            role: "Admin",
+            role: "Sales",
+            is_admin: true,
             tenant_id: tenant.id,
             email: sessionUser.email ?? null,
           });
           nextProfile = {
             ...nextProfile,
             fullName,
-            role: "Admin",
+            role: "Sales",
+            isAdmin: true,
             tenantId: tenant.id,
             tenantName: tenant.name ?? null,
           };
@@ -163,17 +241,20 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       } else if (sessionUser.email) {
         const { data: invite } = await supabase
           .from("user_invites")
-          .select("id, tenant_id, role")
+          .select("id, tenant_id, role, full_name")
           .eq("email", sessionUser.email)
           .is("accepted_at", null)
           .order("invited_at", { ascending: false })
           .maybeSingle();
         if (invite?.tenant_id) {
-          const fullName = nextProfile.fullName || "User";
+          const fullName =
+            invite.full_name?.trim() || nextProfile.fullName || "User";
+          const normalizedRole = normalizeUserRole(invite.role);
           await supabase.from("profiles").upsert({
             id: sessionUser.id,
             full_name: fullName,
-            role: invite.role,
+            role: normalizedRole,
+            is_admin: false,
             tenant_id: invite.tenant_id,
             email: sessionUser.email ?? null,
           });
@@ -184,7 +265,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           nextProfile = {
             ...nextProfile,
             fullName,
-            role: invite.role as UserRole,
+            role: normalizedRole,
+            isAdmin: false,
             tenantId: invite.tenant_id,
             tenantName: nextProfile.tenantName ?? null,
           };
@@ -206,10 +288,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const refreshed = await fetchUserRole(sessionUser.id);
     return {
       role: refreshed.role,
+      isAdmin: refreshed.isAdmin,
       fullName: refreshed.fullName,
       tenantId: refreshed.tenantId,
       avatarUrl: refreshed.avatarUrl,
       tenantName: refreshed.tenantName ?? null,
+      tenantLogoUrl: refreshed.tenantLogoUrl ?? null,
     };
   }
 
@@ -250,9 +334,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           name: ensuredProfile.fullName,
           email: sessionUser.email ?? undefined,
           role: ensuredProfile.role,
+          isAdmin: ensuredProfile.isAdmin,
           tenantId: ensuredProfile.tenantId ?? null,
           avatarUrl: ensuredProfile.avatarUrl ?? null,
           tenantName: ensuredProfile.tenantName ?? null,
+          tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
           isAuthenticated: true,
           loading: false,
         });
@@ -278,15 +364,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           const ensuredProfile = await ensureProfileSetup(sessionUser, profile);
           setUser({
             id: sessionUser.id,
-            name: ensuredProfile.fullName,
-            email: sessionUser.email ?? undefined,
-            role: ensuredProfile.role,
-            tenantId: ensuredProfile.tenantId ?? null,
-            avatarUrl: ensuredProfile.avatarUrl ?? null,
-            tenantName: ensuredProfile.tenantName ?? null,
-            isAuthenticated: true,
-            loading: false,
-          });
+          name: ensuredProfile.fullName,
+          email: sessionUser.email ?? undefined,
+          role: ensuredProfile.role,
+          isAdmin: ensuredProfile.isAdmin,
+          tenantId: ensuredProfile.tenantId ?? null,
+          avatarUrl: ensuredProfile.avatarUrl ?? null,
+          tenantName: ensuredProfile.tenantName ?? null,
+          tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
+          isAuthenticated: true,
+          loading: false,
+        });
         } catch {
           setUser({ ...fallbackUser, loading: false });
         }
@@ -309,28 +397,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         }
         await supabase.auth.signOut();
       },
-      signInWithMagicLink: async (
-        email: string,
-        options?: { mode?: "signin" | "signup"; companyName?: string },
-      ) => {
-        const payload = {
-          email,
-          mode: options?.mode ?? "signin",
-          companyName: options?.companyName,
-        };
-        const response = await fetch("/api/auth/request-magic-link", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        });
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          return data.error ?? "Failed to send magic link.";
-        }
-        return null;
-      },
     }),
     [user],
   );
@@ -343,6 +409,6 @@ export function useCurrentUser() {
 }
 
 export function useAuthActions() {
-  const { signOut, signInWithMagicLink } = useContext(UserContext);
-  return { signOut, signInWithMagicLink };
+  const { signOut } = useContext(UserContext);
+  return { signOut };
 }
