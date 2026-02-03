@@ -13,7 +13,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const isAuthRoute = pathname?.startsWith("/auth");
   const hideTabsNav =
-    pathname?.startsWith("/profile") || pathname?.startsWith("/company");
+    pathname?.startsWith("/profile") ||
+    pathname?.startsWith("/company") ||
+    pathname?.startsWith("/production/operator");
+  const hideHeader = pathname?.startsWith("/production/operator");
 
   useEffect(() => {
     const errorHandler = (event: ErrorEvent) => {
@@ -84,7 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <Header />
+      {hideHeader ? null : <Header />}
       <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
         <main className="container mx-auto px-4 py-6">
           <div className="flex justify-between">

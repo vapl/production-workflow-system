@@ -185,6 +185,13 @@ export default function SettingsPage() {
   const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [operatorAssignments, setOperatorAssignments] = useState<
+    { id: string; userId: string; stationId: string; isActive: boolean }[]
+  >([]);
+  const [operatorAssignmentsError, setOperatorAssignmentsError] = useState<
+    string | null
+  >(null);
+  const [isAssignmentsLoading, setIsAssignmentsLoading] = useState(false);
   const [devRoleOverride, setDevRoleOverride] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [companyLegalName, setCompanyLegalName] = useState("");
@@ -795,6 +802,101 @@ export default function SettingsPage() {
     currentUser.isAdmin,
     currentUser.tenantId,
   ]);
+
+  useEffect(() => {
+    if (!supabase || !currentUser.isAuthenticated) {
+      setOperatorAssignments([]);
+      return;
+    }
+    let isMounted = true;
+    const fetchAssignments = async () => {
+      setIsAssignmentsLoading(true);
+      setOperatorAssignmentsError(null);
+      const { data, error } = await supabase
+        .from("operator_station_assignments")
+        .select("id, user_id, station_id, is_active")
+        .order("created_at", { ascending: true });
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setOperatorAssignmentsError(error.message);
+        setIsAssignmentsLoading(false);
+        return;
+      }
+      setOperatorAssignments(
+        (data ?? []).map((row) => ({
+          id: row.id,
+          userId: row.user_id,
+          stationId: row.station_id,
+          isActive: row.is_active ?? true,
+        })),
+      );
+      setIsAssignmentsLoading(false);
+    };
+    void fetchAssignments();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.id, currentUser.isAuthenticated]);
+
+  const operatorAssignmentsByKey = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; userId: string; stationId: string; isActive: boolean }
+    >();
+    operatorAssignments.forEach((assignment) => {
+      map.set(`${assignment.userId}:${assignment.stationId}`, assignment);
+    });
+    return map;
+  }, [operatorAssignments]);
+
+  async function handleToggleOperatorAssignment(
+    userId: string,
+    stationId: string,
+  ) {
+    if (!supabase) {
+      return;
+    }
+    const key = `${userId}:${stationId}`;
+    const existing = operatorAssignmentsByKey.get(key);
+    if (existing) {
+      const { error } = await supabase
+        .from("operator_station_assignments")
+        .delete()
+        .eq("id", existing.id);
+      if (error) {
+        setOperatorAssignmentsError(error.message);
+        return;
+      }
+      setOperatorAssignments((prev) =>
+        prev.filter((assignment) => assignment.id !== existing.id),
+      );
+      return;
+    }
+    const { data, error } = await supabase
+      .from("operator_station_assignments")
+      .insert({
+        user_id: userId,
+        station_id: stationId,
+        is_active: true,
+      })
+      .select("id, user_id, station_id, is_active")
+      .single();
+    if (error || !data) {
+      setOperatorAssignmentsError(error?.message ?? "Failed to assign station.");
+      return;
+    }
+    setOperatorAssignments((prev) => [
+      ...prev,
+      {
+        id: data.id,
+        userId: data.user_id,
+        stationId: data.station_id,
+        isActive: data.is_active ?? true,
+      },
+    ]);
+  }
 
   async function handleUpdateUserRole(userId: string, role: UserRole) {
     if (!supabase) {
@@ -1719,6 +1821,95 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Operator station assignments</CardTitle>
+                  <CardDescription>
+                    Assign users to one or more stations for the operator view.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {operatorAssignmentsError && (
+                    <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                      {operatorAssignmentsError}
+                    </div>
+                  )}
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/40 text-muted-foreground">
+                        <tr>
+                          <th className="px-4 py-2 text-left">User</th>
+                          {workStations.map((station) => (
+                            <th
+                              key={station.id}
+                              className="px-4 py-2 text-left"
+                            >
+                              {station.name}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {isAssignmentsLoading ? (
+                          <tr>
+                            <td
+                              colSpan={Math.max(1, workStations.length + 1)}
+                              className="px-4 py-6 text-center text-muted-foreground"
+                            >
+                              Loading assignments...
+                            </td>
+                          </tr>
+                        ) : users.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={Math.max(1, workStations.length + 1)}
+                              className="px-4 py-6 text-center text-muted-foreground"
+                            >
+                              No users found.
+                            </td>
+                          </tr>
+                        ) : (
+                          users.map((user) => (
+                            <tr key={user.id} className="border-t border-border">
+                              <td className="px-4 py-2 font-medium">
+                                {user.name}
+                                <div className="text-xs text-muted-foreground">
+                                  {user.role}
+                                </div>
+                              </td>
+                              {workStations.map((station) => {
+                                const key = `${user.id}:${station.id}`;
+                                const isAssigned =
+                                  operatorAssignmentsByKey.has(key);
+                                return (
+                                  <td key={station.id} className="px-4 py-2">
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={isAssigned}
+                                        onChange={() =>
+                                          handleToggleOperatorAssignment(
+                                            user.id,
+                                            station.id,
+                                          )
+                                        }
+                                      />
+                                      <span className="text-xs text-muted-foreground">
+                                        Assigned
+                                      </span>
+                                    </label>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </CardContent>
               </Card>

@@ -33,6 +33,7 @@ function getStoragePathFromUrl(url: string, bucket: string) {
 export default function CompanyPage() {
   const currentUser = useCurrentUser();
   const router = useRouter();
+  const [copyMessage, setCopyMessage] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [companyLegalName, setCompanyLegalName] = useState("");
   const [companyRegistrationNo, setCompanyRegistrationNo] = useState("");
@@ -40,6 +41,7 @@ export default function CompanyPage() {
   const [companyBillingEmail, setCompanyBillingEmail] = useState("");
   const [companyAddress, setCompanyAddress] = useState("");
   const [companyLogoUrl, setCompanyLogoUrl] = useState("");
+  const [companyLogoDisplayUrl, setCompanyLogoDisplayUrl] = useState("");
   const [companyLogoFile, setCompanyLogoFile] = useState<File | null>(null);
   const [companyLogoPreview, setCompanyLogoPreview] = useState<string | null>(null);
   const [companyLogoState, setCompanyLogoState] = useState<
@@ -72,7 +74,24 @@ export default function CompanyPage() {
       setCompanyVatNo(data.vat_no ?? "");
       setCompanyBillingEmail(data.billing_email ?? "");
       setCompanyAddress(data.address ?? "");
-      setCompanyLogoUrl(data.logo_url ?? "");
+      const rawLogoUrl = data.logo_url ?? "";
+      setCompanyLogoUrl(rawLogoUrl);
+      if (rawLogoUrl) {
+        const storagePath = getStoragePathFromUrl(
+          rawLogoUrl,
+          supabaseTenantLogoBucket,
+        );
+        if (storagePath) {
+          const { data: signed } = await supabase.storage
+            .from(supabaseTenantLogoBucket)
+            .createSignedUrl(storagePath, 60 * 60);
+          setCompanyLogoDisplayUrl(signed?.signedUrl ?? rawLogoUrl);
+        } else {
+          setCompanyLogoDisplayUrl(rawLogoUrl);
+        }
+      } else {
+        setCompanyLogoDisplayUrl("");
+      }
     };
     fetchCompany();
   }, [currentUser.tenantId]);
@@ -134,6 +153,20 @@ export default function CompanyPage() {
     setCompanyLogoState("uploaded");
     setCompanyLogoMessage("Logo uploaded.");
     setCompanyLogoUrl(result.url);
+    if (supabase) {
+      const storagePath = getStoragePathFromUrl(
+        result.url,
+        supabaseTenantLogoBucket,
+      );
+      if (storagePath) {
+        const { data } = await supabase.storage
+          .from(supabaseTenantLogoBucket)
+          .createSignedUrl(storagePath, 60 * 60);
+        setCompanyLogoDisplayUrl(data?.signedUrl ?? result.url);
+      } else {
+        setCompanyLogoDisplayUrl(result.url);
+      }
+    }
     setCompanyLogoFile(null);
     if (companyLogoPreview) {
       URL.revokeObjectURL(companyLogoPreview);
@@ -168,6 +201,7 @@ export default function CompanyPage() {
       return;
     }
     setCompanyLogoUrl("");
+    setCompanyLogoDisplayUrl("");
     setCompanyLogoFile(null);
     if (companyLogoPreview) {
       URL.revokeObjectURL(companyLogoPreview);
@@ -176,6 +210,22 @@ export default function CompanyPage() {
     setCompanyLogoState("uploaded");
     setCompanyLogoMessage("Logo removed.");
   }
+
+  const companyId = currentUser.tenantId ?? "";
+
+  const handleCopyCompanyId = async () => {
+    if (!companyId) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(companyId);
+      setCopyMessage("Copied");
+      window.setTimeout(() => setCopyMessage(""), 1500);
+    } catch {
+      setCopyMessage("Copy failed");
+      window.setTimeout(() => setCopyMessage(""), 1500);
+    }
+  };
 
   return (
     <section className="space-y-6">
@@ -201,6 +251,22 @@ export default function CompanyPage() {
           <CardDescription>
             Admins can manage company data, billing, and legal details.
           </CardDescription>
+          {companyId ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="rounded-full border border-border bg-muted/40 px-3 py-1">
+                Company ID: {companyId}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleCopyCompanyId}
+              >
+                Copy
+              </Button>
+              {copyMessage ? <span>{copyMessage}</span> : null}
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
@@ -259,24 +325,14 @@ export default function CompanyPage() {
                 disabled={!currentUser.isAdmin}
               />
             </label>
-            <label className="space-y-2 text-sm font-medium">
-              Logo URL
-              <input
-                value={companyLogoUrl}
-                onChange={(event) => setCompanyLogoUrl(event.target.value)}
-                placeholder="https://"
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                disabled={!currentUser.isAdmin}
-              />
-            </label>
             <div className="space-y-3 text-sm font-medium">
               Upload logo
               <div className="flex flex-wrap items-center gap-4 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
                 <div className="flex items-center gap-3">
                   <div className="h-16 w-16 overflow-hidden rounded-full border border-border bg-background">
-                    {companyLogoPreview || companyLogoUrl ? (
+                    {companyLogoPreview || companyLogoDisplayUrl ? (
                       <img
-                        src={companyLogoPreview ?? companyLogoUrl}
+                        src={companyLogoPreview ?? companyLogoDisplayUrl}
                         alt="Logo preview"
                         className="h-full w-full object-cover"
                       />

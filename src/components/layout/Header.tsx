@@ -172,7 +172,7 @@ export function Header() {
                   </button>
                   {userMenuOpen ? (
                     <div
-                      className="absolute right-0 top-full z-20 mt-2 min-w-[180px] rounded-md border border-border bg-card p-1 text-xs text-muted-foreground shadow-md"
+                      className="absolute right-0 top-full z-20 mt-2 min-w-45 rounded-md border border-border bg-card p-1 text-xs text-muted-foreground shadow-md"
                       role="menu"
                     >
                       <Link
