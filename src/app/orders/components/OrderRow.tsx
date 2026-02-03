@@ -2,14 +2,12 @@
 import { Button } from "@/components/ui/Button";
 import { TableCell, TableRow } from "@/components/ui/Table";
 import {
-  EyeIcon,
   MessageCircleIcon,
   MoreVerticalIcon,
   PaperclipIcon,
   PencilIcon,
   Trash2Icon,
 } from "lucide-react";
-import Link from "next/link";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Order } from "@/types/orders";
 import type { HierarchyLevel } from "@/app/settings/HierarchyContext";
@@ -17,6 +15,7 @@ import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 interface OrderRowProps {
   order: Order;
@@ -37,6 +36,7 @@ export function OrderRow({
   dueIndicatorEnabled = true,
   dueIndicatorStatuses,
 }: OrderRowProps) {
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{
     top: number;
@@ -111,6 +111,8 @@ export function OrderRow({
         .join("")
         .toUpperCase()
     : "";
+  const engineerAvatarUrl = order.assignedEngineerAvatarUrl;
+  const managerAvatarUrl = order.assignedManagerAvatarUrl;
 
   useEffect(() => {
     function handlePosition() {
@@ -118,8 +120,8 @@ export function OrderRow({
         return;
       }
       const rect = triggerRef.current.getBoundingClientRect();
-      const menuWidth = Math.max(rect.width, 120);
-      const viewportPadding = 0;
+      const menuWidth = Math.max(rect.width, 140);
+      const viewportPadding = 8;
       const maxLeft = Math.max(
         viewportPadding,
         window.innerWidth - menuWidth - viewportPadding,
@@ -145,7 +147,18 @@ export function OrderRow({
   }, [menuOpen]);
 
   return (
-    <TableRow>
+    <TableRow
+      className="group cursor-pointer"
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(`/orders/${order.id}`)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          router.push(`/orders/${order.id}`);
+        }
+      }}
+    >
       <TableCell className="font-medium whitespace-nowrap">
         {order.orderNumber}
       </TableCell>
@@ -189,9 +202,17 @@ export function OrderRow({
       <TableCell className="whitespace-normal wrap-break-word">
         {order.assignedEngineerName ? (
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
-              {engineerInitials}
-            </div>
+            {engineerAvatarUrl ? (
+              <img
+                src={engineerAvatarUrl}
+                alt={order.assignedEngineerName}
+                className="h-8 w-8 shrink-0 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+                {engineerInitials}
+              </div>
+            )}
             <span>{order.assignedEngineerName}</span>
           </div>
         ) : (
@@ -201,9 +222,17 @@ export function OrderRow({
       <TableCell className="whitespace-normal wrap-break-word">
         {order.assignedManagerName ? (
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
-              {managerInitials}
-            </div>
+            {managerAvatarUrl ? (
+              <img
+                src={managerAvatarUrl}
+                alt={order.assignedManagerName}
+                className="h-8 w-8 shrink-0 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+                {managerInitials}
+              </div>
+            )}
             <span>{order.assignedManagerName}</span>
           </div>
         ) : (
@@ -227,14 +256,7 @@ export function OrderRow({
         </div>
       </TableCell>
       <TableCell className="text-right align-middle">
-        <div className="flex items-center justify-between gap-2">
-          <Link
-            href={`/orders/${order.id}`}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-muted/40 text-foreground shadow-sm hover:bg-muted hover:text-foreground"
-            aria-label="View order"
-          >
-            <EyeIcon className="h-4 w-4" />
-          </Link>
+        <div className="relative flex items-center justify-between gap-2 pr-12 md:pr-16">
           <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <PaperclipIcon className="h-3.5 w-3.5" />
             <span>
@@ -245,14 +267,48 @@ export function OrderRow({
             <MessageCircleIcon className="h-3.5 w-3.5" />
             <span>{order.commentCount ?? order.comments?.length ?? 0}</span>
           </div>
-          <div className="relative inline-flex">
+          <div className="pointer-events-none absolute -right-2 top-1/2 hidden h-9 w-20 -translate-y-1/2 bg-gradient-to-l from-background via-background/80 to-transparent md:group-hover:block" />
+          <div className="absolute right-0 top-1/2 hidden -translate-y-1/2 items-center gap-1 rounded-full border border-border bg-background/90 p-0.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur md:flex md:opacity-0 md:group-hover:opacity-100">
+            {onEdit ? (
+              <button
+                type="button"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onEdit(order);
+                }}
+                title="Edit"
+                aria-label="Edit"
+              >
+                <PencilIcon className="h-3 w-3" />
+              </button>
+            ) : null}
+            {onDelete ? (
+              <button
+                type="button"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(order);
+                }}
+                title="Delete"
+                aria-label="Delete"
+              >
+                <Trash2Icon className="h-3 w-3" />
+              </button>
+            ) : null}
+          </div>
+          <div className="relative inline-flex md:hidden">
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               ref={triggerRef}
-              onClick={() => setMenuOpen((prev) => !prev)}
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen((prev) => !prev);
+              }}
             >
               <MoreVerticalIcon className="h-4 w-4" />
             </Button>
@@ -269,7 +325,7 @@ export function OrderRow({
                   style={{
                     top: menuPosition.top,
                     left: menuPosition.left,
-                    minWidth: Math.max(menuPosition.width, 120),
+                    minWidth: Math.max(menuPosition.width, 140),
                   }}
                   onClick={(event) => event.stopPropagation()}
                 >

@@ -37,6 +37,24 @@ export default function AuthPage() {
   );
   const [message, setMessage] = useState("");
 
+  const withTimeout = async <T,>(promise: Promise<T>, ms = 12000) => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race<T>([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("Request timed out."));
+          }, ms);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!authModeChecked) {
       return;
@@ -339,50 +357,128 @@ export default function AuthPage() {
     }
     setStatus("sending");
     setMessage("");
-    const accessCheck = await fetch("/api/auth/request-magic-link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: trimmed,
-        mode: tab === "signup" ? "signup" : "signin",
-        companyName: tab === "signup" ? companyName.trim() : undefined,
-      }),
-    });
-    if (!accessCheck.ok) {
-      const data = await accessCheck.json().catch(() => ({}));
-      setStatus("error");
-      setMessage(data.error ?? "Access check failed.");
-      return;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let pollTimeout: ReturnType<typeof setTimeout> | null = null;
+    const stopPoll = () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      if (pollTimeout) {
+        clearTimeout(pollTimeout);
+        pollTimeout = null;
+      }
+    };
+    const startPoll = () => {
+      if (typeof window === "undefined") {
+        return;
+      }
+      if (pollInterval || pollTimeout) {
+        return;
+      }
+      pollInterval = setInterval(async () => {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (data.session?.user) {
+            stopPoll();
+            setStatus("sent");
+            setMessage("Signed in successfully.");
+            router.replace("/orders");
+          }
+        } catch {
+          // ignore session probe errors
+        }
+      }, 1500);
+      pollTimeout = setTimeout(() => {
+        stopPoll();
+        setStatus("error");
+        setMessage("Sign in took too long. Please try again.");
+      }, 15000);
+    };
+    try {
+      const accessCheck = await withTimeout(
+        fetch("/api/auth/request-magic-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: trimmed,
+            mode: tab === "signup" ? "signup" : "signin",
+            companyName: tab === "signup" ? companyName.trim() : undefined,
+          }),
+        }),
+      );
+      if (!accessCheck.ok) {
+        const data = await accessCheck.json().catch(() => ({}));
+        setStatus("error");
+        setMessage(data.error ?? "Access check failed.");
+        stopPoll();
+        return;
+      }
+    } catch (error) {
+      if (tab === "signup") {
+        const messageText =
+          error instanceof Error ? error.message : "Access check failed.";
+        setStatus("error");
+        setMessage(messageText);
+        stopPoll();
+        return;
+      }
+      setMessage("Access check timed out. Continuing sign in...");
     }
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
     if (tab === "signup") {
-      const { error } = await supabase.auth.signUp({
-        email: trimmed,
-        password,
-        options: {
-          emailRedirectTo: origin ? `${origin}/auth` : undefined,
-        },
-      });
+      const { error } = await withTimeout(
+        supabase.auth.signUp({
+          email: trimmed,
+          password,
+          options: {
+            emailRedirectTo: origin ? `${origin}/auth` : undefined,
+          },
+        }),
+      );
       if (error) {
         setStatus("error");
         setMessage(error.message);
+        stopPoll();
         return;
       }
       setStatus("sent");
       setMessage("Account created. Check your email to confirm.");
+      stopPoll();
       return;
     }
-    const { error } = await supabase.auth.signInWithPassword({
-      email: trimmed,
-      password,
-    });
-    if (error) {
+    try {
+      startPoll();
+      const { error } = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email: trimmed,
+          password,
+        }),
+      );
+      if (error) {
+        setStatus("error");
+        setMessage(error.message);
+        stopPoll();
+        return;
+      }
+      setStatus("sent");
+      setMessage("Signed in successfully.");
+      stopPoll();
+      router.replace("/orders");
+    } catch (error) {
+      const messageText =
+        error instanceof Error ? error.message : "Sign in failed.";
+      if (messageText.toLowerCase().includes("timed out")) {
+        setStatus("sending");
+        setMessage("Completing sign in...");
+        return;
+      }
       setStatus("error");
-      setMessage(error.message);
-      return;
+      setMessage(messageText);
+      stopPoll();
     }
-    setStatus("sent");
-    setMessage("Signed in successfully.");
   }
 
   async function handleForgotPassword() {

@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { SearchIcon, SlidersHorizontalIcon } from "lucide-react";
+import {
+  LayoutGridIcon,
+  LayoutListIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
+} from "lucide-react";
 
 import type { OrderStatus } from "@/types/orders";
 
@@ -23,6 +28,8 @@ interface OrdersToolbarProps {
   onPartnerGroupChange?: (value: string) => void;
   assignmentFilter?: AssignmentFilter;
   onAssignmentChange?: (value: AssignmentFilter) => void;
+  viewMode?: "table" | "cards";
+  onViewModeChange?: (value: "table" | "cards") => void;
 }
 
 export function OrdersToolbar({
@@ -39,6 +46,8 @@ export function OrdersToolbar({
   onPartnerGroupChange,
   assignmentFilter,
   onAssignmentChange,
+  viewMode,
+  onViewModeChange,
 }: OrdersToolbarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filtersRef = useRef<HTMLDivElement | null>(null);
@@ -59,15 +68,45 @@ export function OrdersToolbar({
 
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="relative w-full lg:flex-1">
-        <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="search"
-          value={searchQuery}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search orders, customers, products..."
-          className="h-10 w-full rounded-lg border border-border bg-input-background pl-10 pr-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        />
+      <div className="flex w-full flex-col gap-3 lg:flex-1 lg:flex-row lg:items-center">
+        <div className="relative w-full">
+          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search orders, customers, products..."
+            className="h-10 w-full rounded-lg border border-border bg-input-background pl-10 pr-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+        </div>
+        {viewMode && onViewModeChange ? (
+          <div className="flex items-center gap-1 rounded-full border border-border bg-background p-1 text-xs shadow-sm lg:ml-3">
+            <button
+              type="button"
+              onClick={() => onViewModeChange("table")}
+              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition ${
+                viewMode === "table"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted/50"
+              }`}
+            >
+              <LayoutListIcon className="h-3.5 w-3.5" />
+              Table
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewModeChange("cards")}
+              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition ${
+                viewMode === "cards"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted/50"
+              }`}
+            >
+              <LayoutGridIcon className="h-3.5 w-3.5" />
+              Cards
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2 lg:shrink-0">

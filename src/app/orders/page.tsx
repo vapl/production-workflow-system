@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { OrdersTable } from "./components/OrdersTable";
+import { OrdersCards } from "./components/OrdersCards";
 import { OrdersToolbar } from "./components/OrdersToolbar";
 import type { Order, OrderStatus } from "@/types/orders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -16,7 +17,7 @@ import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { buildOrdersTemplate } from "@/lib/excel/ordersExcel";
 import { ImportWizard } from "./components/ImportWizard";
 import { usePartners } from "@/hooks/usePartners";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, supabaseAvatarBucket } from "@/lib/supabaseClient";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatOrderStatus } from "@/lib/domain/formatters";
 
@@ -38,6 +39,7 @@ export default function OrdersPage() {
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const roleStatusOptions = useMemo(() => {
     if (user.role === "Engineering") {
       return [
@@ -92,6 +94,101 @@ export default function OrdersPage() {
   const [isListLoading, setIsListLoading] = useState(false);
   const [listOffset, setListOffset] = useState(0);
   const pageSize = 20;
+
+  const getStoragePathFromUrl = (url: string, bucket: string) => {
+    if (!url) {
+      return null;
+    }
+    if (!url.startsWith("http")) {
+      return url;
+    }
+    try {
+      const parsed = new URL(url);
+      const marker = `/storage/v1/object/public/${bucket}/`;
+      const idx = parsed.pathname.indexOf(marker);
+      if (idx === -1) {
+        return null;
+      }
+      return parsed.pathname.slice(idx + marker.length);
+    } catch {
+      return null;
+    }
+  };
+
+  const resolveSignedAvatarUrl = async (url?: string | null) => {
+    if (!supabase || !url) {
+      return url ?? null;
+    }
+    const storagePath = getStoragePathFromUrl(url, supabaseAvatarBucket);
+    if (!storagePath) {
+      return url;
+    }
+    const { data } = await supabase.storage
+      .from(supabaseAvatarBucket)
+      .createSignedUrl(storagePath, 60 * 60);
+    return data?.signedUrl ?? url;
+  };
+
+  const resolveOrderAvatars = async (rows: Order[]) => {
+    if (!supabase) {
+      return rows;
+    }
+    const ids = new Set<string>();
+    rows.forEach((order) => {
+      if (order.assignedEngineerId) {
+        ids.add(order.assignedEngineerId);
+      }
+      if (order.assignedManagerId) {
+        ids.add(order.assignedManagerId);
+      }
+    });
+    if (ids.size === 0) {
+      return rows;
+    }
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, avatar_url")
+      .in("id", Array.from(ids));
+    if (!data) {
+      return rows;
+    }
+    const avatarMap = new Map<string, string | null>();
+    await Promise.all(
+      data.map(async (profile) => {
+        const resolved = await resolveSignedAvatarUrl(profile.avatar_url);
+        avatarMap.set(profile.id, resolved ?? null);
+      }),
+    );
+    return rows.map((order) => ({
+      ...order,
+      assignedEngineerAvatarUrl: order.assignedEngineerId
+        ? avatarMap.get(order.assignedEngineerId) ?? undefined
+        : undefined,
+      assignedManagerAvatarUrl: order.assignedManagerId
+        ? avatarMap.get(order.assignedManagerId) ?? undefined
+        : undefined,
+    }));
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const stored = window.localStorage.getItem("pws-orders-view");
+    if (stored === "table" || stored === "cards") {
+      setViewMode(stored);
+      return;
+    }
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
+    setViewMode(isMobile ? "cards" : "table");
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem("pws-orders-view", viewMode);
+  }, [viewMode]);
 
   useEffect(() => {
     if (syncStartedRef.current) {
@@ -227,7 +324,9 @@ export default function OrdersPage() {
           due_date,
           priority,
           status,
+          assigned_engineer_id,
           assigned_engineer_name,
+          assigned_manager_id,
           assigned_manager_name,
           order_attachments ( id ),
           order_comments ( id ),
@@ -285,7 +384,9 @@ export default function OrdersPage() {
         dueDate: row.due_date,
         priority: row.priority,
         status: row.status,
+        assignedEngineerId: row.assigned_engineer_id ?? undefined,
         assignedEngineerName: row.assigned_engineer_name ?? undefined,
+        assignedManagerId: row.assigned_manager_id ?? undefined,
         assignedManagerName: row.assigned_manager_name ?? undefined,
         attachments: row.order_attachments?.map((item) => ({
           id: item.id,
@@ -312,8 +413,10 @@ export default function OrdersPage() {
           partnerId: job.partner_id ?? undefined,
         })),
       })) as Order[];
-
-      setVisibleOrders((prev) => (append ? [...prev, ...mapped] : mapped));
+      const enriched = await resolveOrderAvatars(mapped);
+      setVisibleOrders((prev) =>
+        append ? [...prev, ...enriched] : enriched,
+      );
       setTotalOrders(count ?? mapped.length);
       setIsListLoading(false);
     };
@@ -538,23 +641,44 @@ export default function OrdersPage() {
             onAssignmentChange={
               user.role === "Engineering" ? setAssignmentFilter : undefined
             }
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
           />
-          <OrdersTable
-            orders={visibleOrders}
-            groups={groupByContract ? groupedOrders : undefined}
-            dueSoonDays={rules.dueSoonDays}
-            dueIndicatorEnabled={rules.dueIndicatorEnabled}
-            dueIndicatorStatuses={rules.dueIndicatorStatuses}
-            engineerLabel={engineerLabel}
-            managerLabel={managerLabel}
-            onEdit={(order) => {
-              setEditingOrder(order);
-              setIsModalOpen(true);
-            }}
-            onDelete={(order) => {
-              setPendingDelete(order);
-            }}
-          />
+          {viewMode === "cards" ? (
+            <OrdersCards
+              orders={visibleOrders}
+              groups={groupByContract ? groupedOrders : undefined}
+              dueSoonDays={rules.dueSoonDays}
+              dueIndicatorEnabled={rules.dueIndicatorEnabled}
+              dueIndicatorStatuses={rules.dueIndicatorStatuses}
+              engineerLabel={engineerLabel}
+              managerLabel={managerLabel}
+              onEdit={(order) => {
+                setEditingOrder(order);
+                setIsModalOpen(true);
+              }}
+              onDelete={(order) => {
+                setPendingDelete(order);
+              }}
+            />
+          ) : (
+            <OrdersTable
+              orders={visibleOrders}
+              groups={groupByContract ? groupedOrders : undefined}
+              dueSoonDays={rules.dueSoonDays}
+              dueIndicatorEnabled={rules.dueIndicatorEnabled}
+              dueIndicatorStatuses={rules.dueIndicatorStatuses}
+              engineerLabel={engineerLabel}
+              managerLabel={managerLabel}
+              onEdit={(order) => {
+                setEditingOrder(order);
+                setIsModalOpen(true);
+              }}
+              onDelete={(order) => {
+                setPendingDelete(order);
+              }}
+            />
+          )}
           {isListLoading ? (
             <LoadingSpinner label="Loading orders..." />
           ) : (
@@ -583,7 +707,10 @@ export default function OrdersPage() {
                         due_date,
                         priority,
                         status,
+                        assigned_engineer_id,
                         assigned_engineer_name,
+                        assigned_manager_id,
+                        assigned_manager_name,
                         order_attachments ( id ),
                         order_comments ( id ),
                         external_jobs ( partner_id, due_date, status )
@@ -632,7 +759,10 @@ export default function OrdersPage() {
                       dueDate: row.due_date,
                       priority: row.priority,
                       status: row.status,
+                      assignedEngineerId: row.assigned_engineer_id ?? undefined,
                       assignedEngineerName: row.assigned_engineer_name ?? undefined,
+                      assignedManagerId: row.assigned_manager_id ?? undefined,
+                      assignedManagerName: row.assigned_manager_name ?? undefined,
                       attachments: row.order_attachments?.map((item) => ({
                         id: item.id,
                         name: "Attachment",
@@ -658,7 +788,8 @@ export default function OrdersPage() {
                         partnerId: job.partner_id ?? undefined,
                       })),
                     })) as Order[];
-                    setVisibleOrders((prev) => [...prev, ...mapped]);
+                    const enriched = await resolveOrderAvatars(mapped);
+                    setVisibleOrders((prev) => [...prev, ...enriched]);
                     setIsListLoading(false);
                   }}
                 >

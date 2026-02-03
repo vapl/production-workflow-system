@@ -10,6 +10,7 @@ import {
 import { useCurrentUser } from "@/contexts/UserContext";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeftIcon, PencilIcon, XIcon } from "lucide-react";
 
 function getStoragePathFromUrl(url: string, bucket: string) {
@@ -34,9 +35,15 @@ function getStoragePathFromUrl(url: string, bucket: string) {
 
 export default function ProfilePage() {
   const user = useCurrentUser();
+  const router = useRouter();
   const [fullName, setFullName] = useState(user.name ?? "");
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
+  const [initialProfile, setInitialProfile] = useState({
+    fullName: user.name ?? "",
+    avatarUrl: user.avatarUrl ?? "",
+    phone: user.phone ?? "",
+  });
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarState, setAvatarState] = useState<
@@ -53,6 +60,11 @@ export default function ProfilePage() {
     setFullName(user.name ?? "");
     setAvatarUrl(user.avatarUrl ?? "");
     setPhone(user.phone ?? "");
+    setInitialProfile({
+      fullName: user.name ?? "",
+      avatarUrl: user.avatarUrl ?? "",
+      phone: user.phone ?? "",
+    });
     setAvatarFile(null);
     if (avatarPreview) {
       URL.revokeObjectURL(avatarPreview);
@@ -94,6 +106,11 @@ export default function ProfilePage() {
     }
     setStatus("saved");
     setMessage("Profile updated.");
+    setInitialProfile({
+      fullName: fullName.trim(),
+      avatarUrl: avatarUrl.trim(),
+      phone: phone.trim(),
+    });
   }
 
   async function handleAvatarUpload() {
@@ -175,16 +192,28 @@ export default function ProfilePage() {
         .toUpperCase()
     : "U";
 
+  const isDirty =
+    fullName.trim() !== initialProfile.fullName.trim() ||
+    avatarUrl.trim() !== initialProfile.avatarUrl.trim() ||
+    phone.trim() !== initialProfile.phone.trim();
+
   return (
     <section className="space-y-6">
       <div className="flex items-center">
-        <Link
-          href="/"
+        <button
+          type="button"
           className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            if (typeof window !== "undefined" && window.history.length > 1) {
+              router.back();
+              return;
+            }
+            router.replace("/orders");
+          }}
         >
           <ArrowLeftIcon className="h-4 w-4" />
-          Back to dashboard
-        </Link>
+          Back
+        </button>
       </div>
       <Card>
         <CardHeader>
@@ -231,7 +260,7 @@ export default function ProfilePage() {
               <input
                 value={fullName}
                 onChange={(event) => setFullName(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm autofill:bg-input-background autofill:text-foreground"
               />
             </label>
             <label className="space-y-2 text-sm font-medium">
@@ -247,13 +276,16 @@ export default function ProfilePage() {
               <input
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm autofill:bg-input-background autofill:text-foreground"
               />
             </label>
           </div>
 
           <div className="flex items-center gap-3">
-            <Button onClick={handleSave} disabled={status === "saving"}>
+            <Button
+              onClick={handleSave}
+              disabled={status === "saving" || !isDirty}
+            >
               {status === "saving" ? "Saving..." : "Save profile"}
             </Button>
             {message && (

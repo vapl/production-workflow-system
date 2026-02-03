@@ -300,6 +300,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       avatarUrl: refreshed.avatarUrl,
       tenantName: refreshed.tenantName ?? null,
       tenantLogoUrl: refreshed.tenantLogoUrl ?? null,
+      phone: refreshed.phone ?? null,
     };
   }
 
@@ -310,14 +311,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
 
     let isMounted = true;
-    const loadingTimeout = window.setTimeout(() => {
-      if (isMounted) {
-        setUser((prev) => ({
-          ...prev,
-          loading: false,
-        }));
-      }
-    }, 4000);
 
     async function hydrate() {
       try {
@@ -330,25 +323,45 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           setUser({ ...fallbackUser, loading: false });
           return;
         }
-        const profile = await fetchUserRole(sessionUser.id);
-        const ensuredProfile = await ensureProfileSetup(sessionUser, profile);
-        if (!isMounted) {
-          return;
+        try {
+          const profile = await fetchUserRole(sessionUser.id);
+          const ensuredProfile = await ensureProfileSetup(sessionUser, profile);
+          if (!isMounted) {
+            return;
+          }
+          setUser({
+            id: sessionUser.id,
+            name: ensuredProfile.fullName,
+            email: sessionUser.email ?? undefined,
+            phone: ensuredProfile.phone ?? null,
+            role: ensuredProfile.role,
+            isAdmin: ensuredProfile.isAdmin,
+            tenantId: ensuredProfile.tenantId ?? null,
+            avatarUrl: ensuredProfile.avatarUrl ?? null,
+            tenantName: ensuredProfile.tenantName ?? null,
+            tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
+            isAuthenticated: true,
+            loading: false,
+          });
+        } catch {
+          if (!isMounted) {
+            return;
+          }
+          setUser({
+            id: sessionUser.id,
+            name: sessionUser.email ?? "User",
+            email: sessionUser.email ?? undefined,
+            phone: null,
+            role: "Sales",
+            isAdmin: false,
+            tenantId: null,
+            avatarUrl: null,
+            tenantName: null,
+            tenantLogoUrl: null,
+            isAuthenticated: true,
+            loading: false,
+          });
         }
-        setUser({
-          id: sessionUser.id,
-          name: ensuredProfile.fullName,
-          email: sessionUser.email ?? undefined,
-          phone: ensuredProfile.phone ?? null,
-          role: ensuredProfile.role,
-          isAdmin: ensuredProfile.isAdmin,
-          tenantId: ensuredProfile.tenantId ?? null,
-          avatarUrl: ensuredProfile.avatarUrl ?? null,
-          tenantName: ensuredProfile.tenantName ?? null,
-          tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
-          isAuthenticated: true,
-          loading: false,
-        });
       } catch {
         if (!isMounted) {
           return;
@@ -367,22 +380,39 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             setUser({ ...fallbackUser, loading: false });
             return;
           }
-          const profile = await fetchUserRole(sessionUser.id);
-          const ensuredProfile = await ensureProfileSetup(sessionUser, profile);
-          setUser({
-          id: sessionUser.id,
-          name: ensuredProfile.fullName,
-          email: sessionUser.email ?? undefined,
-          phone: ensuredProfile.phone ?? null,
-          role: ensuredProfile.role,
-          isAdmin: ensuredProfile.isAdmin,
-          tenantId: ensuredProfile.tenantId ?? null,
-          avatarUrl: ensuredProfile.avatarUrl ?? null,
-          tenantName: ensuredProfile.tenantName ?? null,
-          tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
-          isAuthenticated: true,
-          loading: false,
-        });
+          try {
+            const profile = await fetchUserRole(sessionUser.id);
+            const ensuredProfile = await ensureProfileSetup(sessionUser, profile);
+            setUser({
+              id: sessionUser.id,
+              name: ensuredProfile.fullName,
+              email: sessionUser.email ?? undefined,
+              phone: ensuredProfile.phone ?? null,
+              role: ensuredProfile.role,
+              isAdmin: ensuredProfile.isAdmin,
+              tenantId: ensuredProfile.tenantId ?? null,
+              avatarUrl: ensuredProfile.avatarUrl ?? null,
+              tenantName: ensuredProfile.tenantName ?? null,
+              tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
+              isAuthenticated: true,
+              loading: false,
+            });
+          } catch {
+            setUser({
+              id: sessionUser.id,
+              name: sessionUser.email ?? "User",
+              email: sessionUser.email ?? undefined,
+              phone: null,
+              role: "Sales",
+              isAdmin: false,
+              tenantId: null,
+              avatarUrl: null,
+              tenantName: null,
+              tenantLogoUrl: null,
+              isAuthenticated: true,
+              loading: false,
+            });
+          }
         } catch {
           setUser({ ...fallbackUser, loading: false });
         }
@@ -391,7 +421,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       isMounted = false;
-      window.clearTimeout(loadingTimeout);
       authListener.subscription.unsubscribe();
     };
   }, []);

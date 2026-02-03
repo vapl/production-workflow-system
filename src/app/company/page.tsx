@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeftIcon } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -31,6 +32,7 @@ function getStoragePathFromUrl(url: string, bucket: string) {
 
 export default function CompanyPage() {
   const currentUser = useCurrentUser();
+  const router = useRouter();
   const [companyName, setCompanyName] = useState("");
   const [companyLegalName, setCompanyLegalName] = useState("");
   const [companyRegistrationNo, setCompanyRegistrationNo] = useState("");
@@ -178,13 +180,20 @@ export default function CompanyPage() {
   return (
     <section className="space-y-6">
       <div className="flex items-center">
-        <Link
-          href="/"
+        <button
+          type="button"
           className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            if (typeof window !== "undefined" && window.history.length > 1) {
+              router.back();
+              return;
+            }
+            router.replace("/orders");
+          }}
         >
           <ArrowLeftIcon className="h-4 w-4" />
-          Back to dashboard
-        </Link>
+          Back
+        </button>
       </div>
       <Card>
         <CardHeader>
