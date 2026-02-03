@@ -183,6 +183,16 @@ export function Header() {
                       >
                         Profile
                       </Link>
+                      {user.isAdmin ? (
+                        <Link
+                          href="/company"
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm leading-none text-foreground hover:bg-muted/50"
+                          role="menuitem"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          Company settings
+                        </Link>
+                      ) : null}
                       <div className="my-1 h-px bg-border" />
                       <ThemeToggle variant="menu" />
                       <div className="my-1 h-px bg-border" />

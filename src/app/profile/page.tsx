@@ -271,22 +271,22 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
       {user.isAdmin && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Company & Billing</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm text-muted-foreground">
-              Manage company legal details and subscription settings.
-            </div>
-            <Link
-              href="/settings?tab=company"
-              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            >
-              Open company settings
-            </Link>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Company & Billing</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-muted-foreground">
+                Manage company legal details and subscription settings.
+              </div>
+              <Link
+                href="/company"
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                Open company settings
+              </Link>
+            </CardContent>
+          </Card>
       )}
       {avatarModalOpen ? (
         <div

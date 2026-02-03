@@ -12,7 +12,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isAuthRoute = pathname?.startsWith("/auth");
-  const hideTabsNav = pathname?.startsWith("/profile");
+  const hideTabsNav =
+    pathname?.startsWith("/profile") || pathname?.startsWith("/company");
 
   useEffect(() => {
     const errorHandler = (event: ErrorEvent) => {
