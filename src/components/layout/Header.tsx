@@ -66,7 +66,7 @@ export function Header() {
     : "U";
 
   return (
-    <header className="border-b bg-card">
+    <header className="border-b bg-card sticky top-0 z-10 shadow-sm">
       <div className="container mx-auto px-4 py-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
