@@ -51,11 +51,13 @@ create table if not exists public.order_attachments (
   added_by_role text,
   created_at timestamptz not null default now(),
   size integer,
-  mime_type text
+  mime_type text,
+  category text
 );
 
 create index if not exists order_attachments_order_id_idx on public.order_attachments(order_id);
 create index if not exists order_attachments_tenant_id_idx on public.order_attachments(tenant_id);
+create index if not exists order_attachments_category_idx on public.order_attachments(category);
 
 create table if not exists public.order_comments (
   id uuid primary key default gen_random_uuid(),
@@ -344,6 +346,105 @@ create table if not exists public.batches (
 create index if not exists batches_tenant_id_idx on public.batches(tenant_id);
 create index if not exists batches_order_id_idx on public.batches(order_id);
 
+create or replace function public.set_user_child_tenant_id()
+returns trigger as $$
+begin
+  if new.tenant_id is null then
+    select tenant_id into new.tenant_id from public.profiles where id = new.user_id;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+create table if not exists public.operator_station_assignments (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid references public.tenants(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  station_id uuid not null references public.workstations(id) on delete cascade,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists operator_station_assignments_unique
+  on public.operator_station_assignments(user_id, station_id);
+create index if not exists operator_station_assignments_tenant_id_idx
+  on public.operator_station_assignments(tenant_id);
+create index if not exists operator_station_assignments_user_id_idx
+  on public.operator_station_assignments(user_id);
+create index if not exists operator_station_assignments_station_id_idx
+  on public.operator_station_assignments(station_id);
+
+create table if not exists public.order_production_maps (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid references public.tenants(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  source_attachment_id uuid references public.order_attachments(id) on delete set null,
+  mapping jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists order_production_maps_order_id_uidx
+  on public.order_production_maps(order_id);
+create index if not exists order_production_maps_tenant_id_idx
+  on public.order_production_maps(tenant_id);
+
+create table if not exists public.production_items (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid references public.tenants(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  batch_code text not null,
+  item_name text not null,
+  qty numeric not null default 1,
+  material text,
+  dimensions text,
+  priority text check (priority in ('low', 'normal', 'high', 'urgent')),
+  status text not null default 'queued'
+    check (status in ('queued', 'in_progress', 'blocked', 'done')),
+  station_id uuid references public.workstations(id) on delete set null,
+  source_attachment_id uuid references public.order_attachments(id) on delete set null,
+  meta jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists production_items_tenant_id_idx
+  on public.production_items(tenant_id);
+create index if not exists production_items_order_id_idx
+  on public.production_items(order_id);
+create index if not exists production_items_batch_code_idx
+  on public.production_items(batch_code);
+create index if not exists production_items_status_idx
+  on public.production_items(status);
+create index if not exists production_items_station_id_idx
+  on public.production_items(station_id);
+
+create table if not exists public.batch_runs (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid references public.tenants(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  batch_code text not null,
+  station_id uuid references public.workstations(id) on delete set null,
+  status text not null default 'queued'
+    check (status in ('queued', 'in_progress', 'blocked', 'done')),
+  started_at timestamptz,
+  done_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists batch_runs_tenant_id_idx
+  on public.batch_runs(tenant_id);
+create index if not exists batch_runs_order_id_idx
+  on public.batch_runs(order_id);
+create index if not exists batch_runs_batch_code_idx
+  on public.batch_runs(batch_code);
+create index if not exists batch_runs_station_id_idx
+  on public.batch_runs(station_id);
+create index if not exists batch_runs_status_idx
+  on public.batch_runs(status);
+
 drop trigger if exists set_hierarchy_levels_updated_at on public.hierarchy_levels;
 create trigger set_hierarchy_levels_updated_at
 before update on public.hierarchy_levels
@@ -379,6 +480,48 @@ create trigger set_batches_updated_at
 before update on public.batches
 for each row execute procedure public.set_updated_at();
 
+drop trigger if exists set_operator_station_assignments_updated_at
+  on public.operator_station_assignments;
+create trigger set_operator_station_assignments_updated_at
+before update on public.operator_station_assignments
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_operator_station_assignments_tenant_id
+  on public.operator_station_assignments;
+create trigger set_operator_station_assignments_tenant_id
+before insert on public.operator_station_assignments
+for each row execute procedure public.set_user_child_tenant_id();
+
+drop trigger if exists set_order_production_maps_updated_at on public.order_production_maps;
+create trigger set_order_production_maps_updated_at
+before update on public.order_production_maps
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_production_items_updated_at on public.production_items;
+create trigger set_production_items_updated_at
+before update on public.production_items
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_batch_runs_updated_at on public.batch_runs;
+create trigger set_batch_runs_updated_at
+before update on public.batch_runs
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_order_production_maps_tenant_id on public.order_production_maps;
+create trigger set_order_production_maps_tenant_id
+before insert on public.order_production_maps
+for each row execute procedure public.set_order_child_tenant_id();
+
+drop trigger if exists set_production_items_tenant_id on public.production_items;
+create trigger set_production_items_tenant_id
+before insert on public.production_items
+for each row execute procedure public.set_order_child_tenant_id();
+
+drop trigger if exists set_batch_runs_tenant_id on public.batch_runs;
+create trigger set_batch_runs_tenant_id
+before insert on public.batch_runs
+for each row execute procedure public.set_order_child_tenant_id();
+
 alter table public.hierarchy_levels enable row level security;
 alter table public.hierarchy_nodes enable row level security;
 alter table public.workstations enable row level security;
@@ -386,6 +529,10 @@ alter table public.operators enable row level security;
 alter table public.stop_reasons enable row level security;
 alter table public.construction_items enable row level security;
 alter table public.batches enable row level security;
+alter table public.operator_station_assignments enable row level security;
+alter table public.order_production_maps enable row level security;
+alter table public.production_items enable row level security;
+alter table public.batch_runs enable row level security;
 
 create policy "hierarchy_levels_select_by_tenant" on public.hierarchy_levels
   for select
@@ -678,5 +825,182 @@ create policy "batches_delete_by_tenant" on public.batches
     exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.tenant_id = batches.tenant_id
+    )
+  );
+
+create policy "operator_station_assignments_select_by_tenant"
+  on public.operator_station_assignments
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.tenant_id = operator_station_assignments.tenant_id
+    )
+  );
+
+create policy "operator_station_assignments_insert_by_tenant"
+  on public.operator_station_assignments
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.tenant_id = operator_station_assignments.tenant_id
+    )
+  );
+
+create policy "operator_station_assignments_update_by_tenant"
+  on public.operator_station_assignments
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.tenant_id = operator_station_assignments.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.tenant_id = operator_station_assignments.tenant_id
+    )
+  );
+
+create policy "operator_station_assignments_delete_by_tenant"
+  on public.operator_station_assignments
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.tenant_id = operator_station_assignments.tenant_id
+    )
+  );
+
+create policy "order_production_maps_select_by_tenant" on public.order_production_maps
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_production_maps.tenant_id
+    )
+  );
+
+create policy "order_production_maps_insert_by_tenant" on public.order_production_maps
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_production_maps.tenant_id
+    )
+  );
+
+create policy "order_production_maps_update_by_tenant" on public.order_production_maps
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_production_maps.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_production_maps.tenant_id
+    )
+  );
+
+create policy "order_production_maps_delete_by_tenant" on public.order_production_maps
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_production_maps.tenant_id
+    )
+  );
+
+create policy "production_items_select_by_tenant" on public.production_items
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = production_items.tenant_id
+    )
+  );
+
+create policy "production_items_insert_by_tenant" on public.production_items
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = production_items.tenant_id
+    )
+  );
+
+create policy "production_items_update_by_tenant" on public.production_items
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = production_items.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = production_items.tenant_id
+    )
+  );
+
+create policy "production_items_delete_by_tenant" on public.production_items
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = production_items.tenant_id
+    )
+  );
+
+create policy "batch_runs_select_by_tenant" on public.batch_runs
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = batch_runs.tenant_id
+    )
+  );
+
+create policy "batch_runs_insert_by_tenant" on public.batch_runs
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = batch_runs.tenant_id
+    )
+  );
+
+create policy "batch_runs_update_by_tenant" on public.batch_runs
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = batch_runs.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = batch_runs.tenant_id
+    )
+  );
+
+create policy "batch_runs_delete_by_tenant" on public.batch_runs
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = batch_runs.tenant_id
     )
   );
