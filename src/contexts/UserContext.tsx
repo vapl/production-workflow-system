@@ -193,6 +193,22 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     ...fallbackUser,
     loading: true,
   });
+  const profileTimeoutMs = 8000;
+
+  async function withTimeout<T>(promise: Promise<T>, ms: number) {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<{ timedOut: true }>((resolve) => {
+      timeoutId = setTimeout(() => resolve({ timedOut: true }), ms);
+    });
+    const result = await Promise.race([promise, timeoutPromise]);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    if ((result as { timedOut?: boolean }).timedOut) {
+      return { timedOut: true as const };
+    }
+    return { timedOut: false as const, value: result as T };
+  }
 
   async function ensureProfileSetup(
     sessionUser: { id: string; email?: string | null },
@@ -312,6 +328,19 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     let isMounted = true;
 
+    let didRetry = false;
+    const scheduleRetry = () => {
+      if (didRetry) {
+        return;
+      }
+      didRetry = true;
+      setTimeout(() => {
+        if (isMounted) {
+          hydrate();
+        }
+      }, 2000);
+    };
+
     async function hydrate() {
       try {
         const { data } = await supabase.auth.getSession();
@@ -324,8 +353,35 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         try {
-          const profile = await fetchUserRole(sessionUser.id);
-          const ensuredProfile = await ensureProfileSetup(sessionUser, profile);
+          const profileResult = await withTimeout(
+            (async () => {
+              const profile = await fetchUserRole(sessionUser.id);
+              return ensureProfileSetup(sessionUser, profile);
+            })(),
+            profileTimeoutMs,
+          );
+          if (profileResult.timedOut) {
+            if (!isMounted) {
+              return;
+            }
+            setUser({
+              id: sessionUser.id,
+              name: sessionUser.email ?? "User",
+              email: sessionUser.email ?? undefined,
+              phone: null,
+              role: "Sales",
+              isAdmin: false,
+              tenantId: null,
+              avatarUrl: null,
+              tenantName: null,
+              tenantLogoUrl: null,
+              isAuthenticated: true,
+              loading: false,
+            });
+            scheduleRetry();
+            return;
+          }
+          const ensuredProfile = profileResult.value;
           if (!isMounted) {
             return;
           }
@@ -381,8 +437,32 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             return;
           }
           try {
-            const profile = await fetchUserRole(sessionUser.id);
-            const ensuredProfile = await ensureProfileSetup(sessionUser, profile);
+            const profileResult = await withTimeout(
+              (async () => {
+                const profile = await fetchUserRole(sessionUser.id);
+                return ensureProfileSetup(sessionUser, profile);
+              })(),
+              profileTimeoutMs,
+            );
+            if (profileResult.timedOut) {
+              setUser({
+                id: sessionUser.id,
+                name: sessionUser.email ?? "User",
+                email: sessionUser.email ?? undefined,
+                phone: null,
+                role: "Sales",
+                isAdmin: false,
+                tenantId: null,
+                avatarUrl: null,
+                tenantName: null,
+                tenantLogoUrl: null,
+                isAuthenticated: true,
+                loading: false,
+              });
+              scheduleRetry();
+              return;
+            }
+            const ensuredProfile = profileResult.value;
             setUser({
               id: sessionUser.id,
               name: ensuredProfile.fullName,

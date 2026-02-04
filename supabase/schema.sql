@@ -59,6 +59,17 @@ create index if not exists order_attachments_order_id_idx on public.order_attach
 create index if not exists order_attachments_tenant_id_idx on public.order_attachments(tenant_id);
 create index if not exists order_attachments_category_idx on public.order_attachments(category);
 
+alter table public.external_jobs
+  add column if not exists delivery_note_no text,
+  add column if not exists received_at timestamptz,
+  add column if not exists received_by uuid references auth.users(id) on delete set null;
+
+alter table public.external_job_attachments
+  add column if not exists category text;
+
+create index if not exists external_job_attachments_category_idx
+  on public.external_job_attachments(category);
+
 create table if not exists public.order_comments (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references public.orders(id) on delete cascade,

@@ -636,7 +636,7 @@ export default function OrderDetailPage() {
     requested: "Requested",
     ordered: "Ordered",
     in_progress: "In progress",
-    delivered: "Delivered",
+    delivered: "In Stock",
     approved: "Approved",
     cancelled: "Cancelled",
   };

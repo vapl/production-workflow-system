@@ -11,13 +11,14 @@ import { Button } from "@/components/ui/Button";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { formatDate } from "@/lib/domain/formatters";
 
 const statusOptions: { value: ExternalJobStatus | "all"; label: string }[] = [
   { value: "all", label: "All" },
   { value: "requested", label: "Requested" },
   { value: "ordered", label: "Ordered" },
   { value: "in_progress", label: "In progress" },
-  { value: "delivered", label: "Delivered" },
+  { value: "delivered", label: "In Stock" },
   { value: "approved", label: "Approved" },
   { value: "cancelled", label: "Cancelled" },
 ];
@@ -26,7 +27,7 @@ const statusLabels: Record<ExternalJobStatus, string> = {
   requested: "Requested",
   ordered: "Ordered",
   in_progress: "In progress",
-  delivered: "Delivered",
+  delivered: "In Stock",
   approved: "Approved",
   cancelled: "Cancelled",
 };
@@ -71,6 +72,7 @@ export default function ExternalJobsPage() {
       dueDate: string;
       quantity?: number;
       status: ExternalJobStatus;
+      receivedAt?: string | null;
       statusHistory?: Array<{
         id: string;
         status: ExternalJobStatus;
@@ -126,6 +128,7 @@ export default function ExternalJobsPage() {
           quantity,
           due_date,
           status,
+          received_at,
           external_job_status_history (
             id,
             status,
@@ -195,6 +198,7 @@ export default function ExternalJobsPage() {
         dueDate: row.due_date,
         quantity: row.quantity ?? undefined,
         status: row.status,
+        receivedAt: row.received_at ?? null,
         statusHistory: (row.external_job_status_history ?? []).map((entry) => ({
           id: entry.id,
           status: entry.status,
@@ -306,6 +310,9 @@ export default function ExternalJobsPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>External Jobs</CardTitle>
           <div className="flex items-center gap-2">
+            <Link href="/orders/external/receive">
+              <Button variant="outline">Receive</Button>
+            </Link>
             <Link href="/orders">
               <Button variant="outline">Back to Orders</Button>
             </Link>
@@ -391,14 +398,27 @@ export default function ExternalJobsPage() {
                   ))}
               </select>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={overdueOnly}
-                onChange={(event) => setOverdueOnly(event.target.checked)}
-              />
-              Overdue only
-            </label>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant={statusFilter === "delivered" ? "default" : "outline"}
+                onClick={() =>
+                  setStatusFilter((prev) =>
+                    prev === "delivered" ? "all" : "delivered",
+                  )
+                }
+              >
+                In Stock
+              </Button>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={overdueOnly}
+                  onChange={(event) => setOverdueOnly(event.target.checked)}
+                />
+                Overdue only
+              </label>
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-border">
@@ -411,6 +431,7 @@ export default function ExternalJobsPage() {
                   <th className="px-4 py-2 text-left font-medium">Ext. Order</th>
                   <th className="px-4 py-2 text-left font-medium">Due date</th>
                   <th className="px-4 py-2 text-left font-medium">Qty</th>
+                  <th className="px-4 py-2 text-left font-medium">Received</th>
                   <th className="px-4 py-2 text-left font-medium">Added by</th>
                   <th className="px-4 py-2 text-left font-medium">Status</th>
                 </tr>
@@ -450,6 +471,11 @@ export default function ExternalJobsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2">{job.quantity ?? "--"}</td>
+                    <td className="px-4 py-2">
+                      {job.receivedAt
+                        ? formatDate(job.receivedAt.slice(0, 10))
+                        : "--"}
+                    </td>
                     <td className="px-4 py-2 text-sm text-muted-foreground">
                       {createdBy
                         ? `${createdBy.changedBy}${

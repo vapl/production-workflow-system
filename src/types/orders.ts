@@ -34,6 +34,7 @@ export interface ExternalJobAttachment {
   createdAt: string;
   size?: number;
   mimeType?: string;
+  category?: string;
 }
 
 export interface ExternalJobStatusEntry {
@@ -69,6 +70,9 @@ export interface ExternalJob {
   quantity?: number;
   dueDate: string;
   status: ExternalJobStatus;
+  deliveryNoteNo?: string;
+  receivedAt?: string;
+  receivedBy?: string;
   attachments?: ExternalJobAttachment[];
   statusHistory?: ExternalJobStatusEntry[];
   createdAt: string;

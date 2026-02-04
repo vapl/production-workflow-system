@@ -100,6 +100,9 @@ interface OrdersContextValue {
       quantity?: number;
       dueDate: string;
       status: ExternalJobStatus;
+      deliveryNoteNo?: string | null;
+      receivedAt?: string | null;
+      receivedBy?: string | null;
     }>,
   ) => Promise<ExternalJob | null>;
   removeExternalJob: (externalJobId: string) => Promise<boolean>;
@@ -190,6 +193,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     created_at: string;
     size?: number | null;
     mime_type?: string | null;
+    category?: string | null;
   }): ExternalJobAttachment => ({
     id: row.id,
     name: row.name,
@@ -199,6 +203,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     createdAt: row.created_at,
     size: row.size ?? undefined,
     mimeType: row.mime_type ?? undefined,
+    category: row.category ?? undefined,
   });
 
   const mapExternalJobStatusEntry = (row: {
@@ -252,6 +257,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     quantity?: number | null;
     due_date: string;
     status: ExternalJobStatus;
+    delivery_note_no?: string | null;
+    received_at?: string | null;
+    received_by?: string | null;
     created_at: string;
     external_job_status_history?: Array<{
       id: string;
@@ -269,6 +277,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       created_at: string;
       size?: number | null;
       mime_type?: string | null;
+      category?: string | null;
     }>;
   }): ExternalJob => ({
     id: row.id,
@@ -279,6 +288,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     quantity: row.quantity ?? undefined,
     dueDate: row.due_date,
     status: row.status,
+    deliveryNoteNo: row.delivery_note_no ?? undefined,
+    receivedAt: row.received_at ?? undefined,
+    receivedBy: row.received_by ?? undefined,
     createdAt: row.created_at,
     statusHistory:
       row.external_job_status_history?.map(mapExternalJobStatusEntry) ??
@@ -455,6 +467,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           quantity,
           due_date,
           status,
+          delivery_note_no,
+          received_at,
+          received_by,
           created_at,
           external_job_status_history (
             id,
@@ -471,7 +486,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             added_by_role,
             created_at,
             size,
-            mime_type
+            mime_type,
+            category
           )
         )
       `,
@@ -907,6 +923,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           quantity,
           due_date,
           status,
+          delivery_note_no,
+          received_at,
+          received_by,
           created_at,
           external_job_status_history (
             id,
@@ -923,7 +942,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             added_by_role,
             created_at,
             size,
-            mime_type
+            mime_type,
+            category
           )
         )
       `,
@@ -1127,6 +1147,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           quantity,
           due_date,
           status,
+          delivery_note_no,
+          received_at,
+          received_by,
           created_at,
           external_job_status_history (
             id,
@@ -1143,7 +1166,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             added_by_role,
             created_at,
             size,
-            mime_type
+            mime_type,
+            category
           )
         )
       `,
@@ -1549,6 +1573,12 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (patch.quantity !== undefined) updatePayload.quantity = patch.quantity;
         if (patch.dueDate !== undefined) updatePayload.due_date = patch.dueDate;
         if (patch.status !== undefined) updatePayload.status = patch.status;
+        if (patch.deliveryNoteNo !== undefined)
+          updatePayload.delivery_note_no = patch.deliveryNoteNo;
+        if (patch.receivedAt !== undefined)
+          updatePayload.received_at = patch.receivedAt;
+        if (patch.receivedBy !== undefined)
+          updatePayload.received_by = patch.receivedBy;
 
         const { data, error: updateError } = await supabase
           .from("external_jobs")
@@ -1564,6 +1594,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             quantity,
             due_date,
             status,
+            delivery_note_no,
+            received_at,
+            received_by,
             created_at,
             external_job_attachments (
               id,
@@ -1573,7 +1606,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
               added_by_role,
               created_at,
               size,
-              mime_type
+              mime_type,
+              category
             )
           `,
           )
@@ -1643,6 +1677,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             createdAt: new Date().toISOString(),
             size: attachment.size,
             mimeType: attachment.mimeType,
+            category: attachment.category,
           };
           setOrders((prev) =>
             prev.map((order) => ({
@@ -1671,6 +1706,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             mime_type: attachment.mimeType ?? null,
             added_by_name: attachment.addedBy,
             added_by_role: attachment.addedByRole ?? null,
+            category: attachment.category ?? null,
           })
           .select(
             `
@@ -1681,7 +1717,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             added_by_role,
             created_at,
             size,
-            mime_type
+            mime_type,
+            category
           `,
           )
           .single();
