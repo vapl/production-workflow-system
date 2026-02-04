@@ -16,6 +16,7 @@ import { useSettingsData } from "@/hooks/useSettingsData";
 import { useCurrentUser, type UserRole } from "@/contexts/UserContext";
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
 import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
+import type { WorkStation } from "@/types/workstation";
 import {
   useWorkflowRules,
   type WorkflowTargetStatus,
@@ -159,6 +160,8 @@ export default function SettingsPage() {
   const [stationName, setStationName] = useState("");
   const [stationDescription, setStationDescription] = useState("");
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
+  const [dragStationId, setDragStationId] = useState<string | null>(null);
+  const [isStationOrderSaving, setIsStationOrderSaving] = useState(false);
 
   const [operatorName, setOperatorName] = useState("");
   const [operatorRole, setOperatorRole] = useState("");
@@ -193,6 +196,21 @@ export default function SettingsPage() {
   >(null);
   const [isAssignmentsLoading, setIsAssignmentsLoading] = useState(false);
   const [devRoleOverride, setDevRoleOverride] = useState(false);
+  const sortedStations = useMemo(
+    () =>
+      [...workStations].sort((a, b) => {
+        const orderDiff = (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
+        if (orderDiff !== 0) return orderDiff;
+        return a.name.localeCompare(b.name);
+      }),
+    [workStations],
+  );
+  const [localStations, setLocalStations] = useState(sortedStations);
+  const displayStations = localStations.length ? localStations : sortedStations;
+
+  useEffect(() => {
+    setLocalStations(sortedStations);
+  }, [sortedStations]);
   const [companyName, setCompanyName] = useState("");
   const [companyLegalName, setCompanyLegalName] = useState("");
   const [companyRegistrationNo, setCompanyRegistrationNo] = useState("");
@@ -1066,6 +1084,43 @@ export default function SettingsPage() {
     setEditingStationId(null);
   }
 
+  async function persistStationOrder(nextStations: WorkStation[]) {
+    setIsStationOrderSaving(true);
+    await Promise.all(
+      nextStations.map((station, index) =>
+        updateWorkStation(station.id, { sortOrder: index }),
+      ),
+    );
+    setIsStationOrderSaving(false);
+  }
+
+  function reorderStations(
+    stations: WorkStation[],
+    draggedId: string,
+    targetId: string,
+  ) {
+    const fromIndex = stations.findIndex((station) => station.id === draggedId);
+    const toIndex = stations.findIndex((station) => station.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) {
+      return stations;
+    }
+    const next = [...stations];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    return next;
+  }
+
+  function handleStationDrop(targetId: string) {
+    if (!dragStationId || dragStationId === targetId) {
+      setDragStationId(null);
+      return;
+    }
+    const nextStations = reorderStations(displayStations, dragStationId, targetId);
+    setLocalStations(nextStations);
+    setDragStationId(null);
+    void persistStationOrder(nextStations);
+  }
+
   async function handleSaveStation() {
     const trimmedName = stationName.trim();
     if (!trimmedName) {
@@ -1083,6 +1138,7 @@ export default function SettingsPage() {
       name: trimmedName,
       description: stationDescription.trim() || undefined,
       isActive: true,
+      sortOrder: displayStations.length,
     });
     resetStationForm();
   }
@@ -1620,7 +1676,7 @@ export default function SettingsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(240px,1.2fr)_auto] lg:items-end">
+                <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(240px,1.2fr)_auto] lg:items-end">
                     <div className="flex flex-col gap-2">
                       <label className="text-sm font-medium">
                         Station name
@@ -1656,13 +1712,22 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-2">
-                    {workStations.map((station) => (
+                    {displayStations.map((station, index) => (
                       <div
                         key={station.id}
                         className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                        draggable
+                        onDragStart={() => setDragStationId(station.id)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => handleStationDrop(station.id)}
                       >
                         <div>
-                          <div className="font-medium">{station.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                              {index + 1}
+                            </span>
+                            <span className="font-medium">{station.name}</span>
+                          </div>
                           <div className="text-sm text-muted-foreground">
                             {station.description ?? "No description"}
                           </div>
@@ -1742,7 +1807,7 @@ export default function SettingsPage() {
                         className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
                       >
                         <option value="">Unassigned</option>
-                        {workStations.map((station) => (
+                        {displayStations.map((station) => (
                           <option key={station.id} value={station.id}>
                             {station.name}
                           </option>
@@ -1783,7 +1848,7 @@ export default function SettingsPage() {
                             {operator.role ?? "Operator"}{" "}
                             {operator.stationId
                               ? `- ${
-                                  workStations.find(
+                                  displayStations.find(
                                     (station) =>
                                       station.id === operator.stationId,
                                   )?.name ?? "Unassigned"
@@ -1843,12 +1908,12 @@ export default function SettingsPage() {
                       <thead className="bg-muted/40 text-muted-foreground">
                         <tr>
                           <th className="px-4 py-2 text-left">User</th>
-                          {workStations.map((station) => (
-                            <th
-                              key={station.id}
-                              className="px-4 py-2 text-left"
-                            >
-                              {station.name}
+                            {displayStations.map((station) => (
+                              <th
+                                key={station.id}
+                                className="px-4 py-2 text-left"
+                              >
+                                {station.name}
                             </th>
                           ))}
                         </tr>
@@ -1857,7 +1922,7 @@ export default function SettingsPage() {
                         {isAssignmentsLoading ? (
                           <tr>
                             <td
-                              colSpan={Math.max(1, workStations.length + 1)}
+                              colSpan={Math.max(1, displayStations.length + 1)}
                               className="px-4 py-6 text-center text-muted-foreground"
                             >
                               Loading assignments...
@@ -1866,7 +1931,7 @@ export default function SettingsPage() {
                         ) : users.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={Math.max(1, workStations.length + 1)}
+                              colSpan={Math.max(1, displayStations.length + 1)}
                               className="px-4 py-6 text-center text-muted-foreground"
                             >
                               No users found.
@@ -1881,7 +1946,7 @@ export default function SettingsPage() {
                                   {user.role}
                                 </div>
                               </td>
-                              {workStations.map((station) => {
+                              {displayStations.map((station) => {
                                 const key = `${user.id}:${station.id}`;
                                 const isAssigned =
                                   operatorAssignmentsByKey.has(key);
@@ -2792,9 +2857,15 @@ export default function SettingsPage() {
                   />
                   Require comment before production
                 </label>
-              </div>
+                </div>
 
-              <div className="space-y-3">
+                {isStationOrderSaving ? (
+                  <div className="text-xs text-muted-foreground">
+                    Saving station order...
+                  </div>
+                ) : null}
+
+                <div className="space-y-3">
                 <div className="text-sm font-medium">Checklist items</div>
                 <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
                   <div className="space-y-2">

@@ -3,4 +3,5 @@ export interface WorkStation {
   name: string;
   description?: string;
   isActive: boolean;
+  sortOrder: number;
 }

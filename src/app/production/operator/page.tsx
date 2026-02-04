@@ -19,6 +19,7 @@ type Priority = "low" | "normal" | "high" | "urgent";
 type Station = {
   id: string;
   name: string;
+  sortOrder: number;
 };
 
 type ProductionItemRow = {
@@ -37,7 +38,11 @@ type BatchRunRow = {
   order_id: string;
   batch_code: string;
   station_id: string | null;
+  route_key: string;
+  step_index: number;
   status: "queued" | "in_progress" | "blocked" | "done";
+  blocked_reason?: string | null;
+  blocked_reason_id?: string | null;
   started_at: string | null;
   done_at: string | null;
   orders?: {
@@ -70,6 +75,7 @@ type QueueItem = {
   totalQty: number;
   material: string;
   attachments: OrderAttachmentRow[];
+  blockedReason?: string | null;
 };
 
 function priorityBadge(priority: Priority) {
@@ -187,6 +193,12 @@ export default function OperatorProductionPage() {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
   const [signingJobs, setSigningJobs] = useState<Set<string>>(new Set());
+  const [stopReasons, setStopReasons] = useState<
+    Array<{ id: string; label: string }>
+  >([]);
+  const [blockedRunId, setBlockedRunId] = useState<string | null>(null);
+  const [blockedReasonId, setBlockedReasonId] = useState<string>("");
+  const [blockedReasonText, setBlockedReasonText] = useState<string>("");
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -267,13 +279,14 @@ export default function OperatorProductionPage() {
       const [stationsResult, runsResult] = await Promise.all([
         supabase
           .from("workstations")
-          .select("id, name")
+          .select("id, name, sort_order")
           .in("id", stationIds)
+          .order("sort_order", { ascending: true })
           .order("name", { ascending: true }),
         supabase
           .from("batch_runs")
           .select(
-            "id, order_id, batch_code, station_id, status, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
+            "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
           )
           .in("station_id", stationIds)
           .order("created_at", { ascending: false }),
@@ -323,7 +336,13 @@ export default function OperatorProductionPage() {
         }
         return;
       }
-      setStations((stationsResult.data ?? []) as Station[]);
+      setStations(
+        (stationsResult.data ?? []).map((station) => ({
+          id: station.id,
+          name: station.name,
+          sortOrder: station.sort_order ?? 0,
+        })),
+      );
       setBatchRuns(runs);
       setProductionItems((itemsResult.data ?? []) as ProductionItemRow[]);
       setAttachments(
@@ -355,6 +374,31 @@ export default function OperatorProductionPage() {
       isMounted = false;
     };
   }, [currentUser.id, currentUser.tenantId, cacheKey]);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+    let isMounted = true;
+    const loadReasons = async () => {
+      const { data, error } = await supabase
+        .from("stop_reasons")
+        .select("id, label")
+        .eq("is_active", true)
+        .order("label", { ascending: true });
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        return;
+      }
+      setStopReasons(data ?? []);
+    };
+    void loadReasons();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const signAttachments = async (list: OrderAttachmentRow[]) => {
     if (!supabase || list.length === 0) {
@@ -409,9 +453,20 @@ export default function OperatorProductionPage() {
   const queueByStation = useMemo(() => {
     const map = new Map<string, QueueItem[]>();
     stations.forEach((station) => map.set(station.id, []));
+    const runMap = new Map<string, BatchRunRow>();
+    batchRuns.forEach((run) => {
+      runMap.set(`${run.order_id}-${run.batch_code}-${run.step_index}`, run);
+    });
     batchRuns.forEach((run) => {
       if (!run.station_id) {
         return;
+      }
+      if (run.step_index > 0) {
+        const prevKey = `${run.order_id}-${run.batch_code}-${run.step_index - 1}`;
+        const prevRun = runMap.get(prevKey);
+        if (!prevRun || prevRun.status !== "done") {
+          return;
+        }
       }
       const items = productionItems.filter(
         (item) =>
@@ -437,6 +492,7 @@ export default function OperatorProductionPage() {
         totalQty,
         material,
         attachments: attachmentsByOrder.get(run.order_id) ?? [],
+        blockedReason: run.blocked_reason ?? null,
       } satisfies QueueItem;
       map.get(run.station_id)?.push(queueItem);
     });
@@ -446,6 +502,7 @@ export default function OperatorProductionPage() {
   const updateStatus = async (
     id: string,
     status: BatchRunRow["status"],
+    extra?: { blockedReason?: string | null; blockedReasonId?: string | null },
   ) => {
     if (!supabase) {
       return;
@@ -455,12 +512,17 @@ export default function OperatorProductionPage() {
       return;
     }
     const now = new Date().toISOString();
+    const isBlocked = status === "blocked";
     const { error } = await supabase
       .from("batch_runs")
       .update({
         status,
         started_at: status === "in_progress" ? now : run.started_at,
         done_at: status === "done" ? now : run.done_at,
+        blocked_reason: isBlocked ? extra?.blockedReason ?? null : null,
+        blocked_reason_id: isBlocked ? extra?.blockedReasonId ?? null : null,
+        blocked_at: isBlocked ? now : null,
+        blocked_by: isBlocked ? currentUser.id : null,
       })
       .eq("id", id);
     if (error) {
@@ -480,6 +542,12 @@ export default function OperatorProductionPage() {
               status,
               started_at: status === "in_progress" ? now : item.started_at,
               done_at: status === "done" ? now : item.done_at,
+              blocked_reason: isBlocked
+                ? extra?.blockedReason ?? null
+                : null,
+              blocked_reason_id: isBlocked
+                ? extra?.blockedReasonId ?? null
+                : null,
             }
           : item,
       ),
@@ -491,6 +559,30 @@ export default function OperatorProductionPage() {
           : item,
       ),
     );
+  };
+
+  const handleOpenBlocked = (runId: string) => {
+    setBlockedRunId(runId);
+    setBlockedReasonId("");
+    setBlockedReasonText("");
+  };
+
+  const handleConfirmBlocked = async () => {
+    if (!blockedRunId) {
+      return;
+    }
+    const manual = blockedReasonText.trim();
+    const selectedLabel =
+      stopReasons.find((reason) => reason.id === blockedReasonId)?.label ??
+      "";
+    const reason = manual || selectedLabel || "Blocked";
+    await updateStatus(blockedRunId, "blocked", {
+      blockedReason: reason,
+      blockedReasonId: blockedReasonId || null,
+    });
+    setBlockedRunId(null);
+    setBlockedReasonId("");
+    setBlockedReasonText("");
   };
 
   if (!currentUser.isAuthenticated) {
@@ -578,6 +670,11 @@ export default function OperatorProductionPage() {
                       <div className="mt-1 text-muted-foreground">
                         {item.material}
                       </div>
+                      {item.status === "blocked" && item.blockedReason ? (
+                        <div className="mt-1 text-xs text-rose-600">
+                          Blocked: {item.blockedReason}
+                        </div>
+                      ) : null}
                       <div className="mt-2 flex items-center justify-between text-muted-foreground">
                         <span className="flex items-center gap-2">
                           <BatchQr value={`${item.orderNumber}-${item.batchCode}`} />
@@ -672,7 +769,7 @@ export default function OperatorProductionPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => updateStatus(item.id, "blocked")}
+                          onClick={() => handleOpenBlocked(item.id)}
                         >
                           Blocked
                         </Button>
@@ -685,6 +782,60 @@ export default function OperatorProductionPage() {
           );
         })}
       </div>
+      {blockedRunId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Mark as blocked</h3>
+              <button
+                type="button"
+                className="text-sm text-muted-foreground"
+                onClick={() => setBlockedRunId(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-4 space-y-3 text-sm">
+              <label className="space-y-1 text-xs text-muted-foreground">
+                Reason template
+                <select
+                  value={blockedReasonId}
+                  onChange={(event) => setBlockedReasonId(event.target.value)}
+                  className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                >
+                  <option value="">Select reason...</option>
+                  {stopReasons.map((reason) => (
+                    <option key={reason.id} value={reason.id}>
+                      {reason.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-xs text-muted-foreground">
+                Manual note
+                <textarea
+                  value={blockedReasonText}
+                  onChange={(event) => setBlockedReasonText(event.target.value)}
+                  placeholder="Type a custom reason..."
+                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
+                />
+              </label>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  type="button"
+                  onClick={() => setBlockedRunId(null)}
+                >
+                  Cancel
+                </Button>
+                <Button type="button" onClick={handleConfirmBlocked}>
+                  Save
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

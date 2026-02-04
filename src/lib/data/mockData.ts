@@ -6,10 +6,34 @@ import type { ConstructionItem } from "@/types/constructionItem";
 import type { Partner, PartnerGroup } from "@/types/partner";
 
 export const mockWorkStations: WorkStation[] = [
-  { id: "ws-1", name: "Cutting", description: "Sawing and prep", isActive: true },
-  { id: "ws-2", name: "Welding", description: "Frame welding", isActive: true },
-  { id: "ws-3", name: "Assembly", description: "Final assembly", isActive: true },
-  { id: "ws-4", name: "Finishing", description: "Surface finishing", isActive: true },
+  {
+    id: "ws-1",
+    name: "Cutting",
+    description: "Sawing and prep",
+    isActive: true,
+    sortOrder: 0,
+  },
+  {
+    id: "ws-2",
+    name: "Welding",
+    description: "Frame welding",
+    isActive: true,
+    sortOrder: 1,
+  },
+  {
+    id: "ws-3",
+    name: "Assembly",
+    description: "Final assembly",
+    isActive: true,
+    sortOrder: 2,
+  },
+  {
+    id: "ws-4",
+    name: "Finishing",
+    description: "Surface finishing",
+    isActive: true,
+    sortOrder: 3,
+  },
 ];
 
 export const mockOperators: Operator[] = [

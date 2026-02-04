@@ -289,17 +289,19 @@ create index if not exists hierarchy_nodes_tenant_id_idx on public.hierarchy_nod
 create index if not exists hierarchy_nodes_level_id_idx on public.hierarchy_nodes(level_id);
 create index if not exists hierarchy_nodes_parent_id_idx on public.hierarchy_nodes(parent_id);
 
-create table if not exists public.workstations (
-  id uuid primary key default gen_random_uuid(),
-  tenant_id uuid not null references public.tenants(id) on delete cascade,
-  name text not null,
-  description text,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+  create table if not exists public.workstations (
+    id uuid primary key default gen_random_uuid(),
+    tenant_id uuid not null references public.tenants(id) on delete cascade,
+    name text not null,
+    description text,
+    is_active boolean not null default true,
+    sort_order integer not null default 0,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  );
 
 create index if not exists workstations_tenant_id_idx on public.workstations(tenant_id);
+create index if not exists workstations_sort_order_idx on public.workstations(sort_order);
 
 create table if not exists public.operators (
   id uuid primary key default gen_random_uuid(),
@@ -437,8 +439,15 @@ create table if not exists public.batch_runs (
   order_id uuid not null references public.orders(id) on delete cascade,
   batch_code text not null,
   station_id uuid references public.workstations(id) on delete set null,
+  route_key text not null default 'default',
+  step_index integer not null default 0,
   status text not null default 'queued'
     check (status in ('queued', 'in_progress', 'blocked', 'done')),
+  blocked_reason text,
+  blocked_reason_id uuid references public.stop_reasons(id) on delete set null,
+  blocked_at timestamptz,
+  blocked_by uuid references auth.users(id) on delete set null,
+  planned_date date,
   started_at timestamptz,
   done_at timestamptz,
   created_at timestamptz not null default now(),
@@ -455,6 +464,10 @@ create index if not exists batch_runs_station_id_idx
   on public.batch_runs(station_id);
 create index if not exists batch_runs_status_idx
   on public.batch_runs(status);
+create index if not exists batch_runs_route_key_idx
+  on public.batch_runs(route_key);
+create index if not exists batch_runs_step_index_idx
+  on public.batch_runs(step_index);
 
 drop trigger if exists set_hierarchy_levels_updated_at on public.hierarchy_levels;
 create trigger set_hierarchy_levels_updated_at

@@ -51,12 +51,14 @@ function mapWorkStation(row: {
   name: string;
   description?: string | null;
   is_active: boolean;
+  sort_order?: number | null;
 }): WorkStation {
   return {
     id: row.id,
     name: row.name,
     description: row.description ?? undefined,
     isActive: row.is_active,
+    sortOrder: row.sort_order ?? 0,
   };
 }
 
@@ -142,7 +144,8 @@ export function useSettingsData(): SettingsDataState {
     ] = await Promise.all([
       supabase
         .from("workstations")
-        .select("id, name, description, is_active")
+        .select("id, name, description, is_active, sort_order")
+        .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
       supabase
         .from("operators")
@@ -221,16 +224,17 @@ export function useSettingsData(): SettingsDataState {
         if (!supabase || !user.tenantId) {
           return;
         }
-        const { data, error: insertError } = await supabase
-          .from("workstations")
-          .insert({
-            tenant_id: user.tenantId,
-            name: payload.name,
-            description: payload.description ?? null,
-            is_active: payload.isActive,
-          })
-          .select("id, name, description, is_active")
-          .single();
+          const { data, error: insertError } = await supabase
+            .from("workstations")
+            .insert({
+              tenant_id: user.tenantId,
+              name: payload.name,
+              description: payload.description ?? null,
+              is_active: payload.isActive,
+              sort_order: payload.sortOrder ?? 0,
+            })
+            .select("id, name, description, is_active, sort_order")
+            .single();
         if (insertError || !data) {
           setError(insertError?.message ?? "Failed to add workstation.");
           notify({
@@ -243,22 +247,24 @@ export function useSettingsData(): SettingsDataState {
         setWorkStations((prev) => [...prev, mapWorkStation(data)]);
         notify({ title: "Workstation added", variant: "success" });
       },
-      updateWorkStation: async (stationId, patch) => {
-        if (!supabase) {
-          return;
-        }
-        const updatePayload: Record<string, unknown> = {};
-        if (patch.name !== undefined) updatePayload.name = patch.name;
-        if (patch.description !== undefined)
-          updatePayload.description = patch.description;
-        if (patch.isActive !== undefined)
-          updatePayload.is_active = patch.isActive;
-        const { data, error: updateError } = await supabase
-          .from("workstations")
-          .update(updatePayload)
-          .eq("id", stationId)
-          .select("id, name, description, is_active")
-          .single();
+        updateWorkStation: async (stationId, patch) => {
+          if (!supabase) {
+            return;
+          }
+          const updatePayload: Record<string, unknown> = {};
+          if (patch.name !== undefined) updatePayload.name = patch.name;
+          if (patch.description !== undefined)
+            updatePayload.description = patch.description || null;
+          if (patch.isActive !== undefined)
+            updatePayload.is_active = patch.isActive;
+          if (patch.sortOrder !== undefined)
+            updatePayload.sort_order = patch.sortOrder;
+          const { data, error: updateError } = await supabase
+            .from("workstations")
+            .update(updatePayload)
+            .eq("id", stationId)
+            .select("id, name, description, is_active, sort_order")
+            .single();
         if (updateError || !data) {
           setError(updateError?.message ?? "Failed to update workstation.");
           notify({
