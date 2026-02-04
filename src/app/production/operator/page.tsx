@@ -175,6 +175,9 @@ function renderAttachmentIcon(attachment: OrderAttachmentRow, signedUrl?: string
 export default function OperatorProductionPage() {
   const currentUser = useCurrentUser();
   const today = new Date().toISOString().slice(0, 10);
+  const cacheKey = currentUser.id
+    ? `pws_operator_cache_${currentUser.id}`
+    : "";
   const [stations, setStations] = useState<Station[]>([]);
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
   const [productionItems, setProductionItems] = useState<ProductionItemRow[]>(
@@ -182,6 +185,8 @@ export default function OperatorProductionPage() {
   );
   const [attachments, setAttachments] = useState<OrderAttachmentRow[]>([]);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
+  const [signingJobs, setSigningJobs] = useState<Set<string>>(new Set());
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -194,8 +199,42 @@ export default function OperatorProductionPage() {
       return;
     }
     let isMounted = true;
+    let usedCache = false;
+
+    if (cacheKey) {
+      try {
+        const raw = window.sessionStorage.getItem(cacheKey);
+        if (raw) {
+          const cached = JSON.parse(raw) as {
+            cachedAt: number;
+            stations: Station[];
+            batchRuns: BatchRunRow[];
+            productionItems: ProductionItemRow[];
+            attachments: OrderAttachmentRow[];
+            tenantId?: string | null;
+          };
+          if (
+            cached &&
+            Date.now() - cached.cachedAt < 15000 &&
+            cached.tenantId === currentUser.tenantId
+          ) {
+            setStations(cached.stations ?? []);
+            setBatchRuns(cached.batchRuns ?? []);
+            setProductionItems(cached.productionItems ?? []);
+            setAttachments(cached.attachments ?? []);
+            usedCache = true;
+            setIsLoading(false);
+          }
+        }
+      } catch {
+        // ignore cache errors
+      }
+    }
+
     const load = async () => {
-      setIsLoading(true);
+      if (!usedCache) {
+        setIsLoading(true);
+      }
       setDataError("");
       const { data: assignments, error: assignmentsError } = await supabase
         .from("operator_station_assignments")
@@ -207,7 +246,9 @@ export default function OperatorProductionPage() {
       }
       if (assignmentsError) {
         setDataError("Failed to load station assignments.");
-        setIsLoading(false);
+        if (!usedCache) {
+          setIsLoading(false);
+        }
         return;
       }
       const stationIds = (assignments ?? [])
@@ -218,7 +259,9 @@ export default function OperatorProductionPage() {
         setBatchRuns([]);
         setProductionItems([]);
         setAttachments([]);
-        setIsLoading(false);
+        if (!usedCache) {
+          setIsLoading(false);
+        }
         return;
       }
       const [stationsResult, runsResult] = await Promise.all([
@@ -240,7 +283,9 @@ export default function OperatorProductionPage() {
       }
       if (stationsResult.error || runsResult.error) {
         setDataError("Failed to load production queue.");
-        setIsLoading(false);
+        if (!usedCache) {
+          setIsLoading(false);
+        }
         return;
       }
       const runs = (runsResult.data ?? []) as BatchRunRow[];
@@ -273,7 +318,9 @@ export default function OperatorProductionPage() {
       }
       if (itemsResult.error || attachmentsResult.error) {
         setDataError("Failed to load production details.");
-        setIsLoading(false);
+        if (!usedCache) {
+          setIsLoading(false);
+        }
         return;
       }
       setStations((stationsResult.data ?? []) as Station[]);
@@ -282,59 +329,68 @@ export default function OperatorProductionPage() {
       setAttachments(
         (attachmentsResult.data ?? []) as OrderAttachmentRow[],
       );
-      setIsLoading(false);
+      if (!usedCache) {
+        setIsLoading(false);
+      }
+      if (cacheKey) {
+        try {
+          window.sessionStorage.setItem(
+            cacheKey,
+            JSON.stringify({
+              cachedAt: Date.now(),
+              stations: stationsResult.data ?? [],
+              batchRuns: runs,
+              productionItems: itemsResult.data ?? [],
+              attachments: attachmentsResult.data ?? [],
+              tenantId: currentUser.tenantId ?? null,
+            }),
+          );
+        } catch {
+          // ignore cache errors
+        }
+      }
     };
     void load();
     return () => {
       isMounted = false;
     };
-  }, [currentUser.id]);
+  }, [currentUser.id, currentUser.tenantId, cacheKey]);
 
-  useEffect(() => {
-    if (!supabase || attachments.length === 0) {
+  const signAttachments = async (list: OrderAttachmentRow[]) => {
+    if (!supabase || list.length === 0) {
       return;
     }
-    let isMounted = true;
-    const signAll = async () => {
-      const results = await Promise.all(
-        attachments.map(async (attachment) => {
-          if (!attachment.url) {
-            return { id: attachment.id, url: undefined };
-          }
-          if (storagePublicPrefix && attachment.url.startsWith(storagePublicPrefix)) {
-            const path = getStoragePathFromUrl(attachment.url, supabaseBucket);
-            const { data } = await supabase.storage
-              .from(supabaseBucket)
-              .createSignedUrl(path, 60 * 60);
-            return { id: attachment.id, url: data?.signedUrl };
-          }
-          if (attachment.url.startsWith("http")) {
-            return { id: attachment.id, url: attachment.url };
-          }
+    const results = await Promise.all(
+      list.map(async (attachment) => {
+        if (!attachment.url) {
+          return { id: attachment.id, url: undefined };
+        }
+        if (storagePublicPrefix && attachment.url.startsWith(storagePublicPrefix)) {
+          const path = getStoragePathFromUrl(attachment.url, supabaseBucket);
           const { data } = await supabase.storage
             .from(supabaseBucket)
-            .createSignedUrl(attachment.url, 60 * 60);
+            .createSignedUrl(path, 60 * 60);
           return { id: attachment.id, url: data?.signedUrl };
-        }),
-      );
-      if (!isMounted) {
-        return;
-      }
-      setSignedUrls((prev) => {
-        const next = { ...prev };
-        results.forEach((result) => {
-          if (result.url) {
-            next[result.id] = result.url;
-          }
-        });
-        return next;
+        }
+        if (attachment.url.startsWith("http")) {
+          return { id: attachment.id, url: attachment.url };
+        }
+        const { data } = await supabase.storage
+          .from(supabaseBucket)
+          .createSignedUrl(attachment.url, 60 * 60);
+        return { id: attachment.id, url: data?.signedUrl };
+      }),
+    );
+    setSignedUrls((prev) => {
+      const next = { ...prev };
+      results.forEach((result) => {
+        if (result.url) {
+          next[result.id] = result.url;
+        }
       });
-    };
-    void signAll();
-    return () => {
-      isMounted = false;
-    };
-  }, [attachments, storagePublicPrefix]);
+      return next;
+    });
+  };
 
   const attachmentsByOrder = useMemo(() => {
     const map = new Map<string, OrderAttachmentRow[]>();
@@ -530,37 +586,72 @@ export default function OperatorProductionPage() {
                       </div>
                       {item.attachments.length > 0 ? (
                         <div className="mt-3 space-y-2">
-                          <div className="text-xs font-medium text-muted-foreground">
-                            Files
-                          </div>
-                          <div className="space-y-2">
-                            {item.attachments.map((attachment) => {
-                              const signedUrl = signedUrls[attachment.id];
-                              return (
-                                <a
-                                  key={attachment.id}
-                                  href={signedUrl ?? attachment.url ?? "#"}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="flex items-center gap-3 rounded-md border border-border px-2 py-2 text-xs hover:bg-muted/30"
-                                >
-                                  {renderAttachmentIcon(attachment, signedUrl)}
-                                  <div className="flex-1">
-                                    <div className="font-medium">
-                                      {attachment.name}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              const next = new Set(expandedJobs);
+                              if (next.has(item.id)) {
+                                next.delete(item.id);
+                                setExpandedJobs(next);
+                                return;
+                              }
+                              next.add(item.id);
+                              setExpandedJobs(next);
+                              if (!signingJobs.has(item.id)) {
+                                setSigningJobs((prev) => {
+                                  const updated = new Set(prev);
+                                  updated.add(item.id);
+                                  return updated;
+                                });
+                                await signAttachments(item.attachments.filter(
+                                  (attachment) => !signedUrls[attachment.id],
+                                ));
+                                setSigningJobs((prev) => {
+                                  const updated = new Set(prev);
+                                  updated.delete(item.id);
+                                  return updated;
+                                });
+                              }
+                            }}
+                          >
+                            {expandedJobs.has(item.id) ? "Hide files" : "Show files"}
+                          </Button>
+                          {expandedJobs.has(item.id) ? (
+                            <div className="space-y-2">
+                              {signingJobs.has(item.id) ? (
+                                <div className="text-xs text-muted-foreground">
+                                  Loading files...
+                                </div>
+                              ) : null}
+                              {item.attachments.map((attachment) => {
+                                const signedUrl = signedUrls[attachment.id];
+                                return (
+                                  <a
+                                    key={attachment.id}
+                                    href={signedUrl ?? attachment.url ?? "#"}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="flex items-center gap-3 rounded-md border border-border px-2 py-2 text-xs hover:bg-muted/30"
+                                  >
+                                    {renderAttachmentIcon(attachment, signedUrl)}
+                                    <div className="flex-1">
+                                      <div className="font-medium">
+                                        {attachment.name}
+                                      </div>
+                                      <div className="text-[11px] text-muted-foreground">
+                                        {attachment.created_at
+                                          ? formatDate(
+                                              attachment.created_at.slice(0, 10),
+                                            )
+                                          : ""}
+                                      </div>
                                     </div>
-                                    <div className="text-[11px] text-muted-foreground">
-                                      {attachment.created_at
-                                        ? formatDate(
-                                            attachment.created_at.slice(0, 10),
-                                          )
-                                        : ""}
-                                    </div>
-                                  </div>
-                                </a>
-                              );
-                            })}
-                          </div>
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                       <div className="mt-3 flex flex-wrap gap-2">

@@ -188,6 +188,66 @@ function clearPendingSignup() {
   }
 }
 
+function readCachedProfile(userId: string) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(`pws_user_cache_${userId}`);
+    if (!raw) {
+      return null;
+    }
+    const data = JSON.parse(raw) as {
+      cachedAt: number;
+      profile: {
+        fullName: string;
+        role: UserRole;
+        isAdmin: boolean;
+        tenantId?: string | null;
+        tenantName?: string | null;
+        tenantLogoUrl?: string | null;
+        avatarUrl?: string | null;
+        phone?: string | null;
+      };
+    };
+    if (!data?.profile) {
+      return null;
+    }
+    return data.profile;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedProfile(
+  userId: string,
+  profile: {
+    fullName: string;
+    role: UserRole;
+    isAdmin: boolean;
+    tenantId?: string | null;
+    tenantName?: string | null;
+    tenantLogoUrl?: string | null;
+    avatarUrl?: string | null;
+    phone?: string | null;
+  },
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      `pws_user_cache_${userId}`,
+      JSON.stringify({
+        cachedAt: Date.now(),
+        profile,
+      }),
+    );
+  } catch {
+    // ignore cache errors
+  }
+}
+
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<CurrentUser>({
     ...fallbackUser,
@@ -352,6 +412,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           setUser({ ...fallbackUser, loading: false });
           return;
         }
+        const cached = readCachedProfile(sessionUser.id);
+        if (cached) {
+          setUser({
+            id: sessionUser.id,
+            name: cached.fullName,
+            email: sessionUser.email ?? undefined,
+            phone: cached.phone ?? null,
+            role: cached.role,
+            isAdmin: cached.isAdmin,
+            tenantId: cached.tenantId ?? null,
+            avatarUrl: cached.avatarUrl ?? null,
+            tenantName: cached.tenantName ?? null,
+            tenantLogoUrl: cached.tenantLogoUrl ?? null,
+            isAuthenticated: true,
+            loading: false,
+          });
+        }
         try {
           const profileResult = await withTimeout(
             (async () => {
@@ -364,20 +441,22 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             if (!isMounted) {
               return;
             }
-            setUser({
-              id: sessionUser.id,
-              name: sessionUser.email ?? "User",
-              email: sessionUser.email ?? undefined,
-              phone: null,
-              role: "Sales",
-              isAdmin: false,
-              tenantId: null,
-              avatarUrl: null,
-              tenantName: null,
-              tenantLogoUrl: null,
-              isAuthenticated: true,
-              loading: false,
-            });
+            if (!cached) {
+              setUser({
+                id: sessionUser.id,
+                name: sessionUser.email ?? "User",
+                email: sessionUser.email ?? undefined,
+                phone: null,
+                role: "Sales",
+                isAdmin: false,
+                tenantId: null,
+                avatarUrl: null,
+                tenantName: null,
+                tenantLogoUrl: null,
+                isAuthenticated: true,
+                loading: false,
+              });
+            }
             scheduleRetry();
             return;
           }
@@ -385,6 +464,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           if (!isMounted) {
             return;
           }
+          writeCachedProfile(sessionUser.id, ensuredProfile);
           setUser({
             id: sessionUser.id,
             name: ensuredProfile.fullName,
@@ -431,20 +511,38 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         try {
-          const sessionUser = session?.user;
-          if (!sessionUser) {
-            setUser({ ...fallbackUser, loading: false });
-            return;
-          }
-          try {
-            const profileResult = await withTimeout(
-              (async () => {
-                const profile = await fetchUserRole(sessionUser.id);
-                return ensureProfileSetup(sessionUser, profile);
-              })(),
-              profileTimeoutMs,
-            );
-            if (profileResult.timedOut) {
+        const sessionUser = session?.user;
+        if (!sessionUser) {
+          setUser({ ...fallbackUser, loading: false });
+          return;
+        }
+        const cached = readCachedProfile(sessionUser.id);
+        if (cached) {
+          setUser({
+            id: sessionUser.id,
+            name: cached.fullName,
+            email: sessionUser.email ?? undefined,
+            phone: cached.phone ?? null,
+            role: cached.role,
+            isAdmin: cached.isAdmin,
+            tenantId: cached.tenantId ?? null,
+            avatarUrl: cached.avatarUrl ?? null,
+            tenantName: cached.tenantName ?? null,
+            tenantLogoUrl: cached.tenantLogoUrl ?? null,
+            isAuthenticated: true,
+            loading: false,
+          });
+        }
+        try {
+          const profileResult = await withTimeout(
+            (async () => {
+              const profile = await fetchUserRole(sessionUser.id);
+              return ensureProfileSetup(sessionUser, profile);
+            })(),
+            profileTimeoutMs,
+          );
+          if (profileResult.timedOut) {
+            if (!cached) {
               setUser({
                 id: sessionUser.id,
                 name: sessionUser.email ?? "User",
@@ -459,14 +557,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 isAuthenticated: true,
                 loading: false,
               });
-              scheduleRetry();
-              return;
             }
-            const ensuredProfile = profileResult.value;
-            setUser({
-              id: sessionUser.id,
-              name: ensuredProfile.fullName,
-              email: sessionUser.email ?? undefined,
+            scheduleRetry();
+            return;
+          }
+          const ensuredProfile = profileResult.value;
+          writeCachedProfile(sessionUser.id, ensuredProfile);
+          setUser({
+            id: sessionUser.id,
+            name: ensuredProfile.fullName,
+            email: sessionUser.email ?? undefined,
               phone: ensuredProfile.phone ?? null,
               role: ensuredProfile.role,
               isAdmin: ensuredProfile.isAdmin,

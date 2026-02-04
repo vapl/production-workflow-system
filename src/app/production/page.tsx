@@ -141,6 +141,11 @@ export default function ProductionPage() {
     const loadData = async () => {
       setIsLoading(true);
       setDataError("");
+      if (!supabase) {
+        setDataError("Supabase is not configured.");
+        setIsLoading(false);
+        return;
+      }
       const [stationsResult, itemsResult, runsResult] = await Promise.all([
         supabase
           .from("workstations")
@@ -281,8 +286,7 @@ export default function ProductionPage() {
       }
       const items = productionItems.filter(
         (item) =>
-          item.order_id === run.order_id &&
-          item.batch_code === run.batch_code,
+          item.order_id === run.order_id && item.batch_code === run.batch_code,
       );
       const totalQty = items.reduce(
         (sum, item) => sum + Number(item.qty ?? 0),
@@ -309,10 +313,7 @@ export default function ProductionPage() {
     return map;
   }, [batchRuns, productionItems, stations]);
 
-  const updateStatus = async (
-    id: string,
-    status: BatchRunRow["status"],
-  ) => {
+  const updateStatus = async (id: string, status: BatchRunRow["status"]) => {
     if (!supabase) {
       return;
     }
@@ -459,7 +460,11 @@ export default function ProductionPage() {
                 />
               </label>
               <div className="flex items-center gap-2">
-                <Button onClick={handleRelease} disabled={!canRelease}>
+                <Button
+                  className="mt-3"
+                  onClick={handleRelease}
+                  disabled={!canRelease}
+                >
                   Create work order
                 </Button>
                 <Button
@@ -488,7 +493,9 @@ export default function ProductionPage() {
                 <Card key={station.id} className="min-h-[240px]">
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">{station.name}</CardTitle>
+                      <CardTitle className="text-base">
+                        {station.name}
+                      </CardTitle>
                       <span className="text-xs text-muted-foreground">
                         {queue.length} items
                       </span>
@@ -519,7 +526,10 @@ export default function ProductionPage() {
                                 {item.priority}
                               </Badge>
                               <Badge variant={statusBadge(item.status)}>
-                                {String(item.status ?? "queued").replace("_", " ")}
+                                {String(item.status ?? "queued").replace(
+                                  "_",
+                                  " ",
+                                )}
                               </Badge>
                             </div>
                           </div>
@@ -531,7 +541,9 @@ export default function ProductionPage() {
                           </div>
                           <div className="mt-2 flex items-center justify-between text-muted-foreground">
                             <span className="flex items-center gap-2">
-                              <BatchQr value={`${item.orderNumber}-${item.batchCode}`} />
+                              <BatchQr
+                                value={`${item.orderNumber}-${item.batchCode}`}
+                              />
                               <span>{item.batchCode}</span>
                             </span>
                           </div>
@@ -539,7 +551,9 @@ export default function ProductionPage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => updateStatus(item.id, "in_progress")}
+                              onClick={() =>
+                                updateStatus(item.id, "in_progress")
+                              }
                             >
                               Start
                             </Button>
