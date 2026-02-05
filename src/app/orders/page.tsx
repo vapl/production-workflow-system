@@ -46,11 +46,15 @@ export default function OrdersPage() {
         { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
         { value: "in_engineering", label: statusLabel("in_engineering") },
         { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
-        { value: "ready_for_production", label: statusLabel("ready_for_production") },
+          { value: "ready_for_production", label: statusLabel("ready_for_production") },
+          { value: "in_production", label: statusLabel("in_production") },
       ];
     }
     if (user.role === "Production") {
-      return [{ value: "ready_for_production", label: statusLabel("ready_for_production") }];
+        return [
+          { value: "ready_for_production", label: statusLabel("ready_for_production") },
+          { value: "in_production", label: statusLabel("in_production") },
+        ];
     }
     if (user.role === "Sales") {
       return [
@@ -59,7 +63,8 @@ export default function OrdersPage() {
         { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
         { value: "in_engineering", label: statusLabel("in_engineering") },
         { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
-        { value: "ready_for_production", label: statusLabel("ready_for_production") },
+          { value: "ready_for_production", label: statusLabel("ready_for_production") },
+          { value: "in_production", label: statusLabel("in_production") },
       ];
     }
     return [
@@ -68,7 +73,8 @@ export default function OrdersPage() {
       { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
       { value: "in_engineering", label: statusLabel("in_engineering") },
       { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
-      { value: "ready_for_production", label: statusLabel("ready_for_production") },
+        { value: "ready_for_production", label: statusLabel("ready_for_production") },
+        { value: "in_production", label: statusLabel("in_production") },
     ];
   }, [rules.statusLabels, user.role]);
   const defaultStatusFilter =

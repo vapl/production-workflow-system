@@ -148,6 +148,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       case "in_engineering":
       case "engineering_blocked":
       case "ready_for_production":
+      case "in_production":
         return value;
       case "pending":
         return "draft";

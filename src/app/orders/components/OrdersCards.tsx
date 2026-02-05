@@ -99,16 +99,18 @@ function OrderCard({
         : order.priority === "urgent"
           ? "priority-urgent"
           : "priority-normal";
-  const statusVariant =
-    order.status === "draft"
-      ? "status-draft"
-      : order.status === "ready_for_engineering"
-        ? "status-ready_for_engineering"
-        : order.status === "in_engineering"
-          ? "status-in_engineering"
-          : order.status === "engineering_blocked"
-            ? "status-engineering_blocked"
-            : "status-ready_for_production";
+    const statusVariant =
+      order.status === "draft"
+        ? "status-draft"
+        : order.status === "ready_for_engineering"
+          ? "status-ready_for_engineering"
+          : order.status === "in_engineering"
+            ? "status-in_engineering"
+            : order.status === "engineering_blocked"
+              ? "status-engineering_blocked"
+              : order.status === "in_production"
+                ? "status-in_production"
+                : "status-ready_for_production";
   const today = new Date().toISOString().slice(0, 10);
   const dueDate = order.dueDate ? order.dueDate.slice(0, 10) : "";
   const dueSoonDate = new Date();

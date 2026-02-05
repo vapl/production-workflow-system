@@ -1241,7 +1241,8 @@ export default function OrderDetailPage() {
       | "ready_for_engineering"
       | "in_engineering"
       | "engineering_blocked"
-      | "ready_for_production",
+      | "ready_for_production"
+      | "in_production",
   ) {
     if (!orderState) {
       return;

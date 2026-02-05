@@ -186,8 +186,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
             normalized === "draft" ||
             normalized === "ready_for_engineering" ||
             normalized === "in_engineering" ||
-            normalized === "engineering_blocked" ||
-            normalized === "ready_for_production"
+              normalized === "engineering_blocked" ||
+            normalized === "ready_for_production" ||
+            normalized === "in_production"
           ) {
             next[value] = normalized as OrderStatus;
           } else {
@@ -312,8 +313,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               return normalized === "draft" ||
                 normalized === "ready_for_engineering" ||
                 normalized === "in_engineering" ||
-                normalized === "engineering_blocked" ||
-                normalized === "ready_for_production"
+                  normalized === "engineering_blocked" ||
+                normalized === "ready_for_production" ||
+                normalized === "in_production"
                 ? (normalized as OrderStatus)
                 : "draft";
             })();
@@ -637,8 +639,11 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                                 engineering blocked
                               </option>
                               <option value="ready_for_production">
-                                ready for production
-                              </option>
+                                  ready for production
+                                </option>
+                              <option value="in_production">
+                                  in production
+                                </option>
                             </select>
                         </label>
                       ))}
