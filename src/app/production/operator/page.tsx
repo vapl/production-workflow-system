@@ -12,7 +12,6 @@ import {
   FileTextIcon,
   ImageIcon,
 } from "lucide-react";
-import QRCode from "qrcode";
 
 type Priority = "low" | "normal" | "high" | "urgent";
 
@@ -64,19 +63,21 @@ type OrderAttachmentRow = {
   category: string | null;
 };
 
-type QueueItem = {
-  id: string;
-  orderNumber: string;
-  customerName: string;
-  dueDate: string;
-  priority: Priority;
-  status: BatchRunRow["status"];
-  batchCode: string;
-  totalQty: number;
-  material: string;
-  attachments: OrderAttachmentRow[];
-  blockedReason?: string | null;
-};
+  type QueueItem = {
+    id: string;
+    orderNumber: string;
+    customerName: string;
+    dueDate: string;
+    priority: Priority;
+    status: BatchRunRow["status"];
+    batchCode: string;
+    totalQty: number;
+    material: string;
+    attachments: OrderAttachmentRow[];
+    blockedReason?: string | null;
+    startedAt?: string | null;
+    doneAt?: string | null;
+  };
 
 function priorityBadge(priority: Priority) {
   if (priority === "urgent") return "priority-urgent";
@@ -92,38 +93,73 @@ function statusBadge(status: BatchRunRow["status"]) {
   return "status-draft";
 }
 
-function BatchQr({ value }: { value: string }) {
-  const [src, setSrc] = useState<string>("");
+function parseTime(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return {
+    hours: Number.isFinite(hours) ? hours : 8,
+    minutes: Number.isFinite(minutes) ? minutes : 0,
+  };
+}
 
-  useEffect(() => {
-    let active = true;
-    QRCode.toDataURL(value, { margin: 1, width: 88 })
-      .then((url) => {
-        if (active) {
-          setSrc(url);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setSrc("");
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [value]);
-
-  return src ? (
-    <img
-      src={src}
-      alt={`QR ${value}`}
-      className="h-12 w-12 rounded-md border border-border bg-background"
-    />
-  ) : (
-    <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted text-[10px] text-muted-foreground">
-      QR
-    </div>
+function buildDayTime(date: Date, timeValue: string) {
+  const { hours, minutes } = parseTime(timeValue);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    hours,
+    minutes,
+    0,
+    0,
   );
+}
+
+function computeWorkingMinutes(
+  startIso: string | null | undefined,
+  endIso: string | null | undefined,
+  workStart: string,
+  workEnd: string,
+) {
+  if (!startIso) return 0;
+  const start = new Date(startIso);
+  const end = endIso ? new Date(endIso) : new Date();
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return 0;
+  }
+  if (end <= start) {
+    return 0;
+  }
+  const startDay = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate(),
+  );
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  let totalMinutes = 0;
+  for (
+    let day = new Date(startDay);
+    day <= endDay;
+    day.setDate(day.getDate() + 1)
+  ) {
+    const dayStart = buildDayTime(day, workStart);
+    const dayEnd = buildDayTime(day, workEnd);
+    const rangeStart = dayStart > start ? dayStart : start;
+    const rangeEnd = dayEnd < end ? dayEnd : end;
+    if (rangeEnd > rangeStart) {
+      totalMinutes += Math.floor(
+        (rangeEnd.getTime() - rangeStart.getTime()) / 60000,
+      );
+    }
+  }
+  return totalMinutes;
+}
+
+function formatDuration(totalMinutes: number) {
+  if (!totalMinutes || totalMinutes <= 0) return "0m";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
 function getStoragePathFromUrl(url: string, bucket: string) {
@@ -193,6 +229,8 @@ export default function OperatorProductionPage() {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
   const [signingJobs, setSigningJobs] = useState<Set<string>>(new Set());
+  const [workdayStart, setWorkdayStart] = useState("08:00");
+  const [workdayEnd, setWorkdayEnd] = useState("17:00");
   const [stopReasons, setStopReasons] = useState<
     Array<{ id: string; label: string }>
   >([]);
@@ -400,6 +438,36 @@ export default function OperatorProductionPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    let isMounted = true;
+    const loadWorkHours = async () => {
+      const { data, error } = await supabase
+        .from("tenant_settings")
+        .select("workday_start, workday_end")
+        .eq("tenant_id", currentUser.tenantId)
+        .maybeSingle();
+      if (!isMounted) {
+        return;
+      }
+      if (error || !data) {
+        return;
+      }
+      if (data.workday_start) {
+        setWorkdayStart(data.workday_start);
+      }
+      if (data.workday_end) {
+        setWorkdayEnd(data.workday_end);
+      }
+    };
+    void loadWorkHours();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.tenantId]);
+
   const signAttachments = async (list: OrderAttachmentRow[]) => {
     if (!supabase || list.length === 0) {
       return;
@@ -461,6 +529,9 @@ export default function OperatorProductionPage() {
       if (!run.station_id) {
         return;
       }
+      if (run.status === "done") {
+        return;
+      }
       if (run.step_index > 0) {
         const prevKey = `${run.order_id}-${run.batch_code}-${run.step_index - 1}`;
         const prevRun = runMap.get(prevKey);
@@ -481,19 +552,21 @@ export default function OperatorProductionPage() {
       const customerName = run.orders?.customer_name ?? "Customer";
       const dueDate = run.orders?.due_date ?? "";
       const priority = run.orders?.priority ?? "normal";
-      const queueItem = {
-        id: run.id,
-        orderNumber,
-        customerName,
-        dueDate,
-        priority,
-        status: run.status,
-        batchCode: run.batch_code,
-        totalQty,
-        material,
-        attachments: attachmentsByOrder.get(run.order_id) ?? [],
-        blockedReason: run.blocked_reason ?? null,
-      } satisfies QueueItem;
+        const queueItem = {
+          id: run.id,
+          orderNumber,
+          customerName,
+          dueDate,
+          priority,
+          status: run.status,
+          batchCode: run.batch_code,
+          totalQty,
+          material,
+          attachments: attachmentsByOrder.get(run.order_id) ?? [],
+          blockedReason: run.blocked_reason ?? null,
+          startedAt: run.started_at,
+          doneAt: run.done_at,
+        } satisfies QueueItem;
       map.get(run.station_id)?.push(queueItem);
     });
     return map;
@@ -645,6 +718,28 @@ export default function OperatorProductionPage() {
                       key={item.id}
                       className="rounded-lg border border-border bg-background px-3 py-2 text-xs shadow-sm"
                     >
+                      {(() => {
+                        const metaParts: string[] = [];
+                        if (item.totalQty > 0) {
+                          metaParts.push(`${item.totalQty} pcs`);
+                        }
+                        if (item.dueDate) {
+                          metaParts.push(`Due ${formatDate(item.dueDate)}`);
+                        }
+                        const metaLine = metaParts.join(" - ");
+                        const elapsedMinutes = item.startedAt
+                          ? computeWorkingMinutes(
+                              item.startedAt,
+                              item.doneAt ?? null,
+                              workdayStart,
+                              workdayEnd,
+                            )
+                          : 0;
+                        const elapsedLabel = item.startedAt
+                          ? formatDuration(elapsedMinutes)
+                          : null;
+                        return (
+                          <>
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <span className="font-semibold">
@@ -663,10 +758,11 @@ export default function OperatorProductionPage() {
                           </Badge>
                         </div>
                       </div>
-                      <div className="mt-1 text-muted-foreground">
-                        {item.totalQty} pcs - Due{" "}
-                        {item.dueDate ? formatDate(item.dueDate) : "--"}
-                      </div>
+                      {metaLine ? (
+                        <div className="mt-1 text-muted-foreground">
+                          {metaLine}
+                        </div>
+                      ) : null}
                       <div className="mt-1 text-muted-foreground">
                         {item.material}
                       </div>
@@ -675,12 +771,14 @@ export default function OperatorProductionPage() {
                           Blocked: {item.blockedReason}
                         </div>
                       ) : null}
-                      <div className="mt-2 flex items-center justify-between text-muted-foreground">
-                        <span className="flex items-center gap-2">
-                          <BatchQr value={`${item.orderNumber}-${item.batchCode}`} />
-                          <span>{item.batchCode}</span>
-                        </span>
-                      </div>
+                      {elapsedLabel ? (
+                        <div className="mt-2 text-[11px] text-muted-foreground">
+                          Time: {elapsedLabel}
+                        </div>
+                      ) : null}
+                          </>
+                        );
+                      })()}
                       {item.attachments.length > 0 ? (
                         <div className="mt-3 space-y-2">
                           <Button

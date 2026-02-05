@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
-import QRCode from "qrcode";
 
 type Priority = "low" | "normal" | "high" | "urgent";
 
@@ -87,7 +86,8 @@ type QueueItem = {
   batchCode: string;
   totalQty: number;
   material: string;
-  blockedReason?: string | null;
+  startedAt?: string | null;
+  doneAt?: string | null;
 };
 
 function priorityBadge(priority: Priority) {
@@ -104,38 +104,73 @@ function statusBadge(status: BatchRunRow["status"]) {
   return "status-draft";
 }
 
-function BatchQr({ value }: { value: string }) {
-  const [src, setSrc] = useState<string>("");
+function parseTime(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return {
+    hours: Number.isFinite(hours) ? hours : 8,
+    minutes: Number.isFinite(minutes) ? minutes : 0,
+  };
+}
 
-  useEffect(() => {
-    let active = true;
-    QRCode.toDataURL(value, { margin: 1, width: 88 })
-      .then((url) => {
-        if (active) {
-          setSrc(url);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setSrc("");
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [value]);
-
-  return src ? (
-    <img
-      src={src}
-      alt={`QR ${value}`}
-      className="h-12 w-12 rounded-md border border-border bg-background"
-    />
-  ) : (
-    <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted text-[10px] text-muted-foreground">
-      QR
-    </div>
+function buildDayTime(date: Date, timeValue: string) {
+  const { hours, minutes } = parseTime(timeValue);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    hours,
+    minutes,
+    0,
+    0,
   );
+}
+
+function computeWorkingMinutes(
+  startIso: string | null | undefined,
+  endIso: string | null | undefined,
+  workStart: string,
+  workEnd: string,
+) {
+  if (!startIso) return 0;
+  const start = new Date(startIso);
+  const end = endIso ? new Date(endIso) : new Date();
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return 0;
+  }
+  if (end <= start) {
+    return 0;
+  }
+  const startDay = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate(),
+  );
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  let totalMinutes = 0;
+  for (
+    let day = new Date(startDay);
+    day <= endDay;
+    day.setDate(day.getDate() + 1)
+  ) {
+    const dayStart = buildDayTime(day, workStart);
+    const dayEnd = buildDayTime(day, workEnd);
+    const rangeStart = dayStart > start ? dayStart : start;
+    const rangeEnd = dayEnd < end ? dayEnd : end;
+    if (rangeEnd > rangeStart) {
+      totalMinutes += Math.floor(
+        (rangeEnd.getTime() - rangeStart.getTime()) / 60000,
+      );
+    }
+  }
+  return totalMinutes;
+}
+
+function formatDuration(totalMinutes: number) {
+  if (!totalMinutes || totalMinutes <= 0) return "0m";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
 export default function ProductionPage() {
@@ -157,12 +192,10 @@ export default function ProductionPage() {
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
   const [readySearch, setReadySearch] = useState("");
   const [readyPriority, setReadyPriority] = useState<Priority | "all">("all");
-  const [stopReasons, setStopReasons] = useState<
-    Array<{ id: string; label: string }>
-  >([]);
-  const [blockedRunId, setBlockedRunId] = useState<string | null>(null);
-  const [blockedReasonId, setBlockedReasonId] = useState<string>("");
-  const [blockedReasonText, setBlockedReasonText] = useState<string>("");
+  const [workdayStart, setWorkdayStart] = useState("08:00");
+  const [workdayEnd, setWorkdayEnd] = useState("17:00");
+  const [removeHintId, setRemoveHintId] = useState<string | null>(null);
+  const removeHintTimer = useRef<number | null>(null);
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -188,26 +221,26 @@ export default function ProductionPage() {
             .eq("is_active", true)
             .order("sort_order", { ascending: true })
             .order("name", { ascending: true }),
-        supabase
-          .from("production_items")
-          .select(
-            "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, orders (order_number, due_date, priority, customer_name)",
-          )
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("batch_runs")
-          .select(
-            "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
-          )
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("orders")
-          .select(
-            "id, order_number, customer_name, due_date, priority, quantity, product_name",
-          )
-          .eq("status", "ready_for_production")
-          .order("due_date", { ascending: true }),
-      ]);
+          supabase
+            .from("production_items")
+            .select(
+              "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, orders (order_number, due_date, priority, customer_name)",
+            )
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("batch_runs")
+            .select(
+              "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
+            )
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("orders")
+            .select(
+              "id, order_number, customer_name, due_date, priority, quantity, product_name",
+            )
+            .eq("status", "ready_for_production")
+            .order("due_date", { ascending: true }),
+        ]);
 
       if (!isMounted) {
         return;
@@ -243,29 +276,34 @@ export default function ProductionPage() {
   }, []);
 
   useEffect(() => {
-    if (!supabase) {
+    if (!supabase || !user?.tenantId) {
       return;
     }
     let isMounted = true;
-    const loadReasons = async () => {
+    const loadWorkHours = async () => {
       const { data, error } = await supabase
-        .from("stop_reasons")
-        .select("id, label")
-        .eq("is_active", true)
-        .order("label", { ascending: true });
+        .from("tenant_settings")
+        .select("workday_start, workday_end")
+        .eq("tenant_id", user.tenantId)
+        .maybeSingle();
       if (!isMounted) {
         return;
       }
-      if (error) {
+      if (error || !data) {
         return;
       }
-      setStopReasons(data ?? []);
+      if (data.workday_start) {
+        setWorkdayStart(data.workday_start);
+      }
+      if (data.workday_end) {
+        setWorkdayEnd(data.workday_end);
+      }
     };
-    void loadReasons();
+    void loadWorkHours();
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [user?.tenantId]);
 
   const readyBatchGroups = useMemo(() => {
     const groups = new Map<string, BatchGroup>();
@@ -342,13 +380,9 @@ export default function ProductionPage() {
   ];
   const activeRoute =
     routes.find((route) => route.key === selectedRouteKey) ?? routes[0];
-  const routeStations = useMemo(
-    () => [...stations],
-    [stations],
-  );
+  const routeStations = useMemo(() => [...stations], [stations]);
 
-  const canRelease =
-    selectedBatchKeys.length > 0 && routeStations.length > 0;
+  const canRelease = selectedBatchKeys.length > 0 && routeStations.length > 0;
 
   const handleRelease = async () => {
     if (!supabase || !canRelease) {
@@ -371,17 +405,24 @@ export default function ProductionPage() {
         planned_date: plannedDate,
       })),
     );
-    const { data: inserted, error } = await supabase
-      .from("batch_runs")
-      .insert(insertRows)
-      .select(
-        "id, order_id, batch_code, station_id, route_key, step_index, status, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
-      );
-    if (error) {
-      setDataError("Failed to create batch runs.");
-      return;
-    }
-    setBatchRuns((prev) => [...(inserted ?? []), ...prev]);
+      const { data: inserted, error } = await supabase
+        .from("batch_runs")
+        .insert(insertRows)
+        .select(
+          "id, order_id, batch_code, station_id, route_key, step_index, status, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
+        );
+      if (error) {
+        setDataError("Failed to create batch runs.");
+        return;
+      }
+      await supabase
+        .from("orders")
+        .update({ status: "in_production" })
+        .in(
+          "id",
+          Array.from(new Set(nextGroups.map((group) => group.orderId))),
+        );
+      setBatchRuns((prev) => [...(inserted ?? []), ...prev]);
     setSelectedBatchKeys([]);
   };
 
@@ -397,6 +438,9 @@ export default function ProductionPage() {
     endDate.setDate(endDate.getDate() + Math.max(plannedRangeDays - 1, 0));
     batchRuns.forEach((run) => {
       if (!run.station_id) {
+        return;
+      }
+      if (run.status === "done") {
         return;
       }
       if (run.planned_date) {
@@ -435,21 +479,15 @@ export default function ProductionPage() {
         batchCode: run.batch_code,
         totalQty,
         material,
-        blockedReason: run.blocked_reason ?? null,
+        startedAt: run.started_at,
+        doneAt: run.done_at,
       } satisfies QueueItem;
       map.get(run.station_id)?.push(queueItem);
     });
     return map;
   }, [batchRuns, productionItems, stations, viewDate, plannedRangeDays]);
 
-  const updateStatus = async (
-    id: string,
-    status: BatchRunRow["status"],
-    extra?: {
-      blockedReason?: string | null;
-      blockedReasonId?: string | null;
-    },
-  ) => {
+  const removeFromQueue = async (id: string) => {
     if (!supabase) {
       return;
     }
@@ -457,78 +495,44 @@ export default function ProductionPage() {
     if (!run) {
       return;
     }
-    const now = new Date().toISOString();
-    const isBlocked = status === "blocked";
     const { error } = await supabase
       .from("batch_runs")
-      .update({
-        status,
-        started_at: status === "in_progress" ? now : run.started_at,
-        done_at: status === "done" ? now : run.done_at,
-        blocked_reason: isBlocked ? extra?.blockedReason ?? null : null,
-        blocked_reason_id: isBlocked ? extra?.blockedReasonId ?? null : null,
-        blocked_at: isBlocked ? now : null,
-        blocked_by: isBlocked ? user.id : null,
-      })
-      .eq("id", id);
-    if (error) {
-      setDataError("Failed to update batch status.");
-      return;
-    }
-    await supabase
-      .from("production_items")
-      .update({ status })
+      .delete()
       .eq("order_id", run.order_id)
       .eq("batch_code", run.batch_code);
-    setBatchRuns((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              status,
-              started_at: status === "in_progress" ? now : item.started_at,
-              done_at: status === "done" ? now : item.done_at,
-              blocked_reason: isBlocked
-                ? extra?.blockedReason ?? null
-                : null,
-              blocked_reason_id: isBlocked
-                ? extra?.blockedReasonId ?? null
-                : null,
-            }
-          : item,
-      ),
-    );
-    setProductionItems((prev) =>
-      prev.map((item) =>
-        item.order_id === run.order_id && item.batch_code === run.batch_code
-          ? { ...item, status }
-          : item,
-      ),
-    );
-  };
-
-  const handleOpenBlocked = (runId: string) => {
-    setBlockedRunId(runId);
-    setBlockedReasonId("");
-    setBlockedReasonText("");
-  };
-
-  const handleConfirmBlocked = async () => {
-    if (!blockedRunId) {
+    if (error) {
+      setDataError("Failed to remove from queue.");
       return;
     }
-    const manual = blockedReasonText.trim();
-    const selectedLabel =
-      stopReasons.find((reason) => reason.id === blockedReasonId)?.label ??
-      "";
-    const reason = manual || selectedLabel || "Blocked";
-    await updateStatus(blockedRunId, "blocked", {
-      blockedReason: reason,
-      blockedReasonId: blockedReasonId || null,
-    });
-    setBlockedRunId(null);
-    setBlockedReasonId("");
-    setBlockedReasonText("");
+    setBatchRuns((prev) =>
+      prev.filter(
+        (item) =>
+          !(
+            item.order_id === run.order_id &&
+            item.batch_code === run.batch_code
+          ),
+      ),
+    );
+    await supabase
+      .from("orders")
+      .update({ status: "ready_for_production" })
+      .eq("id", run.order_id);
+  };
+
+  const handleRemoveHintStart = (id: string) => {
+    if (removeHintTimer.current) {
+      window.clearTimeout(removeHintTimer.current);
+    }
+    removeHintTimer.current = window.setTimeout(() => {
+      setRemoveHintId(id);
+    }, 450);
+  };
+
+  const handleRemoveHintEnd = () => {
+    if (removeHintTimer.current) {
+      window.clearTimeout(removeHintTimer.current);
+      removeHintTimer.current = null;
+    }
   };
 
   const filteredReadyGroups = useMemo(() => {
@@ -585,9 +589,7 @@ export default function ProductionPage() {
                   <select
                     value={readyPriority}
                     onChange={(event) =>
-                      setReadyPriority(
-                        event.target.value as Priority | "all",
-                      )
+                      setReadyPriority(event.target.value as Priority | "all")
                     }
                     className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
                   >
@@ -709,7 +711,7 @@ export default function ProductionPage() {
         </Card>
 
         <div className="space-y-4">
-          <div className="sticky top-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
             <span>Station queues</span>
             <div className="flex flex-wrap items-center gap-2 text-xs font-normal text-muted-foreground">
               <label className="flex items-center gap-2">
@@ -742,7 +744,7 @@ export default function ProductionPage() {
             {stations.map((station) => {
               const queue = queueByStation.get(station.id) ?? [];
               return (
-                <Card key={station.id} className="min-h-[240px]">
+                <Card key={station.id} className="min-h-60">
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-base">
@@ -762,8 +764,25 @@ export default function ProductionPage() {
                       queue.map((item) => (
                         <div
                           key={item.id}
-                          className="rounded-lg border border-border bg-background px-3 py-2 text-xs shadow-sm"
+                          className="group relative rounded-lg border border-border bg-background px-3 py-2 text-xs shadow-sm"
+                          onMouseEnter={() => setRemoveHintId(item.id)}
+                          onMouseLeave={() => setRemoveHintId(null)}
+                          onTouchStart={() => handleRemoveHintStart(item.id)}
+                          onTouchEnd={handleRemoveHintEnd}
+                          onTouchCancel={handleRemoveHintEnd}
                         >
+                          <button
+                            type="button"
+                            aria-label="Remove from queue"
+                            className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full border border-border bg-foreground text-[16px] text-background shadow-sm transition ${
+                              removeHintId === item.id
+                                ? "flex"
+                                : "hidden group-hover:flex"
+                            }`}
+                            onClick={() => removeFromQueue(item.id)}
+                          >
+                            ×
+                          </button>
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <span className="font-semibold">
@@ -773,7 +792,7 @@ export default function ProductionPage() {
                                 {item.customerName}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-col items-end gap-2">
                               <Badge variant={priorityBadge(item.priority)}>
                                 {item.priority}
                               </Badge>
@@ -785,49 +804,46 @@ export default function ProductionPage() {
                               </Badge>
                             </div>
                           </div>
-                          <div className="mt-1 text-muted-foreground">
-                            {item.totalQty} pcs - Due {item.dueDate}
-                          </div>
+                          {(() => {
+                            const metaParts: string[] = [];
+                            if (item.totalQty > 0) {
+                              metaParts.push(`${item.totalQty} pcs`);
+                            }
+                            if (item.dueDate) {
+                              metaParts.push(`Due ${item.dueDate}`);
+                            }
+                            const metaLine = metaParts.join(" - ");
+                            const elapsedMinutes = item.startedAt
+                              ? computeWorkingMinutes(
+                                  item.startedAt,
+                                  item.doneAt ?? null,
+                                  workdayStart,
+                                  workdayEnd,
+                                )
+                              : 0;
+                            const elapsedLabel = item.startedAt
+                              ? formatDuration(elapsedMinutes)
+                              : null;
+                            return (
+                              <>
+                                {metaLine ? (
+                                  <div className="mt-1 text-muted-foreground">
+                                    {metaLine}
+                                  </div>
+                                ) : null}
+                                {elapsedLabel ? (
+                                  <div className="mt-1 text-[11px] text-muted-foreground">
+                                    Time: {elapsedLabel}
+                                  </div>
+                                ) : null}
+                              </>
+                            );
+                          })()}
                           <div className="mt-1 text-muted-foreground">
                             {item.material}
                           </div>
-                          {item.status === "blocked" && item.blockedReason ? (
-                            <div className="mt-1 text-xs text-rose-600">
-                              Blocked: {item.blockedReason}
-                            </div>
-                          ) : null}
-                          <div className="mt-2 flex items-center justify-between text-muted-foreground">
-                            <span className="flex items-center gap-2">
-                              <BatchQr
-                                value={`${item.orderNumber}-${item.batchCode}`}
-                              />
-                              <span>{item.batchCode}</span>
-                            </span>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                updateStatus(item.id, "in_progress")
-                              }
-                            >
-                              Start
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => updateStatus(item.id, "done")}
-                            >
-                              Done
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleOpenBlocked(item.id)}
-                            >
-                              Blocked
-                            </Button>
+                          <div className="mt-2 text-[11px] text-muted-foreground">
+                            {item.batchCode}
                           </div>
                         </div>
                       ))
@@ -839,60 +855,6 @@ export default function ProductionPage() {
           </div>
         </div>
       </div>
-      {blockedRunId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Mark as blocked</h3>
-              <button
-                type="button"
-                className="text-sm text-muted-foreground"
-                onClick={() => setBlockedRunId(null)}
-              >
-                Close
-              </button>
-            </div>
-            <div className="mt-4 space-y-3 text-sm">
-              <label className="space-y-1 text-xs text-muted-foreground">
-                Reason template
-                <select
-                  value={blockedReasonId}
-                  onChange={(event) => setBlockedReasonId(event.target.value)}
-                  className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                >
-                  <option value="">Select reason...</option>
-                  {stopReasons.map((reason) => (
-                    <option key={reason.id} value={reason.id}>
-                      {reason.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                Manual note
-                <textarea
-                  value={blockedReasonText}
-                  onChange={(event) => setBlockedReasonText(event.target.value)}
-                  placeholder="Type a custom reason..."
-                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
-                />
-              </label>
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  type="button"
-                  onClick={() => setBlockedRunId(null)}
-                >
-                  Cancel
-                </Button>
-                <Button type="button" onClick={handleConfirmBlocked}>
-                  Save
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
