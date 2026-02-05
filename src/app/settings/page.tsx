@@ -73,6 +73,7 @@ const workflowStatusOptions: { value: OrderStatus; label: string }[] = [
   { value: "in_engineering", label: "In engineering" },
   { value: "engineering_blocked", label: "Engineering blocked" },
   { value: "ready_for_production", label: "Ready for production" },
+  { value: "in_production", label: "In production" },
 ];
 
 type AttachmentRole = UserRole | "Admin";
@@ -136,16 +137,12 @@ export default function SettingsPage() {
 
   const {
     workStations,
-    operators,
     stopReasons,
     partners,
     partnerGroups,
     addWorkStation,
     updateWorkStation,
     removeWorkStation,
-    addOperator,
-    updateOperator,
-    removeOperator,
     addStopReason,
     updateStopReason,
     removeStopReason,
@@ -162,14 +159,10 @@ export default function SettingsPage() {
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
   const [dragStationId, setDragStationId] = useState<string | null>(null);
   const [isStationOrderSaving, setIsStationOrderSaving] = useState(false);
-
-  const [operatorName, setOperatorName] = useState("");
-  const [operatorRole, setOperatorRole] = useState("");
-  const [operatorStationId, setOperatorStationId] = useState<string>("");
-  const [operatorActive, setOperatorActive] = useState(true);
-  const [editingOperatorId, setEditingOperatorId] = useState<string | null>(
-    null,
-  );
+  const [workdayStart, setWorkdayStart] = useState("08:00");
+  const [workdayEnd, setWorkdayEnd] = useState("17:00");
+  const [workdayError, setWorkdayError] = useState<string | null>(null);
+  const [isWorkdaySaving, setIsWorkdaySaving] = useState(false);
 
   const [stopReasonLabel, setStopReasonLabel] = useState("");
   const [editingStopReasonId, setEditingStopReasonId] = useState<string | null>(
@@ -211,6 +204,36 @@ export default function SettingsPage() {
   useEffect(() => {
     setLocalStations(sortedStations);
   }, [sortedStations]);
+
+  useEffect(() => {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    let isMounted = true;
+    const loadWorkHours = async () => {
+      const { data, error } = await supabase
+        .from("tenant_settings")
+        .select("workday_start, workday_end")
+        .eq("tenant_id", currentUser.tenantId)
+        .maybeSingle();
+      if (!isMounted) {
+        return;
+      }
+      if (error || !data) {
+        return;
+      }
+      if (data.workday_start) {
+        setWorkdayStart(data.workday_start);
+      }
+      if (data.workday_end) {
+        setWorkdayEnd(data.workday_end);
+      }
+    };
+    void loadWorkHours();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.tenantId]);
   const [companyName, setCompanyName] = useState("");
   const [companyLegalName, setCompanyLegalName] = useState("");
   const [companyRegistrationNo, setCompanyRegistrationNo] = useState("");
@@ -1084,6 +1107,33 @@ export default function SettingsPage() {
     setEditingStationId(null);
   }
 
+  async function handleSaveWorkHours() {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    const isValidTime = (value: string) =>
+      /^([01]\d|2[0-3]):[0-5]\d$/.test(value.trim());
+    if (!isValidTime(workdayStart) || !isValidTime(workdayEnd)) {
+      setWorkdayError("Use 24h format HH:MM (e.g., 08:00).");
+      return;
+    }
+    if (workdayStart >= workdayEnd) {
+      setWorkdayError("Workday start must be earlier than end.");
+      return;
+    }
+    setWorkdayError(null);
+    setIsWorkdaySaving(true);
+    const { error } = await supabase.from("tenant_settings").upsert({
+      tenant_id: currentUser.tenantId,
+      workday_start: workdayStart,
+      workday_end: workdayEnd,
+    });
+    if (error) {
+      setWorkdayError(error.message);
+    }
+    setIsWorkdaySaving(false);
+  }
+
   async function persistStationOrder(nextStations: WorkStation[]) {
     setIsStationOrderSaving(true);
     await Promise.all(
@@ -1151,50 +1201,6 @@ export default function SettingsPage() {
     setEditingStationId(stationId);
     setStationName(station.name);
     setStationDescription(station.description ?? "");
-  }
-
-  function resetOperatorForm() {
-    setOperatorName("");
-    setOperatorRole("");
-    setOperatorStationId("");
-    setOperatorActive(true);
-    setEditingOperatorId(null);
-  }
-
-  async function handleSaveOperator() {
-    const trimmedName = operatorName.trim();
-    if (!trimmedName) {
-      return;
-    }
-    if (editingOperatorId) {
-      await updateOperator(editingOperatorId, {
-        name: trimmedName,
-        role: operatorRole.trim() || undefined,
-        stationId: operatorStationId || undefined,
-        isActive: operatorActive,
-      });
-      resetOperatorForm();
-      return;
-    }
-    await addOperator({
-      name: trimmedName,
-      role: operatorRole.trim() || undefined,
-      stationId: operatorStationId || undefined,
-      isActive: operatorActive,
-    });
-    resetOperatorForm();
-  }
-
-  function handleEditOperator(operatorId: string) {
-    const operator = operators.find((item) => item.id === operatorId);
-    if (!operator) {
-      return;
-    }
-    setEditingOperatorId(operatorId);
-    setOperatorName(operator.name);
-    setOperatorRole(operator.role ?? "");
-    setOperatorStationId(operator.stationId ?? "");
-    setOperatorActive(operator.isActive);
   }
 
   function resetStopReasonForm() {
@@ -1670,6 +1676,54 @@ export default function SettingsPage() {
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
+                  <CardTitle>Working hours</CardTitle>
+                  <CardDescription>
+                    Define the daily work window used for production timing.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-medium">
+                        Workday start
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="^([01]\\d|2[0-3]):[0-5]\\d$"
+                        value={workdayStart}
+                        onChange={(event) => setWorkdayStart(event.target.value)}
+                        placeholder="08:00"
+                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-medium">Workday end</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="^([01]\\d|2[0-3]):[0-5]\\d$"
+                        value={workdayEnd}
+                        onChange={(event) => setWorkdayEnd(event.target.value)}
+                        placeholder="17:00"
+                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                      />
+                    </div>
+                  </div>
+                  {workdayError ? (
+                    <div className="text-xs text-destructive">
+                      {workdayError}
+                    </div>
+                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <Button onClick={handleSaveWorkHours} disabled={isWorkdaySaving}>
+                      {isWorkdaySaving ? "Saving..." : "Save hours"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
                   <CardTitle>Work Stations</CardTitle>
                   <CardDescription>
                     Manage the list of production stations.
@@ -1756,130 +1810,6 @@ export default function SettingsPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => removeWorkStation(station.id)}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Operators</CardTitle>
-                  <CardDescription>
-                    Keep track of operators assigned to each station.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
-                    <div className="flex min-w-50 flex-1 flex-col gap-2">
-                      <label className="text-sm font-medium">Name</label>
-                      <input
-                        value={operatorName}
-                        onChange={(event) =>
-                          setOperatorName(event.target.value)
-                        }
-                        placeholder="Operator name"
-                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
-                    </div>
-                    <div className="flex min-w-35 flex-1 flex-col gap-2">
-                      <label className="text-sm font-medium">Role</label>
-                      <input
-                        value={operatorRole}
-                        onChange={(event) =>
-                          setOperatorRole(event.target.value)
-                        }
-                        placeholder="Operator"
-                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
-                    </div>
-                    <div className="flex min-w-45 flex-1 flex-col gap-2">
-                      <label className="text-sm font-medium">Station</label>
-                      <select
-                        value={operatorStationId}
-                        onChange={(event) =>
-                          setOperatorStationId(event.target.value)
-                        }
-                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      >
-                        <option value="">Unassigned</option>
-                        {displayStations.map((station) => (
-                          <option key={station.id} value={station.id}>
-                            {station.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto">
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={operatorActive}
-                          onChange={(event) =>
-                            setOperatorActive(event.target.checked)
-                          }
-                        />
-                        Active
-                      </label>
-                      <Button onClick={handleSaveOperator}>
-                        {editingOperatorId ? "Save operator" : "Add operator"}
-                      </Button>
-                      {editingOperatorId && (
-                        <Button variant="outline" onClick={resetOperatorForm}>
-                          Cancel
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    {operators.map((operator) => (
-                      <div
-                        key={operator.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
-                      >
-                        <div>
-                          <div className="font-medium">{operator.name}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {operator.role ?? "Operator"}{" "}
-                            {operator.stationId
-                              ? `- ${
-                                  displayStations.find(
-                                    (station) =>
-                                      station.id === operator.stationId,
-                                  )?.name ?? "Unassigned"
-                                }`
-                              : "- Unassigned"}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={operator.isActive}
-                              onChange={(event) =>
-                                updateOperator(operator.id, {
-                                  isActive: event.target.checked,
-                                })
-                              }
-                            />
-                            Active
-                          </label>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEditOperator(operator.id)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeOperator(operator.id)}
                           >
                             Remove
                           </Button>
@@ -2914,6 +2844,7 @@ export default function SettingsPage() {
                           type="checkbox"
                           checked={newChecklistRequired.includes(
                             "ready_for_production",
+                            "in_production",
                           )}
                           onChange={(event) => {
                             setNewChecklistRequired((prev) => {
@@ -2965,6 +2896,7 @@ export default function SettingsPage() {
                             type="checkbox"
                             checked={item.requiredFor.includes(
                               "ready_for_production",
+                              "in_production",
                             )}
                             onChange={(event) => {
                               const next = new Set(item.requiredFor);

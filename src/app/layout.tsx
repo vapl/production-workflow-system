@@ -5,7 +5,10 @@ import { OrdersProvider } from "@/app/orders/OrdersContext";
 import { HierarchyProvider } from "@/app/settings/HierarchyContext";
 import { UserProvider } from "@/contexts/UserContext";
 import { BatchesProvider } from "@/contexts/BatchesContext";
-import { NotificationsProvider, NotificationsViewport } from "@/components/ui/Notifications";
+import {
+  NotificationsProvider,
+  NotificationsViewport,
+} from "@/components/ui/Notifications";
 import { WorkflowProvider } from "@/contexts/WorkflowContext";
 import { AppShell } from "@/components/layout/AppShell";
 
@@ -40,8 +43,8 @@ export default function RootLayout({
               <HierarchyProvider>
                 <OrdersProvider>
                   <BatchesProvider>
-                  <AppShell>{children}</AppShell>
-                  <NotificationsViewport />
+                    <AppShell>{children}</AppShell>
+                    <NotificationsViewport />
                   </BatchesProvider>
                 </OrdersProvider>
               </HierarchyProvider>

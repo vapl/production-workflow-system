@@ -30,6 +30,8 @@ export function formatOrderStatus(status: OrderStatus): string {
       return "Eng. blocked";
     case "ready_for_production":
       return "Ready for prod.";
+    case "in_production":
+      return "In prod.";
     default:
       return status.replace(/_/g, " ");
   }

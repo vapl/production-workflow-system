@@ -289,16 +289,24 @@ create index if not exists hierarchy_nodes_tenant_id_idx on public.hierarchy_nod
 create index if not exists hierarchy_nodes_level_id_idx on public.hierarchy_nodes(level_id);
 create index if not exists hierarchy_nodes_parent_id_idx on public.hierarchy_nodes(parent_id);
 
-  create table if not exists public.workstations (
-    id uuid primary key default gen_random_uuid(),
-    tenant_id uuid not null references public.tenants(id) on delete cascade,
-    name text not null,
-    description text,
-    is_active boolean not null default true,
-    sort_order integer not null default 0,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
-  );
+create table if not exists public.workstations (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  name text not null,
+  description text,
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.tenant_settings (
+  tenant_id uuid primary key references public.tenants(id) on delete cascade,
+  workday_start time not null default '08:00',
+  workday_end time not null default '17:00',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
 create index if not exists workstations_tenant_id_idx on public.workstations(tenant_id);
 create index if not exists workstations_sort_order_idx on public.workstations(sort_order);
@@ -484,6 +492,11 @@ create trigger set_workstations_updated_at
 before update on public.workstations
 for each row execute procedure public.set_updated_at();
 
+drop trigger if exists set_tenant_settings_updated_at on public.tenant_settings;
+create trigger set_tenant_settings_updated_at
+before update on public.tenant_settings
+for each row execute procedure public.set_updated_at();
+
 drop trigger if exists set_operators_updated_at on public.operators;
 create trigger set_operators_updated_at
 before update on public.operators
@@ -549,6 +562,7 @@ for each row execute procedure public.set_order_child_tenant_id();
 alter table public.hierarchy_levels enable row level security;
 alter table public.hierarchy_nodes enable row level security;
 alter table public.workstations enable row level security;
+alter table public.tenant_settings enable row level security;
 alter table public.operators enable row level security;
 alter table public.stop_reasons enable row level security;
 alter table public.construction_items enable row level security;
@@ -681,6 +695,48 @@ create policy "workstations_delete_by_tenant" on public.workstations
     exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.tenant_id = workstations.tenant_id
+    )
+  );
+
+create policy "tenant_settings_select_by_tenant" on public.tenant_settings
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = tenant_settings.tenant_id
+    )
+  );
+
+create policy "tenant_settings_insert_by_tenant" on public.tenant_settings
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = tenant_settings.tenant_id
+    )
+  );
+
+create policy "tenant_settings_update_by_tenant" on public.tenant_settings
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = tenant_settings.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = tenant_settings.tenant_id
+    )
+  );
+
+create policy "tenant_settings_delete_by_tenant" on public.tenant_settings
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = tenant_settings.tenant_id
     )
   );
 

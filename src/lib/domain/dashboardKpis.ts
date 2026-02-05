@@ -5,7 +5,9 @@ import type { Batch } from "@/types/batch";
  * Active orders = orders not yet ready for production
  */
 export function getActiveOrdersCount(orders: Order[]): number {
-  return orders.filter((o) => o.status !== "ready_for_production").length;
+  return orders.filter(
+    (o) => o.status !== "ready_for_production" && o.status !== "in_production",
+  ).length;
 }
 
 /**

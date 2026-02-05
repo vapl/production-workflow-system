@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import type { WorkStation } from "@/types/workstation";
-import type { Operator } from "@/types/operator";
 import type { Partner, PartnerGroup } from "@/types/partner";
 import { useNotifications } from "@/components/ui/Notifications";
 import { mockPartnerGroups, mockPartners } from "@/lib/data/mockData";
@@ -17,7 +16,6 @@ export interface StopReason {
 
 interface SettingsDataState {
   workStations: WorkStation[];
-  operators: Operator[];
   stopReasons: StopReason[];
   partners: Partner[];
   partnerGroups: PartnerGroup[];
@@ -29,9 +27,6 @@ interface SettingsDataState {
     patch: Partial<WorkStation>,
   ) => Promise<void>;
   removeWorkStation: (stationId: string) => Promise<void>;
-  addOperator: (payload: Omit<Operator, "id">) => Promise<void>;
-  updateOperator: (operatorId: string, patch: Partial<Operator>) => Promise<void>;
-  removeOperator: (operatorId: string) => Promise<void>;
   addStopReason: (label: string) => Promise<void>;
   updateStopReason: (reasonId: string, patch: Partial<StopReason>) => Promise<void>;
   removeStopReason: (reasonId: string) => Promise<void>;
@@ -59,22 +54,6 @@ function mapWorkStation(row: {
     description: row.description ?? undefined,
     isActive: row.is_active,
     sortOrder: row.sort_order ?? 0,
-  };
-}
-
-function mapOperator(row: {
-  id: string;
-  name: string;
-  role?: string | null;
-  station_id?: string | null;
-  is_active: boolean;
-}): Operator {
-  return {
-    id: row.id,
-    name: row.name,
-    role: row.role ?? undefined,
-    stationId: row.station_id ?? undefined,
-    isActive: row.is_active,
   };
 }
 
@@ -120,7 +99,6 @@ export function useSettingsData(): SettingsDataState {
   const user = useCurrentUser();
   const { notify } = useNotifications();
   const [workStations, setWorkStations] = useState<WorkStation[]>([]);
-  const [operators, setOperators] = useState<Operator[]>([]);
   const [stopReasons, setStopReasons] = useState<StopReason[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [partnerGroups, setPartnerGroups] = useState<PartnerGroup[]>([]);
@@ -137,7 +115,6 @@ export function useSettingsData(): SettingsDataState {
     setError(null);
     const [
       stationsResult,
-      operatorsResult,
       reasonsResult,
       partnersResult,
       partnerGroupsResult,
@@ -146,10 +123,6 @@ export function useSettingsData(): SettingsDataState {
         .from("workstations")
         .select("id, name, description, is_active, sort_order")
         .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("operators")
-        .select("id, name, role, station_id, is_active")
         .order("created_at", { ascending: true }),
       supabase
         .from("stop_reasons")
@@ -167,14 +140,12 @@ export function useSettingsData(): SettingsDataState {
 
     if (
       stationsResult.error ||
-      operatorsResult.error ||
       reasonsResult.error ||
       partnersResult.error ||
       partnerGroupsResult.error
     ) {
       setError(
         stationsResult.error?.message ||
-          operatorsResult.error?.message ||
           reasonsResult.error?.message ||
           partnersResult.error?.message ||
           partnerGroupsResult.error?.message ||
@@ -185,7 +156,6 @@ export function useSettingsData(): SettingsDataState {
     }
 
     setWorkStations((stationsResult.data ?? []).map(mapWorkStation));
-    setOperators((operatorsResult.data ?? []).map(mapOperator));
     setStopReasons((reasonsResult.data ?? []).map(mapStopReason));
     setPartners((partnersResult.data ?? []).map(mapPartner));
     setPartnerGroups((partnerGroupsResult.data ?? []).map(mapPartnerGroup));
@@ -202,7 +172,6 @@ export function useSettingsData(): SettingsDataState {
     }
     if (!user.isAuthenticated) {
       setWorkStations([]);
-      setOperators([]);
       setStopReasons([]);
       setPartners([]);
       setPartnerGroups([]);
@@ -214,7 +183,6 @@ export function useSettingsData(): SettingsDataState {
   const value = useMemo<SettingsDataState>(
     () => ({
       workStations,
-      operators,
       stopReasons,
       partners,
       partnerGroups,
@@ -302,88 +270,6 @@ export function useSettingsData(): SettingsDataState {
           prev.filter((station) => station.id !== stationId),
         );
         notify({ title: "Workstation deleted", variant: "success" });
-      },
-      addOperator: async (payload) => {
-        if (!supabase || !user.tenantId) {
-          return;
-        }
-        const { data, error: insertError } = await supabase
-          .from("operators")
-          .insert({
-            tenant_id: user.tenantId,
-            name: payload.name,
-            role: payload.role ?? null,
-            station_id: payload.stationId ?? null,
-            is_active: payload.isActive,
-          })
-          .select("id, name, role, station_id, is_active")
-          .single();
-        if (insertError || !data) {
-          setError(insertError?.message ?? "Failed to add operator.");
-          notify({
-            title: "Operator not added",
-            description: insertError?.message,
-            variant: "error",
-          });
-          return;
-        }
-        setOperators((prev) => [...prev, mapOperator(data)]);
-        notify({ title: "Operator added", variant: "success" });
-      },
-      updateOperator: async (operatorId, patch) => {
-        if (!supabase) {
-          return;
-        }
-        const updatePayload: Record<string, unknown> = {};
-        if (patch.name !== undefined) updatePayload.name = patch.name;
-        if (patch.role !== undefined) updatePayload.role = patch.role;
-        if (patch.stationId !== undefined)
-          updatePayload.station_id = patch.stationId || null;
-        if (patch.isActive !== undefined)
-          updatePayload.is_active = patch.isActive;
-        const { data, error: updateError } = await supabase
-          .from("operators")
-          .update(updatePayload)
-          .eq("id", operatorId)
-          .select("id, name, role, station_id, is_active")
-          .single();
-        if (updateError || !data) {
-          setError(updateError?.message ?? "Failed to update operator.");
-          notify({
-            title: "Operator not updated",
-            description: updateError?.message,
-            variant: "error",
-          });
-          return;
-        }
-        setOperators((prev) =>
-          prev.map((operator) =>
-            operator.id === operatorId ? mapOperator(data) : operator,
-          ),
-        );
-        notify({ title: "Operator updated", variant: "success" });
-      },
-      removeOperator: async (operatorId) => {
-        if (!supabase) {
-          return;
-        }
-        const { error: deleteError } = await supabase
-          .from("operators")
-          .delete()
-          .eq("id", operatorId);
-        if (deleteError) {
-          setError(deleteError.message);
-          notify({
-            title: "Operator not deleted",
-            description: deleteError.message,
-            variant: "error",
-          });
-          return;
-        }
-        setOperators((prev) =>
-          prev.filter((operator) => operator.id !== operatorId),
-        );
-        notify({ title: "Operator deleted", variant: "success" });
       },
       addStopReason: async (label) => {
         if (!supabase || !user.tenantId) {
@@ -629,7 +515,6 @@ export function useSettingsData(): SettingsDataState {
     }),
     [
       workStations,
-      operators,
       stopReasons,
       partners,
       partnerGroups,

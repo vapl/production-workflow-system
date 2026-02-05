@@ -7,7 +7,8 @@ import { useCurrentUser } from "@/contexts/UserContext";
 
 export type WorkflowTargetStatus =
   | "ready_for_engineering"
-  | "ready_for_production";
+  | "ready_for_production"
+  | "in_production";
 
 export interface ChecklistItem {
   id: string;
@@ -71,6 +72,7 @@ const defaultRules: WorkflowRules = {
     "in_engineering",
     "engineering_blocked",
     "ready_for_production",
+    "in_production",
   ],
   statusLabels: {
     draft: "Draft",
@@ -78,6 +80,7 @@ const defaultRules: WorkflowRules = {
     in_engineering: "In eng.",
     engineering_blocked: "Eng. blocked",
     ready_for_production: "Ready for prod.",
+    in_production: "In prod.",
   },
   assignmentLabels: {
     engineer: "Engineer",

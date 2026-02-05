@@ -1,6 +1,5 @@
 import type { Order } from "@/types/orders";
 import type { Batch } from "@/types/batch";
-import type { Operator } from "@/types/operator";
 import type { WorkStation } from "@/types/workstation";
 import type { ConstructionItem } from "@/types/constructionItem";
 import type { Partner, PartnerGroup } from "@/types/partner";
@@ -34,13 +33,6 @@ export const mockWorkStations: WorkStation[] = [
     isActive: true,
     sortOrder: 3,
   },
-];
-
-export const mockOperators: Operator[] = [
-  { id: "op-1", name: "Janis", role: "Operator", stationId: "ws-1", isActive: true },
-  { id: "op-2", name: "Andris", role: "Operator", stationId: "ws-2", isActive: true },
-  { id: "op-3", name: "Liga", role: "Assembler", stationId: "ws-3", isActive: true },
-  { id: "op-4", name: "Marta", role: "Finisher", stationId: "ws-4", isActive: true },
 ];
 
 export const mockPartnerGroups: PartnerGroup[] = [

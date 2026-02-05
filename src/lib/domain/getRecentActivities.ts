@@ -53,6 +53,14 @@ export function getRecentActivities(
         timestamp: new Date().toISOString(),
       });
     }
+    if (order.status === "in_production") {
+      activities.push({
+        id: `order-prod-${order.id}`,
+        title: `Order ${order.orderNumber} in production`,
+        status: "in_progress",
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   return activities
