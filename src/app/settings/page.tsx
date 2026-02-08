@@ -17,6 +17,12 @@ import { useCurrentUser, type UserRole } from "@/contexts/UserContext";
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
 import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
 import type { WorkStation } from "@/types/workstation";
+import type {
+  OrderInputFieldType,
+  OrderInputGroupKey,
+  OrderInputTableColumn,
+  OrderInputTableColumnType,
+} from "@/types/orderInputs";
 import {
   useWorkflowRules,
   type WorkflowTargetStatus,
@@ -94,6 +100,34 @@ const defaultLevelDescriptions: Record<string, string> = {
   engineer: "Assigned engineer or designer handling the order.",
 };
 
+const orderInputGroupOptions: { value: OrderInputGroupKey; label: string }[] = [
+  { value: "order_info", label: "Order info" },
+  { value: "production_scope", label: "Production scope" },
+];
+
+const orderInputFieldTypeOptions: {
+  value: OrderInputFieldType;
+  label: string;
+}[] = [
+  { value: "text", label: "Text" },
+  { value: "textarea", label: "Multiline text" },
+  { value: "number", label: "Number" },
+  { value: "date", label: "Date" },
+  { value: "select", label: "Select" },
+  { value: "toggle", label: "Toggle" },
+  { value: "toggle_number", label: "Toggle + number" },
+  { value: "table", label: "Table (repeatable rows)" },
+];
+
+const orderInputColumnTypeOptions: {
+  value: OrderInputTableColumnType;
+  label: string;
+}[] = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Number" },
+  { value: "select", label: "Select" },
+];
+
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
@@ -119,7 +153,6 @@ export default function SettingsPage() {
       ),
     [sortedLevels],
   );
-
   const [levelName, setLevelName] = useState("");
   const [levelOrder, setLevelOrder] = useState<number>(sortedLevels.length + 1);
   const [levelRequired, setLevelRequired] = useState(false);
@@ -134,15 +167,19 @@ export default function SettingsPage() {
   const [nodeCode, setNodeCode] = useState("");
   const [nodeParentId, setNodeParentId] = useState<string>("none");
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-
   const {
     workStations,
+    orderInputFields,
     stopReasons,
     partners,
     partnerGroups,
     addWorkStation,
     updateWorkStation,
     removeWorkStation,
+    addOrderInputField,
+    updateOrderInputField,
+    removeOrderInputField,
+    ensureDefaultOrderInputFields,
     addStopReason,
     updateStopReason,
     removeStopReason,
@@ -153,6 +190,19 @@ export default function SettingsPage() {
     updatePartnerGroup,
     removePartnerGroup,
   } = useSettingsData();
+  const sortedOrderInputFields = useMemo(
+    () =>
+      [...orderInputFields].sort((a, b) => {
+        if (a.groupKey !== b.groupKey) {
+          return a.groupKey.localeCompare(b.groupKey);
+        }
+        if (a.sortOrder !== b.sortOrder) {
+          return a.sortOrder - b.sortOrder;
+        }
+        return a.label.localeCompare(b.label);
+      }),
+    [orderInputFields],
+  );
 
   const [stationName, setStationName] = useState("");
   const [stationDescription, setStationDescription] = useState("");
@@ -163,6 +213,37 @@ export default function SettingsPage() {
   const [workdayEnd, setWorkdayEnd] = useState("17:00");
   const [workdayError, setWorkdayError] = useState<string | null>(null);
   const [isWorkdaySaving, setIsWorkdaySaving] = useState(false);
+  const [orderFieldLabel, setOrderFieldLabel] = useState("");
+  const [orderFieldKey, setOrderFieldKey] = useState("");
+  const [orderFieldGroup, setOrderFieldGroup] =
+    useState<OrderInputGroupKey>("order_info");
+  const [orderFieldType, setOrderFieldType] =
+    useState<OrderInputFieldType>("text");
+  const [orderFieldUnit, setOrderFieldUnit] = useState("");
+  const [orderFieldOptions, setOrderFieldOptions] = useState("");
+  const [orderFieldColumns, setOrderFieldColumns] = useState<
+    OrderInputTableColumn[]
+  >([]);
+  const [orderFieldRequired, setOrderFieldRequired] = useState(false);
+  const [orderFieldActive, setOrderFieldActive] = useState(true);
+  const [orderFieldSortOrder, setOrderFieldSortOrder] = useState(0);
+  const [editingOrderFieldId, setEditingOrderFieldId] = useState<string | null>(
+    null,
+  );
+  const [selectedOrderFieldIds, setSelectedOrderFieldIds] = useState<string[]>(
+    [],
+  );
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedWorkStationIds, setSelectedWorkStationIds] = useState<
+    string[]
+  >([]);
+  const [selectedStopReasonIds, setSelectedStopReasonIds] = useState<string[]>(
+    [],
+  );
+  const [selectedPartnerIds, setSelectedPartnerIds] = useState<string[]>([]);
+  const [selectedPartnerGroupIds, setSelectedPartnerGroupIds] = useState<
+    string[]
+  >([]);
 
   const [stopReasonLabel, setStopReasonLabel] = useState("");
   const [editingStopReasonId, setEditingStopReasonId] = useState<string | null>(
@@ -688,17 +769,19 @@ export default function SettingsPage() {
   }
 
   async function handleResendInvite(email: string) {
-    if (!supabase) {
+    const response = await fetch("/api/auth/request-magic-link", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, mode: "invite" }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setInviteMessage(data.error ?? "Failed to resend invite.");
       return;
     }
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
-    await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: origin ? `${origin}/auth` : undefined,
-      },
-    });
+    setInviteMessage("Invite sent.");
   }
 
   async function handleCancelInvite(inviteId: string) {
@@ -747,6 +830,9 @@ export default function SettingsPage() {
   }
 
   function handleRemoveAttachmentCategory(id: string) {
+    if (!confirmRemove("Remove this attachment category?")) {
+      return;
+    }
     const nextCategories = attachmentCategoryDrafts.filter(
       (item) => item.id !== id,
     );
@@ -925,7 +1011,9 @@ export default function SettingsPage() {
       .select("id, user_id, station_id, is_active")
       .single();
     if (error || !data) {
-      setOperatorAssignmentsError(error?.message ?? "Failed to assign station.");
+      setOperatorAssignmentsError(
+        error?.message ?? "Failed to assign station.",
+      );
       return;
     }
     setOperatorAssignments((prev) => [
@@ -1101,6 +1189,165 @@ export default function SettingsPage() {
     setNodeParentId(node.parentId ?? "none");
   }
 
+  async function handleCopyNode(nodeId: string) {
+    const node = nodes.find((item) => item.id === nodeId);
+    if (!node) {
+      return;
+    }
+    const label = `${node.label} copy`;
+    await addNode({
+      levelId: node.levelId,
+      label,
+      code: undefined,
+      parentId: node.parentId ?? null,
+    });
+  }
+
+  async function handleDeleteSelectedNodes() {
+    if (selectedNodeIds.length === 0) {
+      return;
+    }
+    if (
+      !confirmRemove(
+        `Remove ${selectedNodeIds.length} selected item(s) from ${selectedLevel?.name ?? "list"}?`,
+      )
+    ) {
+      return;
+    }
+    const ids = [...selectedNodeIds];
+    for (const id of ids) {
+      await removeNode(id);
+    }
+    setSelectedNodeIds([]);
+  }
+
+  async function handleCopyOrderField(fieldId: string) {
+    const target = orderInputFields.find((field) => field.id === fieldId);
+    if (!target) {
+      return;
+    }
+    const label = `${target.label} copy`;
+    await addOrderInputField({
+      key: slugify(label),
+      label,
+      groupKey: target.groupKey,
+      fieldType: target.fieldType,
+      unit: target.unit,
+      options: target.options,
+      columns: target.columns,
+      isRequired: target.isRequired,
+      isActive: target.isActive,
+      sortOrder: target.sortOrder + 1,
+    });
+  }
+
+  async function handleCopyWorkStation(stationId: string) {
+    const station = workStations.find((item) => item.id === stationId);
+    if (!station) {
+      return;
+    }
+    await addWorkStation({
+      name: `${station.name} copy`,
+      description: station.description,
+      isActive: station.isActive,
+      sortOrder: station.sortOrder,
+    });
+  }
+
+  async function handleDeleteSelectedWorkStations() {
+    if (selectedWorkStationIds.length === 0) {
+      return;
+    }
+    if (
+      !confirmRemove(
+        `Remove ${selectedWorkStationIds.length} selected workstation(s)?`,
+      )
+    ) {
+      return;
+    }
+    const ids = [...selectedWorkStationIds];
+    for (const id of ids) {
+      await removeWorkStation(id);
+    }
+    setSelectedWorkStationIds([]);
+  }
+
+  async function handleCopyStopReason(reasonId: string) {
+    const reason = stopReasons.find((item) => item.id === reasonId);
+    if (!reason) {
+      return;
+    }
+    await addStopReason(`${reason.label} copy`);
+  }
+
+  async function handleDeleteSelectedStopReasons() {
+    if (selectedStopReasonIds.length === 0) {
+      return;
+    }
+    if (
+      !confirmRemove(
+        `Remove ${selectedStopReasonIds.length} selected reason(s)?`,
+      )
+    ) {
+      return;
+    }
+    const ids = [...selectedStopReasonIds];
+    for (const id of ids) {
+      await removeStopReason(id);
+    }
+    setSelectedStopReasonIds([]);
+  }
+
+  async function handleCopyPartner(partnerId: string) {
+    const partner = partners.find((item) => item.id === partnerId);
+    if (!partner) {
+      return;
+    }
+    await addPartner(`${partner.name} copy`, partner.groupId);
+  }
+
+  async function handleDeleteSelectedPartners() {
+    if (selectedPartnerIds.length === 0) {
+      return;
+    }
+    if (
+      !confirmRemove(`Remove ${selectedPartnerIds.length} selected partner(s)?`)
+    ) {
+      return;
+    }
+    const ids = [...selectedPartnerIds];
+    for (const id of ids) {
+      await removePartner(id);
+    }
+    setSelectedPartnerIds([]);
+  }
+
+  async function handleCopyPartnerGroup(groupId: string) {
+    const group = partnerGroups.find((item) => item.id === groupId);
+    if (!group) {
+      return;
+    }
+    await addPartnerGroup(`${group.name} copy`);
+  }
+
+  async function handleDeleteSelectedPartnerGroups() {
+    if (selectedPartnerGroupIds.length === 0) {
+      return;
+    }
+    if (
+      !confirmRemove(
+        `Remove ${selectedPartnerGroupIds.length} selected group(s)?`,
+      )
+    ) {
+      return;
+    }
+    const ids = [...selectedPartnerGroupIds];
+    for (const id of ids) {
+      await removePartnerGroup(id);
+    }
+    setSelectedPartnerGroupIds([]);
+  }
+
   function resetStationForm() {
     setStationName("");
     setStationDescription("");
@@ -1134,6 +1381,226 @@ export default function SettingsPage() {
     setIsWorkdaySaving(false);
   }
 
+  function resetOrderFieldForm() {
+    setOrderFieldLabel("");
+    setOrderFieldKey("");
+    setOrderFieldGroup("order_info");
+    setOrderFieldType("text");
+    setOrderFieldUnit("");
+    setOrderFieldOptions("");
+    setOrderFieldColumns([]);
+    setOrderFieldRequired(false);
+    setOrderFieldActive(true);
+    setOrderFieldSortOrder(0);
+    setEditingOrderFieldId(null);
+  }
+
+  function updateOrderFieldColumn(
+    index: number,
+    patch: Partial<OrderInputTableColumn>,
+  ) {
+    setOrderFieldColumns((prev) =>
+      prev.map((column, idx) =>
+        idx === index ? { ...column, ...patch } : column,
+      ),
+    );
+  }
+
+  function addOrderFieldColumn() {
+    setOrderFieldColumns((prev) => [
+      ...prev,
+      { key: "", label: "", fieldType: "text", maxSelect: 1 },
+    ]);
+  }
+
+  function removeOrderFieldColumn(index: number) {
+    setOrderFieldColumns((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
+  function parseOrderFieldOptions(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+    const parts = trimmed.split(/[,\n\\]+/);
+    return parts.map((item) => item.trim()).filter(Boolean);
+  }
+
+  function confirmRemove(message: string) {
+    return window.confirm(message);
+  }
+
+  useEffect(() => {
+    if (orderInputFields.length === 0) {
+      if (selectedOrderFieldIds.length > 0) {
+        setSelectedOrderFieldIds([]);
+      }
+      return;
+    }
+    const valid = new Set(orderInputFields.map((field) => field.id));
+    const next = selectedOrderFieldIds.filter((id) => valid.has(id));
+    if (next.length !== selectedOrderFieldIds.length) {
+      setSelectedOrderFieldIds(next);
+    }
+  }, [orderInputFields, selectedOrderFieldIds]);
+
+  useEffect(() => {
+    const valid = new Set(currentLevelNodes.map((node) => node.id));
+    const next = selectedNodeIds.filter((id) => valid.has(id));
+    if (next.length !== selectedNodeIds.length) {
+      setSelectedNodeIds(next);
+    }
+  }, [currentLevelNodes, selectedNodeIds]);
+
+  useEffect(() => {
+    const valid = new Set(workStations.map((station) => station.id));
+    const next = selectedWorkStationIds.filter((id) => valid.has(id));
+    if (next.length !== selectedWorkStationIds.length) {
+      setSelectedWorkStationIds(next);
+    }
+  }, [workStations, selectedWorkStationIds]);
+
+  useEffect(() => {
+    const valid = new Set(stopReasons.map((reason) => reason.id));
+    const next = selectedStopReasonIds.filter((id) => valid.has(id));
+    if (next.length !== selectedStopReasonIds.length) {
+      setSelectedStopReasonIds(next);
+    }
+  }, [stopReasons, selectedStopReasonIds]);
+
+  useEffect(() => {
+    const valid = new Set(partners.map((partner) => partner.id));
+    const next = selectedPartnerIds.filter((id) => valid.has(id));
+    if (next.length !== selectedPartnerIds.length) {
+      setSelectedPartnerIds(next);
+    }
+  }, [partners, selectedPartnerIds]);
+
+  useEffect(() => {
+    const valid = new Set(partnerGroups.map((group) => group.id));
+    const next = selectedPartnerGroupIds.filter((id) => valid.has(id));
+    if (next.length !== selectedPartnerGroupIds.length) {
+      setSelectedPartnerGroupIds(next);
+    }
+  }, [partnerGroups, selectedPartnerGroupIds]);
+
+  async function handleSaveOrderField() {
+    const trimmedLabel = orderFieldLabel.trim();
+    if (!trimmedLabel) {
+      return;
+    }
+    const resolvedKey = orderFieldKey.trim() || slugify(trimmedLabel);
+    const options =
+      orderFieldType === "select"
+        ? parseOrderFieldOptions(orderFieldOptions)
+        : undefined;
+    const columns =
+      orderFieldType === "table"
+        ? orderFieldColumns
+            .map((column) => {
+              const trimmedColumnLabel = column.label.trim();
+              if (!trimmedColumnLabel) {
+                return null;
+              }
+              const columnKey =
+                column.key?.trim() || slugify(trimmedColumnLabel);
+              const columnOptions =
+                column.fieldType === "select"
+                  ? (column.options ?? [])
+                      .map((item) => item.trim())
+                      .filter(Boolean)
+                  : undefined;
+              return {
+                key: columnKey,
+                label: trimmedColumnLabel,
+                fieldType: column.fieldType,
+                unit: column.unit?.trim() || undefined,
+                options: columnOptions,
+                isRequired: column.isRequired ?? false,
+                maxSelect:
+                  column.fieldType === "select"
+                    ? Math.max(1, Math.min(3, Number(column.maxSelect ?? 1)))
+                    : undefined,
+              } as OrderInputTableColumn;
+            })
+            .filter((column): column is OrderInputTableColumn =>
+              Boolean(column),
+            )
+        : undefined;
+    const payload = {
+      key: resolvedKey,
+      label: trimmedLabel,
+      groupKey: orderFieldGroup,
+      fieldType: orderFieldType,
+      unit: orderFieldUnit.trim() || undefined,
+      options,
+      columns,
+      isRequired: orderFieldRequired,
+      isActive: orderFieldActive,
+      sortOrder: Number.isFinite(orderFieldSortOrder) ? orderFieldSortOrder : 0,
+    };
+    if (editingOrderFieldId) {
+      await updateOrderInputField(editingOrderFieldId, payload);
+      resetOrderFieldForm();
+      return;
+    }
+    await addOrderInputField(payload);
+    resetOrderFieldForm();
+  }
+
+  function handleEditOrderField(fieldId: string) {
+    const target = orderInputFields.find((field) => field.id === fieldId);
+    if (!target) {
+      return;
+    }
+    setEditingOrderFieldId(fieldId);
+    setOrderFieldLabel(target.label);
+    setOrderFieldKey(target.key);
+    setOrderFieldGroup(target.groupKey);
+    setOrderFieldType(target.fieldType);
+    setOrderFieldUnit(target.unit ?? "");
+    setOrderFieldOptions((target.options ?? []).join(", "));
+    setOrderFieldColumns(
+      target.columns?.map((column) => ({
+        ...column,
+        options: column.options ?? [],
+        maxSelect: column.maxSelect ?? 1,
+      })) ?? [],
+    );
+    setOrderFieldRequired(target.isRequired);
+    setOrderFieldActive(target.isActive);
+    setOrderFieldSortOrder(target.sortOrder);
+  }
+
+  async function handleDeleteOrderField(fieldId: string) {
+    const target = orderInputFields.find((field) => field.id === fieldId);
+    const label = target?.label ?? "this field";
+    if (!confirmRemove(`Remove "${label}"?`)) {
+      return;
+    }
+    await removeOrderInputField(fieldId);
+    setSelectedOrderFieldIds((prev) => prev.filter((id) => id !== fieldId));
+  }
+
+  async function handleDeleteSelectedOrderFields() {
+    if (selectedOrderFieldIds.length === 0) {
+      return;
+    }
+    if (
+      !confirmRemove(
+        `Remove ${selectedOrderFieldIds.length} selected field(s)?`,
+      )
+    ) {
+      return;
+    }
+    const ids = [...selectedOrderFieldIds];
+    for (const id of ids) {
+      // Sequential deletes to keep UI feedback consistent.
+      await removeOrderInputField(id);
+    }
+    setSelectedOrderFieldIds([]);
+  }
+
   async function persistStationOrder(nextStations: WorkStation[]) {
     setIsStationOrderSaving(true);
     await Promise.all(
@@ -1165,7 +1632,11 @@ export default function SettingsPage() {
       setDragStationId(null);
       return;
     }
-    const nextStations = reorderStations(displayStations, dragStationId, targetId);
+    const nextStations = reorderStations(
+      displayStations,
+      dragStationId,
+      targetId,
+    );
     setLocalStations(nextStations);
     setDragStationId(null);
     void persistStationOrder(nextStations);
@@ -1303,15 +1774,21 @@ export default function SettingsPage() {
 
   return (
     <section className="space-y-6">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="w-full justify-start overflow-x-auto flex-nowrap">
-          <TabsTrigger value="structure">Structure</TabsTrigger>
-          <TabsTrigger value="operations">Operations</TabsTrigger>
-          <TabsTrigger value="partners">Partners</TabsTrigger>
-          <TabsTrigger value="users">Users</TabsTrigger>
-          <TabsTrigger value="workflow">Workflow</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
-        </TabsList>
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="space-y-6"
+      >
+        <div className="sticky top-16 z-20 border-b border-border bg-background/90 pb-2 pt-2 backdrop-blur">
+          <TabsList className="w-full justify-start overflow-x-auto flex-nowrap">
+            <TabsTrigger value="structure">Structure</TabsTrigger>
+            <TabsTrigger value="operations">Operations</TabsTrigger>
+            <TabsTrigger value="partners">Partners</TabsTrigger>
+            <TabsTrigger value="users">Users</TabsTrigger>
+            <TabsTrigger value="workflow">Workflow</TabsTrigger>
+            <TabsTrigger value="integrations">Integrations</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="structure">
           <div className="space-y-6">
@@ -1494,7 +1971,16 @@ export default function SettingsPage() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => removeLevel(level.id)}
+                                onClick={() => {
+                                  if (
+                                    !confirmRemove(
+                                      `Remove level "${level.name}"?`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  removeLevel(level.id);
+                                }}
                                 disabled={lockedLevelKeys.has(level.key)}
                               >
                                 Remove
@@ -1600,6 +2086,21 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm text-muted-foreground">
+                    {selectedNodeIds.length > 0
+                      ? `${selectedNodeIds.length} selected`
+                      : " "}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDeleteSelectedNodes}
+                    disabled={selectedNodeIds.length === 0}
+                  >
+                    Remove selected
+                  </Button>
+                </div>
                 <div className="overflow-x-auto rounded-lg border border-border">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/40 text-muted-foreground">
@@ -1614,7 +2115,27 @@ export default function SettingsPage() {
                           Parent
                         </th>
                         <th className="px-4 py-2 text-right font-medium">
-                          Actions
+                          <div className="flex items-center justify-end gap-2">
+                            <span>Actions</span>
+                            <input
+                              type="checkbox"
+                              checked={
+                                currentLevelNodes.length > 0 &&
+                                selectedNodeIds.length ===
+                                  currentLevelNodes.length
+                              }
+                              onChange={(event) => {
+                                if (event.target.checked) {
+                                  setSelectedNodeIds(
+                                    currentLevelNodes.map((node) => node.id),
+                                  );
+                                } else {
+                                  setSelectedNodeIds([]);
+                                }
+                              }}
+                              disabled={currentLevelNodes.length === 0}
+                            />
+                          </div>
                         </th>
                       </tr>
                     </thead>
@@ -1634,7 +2155,7 @@ export default function SettingsPage() {
                               : "--"}
                           </td>
                           <td className="px-4 py-2 text-right">
-                            <div className="flex justify-end gap-2">
+                            <div className="flex justify-end items-center gap-2">
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -1643,12 +2164,40 @@ export default function SettingsPage() {
                                 Edit
                               </Button>
                               <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleCopyNode(node.id)}
+                              >
+                                Copy
+                              </Button>
+                              <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => removeNode(node.id)}
+                                onClick={() => {
+                                  if (
+                                    !confirmRemove(
+                                      `Remove "${node.label}" from ${selectedLevel?.name ?? "list"}?`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  removeNode(node.id);
+                                }}
                               >
                                 Remove
                               </Button>
+                              <input
+                                type="checkbox"
+                                checked={selectedNodeIds.includes(node.id)}
+                                onChange={(event) => {
+                                  setSelectedNodeIds((prev) => {
+                                    if (event.target.checked) {
+                                      return [...prev, node.id];
+                                    }
+                                    return prev.filter((id) => id !== node.id);
+                                  });
+                                }}
+                              />
                             </div>
                           </td>
                         </tr>
@@ -1662,6 +2211,436 @@ export default function SettingsPage() {
                             Add items for this level.
                           </td>
                         </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Order inputs</CardTitle>
+                <CardDescription>
+                  Configure the additional fields shown in the order view.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {orderInputFields.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                    No order inputs yet. Add defaults to get started.
+                    <div className="mt-3">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={ensureDefaultOrderInputFields}
+                      >
+                        Add default fields
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(160px,0.6fr)_minmax(160px,0.6fr)_minmax(120px,0.4fr)_auto] lg:items-end">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Label</label>
+                    <input
+                      value={orderFieldLabel}
+                      onChange={(event) =>
+                        setOrderFieldLabel(event.target.value)
+                      }
+                      placeholder="Construction count"
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Group</label>
+                    <select
+                      value={orderFieldGroup}
+                      onChange={(event) =>
+                        setOrderFieldGroup(
+                          event.target.value as OrderInputGroupKey,
+                        )
+                      }
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    >
+                      {orderInputGroupOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Type</label>
+                    <select
+                      value={orderFieldType}
+                      onChange={(event) =>
+                        setOrderFieldType(
+                          event.target.value as OrderInputFieldType,
+                        )
+                      }
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    >
+                      {orderInputFieldTypeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Order</label>
+                    <input
+                      type="number"
+                      value={orderFieldSortOrder}
+                      onChange={(event) =>
+                        setOrderFieldSortOrder(Number(event.target.value) || 0)
+                      }
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={handleSaveOrderField}>
+                      {editingOrderFieldId ? "Save field" : "Add field"}
+                    </Button>
+                    {editingOrderFieldId && (
+                      <Button variant="outline" onClick={resetOrderFieldForm}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-sm font-medium">
+                    Unit (optional)
+                    <input
+                      value={orderFieldUnit}
+                      onChange={(event) =>
+                        setOrderFieldUnit(event.target.value)
+                      }
+                      placeholder="pcs"
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm font-medium">
+                    Select options (comma, newline, or "\" separated)
+                    <textarea
+                      value={orderFieldOptions}
+                      onChange={(event) =>
+                        setOrderFieldOptions(event.target.value)
+                      }
+                      disabled={orderFieldType !== "select"}
+                      placeholder="Dealer, Private, Partner"
+                      className="min-h-[80px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
+                    />
+                  </label>
+                </div>
+
+                {orderFieldType === "table" && (
+                  <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-medium">Table columns</div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={addOrderFieldColumn}
+                      >
+                        Add column
+                      </Button>
+                    </div>
+                    {orderFieldColumns.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Add at least one column for this table field.
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        {orderFieldColumns.map((column, index) => (
+                          <div key={index} className="space-y-2">
+                            <div className="grid gap-2 md:grid-cols-[1.4fr_0.9fr_0.7fr_0.5fr_auto] md:items-end">
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                Label
+                                <input
+                                  value={column.label}
+                                  onChange={(event) =>
+                                    updateOrderFieldColumn(index, {
+                                      label: event.target.value,
+                                    })
+                                  }
+                                  placeholder="Position"
+                                  className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                Type
+                                <select
+                                  value={column.fieldType}
+                                  onChange={(event) =>
+                                    updateOrderFieldColumn(index, {
+                                      fieldType: event.target
+                                        .value as OrderInputTableColumnType,
+                                    })
+                                  }
+                                  className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
+                                >
+                                  {orderInputColumnTypeOptions.map((option) => (
+                                    <option
+                                      key={option.value}
+                                      value={option.value}
+                                    >
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                Unit
+                                <input
+                                  value={column.unit ?? ""}
+                                  onChange={(event) =>
+                                    updateOrderFieldColumn(index, {
+                                      unit: event.target.value,
+                                    })
+                                  }
+                                  placeholder="mm"
+                                  className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                Required
+                                <input
+                                  type="checkbox"
+                                  checked={column.isRequired ?? false}
+                                  onChange={(event) =>
+                                    updateOrderFieldColumn(index, {
+                                      isRequired: event.target.checked,
+                                    })
+                                  }
+                                  className="h-4 w-4"
+                                />
+                              </label>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  if (!confirmRemove("Remove this column?")) {
+                                    return;
+                                  }
+                                  removeOrderFieldColumn(index);
+                                }}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                            {column.fieldType === "select" && (
+                              <div className="grid gap-2 md:grid-cols-[1fr_160px] md:items-end">
+                                <label className="flex flex-col gap-1 text-xs font-medium">
+                                  Options (comma, newline, or \"\\\" separated)
+                                  <textarea
+                                    value={(column.options ?? []).join("\n")}
+                                    onChange={(event) =>
+                                      updateOrderFieldColumn(index, {
+                                        options: parseOrderFieldOptions(
+                                          event.target.value,
+                                        ),
+                                      })
+                                    }
+                                    placeholder="Type A, Type B"
+                                    className="min-h-[70px] rounded-md border border-border bg-input-background px-2 py-2 text-sm"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-1 text-xs font-medium">
+                                  Max selects (1-3)
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={3}
+                                    value={column.maxSelect ?? 1}
+                                    onChange={(event) =>
+                                      updateOrderFieldColumn(index, {
+                                        maxSelect:
+                                          Number(event.target.value) || 1,
+                                      })
+                                    }
+                                    className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
+                                  />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-4 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={orderFieldRequired}
+                      onChange={(event) =>
+                        setOrderFieldRequired(event.target.checked)
+                      }
+                    />
+                    Required
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={orderFieldActive}
+                      onChange={(event) =>
+                        setOrderFieldActive(event.target.checked)
+                      }
+                    />
+                    Active
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm text-muted-foreground">
+                    {selectedOrderFieldIds.length > 0
+                      ? `${selectedOrderFieldIds.length} selected`
+                      : " "}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDeleteSelectedOrderFields}
+                    disabled={selectedOrderFieldIds.length === 0}
+                  >
+                    Remove selected
+                  </Button>
+                </div>
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Label
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Group
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Type
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Order
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Required
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Active
+                        </th>
+                        <th className="px-4 py-2 text-right font-medium">
+                          <div className="flex items-center justify-end gap-2">
+                            <span>Actions</span>
+                            <input
+                              type="checkbox"
+                              checked={
+                                sortedOrderInputFields.length > 0 &&
+                                selectedOrderFieldIds.length ===
+                                  sortedOrderInputFields.length
+                              }
+                              onChange={(event) => {
+                                if (event.target.checked) {
+                                  setSelectedOrderFieldIds(
+                                    sortedOrderInputFields.map(
+                                      (field) => field.id,
+                                    ),
+                                  );
+                                } else {
+                                  setSelectedOrderFieldIds([]);
+                                }
+                              }}
+                            />
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedOrderInputFields.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="px-4 py-6 text-center text-muted-foreground"
+                          >
+                            No order inputs configured.
+                          </td>
+                        </tr>
+                      ) : (
+                        sortedOrderInputFields.map((field) => (
+                          <tr key={field.id} className="border-t border-border">
+                            <td className="px-4 py-2">
+                              <div className="font-medium">{field.label}</div>
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {orderInputGroupOptions.find(
+                                (option) => option.value === field.groupKey,
+                              )?.label ?? field.groupKey}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {orderInputFieldTypeOptions.find(
+                                (option) => option.value === field.fieldType,
+                              )?.label ?? field.fieldType}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {field.sortOrder}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {field.isRequired ? "Yes" : "No"}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {field.isActive ? "Yes" : "No"}
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <div className="flex justify-end items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleEditOrderField(field.id)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleCopyOrderField(field.id)}
+                                >
+                                  Copy
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    handleDeleteOrderField(field.id)
+                                  }
+                                >
+                                  Remove
+                                </Button>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedOrderFieldIds.includes(
+                                    field.id,
+                                  )}
+                                  onChange={(event) => {
+                                    setSelectedOrderFieldIds((prev) => {
+                                      if (event.target.checked) {
+                                        return [...prev, field.id];
+                                      }
+                                      return prev.filter(
+                                        (id) => id !== field.id,
+                                      );
+                                    });
+                                  }}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        ))
                       )}
                     </tbody>
                   </table>
@@ -1692,7 +2671,9 @@ export default function SettingsPage() {
                         inputMode="numeric"
                         pattern="^([01]\\d|2[0-3]):[0-5]\\d$"
                         value={workdayStart}
-                        onChange={(event) => setWorkdayStart(event.target.value)}
+                        onChange={(event) =>
+                          setWorkdayStart(event.target.value)
+                        }
                         placeholder="08:00"
                         className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
                       />
@@ -1716,7 +2697,10 @@ export default function SettingsPage() {
                     </div>
                   ) : null}
                   <div className="flex items-center gap-2">
-                    <Button onClick={handleSaveWorkHours} disabled={isWorkdaySaving}>
+                    <Button
+                      onClick={handleSaveWorkHours}
+                      disabled={isWorkdaySaving}
+                    >
                       {isWorkdaySaving ? "Saving..." : "Save hours"}
                     </Button>
                   </div>
@@ -1730,7 +2714,7 @@ export default function SettingsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(240px,1.2fr)_auto] lg:items-end">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(240px,1.2fr)_auto] lg:items-end">
                     <div className="flex flex-col gap-2">
                       <label className="text-sm font-medium">
                         Station name
@@ -1762,6 +2746,45 @@ export default function SettingsPage() {
                           Cancel
                         </Button>
                       )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm text-muted-foreground">
+                      {selectedWorkStationIds.length > 0
+                        ? `${selectedWorkStationIds.length} selected`
+                        : " "}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={
+                            displayStations.length > 0 &&
+                            selectedWorkStationIds.length ===
+                              displayStations.length
+                          }
+                          onChange={(event) => {
+                            if (event.target.checked) {
+                              setSelectedWorkStationIds(
+                                displayStations.map((station) => station.id),
+                              );
+                            } else {
+                              setSelectedWorkStationIds([]);
+                            }
+                          }}
+                          disabled={displayStations.length === 0}
+                        />
+                        Select all
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDeleteSelectedWorkStations}
+                        disabled={selectedWorkStationIds.length === 0}
+                      >
+                        Remove selected
+                      </Button>
                     </div>
                   </div>
 
@@ -1807,12 +2830,42 @@ export default function SettingsPage() {
                             Edit
                           </Button>
                           <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCopyWorkStation(station.id)}
+                          >
+                            Copy
+                          </Button>
+                          <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => removeWorkStation(station.id)}
+                            onClick={() => {
+                              if (
+                                !confirmRemove(
+                                  `Remove workstation "${station.name}"?`,
+                                )
+                              ) {
+                                return;
+                              }
+                              removeWorkStation(station.id);
+                            }}
                           >
                             Remove
                           </Button>
+                          <input
+                            type="checkbox"
+                            checked={selectedWorkStationIds.includes(
+                              station.id,
+                            )}
+                            onChange={(event) => {
+                              setSelectedWorkStationIds((prev) => {
+                                if (event.target.checked) {
+                                  return [...prev, station.id];
+                                }
+                                return prev.filter((id) => id !== station.id);
+                              });
+                            }}
+                          />
                         </div>
                       </div>
                     ))}
@@ -1838,12 +2891,12 @@ export default function SettingsPage() {
                       <thead className="bg-muted/40 text-muted-foreground">
                         <tr>
                           <th className="px-4 py-2 text-left">User</th>
-                            {displayStations.map((station) => (
-                              <th
-                                key={station.id}
-                                className="px-4 py-2 text-left"
-                              >
-                                {station.name}
+                          {displayStations.map((station) => (
+                            <th
+                              key={station.id}
+                              className="px-4 py-2 text-left"
+                            >
+                              {station.name}
                             </th>
                           ))}
                         </tr>
@@ -1869,7 +2922,10 @@ export default function SettingsPage() {
                           </tr>
                         ) : (
                           users.map((user) => (
-                            <tr key={user.id} className="border-t border-border">
+                            <tr
+                              key={user.id}
+                              className="border-t border-border"
+                            >
                               <td className="px-4 py-2 font-medium">
                                 {user.name}
                                 <div className="text-xs text-muted-foreground">
@@ -1943,6 +2999,43 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm text-muted-foreground">
+                      {selectedStopReasonIds.length > 0
+                        ? `${selectedStopReasonIds.length} selected`
+                        : " "}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={
+                            stopReasons.length > 0 &&
+                            selectedStopReasonIds.length === stopReasons.length
+                          }
+                          onChange={(event) => {
+                            if (event.target.checked) {
+                              setSelectedStopReasonIds(
+                                stopReasons.map((reason) => reason.id),
+                              );
+                            } else {
+                              setSelectedStopReasonIds([]);
+                            }
+                          }}
+                          disabled={stopReasons.length === 0}
+                        />
+                        Select all
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDeleteSelectedStopReasons}
+                        disabled={selectedStopReasonIds.length === 0}
+                      >
+                        Remove selected
+                      </Button>
+                    </div>
+                  </div>
                   {stopReasons.map((reason) => (
                     <div
                       key={reason.id}
@@ -1970,12 +3063,38 @@ export default function SettingsPage() {
                           Edit
                         </Button>
                         <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopyStopReason(reason.id)}
+                        >
+                          Copy
+                        </Button>
+                        <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => removeStopReason(reason.id)}
+                          onClick={() => {
+                            if (
+                              !confirmRemove(`Remove reason "${reason.label}"?`)
+                            ) {
+                              return;
+                            }
+                            removeStopReason(reason.id);
+                          }}
                         >
                           Remove
                         </Button>
+                        <input
+                          type="checkbox"
+                          checked={selectedStopReasonIds.includes(reason.id)}
+                          onChange={(event) => {
+                            setSelectedStopReasonIds((prev) => {
+                              if (event.target.checked) {
+                                return [...prev, reason.id];
+                              }
+                              return prev.filter((id) => id !== reason.id);
+                            });
+                          }}
+                        />
                       </div>
                     </div>
                   ))}
@@ -2034,6 +3153,43 @@ export default function SettingsPage() {
               </div>
 
               <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm text-muted-foreground">
+                    {selectedPartnerIds.length > 0
+                      ? `${selectedPartnerIds.length} selected`
+                      : " "}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={
+                          partners.length > 0 &&
+                          selectedPartnerIds.length === partners.length
+                        }
+                        onChange={(event) => {
+                          if (event.target.checked) {
+                            setSelectedPartnerIds(
+                              partners.map((partner) => partner.id),
+                            );
+                          } else {
+                            setSelectedPartnerIds([]);
+                          }
+                        }}
+                        disabled={partners.length === 0}
+                      />
+                      Select all
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleDeleteSelectedPartners}
+                      disabled={selectedPartnerIds.length === 0}
+                    >
+                      Remove selected
+                    </Button>
+                  </div>
+                </div>
                 {partners.map((partner) => (
                   <div
                     key={partner.id}
@@ -2070,12 +3226,38 @@ export default function SettingsPage() {
                         Edit
                       </Button>
                       <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleCopyPartner(partner.id)}
+                      >
+                        Copy
+                      </Button>
+                      <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => removePartner(partner.id)}
+                        onClick={() => {
+                          if (
+                            !confirmRemove(`Remove partner "${partner.name}"?`)
+                          ) {
+                            return;
+                          }
+                          removePartner(partner.id);
+                        }}
                       >
                         Remove
                       </Button>
+                      <input
+                        type="checkbox"
+                        checked={selectedPartnerIds.includes(partner.id)}
+                        onChange={(event) => {
+                          setSelectedPartnerIds((prev) => {
+                            if (event.target.checked) {
+                              return [...prev, partner.id];
+                            }
+                            return prev.filter((id) => id !== partner.id);
+                          });
+                        }}
+                      />
                     </div>
                   </div>
                 ))}
@@ -2112,6 +3294,44 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm text-muted-foreground">
+                      {selectedPartnerGroupIds.length > 0
+                        ? `${selectedPartnerGroupIds.length} selected`
+                        : " "}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={
+                            partnerGroups.length > 0 &&
+                            selectedPartnerGroupIds.length ===
+                              partnerGroups.length
+                          }
+                          onChange={(event) => {
+                            if (event.target.checked) {
+                              setSelectedPartnerGroupIds(
+                                partnerGroups.map((group) => group.id),
+                              );
+                            } else {
+                              setSelectedPartnerGroupIds([]);
+                            }
+                          }}
+                          disabled={partnerGroups.length === 0}
+                        />
+                        Select all
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDeleteSelectedPartnerGroups}
+                        disabled={selectedPartnerGroupIds.length === 0}
+                      >
+                        Remove selected
+                      </Button>
+                    </div>
+                  </div>
                   {partnerGroups.map((group) => (
                     <div
                       key={group.id}
@@ -2139,12 +3359,38 @@ export default function SettingsPage() {
                           Edit
                         </Button>
                         <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopyPartnerGroup(group.id)}
+                        >
+                          Copy
+                        </Button>
+                        <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => removePartnerGroup(group.id)}
+                          onClick={() => {
+                            if (
+                              !confirmRemove(`Remove group "${group.name}"?`)
+                            ) {
+                              return;
+                            }
+                            removePartnerGroup(group.id);
+                          }}
                         >
                           Remove
                         </Button>
+                        <input
+                          type="checkbox"
+                          checked={selectedPartnerGroupIds.includes(group.id)}
+                          onChange={(event) => {
+                            setSelectedPartnerGroupIds((prev) => {
+                              if (event.target.checked) {
+                                return [...prev, group.id];
+                              }
+                              return prev.filter((id) => id !== group.id);
+                            });
+                          }}
+                        />
                       </div>
                     </div>
                   ))}
@@ -2186,7 +3432,9 @@ export default function SettingsPage() {
                     Full name
                     <input
                       value={inviteFullName}
-                      onChange={(event) => setInviteFullName(event.target.value)}
+                      onChange={(event) =>
+                        setInviteFullName(event.target.value)
+                      }
                       placeholder="Full name"
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       disabled={!currentUser.isAdmin}
@@ -2211,10 +3459,7 @@ export default function SettingsPage() {
                   </label>
                   <Button
                     onClick={handleInviteUser}
-                    disabled={
-                      !currentUser.isAdmin ||
-                      inviteState === "sending"
-                    }
+                    disabled={!currentUser.isAdmin || inviteState === "sending"}
                   >
                     {inviteState === "sending" ? "Sending..." : "Send invite"}
                   </Button>
@@ -2342,12 +3587,18 @@ export default function SettingsPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-2 text-left font-medium">Email</th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Email
+                        </th>
                         <th className="px-4 py-2 text-left font-medium">
                           Full name
                         </th>
-                        <th className="px-4 py-2 text-left font-medium">Role</th>
-                        <th className="px-4 py-2 text-left font-medium">Status</th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Role
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Status
+                        </th>
                         <th className="px-4 py-2 text-right font-medium">
                           Actions
                         </th>
@@ -2374,7 +3625,10 @@ export default function SettingsPage() {
                         </tr>
                       ) : (
                         invites.map((invite) => (
-                          <tr key={invite.id} className="border-t border-border">
+                          <tr
+                            key={invite.id}
+                            className="border-t border-border"
+                          >
                             <td className="px-4 py-2">{invite.email}</td>
                             <td className="px-4 py-2">
                               {invite.fullName ?? "--"}
@@ -2388,7 +3642,9 @@ export default function SettingsPage() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => handleResendInvite(invite.email)}
+                                  onClick={() =>
+                                    handleResendInvite(invite.email)
+                                  }
                                   disabled={
                                     invite.acceptedAt !== null ||
                                     !currentUser.isAdmin
@@ -2787,15 +4043,15 @@ export default function SettingsPage() {
                   />
                   Require comment before production
                 </label>
+              </div>
+
+              {isStationOrderSaving ? (
+                <div className="text-xs text-muted-foreground">
+                  Saving station order...
                 </div>
+              ) : null}
 
-                {isStationOrderSaving ? (
-                  <div className="text-xs text-muted-foreground">
-                    Saving station order...
-                  </div>
-                ) : null}
-
-                <div className="space-y-3">
+              <div className="space-y-3">
                 <div className="text-sm font-medium">Checklist items</div>
                 <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
                   <div className="space-y-2">
@@ -2929,7 +4185,16 @@ export default function SettingsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => removeChecklistItem(item.id)}
+                          onClick={() => {
+                            if (
+                              !confirmRemove(
+                                `Remove checklist item "${item.label}"?`,
+                              )
+                            ) {
+                              return;
+                            }
+                            removeChecklistItem(item.id);
+                          }}
                         >
                           Remove
                         </Button>
@@ -2972,7 +4237,12 @@ export default function SettingsPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => removeReturnReason(reason)}
+                        onClick={() => {
+                          if (!confirmRemove(`Remove reason "${reason}"?`)) {
+                            return;
+                          }
+                          removeReturnReason(reason);
+                        }}
                       >
                         Remove
                       </Button>
@@ -3057,4 +4327,3 @@ export default function SettingsPage() {
     </section>
   );
 }
-

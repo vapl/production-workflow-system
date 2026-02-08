@@ -36,6 +36,12 @@ export default function AuthPage() {
     "idle",
   );
   const [message, setMessage] = useState("");
+  const [inviteMode, setInviteMode] = useState(false);
+  const [inviteFullName, setInviteFullName] = useState("");
+  const [invitePhone, setInvitePhone] = useState("");
+  const [invitePassword, setInvitePassword] = useState("");
+  const [inviteConfirmPassword, setInviteConfirmPassword] = useState("");
+  const [inviteError, setInviteError] = useState("");
 
   const withTimeout = async <T,>(promise: Promise<T>, ms = 12000) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -77,7 +83,8 @@ export default function AuthPage() {
       !recoveryMode &&
       !isRecoveryLink &&
       !urlHasRecovery &&
-      !hasRecoveryHint
+      !hasRecoveryHint &&
+      !inviteMode
     ) {
       router.replace("/orders");
     }
@@ -86,6 +93,7 @@ export default function AuthPage() {
     recoveryMode,
     isRecoveryLink,
     urlHasRecovery,
+    inviteMode,
     authModeChecked,
     router,
   ]);
@@ -122,6 +130,7 @@ export default function AuthPage() {
     const refreshToken = hashParams.get("refresh_token");
     const recoveryType = hashParams.get("type") ?? url.searchParams.get("type");
     const isRecovery = recoveryType === "recovery";
+    const isInvite = recoveryType === "invite";
     if (isRecovery || recoveryFlag) {
       setIsRecoveryLink(true);
       setRecoveryMode(true);
@@ -155,6 +164,14 @@ export default function AuthPage() {
             setStatus("idle");
             setMessage("");
             window.history.replaceState({}, document.title, "/auth?recovery=1");
+            setAuthModeChecked(true);
+            return;
+          }
+          if (isInvite) {
+            setInviteMode(true);
+            setStatus("idle");
+            setMessage("");
+            window.history.replaceState({}, document.title, "/auth?invite=1");
             setAuthModeChecked(true);
             return;
           }
@@ -198,6 +215,14 @@ export default function AuthPage() {
           if (error) {
             setStatus("error");
             setMessage(error.message);
+            return;
+          }
+          if (isInvite) {
+            setInviteMode(true);
+            setStatus("idle");
+            setMessage("");
+            window.history.replaceState({}, document.title, "/auth?invite=1");
+            setAuthModeChecked(true);
             return;
           }
           finalize();
@@ -612,6 +637,96 @@ export default function AuthPage() {
     }
   }
 
+  async function handleInviteComplete(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setInviteError("");
+    if (!invitePassword.trim()) {
+      setInviteError("Password is required.");
+      return;
+    }
+    if (invitePassword !== inviteConfirmPassword) {
+      setInviteError("Passwords do not match.");
+      return;
+    }
+    if (!supabase) {
+      setInviteError("Supabase is not configured.");
+      return;
+    }
+    setStatus("sending");
+    try {
+      const { data } = await supabase.auth.getUser();
+      const authUser = data.user;
+      if (!authUser) {
+        setInviteError("Invite session expired. Open the invite link again.");
+        setStatus("error");
+        return;
+      }
+      const metadata = authUser.user_metadata as {
+        tenant_id?: string;
+        full_name?: string;
+        role?: string;
+      };
+      const tenantId = metadata?.tenant_id ?? null;
+      if (!tenantId) {
+        setInviteError("Invite metadata missing tenant.");
+        setStatus("error");
+        return;
+      }
+      const normalizedRole =
+        metadata?.role === "Engineering" ||
+        metadata?.role === "Production" ||
+        metadata?.role === "Sales"
+          ? metadata.role
+          : "Production";
+      const finalName =
+        inviteFullName.trim() ||
+        metadata?.full_name?.trim() ||
+        authUser.email ||
+        "User";
+
+      const { error: passwordError } = await supabase.auth.updateUser({
+        password: invitePassword,
+      });
+      if (passwordError) {
+        setInviteError(passwordError.message);
+        setStatus("error");
+        return;
+      }
+
+      const { error: profileError } = await supabase.from("profiles").upsert({
+        id: authUser.id,
+        full_name: finalName,
+        role: normalizedRole,
+        is_admin: false,
+        tenant_id: tenantId,
+        phone: invitePhone.trim() || null,
+        email: authUser.email ?? null,
+      });
+      if (profileError) {
+        setInviteError(profileError.message);
+        setStatus("error");
+        return;
+      }
+
+      if (authUser.email) {
+        await supabase
+          .from("user_invites")
+          .update({ accepted_at: new Date().toISOString() })
+          .eq("email", authUser.email)
+          .is("accepted_at", null);
+      }
+
+      setStatus("sent");
+      setMessage("Invite accepted. Redirecting...");
+      router.replace("/orders");
+    } catch (err) {
+      const messageText =
+        err instanceof Error ? err.message : "Invite failed.";
+      setInviteError(messageText);
+      setStatus("error");
+    }
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-2xl space-y-6">
@@ -625,7 +740,11 @@ export default function AuthPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              {recoveryMode ? "Reset password" : "Access PWS"}
+              {recoveryMode
+                ? "Reset password"
+                : inviteMode
+                  ? "Complete invite"
+                  : "Access PWS"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -664,6 +783,62 @@ export default function AuthPage() {
                   disabled={status === "sending"}
                 >
                   {status === "sending" ? "Updating..." : "Update password"}
+                </Button>
+              </form>
+            ) : inviteMode ? (
+              <form onSubmit={handleInviteComplete} className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Finish setting up your account to join the workspace.
+                </p>
+                <label className="space-y-2 text-sm font-medium">
+                  Full name
+                  <input
+                    value={inviteFullName}
+                    onChange={(event) => setInviteFullName(event.target.value)}
+                    placeholder="Your name"
+                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  Phone (optional)
+                  <input
+                    value={invitePhone}
+                    onChange={(event) => setInvitePhone(event.target.value)}
+                    placeholder="e.g. +371 20000000"
+                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  Password
+                  <input
+                    type="password"
+                    value={invitePassword}
+                    onChange={(event) =>
+                      setInvitePassword(event.target.value)
+                    }
+                    placeholder="Create a password"
+                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    required
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium">
+                  Confirm password
+                  <input
+                    type="password"
+                    value={inviteConfirmPassword}
+                    onChange={(event) =>
+                      setInviteConfirmPassword(event.target.value)
+                    }
+                    placeholder="Repeat password"
+                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    required
+                  />
+                </label>
+                {inviteError ? (
+                  <p className="text-sm text-destructive">{inviteError}</p>
+                ) : null}
+                <Button type="submit" disabled={status === "sending"}>
+                  {status === "sending" ? "Saving..." : "Complete setup"}
                 </Button>
               </form>
             ) : (

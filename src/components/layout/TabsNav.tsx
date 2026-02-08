@@ -51,7 +51,7 @@ export function TabsNav() {
         if (tab) router.push(tab.href);
       }}
     >
-      <TabsList className="mb-6">
+      <TabsList>
         {tabs.map(({ value, label, icon: Icon }) => (
           <TabsTrigger key={value} value={value} className="gap-2">
             <Icon className="w-4 h-4" />

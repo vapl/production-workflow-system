@@ -288,9 +288,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
 
     let nextProfile = { ...profile };
-    if (!nextProfile.tenantId) {
-      const pending = readPendingSignup();
-      if (pending?.companyName) {
+      if (!nextProfile.tenantId) {
+        const pending = readPendingSignup();
+        if (pending?.companyName) {
         const { data: tenant, error: tenantError } = await supabase
           .from("tenants")
           .insert({
@@ -320,14 +320,42 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           };
           clearPendingSignup();
         }
-      } else if (sessionUser.email) {
-        const { data: invite } = await supabase
-          .from("user_invites")
-          .select("id, tenant_id, role, full_name")
-          .eq("email", sessionUser.email)
-          .is("accepted_at", null)
-          .order("invited_at", { ascending: false })
-          .maybeSingle();
+        } else if (sessionUser.user_metadata?.tenant_id) {
+          const metadata = sessionUser.user_metadata as {
+            tenant_id?: string;
+            full_name?: string;
+            role?: string;
+          };
+          const tenantId = metadata.tenant_id ?? null;
+          if (tenantId) {
+            const fullName =
+              metadata.full_name?.trim() || nextProfile.fullName || "User";
+            const normalizedRole = normalizeUserRole(metadata.role);
+            await supabase.from("profiles").upsert({
+              id: sessionUser.id,
+              full_name: fullName,
+              role: normalizedRole,
+              is_admin: false,
+              tenant_id: tenantId,
+              email: sessionUser.email ?? null,
+            });
+            nextProfile = {
+              ...nextProfile,
+              fullName,
+              role: normalizedRole,
+              isAdmin: false,
+              tenantId,
+              tenantName: nextProfile.tenantName ?? null,
+            };
+          }
+        } else if (sessionUser.email) {
+          const { data: invite } = await supabase
+            .from("user_invites")
+            .select("id, tenant_id, role, full_name")
+            .eq("email", sessionUser.email)
+            .is("accepted_at", null)
+            .order("invited_at", { ascending: false })
+            .maybeSingle();
         if (invite?.tenant_id) {
           const fullName =
             invite.full_name?.trim() || nextProfile.fullName || "User";

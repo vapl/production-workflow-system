@@ -22,53 +22,125 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = await request.json().catch(() => ({}));
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const mode = typeof body.mode === "string" ? body.mode : "signin";
-  const companyName =
-    typeof body.companyName === "string" ? body.companyName.trim() : "";
+  try {
+    const body = await request.json().catch(() => ({}));
+    const email =
+      typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const mode = typeof body.mode === "string" ? body.mode : "signin";
+    const companyName =
+      typeof body.companyName === "string" ? body.companyName.trim() : "";
 
-  if (!email) {
-    return NextResponse.json({ error: "Email is required." }, { status: 400 });
-  }
+    if (!email) {
+      return NextResponse.json({ error: "Email is required." }, { status: 400 });
+    }
 
-  const admin = createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
 
-  if (mode === "signup" && !companyName) {
-    return NextResponse.json(
-      { error: "Company name is required for sign up." },
-      { status: 400 },
-    );
-  }
+    if (mode === "signup" && !companyName) {
+      return NextResponse.json(
+        { error: "Company name is required for sign up." },
+        { status: 400 },
+      );
+    }
 
-  if (mode !== "signup") {
-    const { data: invite } = await admin
-      .from("user_invites")
-      .select("id")
-      .eq("email", email)
-      .is("accepted_at", null)
-      .order("invited_at", { ascending: false })
-      .maybeSingle();
-
-    if (!invite) {
-      const { data: profile } = await admin
-        .from("profiles")
-        .select("id")
+    if (mode === "invite") {
+      const origin = getOrigin(request);
+      const { data: invite, error: inviteError } = await admin
+        .from("user_invites")
+        .select("id, tenant_id, full_name, role")
         .eq("email", email)
+        .is("accepted_at", null)
+        .order("invited_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
-      if (!profile) {
+
+      if (inviteError) {
+        console.error("Invite lookup failed", inviteError);
         return NextResponse.json(
-          { error: "You are not invited to this workspace." },
-          { status: 403 },
+          { error: inviteError.message ?? "Failed to load invite." },
+          { status: 500 },
         );
       }
-    }
-  }
 
-  return NextResponse.json({ success: true });
+      if (!invite) {
+        return NextResponse.json(
+          { error: "Invite not found for this email." },
+          { status: 404 },
+        );
+      }
+
+      if (!admin.auth?.admin?.inviteUserByEmail) {
+        console.error("Supabase admin invite method unavailable.");
+        return NextResponse.json(
+          { error: "Invite API unavailable on this Supabase client." },
+          { status: 500 },
+        );
+      }
+
+      const { error } = await admin.auth.admin.inviteUserByEmail(email, {
+        data: {
+          tenant_id: invite.tenant_id,
+          full_name: invite.full_name,
+          role: invite.role,
+        },
+        redirectTo: origin ? `${origin}/auth` : undefined,
+      });
+
+      if (error) {
+        console.error("Invite send failed", error);
+        return NextResponse.json(
+          { error: error.message ?? "Failed to send invite." },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({ success: true });
+    }
+
+    if (mode !== "signup") {
+      const { data: invite, error: inviteError } = await admin
+        .from("user_invites")
+        .select("id")
+        .eq("email", email)
+        .is("accepted_at", null)
+        .order("invited_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (inviteError) {
+        console.error("Invite lookup failed", inviteError);
+        return NextResponse.json(
+          { error: inviteError.message ?? "Failed to check invite." },
+          { status: 500 },
+        );
+      }
+
+      if (!invite) {
+        const { data: profile } = await admin
+          .from("profiles")
+          .select("id")
+          .eq("email", email)
+          .maybeSingle();
+        if (!profile) {
+          return NextResponse.json(
+            { error: "You are not invited to this workspace." },
+            { status: 403 },
+          );
+        }
+      }
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Request magic link failed", error);
+    return NextResponse.json(
+      { error: "Unexpected error while sending invite." },
+      { status: 500 },
+    );
+  }
 }

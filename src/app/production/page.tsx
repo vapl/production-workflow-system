@@ -318,41 +318,41 @@ export default function ProductionPage() {
           )
         : [];
 
-    if (sourceItems.length > 0) {
-      sourceItems.forEach((item) => {
-        const orderNumber = item.orders?.order_number ?? "Order";
-        const customerName = item.orders?.customer_name ?? "Customer";
-        const dueDate = item.orders?.due_date ?? "";
-        const priority = item.orders?.priority ?? "normal";
-        const batchCode = item.batch_code || "B1";
-        const key = `${item.order_id}-${batchCode}`;
-        if (releasedKeys.has(key)) {
-          return;
-        }
-        const existing = groups.get(key);
-        const qtyValue = Number(item.qty ?? 0);
-        if (!existing) {
-          groups.set(key, {
-            key,
-            orderId: item.order_id,
-            orderNumber,
-            customerName,
-            dueDate,
-            priority,
-            batchCode,
-            totalQty: qtyValue,
-            material: item.material ?? "",
-          });
-        } else {
-          existing.totalQty += qtyValue;
-        }
-      });
-      return Array.from(groups.values());
-    }
+    sourceItems.forEach((item) => {
+      const orderNumber = item.orders?.order_number ?? "Order";
+      const customerName = item.orders?.customer_name ?? "Customer";
+      const dueDate = item.orders?.due_date ?? "";
+      const priority = item.orders?.priority ?? "normal";
+      const batchCode = item.batch_code || "B1";
+      const key = `${item.order_id}-${batchCode}`;
+      if (releasedKeys.has(key)) {
+        return;
+      }
+      const existing = groups.get(key);
+      const qtyValue = Number(item.qty ?? 0);
+      if (!existing) {
+        groups.set(key, {
+          key,
+          orderId: item.order_id,
+          orderNumber,
+          customerName,
+          dueDate,
+          priority,
+          batchCode,
+          totalQty: qtyValue,
+          material: item.material ?? "",
+        });
+      } else {
+        existing.totalQty += qtyValue;
+      }
+    });
 
     readyOrders.forEach((order) => {
       const batchCode = "B1";
       const key = `${order.id}-${batchCode}`;
+      if (groups.has(key)) {
+        return;
+      }
       if (releasedKeys.has(key)) {
         return;
       }

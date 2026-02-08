@@ -88,13 +88,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       {hideHeader ? null : <Header />}
-      <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
-        <main className="container mx-auto px-4 py-6">
-          <div className="flex justify-between">
-            {!hideTabsNav ? <TabsNav /> : <div />}
+      {!hideTabsNav ? (
+        <div className="sticky top-0 z-30 bg-background/90 backdrop-blur">
+          <div className="container mx-auto px-4 py-3">
+            <TabsNav />
           </div>
-          {children}
-        </main>
+        </div>
+      ) : null}
+      <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
+        <main className="container mx-auto px-4 py-6">{children}</main>
       </div>
     </>
   );

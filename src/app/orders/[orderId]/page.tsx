@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/Tabs";
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/Card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type {
   ExternalJobAttachment,
@@ -19,6 +20,7 @@ import type {
   OrderComment,
   OrderStatus,
 } from "@/types/orders";
+import type { OrderInputField } from "@/types/orderInputs";
 import Link from "next/link";
 import {
   ArrowLeftIcon,
@@ -65,7 +67,10 @@ type ProductionItem = {
 export default function OrderDetailPage() {
   const params = useParams<{ orderId?: string }>();
   const normalizeId = (value: string) =>
-    value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-");
 
   const decodedOrderId = params?.orderId
     ? normalizeId(decodeURIComponent(params.orderId))
@@ -176,22 +181,23 @@ export default function OrderDetailPage() {
     Record<string, string>
   >({});
   const [selectedReportId, setSelectedReportId] = useState("");
-  const [attachmentCategory, setAttachmentCategory] =
-    useState<string>(defaultAttachmentCategory);
+  const [attachmentCategory, setAttachmentCategory] = useState<string>(
+    defaultAttachmentCategory,
+  );
   const [isAttachmentCategoryManual, setIsAttachmentCategoryManual] =
     useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [commentMessage, setCommentMessage] = useState("");
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
-  const [engineers, setEngineers] = useState<
-    { id: string; name: string }[]
-  >([]);
+  const [engineers, setEngineers] = useState<{ id: string; name: string }[]>(
+    [],
+  );
   const [selectedEngineerId, setSelectedEngineerId] = useState("");
   const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
   const [selectedManagerId, setSelectedManagerId] = useState("");
-  const [checklistState, setChecklistState] = useState<
-    Record<string, boolean>
-  >({});
+  const [checklistState, setChecklistState] = useState<Record<string, boolean>>(
+    {},
+  );
   const [isReturnOpen, setIsReturnOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnNote, setReturnNote] = useState("");
@@ -209,6 +215,20 @@ export default function OrderDetailPage() {
   const [externalJobUpload, setExternalJobUpload] = useState<
     Record<string, { isUploading: boolean; error?: string }>
   >({});
+  const [orderInputFields, setOrderInputFields] = useState<OrderInputField[]>(
+    [],
+  );
+  const [orderInputValues, setOrderInputValues] = useState<
+    Record<string, unknown>
+  >({});
+  const [orderInputInitialValues, setOrderInputInitialValues] = useState<
+    Record<string, unknown>
+  >({});
+  const [tableRowSelections, setTableRowSelections] = useState<
+    Record<string, number[]>
+  >({});
+  const [orderInputError, setOrderInputError] = useState("");
+  const [isSavingOrderInputs, setIsSavingOrderInputs] = useState(false);
   const [expandedExternalHistory, setExpandedExternalHistory] = useState<
     Record<string, boolean>
   >({});
@@ -441,6 +461,83 @@ export default function OrderDetailPage() {
   }, [order]);
 
   useEffect(() => {
+    if (!supabase || !tenantId) {
+      return;
+    }
+    let isMounted = true;
+    const loadOrderInputFields = async () => {
+      const { data, error } = await supabase
+        .from("order_input_fields")
+        .select(
+          "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+        )
+        .order("group_key", { ascending: true })
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setOrderInputError("Failed to load order inputs.");
+        return;
+      }
+      setOrderInputError("");
+      const mapped = (data ?? []).map((row) => ({
+        id: row.id,
+        key: row.key,
+        label: row.label,
+        groupKey: (row.group_key ??
+          "order_info") as OrderInputField["groupKey"],
+        fieldType: row.field_type as OrderInputField["fieldType"],
+        unit: row.unit ?? undefined,
+        options: row.options?.options ?? undefined,
+        columns: row.options?.columns ?? undefined,
+        isRequired: row.is_required ?? false,
+        isActive: row.is_active ?? true,
+        sortOrder: row.sort_order ?? 0,
+      }));
+      setOrderInputFields(mapped);
+    };
+    void loadOrderInputFields();
+    return () => {
+      isMounted = false;
+    };
+  }, [supabase, tenantId]);
+
+  useEffect(() => {
+    if (!supabase || !orderState?.id) {
+      setOrderInputValues({});
+      setOrderInputInitialValues({});
+      return;
+    }
+    let isMounted = true;
+    const loadOrderInputValues = async () => {
+      const { data, error } = await supabase
+        .from("order_input_values")
+        .select("field_id, value")
+        .eq("order_id", orderState.id);
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setOrderInputError("Failed to load order values.");
+        return;
+      }
+      setOrderInputError("");
+      const nextValues: Record<string, unknown> = {};
+      (data ?? []).forEach((row) => {
+        nextValues[row.field_id] = row.value ?? undefined;
+      });
+      setOrderInputValues(nextValues);
+      setOrderInputInitialValues(nextValues);
+    };
+    void loadOrderInputValues();
+    return () => {
+      isMounted = false;
+    };
+  }, [orderState?.id, supabase]);
+
+  useEffect(() => {
     if (isAttachmentCategoryManual) {
       return;
     }
@@ -463,8 +560,7 @@ export default function OrderDetailPage() {
       return;
     }
     const pending = attachments.filter(
-      (attachment) =>
-        attachment.url && !signedAttachmentUrls[attachment.id],
+      (attachment) => attachment.url && !signedAttachmentUrls[attachment.id],
     );
     if (pending.length === 0) {
       return;
@@ -592,13 +688,106 @@ export default function OrderDetailPage() {
     meetsProductionAttachments &&
     meetsProductionComment;
 
+  const activeOrderInputFields = useMemo(
+    () =>
+      orderInputFields
+        .filter((field) => field.isActive)
+        .sort((a, b) => {
+          if (a.groupKey !== b.groupKey) {
+            return a.groupKey.localeCompare(b.groupKey);
+          }
+          if (a.sortOrder !== b.sortOrder) {
+            return a.sortOrder - b.sortOrder;
+          }
+          return a.label.localeCompare(b.label);
+        }),
+    [orderInputFields],
+  );
+  const orderInputGroups = useMemo(() => {
+    const groups = new Map<string, OrderInputField[]>();
+    activeOrderInputFields.forEach((field) => {
+      const current = groups.get(field.groupKey) ?? [];
+      current.push(field);
+      groups.set(field.groupKey, current);
+    });
+    return groups;
+  }, [activeOrderInputFields]);
+  const canEditOrderInputs = role === "Sales" || isAdmin;
+  const normalizeOrderInputValue = (field: OrderInputField, value: unknown) => {
+    if (field.fieldType === "table") {
+      return Array.isArray(value) ? value : [];
+    }
+    if (field.fieldType === "toggle_number") {
+      const raw =
+        typeof value === "object" && value !== null ? (value as any) : {};
+      const enabled = Boolean(raw.enabled);
+      const amount =
+        raw.amount === "" || raw.amount === null || raw.amount === undefined
+          ? null
+          : Number(raw.amount);
+      return { enabled, amount: Number.isNaN(amount) ? null : amount };
+    }
+    if (field.fieldType === "toggle") {
+      return Boolean(value);
+    }
+    if (field.fieldType === "number") {
+      if (value === "" || value === null || value === undefined) {
+        return null;
+      }
+      const parsed = Number(value);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    if (field.fieldType === "date") {
+      return typeof value === "string" ? value : "";
+    }
+    return typeof value === "string" ? value : (value ?? "");
+  };
+  const shouldPersistOrderInputValue = (
+    field: OrderInputField,
+    value: unknown,
+  ) => {
+    const normalized = normalizeOrderInputValue(field, value);
+    if (field.fieldType === "table") {
+      const rows = normalized as Array<Record<string, unknown>>;
+      return rows.some((row) =>
+        Object.values(row).some((cell) => String(cell ?? "").trim().length > 0),
+      );
+    }
+    if (field.fieldType === "toggle_number") {
+      const payload = normalized as { enabled: boolean; amount: number | null };
+      return payload.enabled || payload.amount !== null;
+    }
+    if (field.fieldType === "toggle") {
+      return true;
+    }
+    if (field.fieldType === "number") {
+      return normalized !== null;
+    }
+    if (field.fieldType === "date") {
+      return Boolean(normalized);
+    }
+    return Boolean(String(normalized ?? "").trim());
+  };
+  const isOrderInputsDirty = useMemo(
+    () =>
+      activeOrderInputFields.some((field) => {
+        const current = normalizeOrderInputValue(
+          field,
+          orderInputValues[field.id],
+        );
+        const initial = normalizeOrderInputValue(
+          field,
+          orderInputInitialValues[field.id],
+        );
+        return JSON.stringify(current) !== JSON.stringify(initial);
+      }),
+    [activeOrderInputFields, orderInputInitialValues, orderInputValues],
+  );
   if (!orderState && isLoadingOrder) {
     return (
       <section className="space-y-3">
         <h1 className="text-xl font-semibold">Loading order...</h1>
-        <p className="text-sm text-muted-foreground">
-          Fetching order details.
-        </p>
+        <p className="text-sm text-muted-foreground">Fetching order details.</p>
       </section>
     );
   }
@@ -747,7 +936,6 @@ export default function OrderDetailPage() {
     }
   }
 
-
   async function handleOpenMapping(reportId: string) {
     const target = attachments.find((item) => item.id === reportId);
     if (!target) {
@@ -798,14 +986,10 @@ export default function OrderDetailPage() {
     setProductionItemsError("");
     const nextItems = mappingRows
       .map((row, index) => {
-        const itemName = String(
-          row[mappingSelection.itemName] ?? "",
-        ).trim();
+        const itemName = String(row[mappingSelection.itemName] ?? "").trim();
         const qtyRaw = row[mappingSelection.qty];
         const qty = Number(String(qtyRaw ?? "").replace(",", "."));
-        const material = String(
-          row[mappingSelection.material] ?? "",
-        ).trim();
+        const material = String(row[mappingSelection.material] ?? "").trim();
         if (!itemName || !material || Number.isNaN(qty) || qty <= 0) {
           return null;
         }
@@ -941,8 +1125,589 @@ export default function OrderDetailPage() {
     }
   }
 
+  async function handleSaveOrderInputs() {
+    if (!supabase || !orderState?.id) {
+      return;
+    }
+    setIsSavingOrderInputs(true);
+    setOrderInputError("");
+    const upsertRows: Array<{
+      order_id: string;
+      field_id: string;
+      value: unknown;
+    }> = [];
+    const deleteFieldIds: string[] = [];
+    activeOrderInputFields.forEach((field) => {
+      const value = normalizeOrderInputValue(field, orderInputValues[field.id]);
+      if (shouldPersistOrderInputValue(field, value)) {
+        upsertRows.push({
+          order_id: orderState.id,
+          field_id: field.id,
+          value,
+        });
+      } else {
+        deleteFieldIds.push(field.id);
+      }
+    });
+
+    if (upsertRows.length > 0) {
+      const { error } = await supabase
+        .from("order_input_values")
+        .upsert(upsertRows, { onConflict: "order_id,field_id" });
+      if (error) {
+        setOrderInputError("Failed to save order inputs.");
+        setIsSavingOrderInputs(false);
+        return;
+      }
+    }
+
+    if (deleteFieldIds.length > 0) {
+      const { error } = await supabase
+        .from("order_input_values")
+        .delete()
+        .eq("order_id", orderState.id)
+        .in("field_id", deleteFieldIds);
+      if (error) {
+        setOrderInputError("Failed to clear order inputs.");
+        setIsSavingOrderInputs(false);
+        return;
+      }
+    }
+
+    setOrderInputInitialValues({ ...orderInputValues });
+    setOrderInputError("");
+    setIsSavingOrderInputs(false);
+  }
+
+  function renderOrderInputField(field: OrderInputField) {
+    const value = orderInputValues[field.id];
+    const normalized = normalizeOrderInputValue(field, value);
+    const label = (
+      <span className="font-medium">
+        {field.label}
+        {field.isRequired && <span className="ml-1 text-destructive">*</span>}
+      </span>
+    );
+
+    if (field.fieldType === "toggle_number") {
+      const payload = normalized as { enabled: boolean; amount: number | null };
+      return (
+        <div
+          key={field.id}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={payload.enabled}
+              disabled={!canEditOrderInputs}
+              onChange={(event) =>
+                setOrderInputValues((prev) => ({
+                  ...prev,
+                  [field.id]: {
+                    enabled: event.target.checked,
+                    amount: payload.amount ?? null,
+                  },
+                }))
+              }
+            />
+            {label}
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={payload.amount ?? ""}
+              disabled={!canEditOrderInputs || !payload.enabled}
+              onChange={(event) =>
+                setOrderInputValues((prev) => ({
+                  ...prev,
+                  [field.id]: {
+                    enabled: payload.enabled,
+                    amount: event.target.value,
+                  },
+                }))
+              }
+              className="h-9 w-28 rounded-md border border-border bg-input-background px-2 text-sm"
+            />
+            {field.unit && (
+              <span className="text-xs text-muted-foreground">
+                {field.unit}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (field.fieldType === "toggle") {
+      return (
+        <label
+          key={field.id}
+          className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
+        >
+          {label}
+          <input
+            type="checkbox"
+            checked={Boolean(normalized)}
+            disabled={!canEditOrderInputs}
+            onChange={(event) =>
+              setOrderInputValues((prev) => ({
+                ...prev,
+                [field.id]: event.target.checked,
+              }))
+            }
+          />
+        </label>
+      );
+    }
+
+    if (field.fieldType === "select") {
+      return (
+        <label
+          key={field.id}
+          className="flex flex-col gap-2 text-sm font-medium"
+        >
+          {label}
+          <select
+            value={String(normalized ?? "")}
+            disabled={!canEditOrderInputs}
+            onChange={(event) =>
+              setOrderInputValues((prev) => ({
+                ...prev,
+                [field.id]: event.target.value,
+              }))
+            }
+            className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+          >
+            <option value="">Select</option>
+            {(field.options ?? []).map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
+    if (field.fieldType === "table") {
+      const columns = field.columns ?? [];
+      const rows = Array.isArray(normalized) ? normalized : [];
+      const parseMultiValue = (raw: string) =>
+        raw
+          .split(/[\/;]+/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+      const selectedRows = tableRowSelections[field.id] ?? [];
+      const allSelected =
+        rows.length > 0 && selectedRows.length === rows.length;
+      const toggleSelectAll = (checked: boolean) => {
+        setTableRowSelections((prev) => ({
+          ...prev,
+          [field.id]: checked ? rows.map((_, idx) => idx) : [],
+        }));
+      };
+      const updateRow = (
+        rowIndex: number,
+        columnKey: string,
+        nextValue: string,
+      ) => {
+        setOrderInputValues((prev) => {
+          const nextRows = [...rows];
+          const currentRow =
+            typeof nextRows[rowIndex] === "object" && nextRows[rowIndex]
+              ? { ...(nextRows[rowIndex] as Record<string, unknown>) }
+              : {};
+          currentRow[columnKey] = nextValue;
+          nextRows[rowIndex] = currentRow;
+          return { ...prev, [field.id]: nextRows };
+        });
+      };
+      const addRow = () => {
+        setOrderInputValues((prev) => ({
+          ...prev,
+          [field.id]: [...rows, {}],
+        }));
+      };
+      const removeRow = (rowIndex: number) => {
+        if (!window.confirm("Remove this row?")) {
+          return;
+        }
+        setOrderInputValues((prev) => ({
+          ...prev,
+          [field.id]: rows.filter((_, idx) => idx !== rowIndex),
+        }));
+        setTableRowSelections((prev) => ({
+          ...prev,
+          [field.id]: (prev[field.id] ?? [])
+            .filter((idx) => idx !== rowIndex)
+            .map((idx) => (idx > rowIndex ? idx - 1 : idx)),
+        }));
+      };
+      const removeSelectedRows = () => {
+        if (selectedRows.length === 0) {
+          return;
+        }
+        if (!window.confirm(`Remove ${selectedRows.length} selected row(s)?`)) {
+          return;
+        }
+        const removeSet = new Set(selectedRows);
+        setOrderInputValues((prev) => ({
+          ...prev,
+          [field.id]: rows.filter((_, idx) => !removeSet.has(idx)),
+        }));
+        setTableRowSelections((prev) => ({ ...prev, [field.id]: [] }));
+      };
+      return (
+        <div key={field.id} className="md:col-span-2 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-medium">{label}</div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={removeSelectedRows}
+                disabled={!canEditOrderInputs || selectedRows.length === 0}
+              >
+                Remove selected
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={addRow}
+                disabled={!canEditOrderInputs}
+              >
+                Add row
+              </Button>
+            </div>
+          </div>
+          {columns.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              No columns configured for this table field.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-muted-foreground">
+                  <tr>
+                    {columns.map((column) => (
+                      <th key={column.key} className="px-3 py-2 text-left">
+                        {column.label}
+                        {column.unit ? ` (${column.unit})` : ""}
+                      </th>
+                    ))}
+                    <th className="px-3 py-2 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <span>Actions</span>
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={(event) =>
+                            toggleSelectAll(event.target.checked)
+                          }
+                          disabled={rows.length === 0 || !canEditOrderInputs}
+                        />
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={columns.length + 1}
+                        className="px-3 py-4 text-center text-xs text-muted-foreground"
+                      >
+                        No rows yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    rows.map((row, rowIndex) => (
+                      <tr
+                        key={`row-${rowIndex}`}
+                        className="border-t border-border"
+                      >
+                        {columns.map((column) => {
+                          const cellValue =
+                            typeof row === "object" && row !== null
+                              ? (row as Record<string, unknown>)[column.key]
+                              : "";
+                          if (column.fieldType === "select") {
+                            const maxSelect = Math.max(
+                              1,
+                              Math.min(3, column.maxSelect ?? 1),
+                            );
+                            const currentValues = Array.isArray(cellValue)
+                              ? cellValue.filter(
+                                  (item): item is string =>
+                                    typeof item === "string",
+                                )
+                              : typeof cellValue === "string" && cellValue
+                                ? [cellValue]
+                                : [];
+                            const canAddMore = currentValues.length < maxSelect;
+                            const handleAddValue = (value: string) => {
+                              if (!value) {
+                                return;
+                              }
+                              if (currentValues.includes(value)) {
+                                return;
+                              }
+                              const nextValues = [
+                                ...currentValues,
+                                value,
+                              ].slice(0, maxSelect);
+                              setOrderInputValues((prev) => {
+                                const nextRows = [...rows];
+                                const currentRow =
+                                  typeof nextRows[rowIndex] === "object" &&
+                                  nextRows[rowIndex]
+                                    ? {
+                                        ...(nextRows[rowIndex] as Record<
+                                          string,
+                                          unknown
+                                        >),
+                                      }
+                                    : {};
+                                currentRow[column.key] =
+                                  maxSelect === 1 ? value : nextValues;
+                                nextRows[rowIndex] = currentRow;
+                                return { ...prev, [field.id]: nextRows };
+                              });
+                            };
+                            const handleRemoveValue = (value: string) => {
+                              const nextValues = currentValues.filter(
+                                (item) => item !== value,
+                              );
+                              setOrderInputValues((prev) => {
+                                const nextRows = [...rows];
+                                const currentRow =
+                                  typeof nextRows[rowIndex] === "object" &&
+                                  nextRows[rowIndex]
+                                    ? {
+                                        ...(nextRows[rowIndex] as Record<
+                                          string,
+                                          unknown
+                                        >),
+                                      }
+                                    : {};
+                                currentRow[column.key] =
+                                  maxSelect === 1
+                                    ? (nextValues[0] ?? "")
+                                    : nextValues;
+                                nextRows[rowIndex] = currentRow;
+                                return { ...prev, [field.id]: nextRows };
+                              });
+                            };
+                            return (
+                              <td key={column.key} className="px-3 py-2">
+                                <select
+                                  value=""
+                                  disabled={!canEditOrderInputs || !canAddMore}
+                                  onChange={(event) => {
+                                    const next = event.target.value;
+                                    handleAddValue(next);
+                                    event.currentTarget.value = "";
+                                  }}
+                                  className="h-9 w-full rounded-md border border-border bg-input-background px-2 text-sm"
+                                >
+                                  <option value="">
+                                    {canAddMore ? "Select" : "Max selected"}
+                                  </option>
+                                  {(column.options ?? []).map((option) => (
+                                    <option key={option} value={option}>
+                                      {option}
+                                    </option>
+                                  ))}
+                                </select>
+                                {currentValues.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {currentValues.map((chip) => (
+                                      <button
+                                        key={chip}
+                                        type="button"
+                                        onClick={() => handleRemoveValue(chip)}
+                                        disabled={!canEditOrderInputs}
+                                        className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
+                                      >
+                                        {chip}
+                                        <span aria-hidden="true">&times;</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          }
+                          return (
+                            <td key={column.key} className="px-3 py-2">
+                              <input
+                                type={
+                                  column.fieldType === "number"
+                                    ? "number"
+                                    : "text"
+                                }
+                                value={String(cellValue ?? "")}
+                                disabled={!canEditOrderInputs}
+                                onChange={(event) =>
+                                  updateRow(
+                                    rowIndex,
+                                    column.key,
+                                    event.target.value,
+                                  )
+                                }
+                                className="h-9 w-full rounded-md border border-border bg-input-background px-2 text-sm"
+                              />
+                              {column.fieldType !== "number" &&
+                                typeof cellValue === "string" &&
+                                (() => {
+                                  const chips = parseMultiValue(cellValue);
+                                  if (chips.length <= 1) {
+                                    return null;
+                                  }
+                                  return (
+                                    <div className="mt-2 flex flex-wrap gap-1">
+                                      {chips.map((chip, chipIndex) => (
+                                        <span
+                                          key={`${chip}-${chipIndex}`}
+                                          className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
+                                        >
+                                          {chip}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                const nextRows = [...rows, row];
+                                setOrderInputValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: nextRows,
+                                }));
+                              }}
+                              disabled={!canEditOrderInputs}
+                            >
+                              Copy
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => removeRow(rowIndex)}
+                              disabled={!canEditOrderInputs}
+                            >
+                              Remove
+                            </Button>
+                            <input
+                              type="checkbox"
+                              checked={selectedRows.includes(rowIndex)}
+                              onChange={(event) => {
+                                setTableRowSelections((prev) => {
+                                  const current = prev[field.id] ?? [];
+                                  if (event.target.checked) {
+                                    return {
+                                      ...prev,
+                                      [field.id]: [...current, rowIndex],
+                                    };
+                                  }
+                                  return {
+                                    ...prev,
+                                    [field.id]: current.filter(
+                                      (idx) => idx !== rowIndex,
+                                    ),
+                                  };
+                                });
+                              }}
+                              disabled={!canEditOrderInputs}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (field.fieldType === "date") {
+      return (
+        <label
+          key={field.id}
+          className="flex flex-col gap-2 text-sm font-medium"
+        >
+          {label}
+          <input
+            type="date"
+            value={String(normalized ?? "")}
+            disabled={!canEditOrderInputs}
+            onChange={(event) =>
+              setOrderInputValues((prev) => ({
+                ...prev,
+                [field.id]: event.target.value,
+              }))
+            }
+            className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+          />
+        </label>
+      );
+    }
+
+    if (field.fieldType === "textarea") {
+      return (
+        <label
+          key={field.id}
+          className="flex flex-col gap-2 text-sm font-medium"
+        >
+          {label}
+          <textarea
+            value={String(normalized ?? "")}
+            disabled={!canEditOrderInputs}
+            onChange={(event) =>
+              setOrderInputValues((prev) => ({
+                ...prev,
+                [field.id]: event.target.value,
+              }))
+            }
+            className="min-h-[80px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+          />
+        </label>
+      );
+    }
+
+    return (
+      <label key={field.id} className="flex flex-col gap-2 text-sm font-medium">
+        {label}
+        <input
+          type={field.fieldType === "number" ? "number" : "text"}
+          value={String(normalized ?? "")}
+          disabled={!canEditOrderInputs}
+          onChange={(event) =>
+            setOrderInputValues((prev) => ({
+              ...prev,
+              [field.id]: event.target.value,
+            }))
+          }
+          className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+        />
+      </label>
+    );
+  }
+
   async function handleRemoveAttachment(attachmentId: string) {
-    const target = attachments.find((attachment) => attachment.id === attachmentId);
+    const target = attachments.find(
+      (attachment) => attachment.id === attachmentId,
+    );
     if (target?.url?.startsWith("blob:")) {
       URL.revokeObjectURL(target.url);
     }
@@ -960,7 +1725,9 @@ export default function OrderDetailPage() {
   async function handleRemoveComment(commentId: string) {
     const removed = await removeOrderComment(orderState.id, commentId);
     if (removed) {
-      const nextComments = comments.filter((comment) => comment.id !== commentId);
+      const nextComments = comments.filter(
+        (comment) => comment.id !== commentId,
+      );
       setOrderState((prev) =>
         prev ? { ...prev, comments: nextComments } : prev,
       );
@@ -973,7 +1740,9 @@ export default function OrderDetailPage() {
       setExternalError("Partner, order number, and due date are required.");
       return;
     }
-    const partner = activePartners.find((item) => item.id === externalPartnerId);
+    const partner = activePartners.find(
+      (item) => item.id === externalPartnerId,
+    );
     if (!partner) {
       setExternalError("Select a valid partner.");
       return;
@@ -1119,10 +1888,7 @@ export default function OrderDetailPage() {
                   job.id === externalJobId
                     ? {
                         ...job,
-                        attachments: [
-                          created,
-                          ...(job.attachments ?? []),
-                        ],
+                        attachments: [created, ...(job.attachments ?? [])],
                       }
                     : job,
                 ),
@@ -1476,987 +2242,1104 @@ export default function OrderDetailPage() {
   return (
     <section className="space-y-6">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-4">
-        <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
-          <Link
-            href="/orders"
-            className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--tabs-border)] bg-[var(--tabs-bg)] px-3 text-sm font-medium text-[var(--tabs-text)] shadow-sm transition hover:text-[var(--tabs-hover-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tabs-ring)]"
-          >
-            <ArrowLeftIcon className="h-4 w-4" />
-            Back to Orders
-          </Link>
-          <TabsList className="min-w-max">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="workflow">Workflow</TabsTrigger>
-            <TabsTrigger value="files">Files & Comments</TabsTrigger>
-            <TabsTrigger value="external">External Jobs</TabsTrigger>
-            <TabsTrigger value="production">Production</TabsTrigger>
-          </TabsList>
+        <div className="sticky top-16 z-20 border-b bg-background/90 border-border pb-3 pt-2 backdrop-blur">
+          <div className="grid gap-3 lg:grid-cols-[auto_1fr_auto] lg:items-center">
+            <div className="pl-6 mr-6">
+              <h1 className="text-xl font-semibold">
+                {orderState.orderNumber}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {orderState.customerName}
+              </p>
+            </div>
+            <div className="flex flex-nowrap py-1 items-center gap-2 overflow-x-auto">
+              <Link
+                href="/orders"
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-(--tabs-border) bg-(--tabs-bg) px-3 text-sm font-medium text-(--tabs-text) shadow-sm transition hover:text-(--tabs-hover-text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--tabs-ring)"
+              >
+                <ArrowLeftIcon className="h-4 w-4" />
+                Back
+              </Link>
+              <TabsList className="min-w-max h-9 shadow-sm **:data-[slot=tabs-trigger]:h-7 **:data-[slot=tabs-trigger]:py-1">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="details">Order details</TabsTrigger>
+                <TabsTrigger value="workflow">Workflow</TabsTrigger>
+                <TabsTrigger value="files">Files & Comments</TabsTrigger>
+                <TabsTrigger value="external">External Jobs</TabsTrigger>
+                <TabsTrigger value="production">Production</TabsTrigger>
+              </TabsList>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+              <Badge variant={statusVariant}>
+                {statusLabel(orderState.status)}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2"
+                onClick={() => setIsEditOpen(true)}
+              >
+                <PencilIcon className="h-4 w-4" />
+                Edit
+              </Button>
+            </div>
+          </div>
         </div>
-
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">{orderState.orderNumber}</h1>
-          <p className="text-sm text-muted-foreground">
-            {orderState.customerName}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={priorityVariant}>{orderState.priority}</Badge>
-          <Badge variant={statusVariant}>
-            {statusLabel(orderState.status)}
-          </Badge>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2"
-            onClick={() => setIsEditOpen(true)}
-          >
-            <PencilIcon className="h-4 w-4" />
-            Edit
-          </Button>
-        </div>
-      </div>
 
         <TabsContent value="overview">
           <div className="space-y-6">
             <Card>
-            <CardHeader>
-              <CardTitle>Order Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Due date</span>
-                <span>{formatDate(orderState.dueDate)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Quantity</span>
-                <span>{orderState.quantity ?? "--"}</span>
-              </div>
-            </CardContent>
-            </Card>
-            <Card>
-            <CardHeader>
-              <CardTitle>Hierarchy Details</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {activeLevels.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No hierarchy levels configured.
-                </p>
-              ) : (
-                <div className="grid gap-2 text-sm">
-                  {activeLevels.map((level) => {
-                    const valueId = orderState.hierarchy?.[level.id];
-                    const valueLabel = valueId
-                      ? nodeLabelMap.get(valueId) ?? valueId
-                      : "--";
-                    return (
-                      <div
-                        key={level.id}
-                        className="flex items-center justify-between"
-                      >
-                        <span className="text-muted-foreground">{level.name}</span>
-                        <span className="font-medium">{valueLabel}</span>
+              <CardHeader>
+                <CardTitle>Order Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6 text-sm">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-3">
+                    <div className="text-xs font-semibold text-muted-foreground">
+                      Schedule
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                      <span className="text-muted-foreground">Due date</span>
+                      <span className="font-medium">
+                        {formatDate(orderState.dueDate)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                      <span className="text-muted-foreground">Quantity</span>
+                      <span className="font-medium">
+                        {orderState.quantity ?? "--"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="text-xs font-semibold text-muted-foreground">
+                      Hierarchy
+                    </div>
+                    {activeLevels.length === 0 ? (
+                      <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                        No hierarchy levels configured.
                       </div>
-                    );
-                  })}
+                    ) : (
+                      <div className="space-y-2">
+                        {activeLevels.map((level) => {
+                          const valueId = orderState.hierarchy?.[level.id];
+                          const valueLabel = valueId
+                            ? (nodeLabelMap.get(valueId) ?? valueId)
+                            : "--";
+                          return (
+                            <div
+                              key={level.id}
+                              className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                            >
+                              <span className="text-muted-foreground">
+                                {level.name}
+                              </span>
+                              <span className="font-medium">{valueLabel}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </CardContent>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="details">
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Order inputs</CardTitle>
+                <CardDescription>
+                  Sales notes and production scope details.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {orderInputError && (
+                  <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                    {orderInputError}
+                  </div>
+                )}
+                {activeOrderInputFields.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No order inputs configured yet.
+                  </p>
+                ) : (
+                  <div className="space-y-6">
+                    {Array.from(orderInputGroups.entries()).map(
+                      ([groupKey, fields]) => (
+                        <div key={groupKey} className="space-y-3">
+                          <div className="text-sm font-semibold">
+                            {groupKey === "production_scope"
+                              ? "Production scope"
+                              : "Order info"}
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            {fields.map((field) =>
+                              renderOrderInputField(field),
+                            )}
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  {!canEditOrderInputs && (
+                    <span className="text-xs text-muted-foreground">
+                      Only Sales and Admin can edit these fields.
+                    </span>
+                  )}
+                  <Button
+                    onClick={handleSaveOrderInputs}
+                    disabled={
+                      !canEditOrderInputs ||
+                      !isOrderInputsDirty ||
+                      isSavingOrderInputs
+                    }
+                  >
+                    {isSavingOrderInputs ? "Saving..." : "Save inputs"}
+                  </Button>
+                </div>
+              </CardContent>
             </Card>
           </div>
         </TabsContent>
 
         <TabsContent value="workflow">
           <div className="space-y-6">
-          <Card className="lg:sticky lg:top-6">
-            <CardHeader>
-              <CardTitle>Workflow</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={priorityVariant}>{orderState.priority}</Badge>
-                <Badge variant={statusVariant}>
-                  {statusLabel(orderState.status)}
-                </Badge>
-              </div>
+            <Card className="lg:sticky lg:top-6">
+              <CardHeader>
+                <CardTitle>Workflow</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+                  <Badge variant={statusVariant}>
+                    {statusLabel(orderState.status)}
+                  </Badge>
+                </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                {canSendToEngineering && (
-                  <Button
-                    size="sm"
-                    disabled={!canAdvanceToEngineering}
-                    onClick={() => handleStatusChange("ready_for_engineering")}
-                  >
-                    Send to engineering
-                  </Button>
-                )}
-                {canStartEngineering && (
-                  <Button
-                    size="sm"
-                    onClick={() => handleStatusChange("in_engineering")}
-                  >
-                    Start engineering
-                  </Button>
-                )}
-                {canBlockEngineering && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleStatusChange("engineering_blocked")}
-                  >
-                    Block engineering
-                  </Button>
-                )}
-                {canSendToProduction && (
-                  <Button
-                    size="sm"
-                    disabled={!canAdvanceToProduction}
-                    onClick={() => handleStatusChange("ready_for_production")}
+                <div className="flex flex-wrap items-center gap-2">
+                  {canSendToEngineering && (
+                    <Button
+                      size="sm"
+                      disabled={!canAdvanceToEngineering}
+                      onClick={() =>
+                        handleStatusChange("ready_for_engineering")
+                      }
+                    >
+                      Send to engineering
+                    </Button>
+                  )}
+                  {canStartEngineering && (
+                    <Button
+                      size="sm"
+                      onClick={() => handleStatusChange("in_engineering")}
+                    >
+                      Start engineering
+                    </Button>
+                  )}
+                  {canBlockEngineering && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStatusChange("engineering_blocked")}
+                    >
+                      Block engineering
+                    </Button>
+                  )}
+                  {canSendToProduction && (
+                    <Button
+                      size="sm"
+                      disabled={!canAdvanceToProduction}
+                      onClick={() => handleStatusChange("ready_for_production")}
                     >
                       {statusLabel("ready_for_production")}
                     </Button>
-                )}
-                {canSendBack && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setIsReturnOpen(true)}
-                  >
-                    Send back
-                  </Button>
-                )}
-                {canTakeOrder && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleTakeOrder}
-                  >
-                    Take order
-                  </Button>
-                )}
-                {canReturnToQueue && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleReturnToQueue}
-                  >
-                    Return to queue
-                  </Button>
-                )}
-              </div>
-
-              <div className="space-y-2 text-xs text-muted-foreground">
-                {orderState.assignedManagerName && (
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
-                      {getInitials(orderState.assignedManagerName)}
-                    </div>
-                    <span>
-                      {managerLabel}: {orderState.assignedManagerName}
-                    </span>
-                  </div>
-                )}
-                {canAssignManager && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      value={selectedManagerId}
-                      onChange={(event) =>
-                        setSelectedManagerId(event.target.value)
-                      }
-                      className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                  )}
+                  {canSendBack && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsReturnOpen(true)}
                     >
-                      <option value="">Assign {managerLabel.toLowerCase()}...</option>
-                      {managers.map((manager) => (
-                        <option key={manager.id} value={manager.id}>
-                          {manager.name}
-                        </option>
-                      ))}
-                    </select>
+                      Send back
+                    </Button>
+                  )}
+                  {canTakeOrder && (
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleAssignManager}
-                      disabled={!selectedManagerId}
+                      onClick={handleTakeOrder}
                     >
-                      Assign
+                      Take order
                     </Button>
-                    {orderState.assignedManagerId && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleClearManager}
-                      >
-                        Clear
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {orderState.assignedEngineerName && (
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
-                      {getInitials(orderState.assignedEngineerName)}
-                    </div>
-                    <span>
-                      {engineerLabel}: {orderState.assignedEngineerName}
-                    </span>
-                  </div>
-                )}
-                {canAssignEngineer && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      value={selectedEngineerId}
-                      onChange={(event) =>
-                        setSelectedEngineerId(event.target.value)
-                      }
-                      className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
-                    >
-                      <option value="">Assign {engineerLabel.toLowerCase()}...</option>
-                      {engineers.map((engineer) => (
-                        <option key={engineer.id} value={engineer.id}>
-                          {engineer.name}
-                        </option>
-                      ))}
-                    </select>
+                  )}
+                  {canReturnToQueue && (
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleAssignEngineer}
-                      disabled={!selectedEngineerId}
+                      onClick={handleReturnToQueue}
                     >
-                      Assign
+                      Return to queue
                     </Button>
-                    {orderState.assignedEngineerId && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleClearEngineer}
-                      >
-                        Clear
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {orderState.statusChangedAt && (
-                  <div>
-                    Status updated{" "}
-                    {orderState.statusChangedBy
-                      ? `by ${orderState.statusChangedBy}`
-                      : ""}
-                    {orderState.statusChangedByRole
-                      ? ` (${orderState.statusChangedByRole})`
-                      : ""}
-                    {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
-                  </div>
-                )}
-              </div>
-
-              {nextGate && (
-                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  <div className="font-medium text-foreground">
-                    Next step readiness
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    <div>
-                      Checklist: {nextChecklistDone}/{nextChecklistTotal || 0}
-                    </div>
-                    <div>
-                      Attachments: {attachments.length}/{nextMinAttachments}
-                    </div>
-                    <div>
-                      Comment:{" "}
-                      {nextRequireComment
-                        ? comments.length > 0
-                          ? "Added"
-                          : "Required"
-                        : "Optional"}
-                    </div>
-                  </div>
+                  )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
+
+                <div className="space-y-2 text-xs text-muted-foreground">
+                  {orderState.assignedManagerName && (
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
+                        {getInitials(orderState.assignedManagerName)}
+                      </div>
+                      <span>
+                        {managerLabel}: {orderState.assignedManagerName}
+                      </span>
+                    </div>
+                  )}
+                  {canAssignManager && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={selectedManagerId}
+                        onChange={(event) =>
+                          setSelectedManagerId(event.target.value)
+                        }
+                        className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                      >
+                        <option value="">
+                          Assign {managerLabel.toLowerCase()}...
+                        </option>
+                        {managers.map((manager) => (
+                          <option key={manager.id} value={manager.id}>
+                            {manager.name}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAssignManager}
+                        disabled={!selectedManagerId}
+                      >
+                        Assign
+                      </Button>
+                      {orderState.assignedManagerId && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleClearManager}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  {orderState.assignedEngineerName && (
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
+                        {getInitials(orderState.assignedEngineerName)}
+                      </div>
+                      <span>
+                        {engineerLabel}: {orderState.assignedEngineerName}
+                      </span>
+                    </div>
+                  )}
+                  {canAssignEngineer && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={selectedEngineerId}
+                        onChange={(event) =>
+                          setSelectedEngineerId(event.target.value)
+                        }
+                        className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                      >
+                        <option value="">
+                          Assign {engineerLabel.toLowerCase()}...
+                        </option>
+                        {engineers.map((engineer) => (
+                          <option key={engineer.id} value={engineer.id}>
+                            {engineer.name}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAssignEngineer}
+                        disabled={!selectedEngineerId}
+                      >
+                        Assign
+                      </Button>
+                      {orderState.assignedEngineerId && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleClearEngineer}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  {orderState.statusChangedAt && (
+                    <div>
+                      Status updated{" "}
+                      {orderState.statusChangedBy
+                        ? `by ${orderState.statusChangedBy}`
+                        : ""}
+                      {orderState.statusChangedByRole
+                        ? ` (${orderState.statusChangedByRole})`
+                        : ""}
+                      {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
+                    </div>
+                  )}
+                </div>
+
+                {nextGate && (
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                    <div className="font-medium text-foreground">
+                      Next step readiness
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      <div>
+                        Checklist: {nextChecklistDone}/{nextChecklistTotal || 0}
+                      </div>
+                      <div>
+                        Attachments: {attachments.length}/{nextMinAttachments}
+                      </div>
+                      <div>
+                        Comment:{" "}
+                        {nextRequireComment
+                          ? comments.length > 0
+                            ? "Added"
+                            : "Required"
+                          : "Optional"}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
         <TabsContent value="files">
           <div className="space-y-6">
-          <Card>
-            <CardHeader>
-            <CardTitle>Attachments</CardTitle>
-          </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <label className="space-y-2 text-sm font-medium">
-                Category
-                <select
-                  value={attachmentCategory}
-                  onChange={(event) => {
-                    setAttachmentCategory(event.target.value);
-                    setIsAttachmentCategoryManual(true);
-                  }}
-                  className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                >
-                  {attachmentCategories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-muted-foreground">
-                  Pick the best bucket before uploading files.
-                </span>
-              </label>
-              <div className="space-y-2">
-                <div
-                  className="flex min-h-[86px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    handleFilesAdded(event.dataTransfer.files);
-                  }}
-                  onClick={() => {
-                    const input = document.getElementById(
-                      "attachment-file-input",
-                    ) as HTMLInputElement | null;
-                    input?.click();
-                  }}
-                >
-                  <ImageIcon className="h-5 w-5" />
-                  <span>Drag files here or click to upload</span>
-                  <input
-                    id="attachment-file-input"
-                    type="file"
-                    multiple
-                    className="hidden"
+            <Card>
+              <CardHeader>
+                <CardTitle>Attachments</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <label className="space-y-2 text-sm font-medium">
+                  Category
+                  <select
+                    value={attachmentCategory}
                     onChange={(event) => {
-                      if (event.target.files) {
-                        handleFilesAdded(event.target.files);
-                      }
-                      event.target.value = "";
+                      setAttachmentCategory(event.target.value);
+                      setIsAttachmentCategoryManual(true);
                     }}
-                  />
-                  <span className="text-[11px]">
-                    Max {MAX_FILE_SIZE_MB}MB per file
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  >
+                    {attachmentCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-muted-foreground">
+                    Pick the best bucket before uploading files.
                   </span>
-                </div>
-                {attachmentError && (
-                  <p className="text-xs text-destructive">{attachmentError}</p>
-                )}
-                {attachmentNotice && (
-                  <p className="text-xs text-muted-foreground">
-                    {attachmentNotice}
-                  </p>
-                )}
-              </div>
-
-              {attachmentFiles.length > 0 && (
-                <div className="space-y-2 text-xs text-muted-foreground">
-                  {attachmentFiles.map((file, index) => (
-                    <div
-                      key={`${file.name}-${index}`}
-                      className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2"
-                    >
-                      <span>{file.name}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemovePendingFile(index)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  ))}
-                  <div className="flex justify-end">
-                    <Button onClick={handleAddAttachment} disabled={isUploading}>
-                      {isUploading ? "Uploading..." : "Upload"}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {attachments.length === 0 ? (
-                <p className="text-muted-foreground">
-                  No attachments added yet.
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {attachmentGroups.map((group) => (
-                    <div key={group.key} className="space-y-2">
-                      <div className="text-xs font-semibold text-muted-foreground">
-                        {group.label}
-                      </div>
-                      {group.items.map((attachment) => (
-                        <div
-                          key={attachment.id}
-                          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                        >
-                          <div className="flex items-center gap-3">
-                            {renderAttachmentPreview(
-                              attachment,
-                              resolveAttachmentUrl(attachment),
-                            )}
-                            <div>
-                              <div className="font-medium">{attachment.name}</div>
-                              <div className="text-xs text-muted-foreground">
-                                Added by {attachment.addedBy}
-                                {attachment.addedByRole
-                                  ? ` (${attachment.addedByRole})`
-                                  : ""}{" "}
-                                on {formatDate(attachment.createdAt.slice(0, 10))}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {resolveAttachmentUrl(attachment) && (
-                              <a
-                                href={resolveAttachmentUrl(attachment)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs text-primary underline"
-                              >
-                                Open
-                              </a>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRemoveAttachment(attachment.id)}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Comments</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="space-y-2">
-                <textarea
-                  value={commentMessage}
-                  onChange={(event) => setCommentMessage(event.target.value)}
-                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                  placeholder="Add a note for the next role..."
-                />
-                <div className="flex justify-end">
-                  <Button onClick={handleAddComment}>Add comment</Button>
-                </div>
-              </div>
-              {comments.length === 0 ? (
-                <p className="text-muted-foreground">No comments yet.</p>
-              ) : (
+                </label>
                 <div className="space-y-2">
-                  {comments.map((comment) => (
-                    <div
-                      key={comment.id}
-                      className="rounded-md border border-border px-3 py-2"
-                    >
-                      <div className="text-xs text-muted-foreground">
-                        {comment.author}
-                        {comment.authorRole ? ` (${comment.authorRole})` : ""} -{" "}
-                        {formatDate(comment.createdAt.slice(0, 10))}
-                      </div>
-                      <div className="mt-1">{comment.message}</div>
-                      <div className="mt-2 flex justify-end">
+                  <div
+                    className="flex min-h-[86px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      handleFilesAdded(event.dataTransfer.files);
+                    }}
+                    onClick={() => {
+                      const input = document.getElementById(
+                        "attachment-file-input",
+                      ) as HTMLInputElement | null;
+                      input?.click();
+                    }}
+                  >
+                    <ImageIcon className="h-5 w-5" />
+                    <span>Drag files here or click to upload</span>
+                    <input
+                      id="attachment-file-input"
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        if (event.target.files) {
+                          handleFilesAdded(event.target.files);
+                        }
+                        event.target.value = "";
+                      }}
+                    />
+                    <span className="text-[11px]">
+                      Max {MAX_FILE_SIZE_MB}MB per file
+                    </span>
+                  </div>
+                  {attachmentError && (
+                    <p className="text-xs text-destructive">
+                      {attachmentError}
+                    </p>
+                  )}
+                  {attachmentNotice && (
+                    <p className="text-xs text-muted-foreground">
+                      {attachmentNotice}
+                    </p>
+                  )}
+                </div>
+
+                {attachmentFiles.length > 0 && (
+                  <div className="space-y-2 text-xs text-muted-foreground">
+                    {attachmentFiles.map((file, index) => (
+                      <div
+                        key={`${file.name}-${index}`}
+                        className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2"
+                      >
+                        <span>{file.name}</span>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRemoveComment(comment.id)}
+                          onClick={() => handleRemovePendingFile(index)}
                         >
                           Remove
                         </Button>
                       </div>
+                    ))}
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={handleAddAttachment}
+                        disabled={isUploading}
+                      >
+                        {isUploading ? "Uploading..." : "Upload"}
+                      </Button>
                     </div>
-                  ))}
+                  </div>
+                )}
+
+                {attachments.length === 0 ? (
+                  <p className="text-muted-foreground">
+                    No attachments added yet.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {attachmentGroups.map((group) => (
+                      <div key={group.key} className="space-y-2">
+                        <div className="text-xs font-semibold text-muted-foreground">
+                          {group.label}
+                        </div>
+                        {group.items.map((attachment) => (
+                          <div
+                            key={attachment.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                          >
+                            <div className="flex items-center gap-3">
+                              {renderAttachmentPreview(
+                                attachment,
+                                resolveAttachmentUrl(attachment),
+                              )}
+                              <div>
+                                <div className="font-medium">
+                                  {attachment.name}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  Added by {attachment.addedBy}
+                                  {attachment.addedByRole
+                                    ? ` (${attachment.addedByRole})`
+                                    : ""}{" "}
+                                  on{" "}
+                                  {formatDate(
+                                    attachment.createdAt.slice(0, 10),
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {resolveAttachmentUrl(attachment) && (
+                                <a
+                                  href={resolveAttachmentUrl(attachment)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-xs text-primary underline"
+                                >
+                                  Open
+                                </a>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  handleRemoveAttachment(attachment.id)
+                                }
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Comments</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="space-y-2">
+                  <textarea
+                    value={commentMessage}
+                    onChange={(event) => setCommentMessage(event.target.value)}
+                    className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                    placeholder="Add a note for the next role..."
+                  />
+                  <div className="flex justify-end">
+                    <Button onClick={handleAddComment}>Add comment</Button>
+                  </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                {comments.length === 0 ? (
+                  <p className="text-muted-foreground">No comments yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {comments.map((comment) => (
+                      <div
+                        key={comment.id}
+                        className="rounded-md border border-border px-3 py-2"
+                      >
+                        <div className="text-xs text-muted-foreground">
+                          {comment.author}
+                          {comment.authorRole
+                            ? ` (${comment.authorRole})`
+                            : ""}{" "}
+                          - {formatDate(comment.createdAt.slice(0, 10))}
+                        </div>
+                        <div className="mt-1">{comment.message}</div>
+                        <div className="mt-2 flex justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveComment(comment.id)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
         <TabsContent value="external">
           <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>External Jobs</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="grid gap-3 lg:grid-cols-2">
-                <label className="space-y-2 text-sm font-medium">
-                  Partner group
-                  <select
-                    value={externalPartnerGroupId}
-                    onChange={(event) =>
-                      setExternalPartnerGroupId(event.target.value)
-                    }
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  >
-                    <option value="">All groups</option>
-                    {activeGroups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Partner
-                  <select
-                    value={externalPartnerId}
-                    onChange={(event) =>
-                      setExternalPartnerId(event.target.value)
-                    }
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  >
-                    <option value="">Select partner</option>
-                    {activePartners
-                      .filter((partner) =>
-                        externalPartnerGroupId
-                          ? partner.groupId === externalPartnerGroupId
-                          : true,
-                      )
-                      .map((partner) => (
-                        <option key={partner.id} value={partner.id}>
-                          {partner.name}
+            <Card>
+              <CardHeader>
+                <CardTitle>External Jobs</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm">
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <label className="space-y-2 text-sm font-medium">
+                    Partner group
+                    <select
+                      value={externalPartnerGroupId}
+                      onChange={(event) =>
+                        setExternalPartnerGroupId(event.target.value)
+                      }
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    >
+                      <option value="">All groups</option>
+                      {activeGroups.map((group) => (
+                        <option key={group.id} value={group.id}>
+                          {group.name}
                         </option>
                       ))}
-                  </select>
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  External order #
-                  <input
-                    value={externalOrderNumber}
-                    onChange={(event) =>
-                      setExternalOrderNumber(event.target.value)
-                    }
-                    placeholder="BG-5512"
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Quantity
-                  <input
-                    type="number"
-                    min={0}
-                    value={externalQuantity}
-                    onChange={(event) => setExternalQuantity(event.target.value)}
-                    placeholder="1"
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Due date
-                  <input
-                    type="date"
-                    value={externalDueDate}
-                    onChange={(event) => setExternalDueDate(event.target.value)}
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Status
-                  <select
-                    value={externalStatus}
-                    onChange={(event) =>
-                      setExternalStatus(event.target.value as ExternalJobStatus)
-                    }
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  >
-                    {Object.entries(externalJobStatusLabels).map(
-                      ([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </label>
-              </div>
-              {externalError && (
-                <p className="text-xs text-destructive">{externalError}</p>
-              )}
-              <div className="flex justify-end">
-                <Button onClick={handleAddExternalJob}>Add external job</Button>
-              </div>
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    Partner
+                    <select
+                      value={externalPartnerId}
+                      onChange={(event) =>
+                        setExternalPartnerId(event.target.value)
+                      }
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    >
+                      <option value="">Select partner</option>
+                      {activePartners
+                        .filter((partner) =>
+                          externalPartnerGroupId
+                            ? partner.groupId === externalPartnerGroupId
+                            : true,
+                        )
+                        .map((partner) => (
+                          <option key={partner.id} value={partner.id}>
+                            {partner.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    External order #
+                    <input
+                      value={externalOrderNumber}
+                      onChange={(event) =>
+                        setExternalOrderNumber(event.target.value)
+                      }
+                      placeholder="BG-5512"
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    Quantity
+                    <input
+                      type="number"
+                      min={0}
+                      value={externalQuantity}
+                      onChange={(event) =>
+                        setExternalQuantity(event.target.value)
+                      }
+                      placeholder="1"
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    Due date
+                    <input
+                      type="date"
+                      value={externalDueDate}
+                      onChange={(event) =>
+                        setExternalDueDate(event.target.value)
+                      }
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    Status
+                    <select
+                      value={externalStatus}
+                      onChange={(event) =>
+                        setExternalStatus(
+                          event.target.value as ExternalJobStatus,
+                        )
+                      }
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    >
+                      {Object.entries(externalJobStatusLabels).map(
+                        ([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                </div>
+                {externalError && (
+                  <p className="text-xs text-destructive">{externalError}</p>
+                )}
+                <div className="flex justify-end">
+                  <Button onClick={handleAddExternalJob}>
+                    Add external job
+                  </Button>
+                </div>
 
-              {(orderState.externalJobs ?? []).length === 0 ? (
-                <p className="text-muted-foreground">
-                  No external jobs added yet.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {(orderState.externalJobs ?? []).map((job) => {
-                    const pendingFiles = externalJobFiles[job.id] ?? [];
-                    const uploadState = externalJobUpload[job.id];
-                    const partnerGroupName =
-                      activeGroups.find(
-                        (group) =>
-                          group.id ===
-                          activePartners.find(
-                            (partner) => partner.id === job.partnerId,
-                          )?.groupId,
-                      )?.name ?? "";
-                    return (
-                      <div
-                        key={job.id}
-                        className="space-y-3 rounded-lg border border-border px-4 py-3"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="font-medium">{job.partnerName}</div>
-                              {partnerGroupName ? (
-                                <span className="text-xs text-muted-foreground">
-                                  {partnerGroupName}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {job.externalOrderNumber} • Due{" "}
-                              {formatDate(job.dueDate)}
-                            </div>
-                            {job.quantity !== undefined && (
-                              <div className="text-xs text-muted-foreground">
-                                Qty: {job.quantity}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={externalJobStatusVariant(job.status)}>
-                              {externalJobStatusLabels[job.status]}
-                            </Badge>
-                            <select
-                              value={job.status}
-                              onChange={(event) =>
-                                handleExternalStatusChange(
-                                  job.id,
-                                  event.target.value as ExternalJobStatus,
-                                )
-                              }
-                              className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
-                            >
-                              {Object.entries(externalJobStatusLabels).map(
-                                ([value, label]) => (
-                                  <option key={value} value={value}>
-                                    {label}
-                                  </option>
-                                ),
-                              )}
-                            </select>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRemoveExternalJob(job.id)}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-xs text-muted-foreground">
-                              Attachments
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <input
-                                id={`external-files-${job.id}`}
-                                type="file"
-                                multiple
-                                className="hidden"
-                                onChange={(event) => {
-                                  if (event.target.files) {
-                                    handleExternalFilesAdded(
-                                      job.id,
-                                      event.target.files,
-                                    );
-                                  }
-                                  event.target.value = "";
-                                }}
-                              />
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  const input = document.getElementById(
-                                    `external-files-${job.id}`,
-                                  ) as HTMLInputElement | null;
-                                  input?.click();
-                                }}
-                              >
-                                Add files
-                              </Button>
-                              <Button
-                                size="sm"
-                                onClick={() => handleUploadExternalFiles(job.id)}
-                                disabled={
-                                  pendingFiles.length === 0 ||
-                                  uploadState?.isUploading
-                                }
-                              >
-                                {uploadState?.isUploading
-                                  ? "Uploading..."
-                                  : "Upload"}
-                              </Button>
-                            </div>
-                          </div>
-                          {uploadState?.error && (
-                            <p className="text-xs text-destructive">
-                              {uploadState.error}
-                            </p>
-                          )}
-                          {pendingFiles.length > 0 && (
-                            <div className="space-y-2 text-xs text-muted-foreground">
-                              {pendingFiles.map((file, index) => (
-                                <div
-                                  key={`${file.name}-${index}`}
-                                  className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2"
-                                >
-                                  <span>{file.name}</span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() =>
-                                      setExternalJobFiles((prev) => ({
-                                        ...prev,
-                                        [job.id]: (prev[job.id] ?? []).filter(
-                                          (_, idx) => idx !== index,
-                                        ),
-                                      }))
-                                    }
-                                  >
-                                    Remove
-                                  </Button>
+                {(orderState.externalJobs ?? []).length === 0 ? (
+                  <p className="text-muted-foreground">
+                    No external jobs added yet.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {(orderState.externalJobs ?? []).map((job) => {
+                      const pendingFiles = externalJobFiles[job.id] ?? [];
+                      const uploadState = externalJobUpload[job.id];
+                      const partnerGroupName =
+                        activeGroups.find(
+                          (group) =>
+                            group.id ===
+                            activePartners.find(
+                              (partner) => partner.id === job.partnerId,
+                            )?.groupId,
+                        )?.name ?? "";
+                      return (
+                        <div
+                          key={job.id}
+                          className="space-y-3 rounded-lg border border-border px-4 py-3"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium">
+                                  {job.partnerName}
                                 </div>
-                              ))}
+                                {partnerGroupName ? (
+                                  <span className="text-xs text-muted-foreground">
+                                    {partnerGroupName}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {job.externalOrderNumber} • Due{" "}
+                                {formatDate(job.dueDate)}
+                              </div>
+                              {job.quantity !== undefined && (
+                                <div className="text-xs text-muted-foreground">
+                                  Qty: {job.quantity}
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {(job.attachments ?? []).length === 0 ? (
-                            <p className="text-xs text-muted-foreground">
-                              No files uploaded yet.
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
-                              {(job.attachments ?? []).map((file) => (
-                                <div
-                                  key={file.id}
-                                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge
+                                variant={externalJobStatusVariant(job.status)}
+                              >
+                                {externalJobStatusLabels[job.status]}
+                              </Badge>
+                              <select
+                                value={job.status}
+                                onChange={(event) =>
+                                  handleExternalStatusChange(
+                                    job.id,
+                                    event.target.value as ExternalJobStatus,
+                                  )
+                                }
+                                className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                              >
+                                {Object.entries(externalJobStatusLabels).map(
+                                  ([value, label]) => (
+                                    <option key={value} value={value}>
+                                      {label}
+                                    </option>
+                                  ),
+                                )}
+                              </select>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRemoveExternalJob(job.id)}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="text-xs text-muted-foreground">
+                                Attachments
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  id={`external-files-${job.id}`}
+                                  type="file"
+                                  multiple
+                                  className="hidden"
+                                  onChange={(event) => {
+                                    if (event.target.files) {
+                                      handleExternalFilesAdded(
+                                        job.id,
+                                        event.target.files,
+                                      );
+                                    }
+                                    event.target.value = "";
+                                  }}
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    const input = document.getElementById(
+                                      `external-files-${job.id}`,
+                                    ) as HTMLInputElement | null;
+                                    input?.click();
+                                  }}
                                 >
-                                  <div className="flex items-center gap-2">
-                                    {renderAttachmentPreview(
-                                      file as ExternalJobAttachment,
-                                      resolveExternalAttachmentUrl(
-                                        file as ExternalJobAttachment,
-                                      ),
-                                    )}
-                                    <span className="font-medium">
-                                      {file.name}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {resolveExternalAttachmentUrl(
-                                      file as ExternalJobAttachment,
-                                    ) && (
-                                      <a
-                                        href={resolveExternalAttachmentUrl(
-                                          file as ExternalJobAttachment,
-                                        )}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-xs text-primary underline"
-                                      >
-                                        Open
-                                      </a>
-                                    )}
+                                  Add files
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() =>
+                                    handleUploadExternalFiles(job.id)
+                                  }
+                                  disabled={
+                                    pendingFiles.length === 0 ||
+                                    uploadState?.isUploading
+                                  }
+                                >
+                                  {uploadState?.isUploading
+                                    ? "Uploading..."
+                                    : "Upload"}
+                                </Button>
+                              </div>
+                            </div>
+                            {uploadState?.error && (
+                              <p className="text-xs text-destructive">
+                                {uploadState.error}
+                              </p>
+                            )}
+                            {pendingFiles.length > 0 && (
+                              <div className="space-y-2 text-xs text-muted-foreground">
+                                {pendingFiles.map((file, index) => (
+                                  <div
+                                    key={`${file.name}-${index}`}
+                                    className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2"
+                                  >
+                                    <span>{file.name}</span>
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() =>
-                                        handleRemoveExternalFile(job.id, file.id)
+                                        setExternalJobFiles((prev) => ({
+                                          ...prev,
+                                          [job.id]: (prev[job.id] ?? []).filter(
+                                            (_, idx) => idx !== index,
+                                          ),
+                                        }))
                                       }
                                     >
                                       Remove
                                     </Button>
                                   </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-xs text-muted-foreground">
-                            Status history
-                          </div>
-                          {job.statusHistory && job.statusHistory.length > 0 ? (
-                            <div className="space-y-2">
-                              {(expandedExternalHistory[job.id]
-                                ? job.statusHistory
-                                : job.statusHistory.slice(0, 3)
-                              ).map((entry) => (
-                                <div
-                                  key={entry.id}
-                                  className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Badge
-                                      variant={externalJobStatusVariant(
-                                        entry.status,
+                                ))}
+                              </div>
+                            )}
+                            {(job.attachments ?? []).length === 0 ? (
+                              <p className="text-xs text-muted-foreground">
+                                No files uploaded yet.
+                              </p>
+                            ) : (
+                              <div className="space-y-2">
+                                {(job.attachments ?? []).map((file) => (
+                                  <div
+                                    key={file.id}
+                                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      {renderAttachmentPreview(
+                                        file as ExternalJobAttachment,
+                                        resolveExternalAttachmentUrl(
+                                          file as ExternalJobAttachment,
+                                        ),
                                       )}
-                                    >
-                                      {externalJobStatusLabels[entry.status]}
-                                    </Badge>
+                                      <span className="font-medium">
+                                        {file.name}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {resolveExternalAttachmentUrl(
+                                        file as ExternalJobAttachment,
+                                      ) && (
+                                        <a
+                                          href={resolveExternalAttachmentUrl(
+                                            file as ExternalJobAttachment,
+                                          )}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-xs text-primary underline"
+                                        >
+                                          Open
+                                        </a>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() =>
+                                          handleRemoveExternalFile(
+                                            job.id,
+                                            file.id,
+                                          )
+                                        }
+                                      >
+                                        Remove
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="text-xs text-muted-foreground">
+                              Status history
+                            </div>
+                            {job.statusHistory &&
+                            job.statusHistory.length > 0 ? (
+                              <div className="space-y-2">
+                                {(expandedExternalHistory[job.id]
+                                  ? job.statusHistory
+                                  : job.statusHistory.slice(0, 3)
+                                ).map((entry) => (
+                                  <div
+                                    key={entry.id}
+                                    className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <Badge
+                                        variant={externalJobStatusVariant(
+                                          entry.status,
+                                        )}
+                                      >
+                                        {externalJobStatusLabels[entry.status]}
+                                      </Badge>
+                                      <span className="text-muted-foreground">
+                                        {entry.changedBy}
+                                        {entry.changedByRole
+                                          ? ` (${entry.changedByRole})`
+                                          : ""}
+                                      </span>
+                                    </div>
                                     <span className="text-muted-foreground">
-                                      {entry.changedBy}
-                                      {entry.changedByRole
-                                        ? ` (${entry.changedByRole})`
-                                        : ""}
+                                      {formatDate(entry.changedAt.slice(0, 10))}
                                     </span>
                                   </div>
-                                  <span className="text-muted-foreground">
-                                    {formatDate(entry.changedAt.slice(0, 10))}
-                                  </span>
-                                </div>
-                              ))}
-                              {job.statusHistory.length > 3 && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setExpandedExternalHistory((prev) => ({
-                                      ...prev,
-                                      [job.id]: !prev[job.id],
-                                    }))
-                                  }
-                                  className="text-xs text-primary underline"
-                                >
-                                  {expandedExternalHistory[job.id]
-                                    ? "Show less"
-                                    : `Show all (${job.statusHistory.length})`}
-                                </button>
-                              )}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">
-                              No status updates yet.
-                            </p>
-                          )}
+                                ))}
+                                {job.statusHistory.length > 3 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedExternalHistory((prev) => ({
+                                        ...prev,
+                                        [job.id]: !prev[job.id],
+                                      }))
+                                    }
+                                    className="text-xs text-primary underline"
+                                  >
+                                    {expandedExternalHistory[job.id]
+                                      ? "Show less"
+                                      : `Show all (${job.statusHistory.length})`}
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">
+                                No status updates yet.
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
         <TabsContent value="workflow">
           <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Status History</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              {orderState.statusHistory && orderState.statusHistory.length > 0 ? (
-                <div className="space-y-4">
-                  {orderState.statusHistory.map((entry, index) => (
-                    <div key={entry.id} className="flex gap-3">
-                      <div className="flex flex-col items-center">
-                        <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                        {index < orderState.statusHistory.length - 1 && (
-                          <div className="mt-1 h-full w-px bg-border" />
-                        )}
-                      </div>
-                      <div className="flex-1 rounded-md border border-border px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <Badge variant={`status-${entry.status}`}>
-                            {statusLabel(entry.status)}
-                          </Badge>
-                          <div className="text-xs text-muted-foreground">
-                            {formatDate(entry.changedAt.slice(0, 10))}
+            <Card>
+              <CardHeader>
+                <CardTitle>Status History</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {orderState.statusHistory &&
+                orderState.statusHistory.length > 0 ? (
+                  <div className="space-y-4">
+                    {orderState.statusHistory.map((entry, index) => (
+                      <div key={entry.id} className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className="h-2.5 w-2.5 rounded-full bg-primary" />
+                          {index < orderState.statusHistory.length - 1 && (
+                            <div className="mt-1 h-full w-px bg-border" />
+                          )}
+                        </div>
+                        <div className="flex-1 rounded-md border border-border px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Badge variant={`status-${entry.status}`}>
+                              {statusLabel(entry.status)}
+                            </Badge>
+                            <div className="text-xs text-muted-foreground">
+                              {formatDate(entry.changedAt.slice(0, 10))}
+                            </div>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {entry.changedBy}
+                            {entry.changedByRole
+                              ? ` (${entry.changedByRole})`
+                              : ""}
                           </div>
                         </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {entry.changedBy}
-                          {entry.changedByRole ? ` (${entry.changedByRole})` : ""}
-                        </div>
                       </div>
+                    ))}
+                  </div>
+                ) : orderState.statusChangedAt ? (
+                  <div className="rounded-md border border-border px-3 py-2">
+                    <div className="font-medium">
+                      {statusLabel(orderState.status)}
                     </div>
-                  ))}
-                </div>
-              ) : orderState.statusChangedAt ? (
-                <div className="rounded-md border border-border px-3 py-2">
-                  <div className="font-medium">
-                    {statusLabel(orderState.status)}
+                    <div className="text-xs text-muted-foreground">
+                      {orderState.statusChangedBy ?? "Unknown"}
+                      {orderState.statusChangedByRole
+                        ? ` (${orderState.statusChangedByRole})`
+                        : ""}
+                      {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {orderState.statusChangedBy ?? "Unknown"}
-                    {orderState.statusChangedByRole
-                      ? ` (${orderState.statusChangedByRole})`
-                      : ""}
-                    {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-muted-foreground">No status changes yet.</p>
-              )}
-            </CardContent>
-          </Card>
+                ) : (
+                  <p className="text-muted-foreground">
+                    No status changes yet.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Preparation Checklist</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              {activeChecklistItems.length === 0 ? (
-                <p className="text-muted-foreground">
-                  No checklist items configured.
-                </p>
-              ) : (
-                activeChecklistItems.map((item) => (
-                  <label
-                    key={item.id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                  >
-                    <span className="font-medium">{item.label}</span>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(checklistState[item.id])}
-                      onChange={(event) =>
-                        handleChecklistToggle(item.id, event.target.checked)
-                      }
-                    />
-                  </label>
-                ))
-              )}
-              {canSendToEngineering && !canAdvanceToEngineering && (
-                <p className="text-xs text-muted-foreground">
-                  Complete required attachments, comments, and checklist items
-                  before sending to engineering.
-                </p>
-              )}
-              {canSendToProduction && !canAdvanceToProduction && (
-                <p className="text-xs text-muted-foreground">
-                  Complete required attachments, comments, and checklist items
-                  before sending to production.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
+            <Card>
+              <CardHeader>
+                <CardTitle>Preparation Checklist</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {activeChecklistItems.length === 0 ? (
+                  <p className="text-muted-foreground">
+                    No checklist items configured.
+                  </p>
+                ) : (
+                  activeChecklistItems.map((item) => (
+                    <label
+                      key={item.id}
+                      className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                    >
+                      <span className="font-medium">{item.label}</span>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(checklistState[item.id])}
+                        onChange={(event) =>
+                          handleChecklistToggle(item.id, event.target.checked)
+                        }
+                      />
+                    </label>
+                  ))
+                )}
+                {canSendToEngineering && !canAdvanceToEngineering && (
+                  <p className="text-xs text-muted-foreground">
+                    Complete required attachments, comments, and checklist items
+                    before sending to engineering.
+                  </p>
+                )}
+                {canSendToProduction && !canAdvanceToProduction && (
+                  <p className="text-xs text-muted-foreground">
+                    Complete required attachments, comments, and checklist items
+                    before sending to production.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
@@ -2469,7 +3352,8 @@ export default function OrderDetailPage() {
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
                   <div>
-                    Upload production reports in the Files tab and map them here.
+                    Upload production reports in the Files tab and map them
+                    here.
                   </div>
                   <Button
                     variant="outline"
@@ -2548,17 +3432,17 @@ export default function OrderDetailPage() {
 
             <Card>
               <CardHeader>
-              <CardTitle>Production Items</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              {productionItemsError ? (
-                <p className="text-xs text-destructive">
-                  {productionItemsError}
-                </p>
-              ) : null}
-              {productionItems.length === 0 ? (
-                <p className="text-muted-foreground">
-                  No production items created yet. Map a report to start.
+                <CardTitle>Production Items</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {productionItemsError ? (
+                  <p className="text-xs text-destructive">
+                    {productionItemsError}
+                  </p>
+                ) : null}
+                {productionItems.length === 0 ? (
+                  <p className="text-muted-foreground">
+                    No production items created yet. Map a report to start.
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -2583,13 +3467,10 @@ export default function OrderDetailPage() {
                   </div>
                 )}
                 {productionItems.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      onClick={handleClearProductionItems}
-                    >
-                      Clear items
-                    </Button>
-                  )}
+                  <Button variant="ghost" onClick={handleClearProductionItems}>
+                    Clear items
+                  </Button>
+                )}
               </CardContent>
             </Card>
           </div>

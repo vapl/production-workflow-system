@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import type { WorkStation } from "@/types/workstation";
+import type {
+  OrderInputField,
+  OrderInputFieldType,
+  OrderInputGroupKey,
+} from "@/types/orderInputs";
 import type { Partner, PartnerGroup } from "@/types/partner";
 import { useNotifications } from "@/components/ui/Notifications";
 import { mockPartnerGroups, mockPartners } from "@/lib/data/mockData";
@@ -16,6 +21,7 @@ export interface StopReason {
 
 interface SettingsDataState {
   workStations: WorkStation[];
+  orderInputFields: OrderInputField[];
   stopReasons: StopReason[];
   partners: Partner[];
   partnerGroups: PartnerGroup[];
@@ -27,6 +33,15 @@ interface SettingsDataState {
     patch: Partial<WorkStation>,
   ) => Promise<void>;
   removeWorkStation: (stationId: string) => Promise<void>;
+  addOrderInputField: (
+    payload: Omit<OrderInputField, "id">,
+  ) => Promise<void>;
+  updateOrderInputField: (
+    fieldId: string,
+    patch: Partial<Omit<OrderInputField, "id">>,
+  ) => Promise<void>;
+  removeOrderInputField: (fieldId: string) => Promise<void>;
+  ensureDefaultOrderInputFields: () => Promise<void>;
   addStopReason: (label: string) => Promise<void>;
   updateStopReason: (reasonId: string, patch: Partial<StopReason>) => Promise<void>;
   removeStopReason: (reasonId: string) => Promise<void>;
@@ -53,6 +68,33 @@ function mapWorkStation(row: {
     name: row.name,
     description: row.description ?? undefined,
     isActive: row.is_active,
+    sortOrder: row.sort_order ?? 0,
+  };
+}
+
+function mapOrderInputField(row: {
+  id: string;
+  key: string;
+  label: string;
+  group_key?: string | null;
+  field_type: string;
+  unit?: string | null;
+  options?: { options?: string[]; columns?: OrderInputField["columns"] } | null;
+  is_required?: boolean | null;
+  is_active?: boolean | null;
+  sort_order?: number | null;
+}): OrderInputField {
+  return {
+    id: row.id,
+    key: row.key,
+    label: row.label,
+    groupKey: (row.group_key ?? "order_info") as OrderInputGroupKey,
+    fieldType: row.field_type as OrderInputFieldType,
+    unit: row.unit ?? undefined,
+    options: row.options?.options ?? undefined,
+    columns: row.options?.columns ?? undefined,
+    isRequired: row.is_required ?? false,
+    isActive: row.is_active ?? true,
     sortOrder: row.sort_order ?? 0,
   };
 }
@@ -99,11 +141,167 @@ export function useSettingsData(): SettingsDataState {
   const user = useCurrentUser();
   const { notify } = useNotifications();
   const [workStations, setWorkStations] = useState<WorkStation[]>([]);
+  const [orderInputFields, setOrderInputFields] = useState<OrderInputField[]>([]);
   const [stopReasons, setStopReasons] = useState<StopReason[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [partnerGroups, setPartnerGroups] = useState<PartnerGroup[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const orderInputFieldBlacklist = new Set([
+    "contract_number",
+    "project_object",
+    "responsible_designer",
+    "responsible_estimator",
+    "responsible_technologist",
+    "order_type",
+  ]);
+  const defaultOrderInputFields: Array<Omit<OrderInputField, "id">> = [
+    {
+      key: "construction_count",
+      label: "Construction count",
+      groupKey: "order_info",
+      fieldType: "number",
+      unit: "pcs",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 10,
+    },
+    {
+      key: "construction_names",
+      label: "Construction names",
+      groupKey: "order_info",
+      fieldType: "textarea",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 20,
+    },
+    {
+      key: "delivery_address",
+      label: "Delivery address",
+      groupKey: "order_info",
+      fieldType: "textarea",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 50,
+    },
+    {
+      key: "contact_phone",
+      label: "Contact phone",
+      groupKey: "order_info",
+      fieldType: "text",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 60,
+    },
+    {
+      key: "cad_reference",
+      label: "CAD / IMOS reference",
+      groupKey: "order_info",
+      fieldType: "text",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 70,
+    },
+    {
+      key: "produce_flag",
+      label: "Produce",
+      groupKey: "order_info",
+      fieldType: "toggle",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 110,
+    },
+    {
+      key: "scope_doors",
+      label: "Doors",
+      groupKey: "production_scope",
+      fieldType: "toggle_number",
+      unit: "pcs",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 10,
+    },
+    {
+      key: "scope_standard_furniture",
+      label: "Standard furniture",
+      groupKey: "production_scope",
+      fieldType: "toggle_number",
+      unit: "m2",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 20,
+    },
+    {
+      key: "scope_parts",
+      label: "Parts / components",
+      groupKey: "production_scope",
+      fieldType: "toggle_number",
+      unit: "m2",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 30,
+    },
+    {
+      key: "scope_nonstandard",
+      label: "Non-standard furniture",
+      groupKey: "production_scope",
+      fieldType: "toggle_number",
+      unit: "m2",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 40,
+    },
+    {
+      key: "scope_kitchen",
+      label: "Kitchen",
+      groupKey: "production_scope",
+      fieldType: "toggle_number",
+      unit: "m2",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 50,
+    },
+    {
+      key: "scope_windows",
+      label: "Windows",
+      groupKey: "production_scope",
+      fieldType: "toggle_number",
+      unit: "pcs",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 60,
+    },
+    {
+      key: "scope_glass",
+      label: "Glass",
+      groupKey: "production_scope",
+      fieldType: "toggle_number",
+      unit: "m2",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 70,
+    },
+    {
+      key: "scope_other",
+      label: "Other",
+      groupKey: "production_scope",
+      fieldType: "toggle_number",
+      unit: "pcs",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 80,
+    },
+    {
+      key: "scope_other_notes",
+      label: "Other description",
+      groupKey: "production_scope",
+      fieldType: "text",
+      isRequired: false,
+      isActive: true,
+      sortOrder: 90,
+    },
+  ];
 
   const refreshAll = async () => {
     if (!supabase) {
@@ -115,6 +313,7 @@ export function useSettingsData(): SettingsDataState {
     setError(null);
     const [
       stationsResult,
+      orderInputFieldsResult,
       reasonsResult,
       partnersResult,
       partnerGroupsResult,
@@ -122,6 +321,14 @@ export function useSettingsData(): SettingsDataState {
       supabase
         .from("workstations")
         .select("id, name, description, is_active, sort_order")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("order_input_fields")
+        .select(
+          "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+        )
+        .order("group_key", { ascending: true })
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
       supabase
@@ -156,6 +363,11 @@ export function useSettingsData(): SettingsDataState {
     }
 
     setWorkStations((stationsResult.data ?? []).map(mapWorkStation));
+    setOrderInputFields(
+      (orderInputFieldsResult.data ?? [])
+        .filter((field) => !orderInputFieldBlacklist.has(field.key))
+        .map(mapOrderInputField),
+    );
     setStopReasons((reasonsResult.data ?? []).map(mapStopReason));
     setPartners((partnersResult.data ?? []).map(mapPartner));
     setPartnerGroups((partnerGroupsResult.data ?? []).map(mapPartnerGroup));
@@ -172,6 +384,7 @@ export function useSettingsData(): SettingsDataState {
     }
     if (!user.isAuthenticated) {
       setWorkStations([]);
+      setOrderInputFields([]);
       setStopReasons([]);
       setPartners([]);
       setPartnerGroups([]);
@@ -183,6 +396,7 @@ export function useSettingsData(): SettingsDataState {
   const value = useMemo<SettingsDataState>(
     () => ({
       workStations,
+      orderInputFields,
       stopReasons,
       partners,
       partnerGroups,
@@ -270,6 +484,158 @@ export function useSettingsData(): SettingsDataState {
           prev.filter((station) => station.id !== stationId),
         );
         notify({ title: "Workstation deleted", variant: "success" });
+      },
+      addOrderInputField: async (payload) => {
+        if (!supabase || !user.tenantId) {
+          return;
+        }
+        const optionsPayload =
+          payload.options || payload.columns
+            ? { options: payload.options, columns: payload.columns }
+            : null;
+        const { data, error: insertError } = await supabase
+          .from("order_input_fields")
+          .insert({
+            tenant_id: user.tenantId,
+            key: payload.key,
+            label: payload.label,
+            group_key: payload.groupKey,
+            field_type: payload.fieldType,
+            unit: payload.unit ?? null,
+            options: optionsPayload,
+            is_required: payload.isRequired,
+            is_active: payload.isActive,
+            sort_order: payload.sortOrder ?? 0,
+          })
+          .select(
+            "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+          )
+          .single();
+        if (insertError || !data) {
+          setError(insertError?.message ?? "Failed to add order field.");
+          notify({
+            title: "Order field not added",
+            description: insertError?.message,
+            variant: "error",
+          });
+          return;
+        }
+        setOrderInputFields((prev) => [...prev, mapOrderInputField(data)]);
+        notify({ title: "Order field added", variant: "success" });
+      },
+      updateOrderInputField: async (fieldId, patch) => {
+        if (!supabase) {
+          return;
+        }
+        const updatePayload: Record<string, unknown> = {};
+        if (patch.key !== undefined) updatePayload.key = patch.key;
+        if (patch.label !== undefined) updatePayload.label = patch.label;
+        if (patch.groupKey !== undefined)
+          updatePayload.group_key = patch.groupKey;
+        if (patch.fieldType !== undefined)
+          updatePayload.field_type = patch.fieldType;
+        if (patch.unit !== undefined) updatePayload.unit = patch.unit ?? null;
+        if (patch.options !== undefined || patch.columns !== undefined) {
+          updatePayload.options =
+            patch.options || patch.columns
+              ? { options: patch.options, columns: patch.columns }
+              : null;
+        }
+        if (patch.isRequired !== undefined)
+          updatePayload.is_required = patch.isRequired;
+        if (patch.isActive !== undefined)
+          updatePayload.is_active = patch.isActive;
+        if (patch.sortOrder !== undefined)
+          updatePayload.sort_order = patch.sortOrder;
+        const { data, error: updateError } = await supabase
+          .from("order_input_fields")
+          .update(updatePayload)
+          .eq("id", fieldId)
+          .select(
+            "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+          )
+          .single();
+        if (updateError || !data) {
+          setError(updateError?.message ?? "Failed to update order field.");
+          notify({
+            title: "Order field not updated",
+            description: updateError?.message,
+            variant: "error",
+          });
+          return;
+        }
+        setOrderInputFields((prev) =>
+          prev.map((field) =>
+            field.id === fieldId ? mapOrderInputField(data) : field,
+          ),
+        );
+        notify({ title: "Order field updated", variant: "success" });
+      },
+      removeOrderInputField: async (fieldId) => {
+        if (!supabase) {
+          return;
+        }
+        const { error: deleteError } = await supabase
+          .from("order_input_fields")
+          .delete()
+          .eq("id", fieldId);
+        if (deleteError) {
+          setError(deleteError.message);
+          notify({
+            title: "Order field not deleted",
+            description: deleteError.message,
+            variant: "error",
+          });
+          return;
+        }
+        setOrderInputFields((prev) =>
+          prev.filter((field) => field.id !== fieldId),
+        );
+        notify({ title: "Order field deleted", variant: "success" });
+      },
+      ensureDefaultOrderInputFields: async () => {
+        if (!supabase || !user.tenantId) {
+          return;
+        }
+        if (orderInputFields.length > 0) {
+          return;
+        }
+        const rows = defaultOrderInputFields.map((field) => ({
+          tenant_id: user.tenantId,
+          key: field.key,
+          label: field.label,
+          group_key: field.groupKey,
+          field_type: field.fieldType,
+          unit: field.unit ?? null,
+          options:
+            field.options || field.columns
+              ? { options: field.options, columns: field.columns }
+              : null,
+          is_required: field.isRequired,
+          is_active: field.isActive,
+          sort_order: field.sortOrder ?? 0,
+        }));
+        const { data, error: insertError } = await supabase
+          .from("order_input_fields")
+          .insert(rows)
+          .select(
+            "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+          );
+        if (insertError) {
+          setError(insertError.message);
+          notify({
+            title: "Default fields not added",
+            description: insertError.message,
+            variant: "error",
+          });
+          return;
+        }
+        setOrderInputFields(
+          (data ?? [])
+            .filter((field) => !orderInputFieldBlacklist.has(field.key))
+            .map(mapOrderInputField),
+        );
+        notify({ title: "Default order fields added", variant: "success" });
       },
       addStopReason: async (label) => {
         if (!supabase || !user.tenantId) {
@@ -515,6 +881,7 @@ export function useSettingsData(): SettingsDataState {
     }),
     [
       workStations,
+      orderInputFields,
       stopReasons,
       partners,
       partnerGroups,

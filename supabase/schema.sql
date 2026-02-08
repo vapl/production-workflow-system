@@ -84,6 +84,49 @@ create table if not exists public.order_comments (
 create index if not exists order_comments_order_id_idx on public.order_comments(order_id);
 create index if not exists order_comments_tenant_id_idx on public.order_comments(tenant_id);
 
+create table if not exists public.order_input_fields (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  key text not null,
+  label text not null,
+  group_key text not null default 'order_info',
+  field_type text not null
+    check (field_type in ('text', 'textarea', 'number', 'date', 'select', 'toggle', 'toggle_number', 'table')),
+  unit text,
+  options jsonb,
+  is_required boolean not null default false,
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists order_input_fields_tenant_key_uidx
+  on public.order_input_fields(tenant_id, key);
+create index if not exists order_input_fields_tenant_id_idx
+  on public.order_input_fields(tenant_id);
+create index if not exists order_input_fields_group_key_idx
+  on public.order_input_fields(group_key);
+create index if not exists order_input_fields_sort_order_idx
+  on public.order_input_fields(sort_order);
+
+create table if not exists public.order_input_values (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  field_id uuid not null references public.order_input_fields(id) on delete cascade,
+  value jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists order_input_values_order_field_uidx
+  on public.order_input_values(order_id, field_id);
+create index if not exists order_input_values_tenant_id_idx
+  on public.order_input_values(tenant_id);
+create index if not exists order_input_values_order_id_idx
+  on public.order_input_values(order_id);
+
 create or replace function public.set_updated_at()
 returns trigger as $$
 begin
@@ -117,9 +160,26 @@ create trigger set_order_comments_tenant_id
 before insert on public.order_comments
 for each row execute procedure public.set_order_child_tenant_id();
 
+drop trigger if exists set_order_input_fields_updated_at on public.order_input_fields;
+create trigger set_order_input_fields_updated_at
+before update on public.order_input_fields
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_order_input_values_updated_at on public.order_input_values;
+create trigger set_order_input_values_updated_at
+before update on public.order_input_values
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_order_input_values_tenant_id on public.order_input_values;
+create trigger set_order_input_values_tenant_id
+before insert on public.order_input_values
+for each row execute procedure public.set_order_child_tenant_id();
+
 alter table public.orders enable row level security;
 alter table public.order_attachments enable row level security;
 alter table public.order_comments enable row level security;
+alter table public.order_input_fields enable row level security;
+alter table public.order_input_values enable row level security;
 alter table public.tenants enable row level security;
 
 create policy "orders_select_by_tenant" on public.orders
@@ -245,6 +305,90 @@ create policy "order_comments_delete_by_tenant" on public.order_comments
     exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.tenant_id = order_comments.tenant_id
+    )
+  );
+
+create policy "order_input_fields_select_by_tenant" on public.order_input_fields
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_fields.tenant_id
+    )
+  );
+
+create policy "order_input_fields_insert_by_tenant" on public.order_input_fields
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_fields.tenant_id
+    )
+  );
+
+create policy "order_input_fields_update_by_tenant" on public.order_input_fields
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_fields.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_fields.tenant_id
+    )
+  );
+
+create policy "order_input_fields_delete_by_tenant" on public.order_input_fields
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_fields.tenant_id
+    )
+  );
+
+create policy "order_input_values_select_by_tenant" on public.order_input_values
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_values.tenant_id
+    )
+  );
+
+create policy "order_input_values_insert_by_tenant" on public.order_input_values
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_values.tenant_id
+    )
+  );
+
+create policy "order_input_values_update_by_tenant" on public.order_input_values
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_values.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_values.tenant_id
+    )
+  );
+
+create policy "order_input_values_delete_by_tenant" on public.order_input_values
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_input_values.tenant_id
     )
   );
 

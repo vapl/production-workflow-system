@@ -148,8 +148,7 @@ export function OrderModal({
     if (productLevel && nextValues.hierarchy?.[productLevel.id]) {
       const rawValue = nextValues.hierarchy?.[productLevel.id] ?? "";
       const selectedNode = nodes.find((node) => node.id === rawValue);
-      nextProductName =
-        selectedNode?.label ?? (rawValue || nextProductName);
+      nextProductName = selectedNode?.label ?? (rawValue || nextProductName);
     }
     setFormState({
       orderNumber: nextValues.orderNumber ?? "",
@@ -205,8 +204,7 @@ export function OrderModal({
         }
         return "";
       case "customerEmail":
-        return value.trim() &&
-          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+        return value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
           ? "Customer email must be valid."
           : "";
       case "productName":
@@ -238,7 +236,9 @@ export function OrderModal({
     setFormState((prev) => {
       const nextHierarchy = { ...prev.hierarchy, [levelId]: value };
       // Do not clear lower levels on manual input; many levels are independent.
-      const productLevel = activeLevels.find((level) => level.key === "product");
+      const productLevel = activeLevels.find(
+        (level) => level.key === "product",
+      );
       if (productLevel && levelId === productLevel.id) {
         const selectedNode = nodes.find((node) => node.id === value);
         return {
@@ -274,7 +274,9 @@ export function OrderModal({
       if (!level.isRequired || !editableLevelIds.has(level.id)) {
         return true;
       }
-      return Boolean(formState.hierarchy[level.id] || hierarchyInput[level.id]?.trim());
+      return Boolean(
+        formState.hierarchy[level.id] || hierarchyInput[level.id]?.trim(),
+      );
     });
     return requiredHierarchyOk;
   })();
@@ -286,8 +288,8 @@ export function OrderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
-        <div className="flex items-center justify-between">
+      <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 pt-0 shadow-xl">
+        <div className="sticky top-0 z-10 -mx-6 mb-4 flex items-center justify-between bg-card px-6 py-4 shadow-sm">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button
             type="button"
@@ -300,7 +302,7 @@ export function OrderModal({
         </div>
 
         <form
-          className="mt-6 space-y-4"
+          className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
             const resolvedHierarchy = { ...formState.hierarchy };
@@ -321,7 +323,7 @@ export function OrderModal({
               }
               const parentLevel = activeLevels[index - 1];
               const parentId = parentLevel
-                ? resolvedHierarchy[parentLevel.id] ?? null
+                ? (resolvedHierarchy[parentLevel.id] ?? null)
                 : null;
               const matchedId = resolveNodeId(
                 level.id,
@@ -331,13 +333,15 @@ export function OrderModal({
               resolvedHierarchy[level.id] = matchedId || inputValue;
             });
             const nextErrors: Record<string, string> = {};
-            ([
-              "orderNumber",
-              "customerName",
-              "customerEmail",
-              "quantity",
-              "dueDate",
-            ] as const).forEach((field) => {
+            (
+              [
+                "orderNumber",
+                "customerName",
+                "customerEmail",
+                "quantity",
+                "dueDate",
+              ] as const
+            ).forEach((field) => {
               if (isCategoryProductOnly) {
                 return;
               }
@@ -352,7 +356,8 @@ export function OrderModal({
                 !resolvedHierarchy[level.id] &&
                 editableLevelIds.has(level.id)
               ) {
-                nextErrors[`hierarchy.${level.id}`] = `${level.name} is required.`;
+                nextErrors[`hierarchy.${level.id}`] =
+                  `${level.name} is required.`;
               }
             });
             setErrors(nextErrors);
@@ -586,8 +591,7 @@ export function OrderModal({
                         handleHierarchyChange(level.id, nextValue);
                         setHierarchyInput((prev) => ({
                           ...prev,
-                          [level.id]:
-                            matched?.label ?? rawValue,
+                          [level.id]: matched?.label ?? rawValue,
                         }));
                         setErrors((prev) => ({
                           ...prev,
@@ -633,10 +637,7 @@ export function OrderModal({
                   if (isCategoryProductOnly) {
                     return;
                   }
-                  const message = validateField(
-                    "quantity",
-                    event.target.value,
-                  );
+                  const message = validateField("quantity", event.target.value);
                   setErrors((prev) => ({
                     ...prev,
                     quantity: message,
@@ -704,7 +705,11 @@ export function OrderModal({
               onChange={(event) =>
                 setFormState((prev) => ({
                   ...prev,
-                  priority: event.target.value,
+                  priority: event.target.value as
+                    | "low"
+                    | "normal"
+                    | "high"
+                    | "urgent",
                 }))
               }
               className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
@@ -724,7 +729,7 @@ export function OrderModal({
               onChange={(event) =>
                 setFormState((prev) => ({ ...prev, notes: event.target.value }))
               }
-              className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
+              className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
               placeholder="Special requirements or additional information..."
               disabled={isCategoryProductOnly}
             />

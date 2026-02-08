@@ -18,6 +18,7 @@ export function Header() {
   const { signOut } = useAuthActions();
   const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [isHidden, setIsHidden] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -47,6 +48,22 @@ export function Header() {
     };
   }, [userMenuOpen]);
 
+  useEffect(() => {
+    let ticking = false;
+    const handleScroll = () => {
+      const currentY = window.scrollY;
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          setIsHidden(currentY > 0);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   const tenantInitials = (user.tenantName ?? "Company")
     .split(" ")
     .filter(Boolean)
@@ -66,7 +83,11 @@ export function Header() {
     : "U";
 
   return (
-    <header className="border-b bg-card sticky top-0 z-10 shadow-sm">
+    <header
+      className={`sticky top-0 z-40 border-b bg-card shadow-sm transition-transform duration-200 ${
+        isHidden ? "-translate-y-full" : "translate-y-0"
+      }`}
+    >
       <div className="container mx-auto px-4 py-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
@@ -172,7 +193,7 @@ export function Header() {
                   </button>
                   {userMenuOpen ? (
                     <div
-                      className="absolute right-0 top-full z-20 mt-2 min-w-45 rounded-md border border-border bg-card p-1 text-xs text-muted-foreground shadow-md"
+                      className="absolute right-0 top-full z-9999 mt-2 min-w-45 rounded-md border border-border bg-card p-1 text-xs text-muted-foreground shadow-md"
                       role="menu"
                     >
                       <Link
