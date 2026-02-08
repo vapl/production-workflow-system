@@ -3113,7 +3113,141 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(180px,0.7fr)_auto] lg:items-end">
+              <div className="border-t border-border pt-4 pb-8">
+                <div className="text-sm font-medium">Partner groups</div>
+                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Group name</label>
+                    <input
+                      value={partnerGroupName}
+                      onChange={(event) =>
+                        setPartnerGroupName(event.target.value)
+                      }
+                      placeholder="Glass"
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={handleSavePartnerGroup}>
+                      {editingPartnerGroupId ? "Save group" : "Add group"}
+                    </Button>
+                    {editingPartnerGroupId && (
+                      <Button variant="outline" onClick={resetPartnerGroupForm}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm text-muted-foreground">
+                      {selectedPartnerGroupIds.length > 0
+                        ? `${selectedPartnerGroupIds.length} selected`
+                        : " "}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={
+                            partnerGroups.length > 0 &&
+                            selectedPartnerGroupIds.length ===
+                              partnerGroups.length
+                          }
+                          onChange={(event) => {
+                            if (event.target.checked) {
+                              setSelectedPartnerGroupIds(
+                                partnerGroups.map((group) => group.id),
+                              );
+                            } else {
+                              setSelectedPartnerGroupIds([]);
+                            }
+                          }}
+                          disabled={partnerGroups.length === 0}
+                        />
+                        Select all
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDeleteSelectedPartnerGroups}
+                        disabled={selectedPartnerGroupIds.length === 0}
+                      >
+                        Remove selected
+                      </Button>
+                    </div>
+                  </div>
+                  {partnerGroups.map((group) => (
+                    <div
+                      key={group.id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                    >
+                      <div className="font-medium">{group.name}</div>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={group.isActive}
+                            onChange={(event) =>
+                              updatePartnerGroup(group.id, {
+                                isActive: event.target.checked,
+                              })
+                            }
+                          />
+                          Active
+                        </label>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEditPartnerGroup(group.id)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopyPartnerGroup(group.id)}
+                        >
+                          Copy
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            if (
+                              !confirmRemove(`Remove group "${group.name}"?`)
+                            ) {
+                              return;
+                            }
+                            removePartnerGroup(group.id);
+                          }}
+                        >
+                          Remove
+                        </Button>
+                        <input
+                          type="checkbox"
+                          checked={selectedPartnerGroupIds.includes(group.id)}
+                          onChange={(event) => {
+                            setSelectedPartnerGroupIds((prev) => {
+                              if (event.target.checked) {
+                                return [...prev, group.id];
+                              }
+                              return prev.filter((id) => id !== group.id);
+                            });
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {partnerGroups.length === 0 && (
+                    <div className="text-sm text-muted-foreground">
+                      No partner groups yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-4 grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(180px,0.7fr)_auto] lg:items-end">
                 <div className="flex flex-col gap-2">
                   <label className="text-sm font-medium">Partner name</label>
                   <input
@@ -3266,140 +3400,6 @@ export default function SettingsPage() {
                     No partners yet.
                   </div>
                 )}
-              </div>
-
-              <div className="border-t border-border pt-4">
-                <div className="text-sm font-medium">Partner groups</div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Group name</label>
-                    <input
-                      value={partnerGroupName}
-                      onChange={(event) =>
-                        setPartnerGroupName(event.target.value)
-                      }
-                      placeholder="Glass"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button onClick={handleSavePartnerGroup}>
-                      {editingPartnerGroupId ? "Save group" : "Add group"}
-                    </Button>
-                    {editingPartnerGroupId && (
-                      <Button variant="outline" onClick={resetPartnerGroupForm}>
-                        Cancel
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm text-muted-foreground">
-                      {selectedPartnerGroupIds.length > 0
-                        ? `${selectedPartnerGroupIds.length} selected`
-                        : " "}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <input
-                          type="checkbox"
-                          checked={
-                            partnerGroups.length > 0 &&
-                            selectedPartnerGroupIds.length ===
-                              partnerGroups.length
-                          }
-                          onChange={(event) => {
-                            if (event.target.checked) {
-                              setSelectedPartnerGroupIds(
-                                partnerGroups.map((group) => group.id),
-                              );
-                            } else {
-                              setSelectedPartnerGroupIds([]);
-                            }
-                          }}
-                          disabled={partnerGroups.length === 0}
-                        />
-                        Select all
-                      </label>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleDeleteSelectedPartnerGroups}
-                        disabled={selectedPartnerGroupIds.length === 0}
-                      >
-                        Remove selected
-                      </Button>
-                    </div>
-                  </div>
-                  {partnerGroups.map((group) => (
-                    <div
-                      key={group.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
-                    >
-                      <div className="font-medium">{group.name}</div>
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={group.isActive}
-                            onChange={(event) =>
-                              updatePartnerGroup(group.id, {
-                                isActive: event.target.checked,
-                              })
-                            }
-                          />
-                          Active
-                        </label>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEditPartnerGroup(group.id)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCopyPartnerGroup(group.id)}
-                        >
-                          Copy
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            if (
-                              !confirmRemove(`Remove group "${group.name}"?`)
-                            ) {
-                              return;
-                            }
-                            removePartnerGroup(group.id);
-                          }}
-                        >
-                          Remove
-                        </Button>
-                        <input
-                          type="checkbox"
-                          checked={selectedPartnerGroupIds.includes(group.id)}
-                          onChange={(event) => {
-                            setSelectedPartnerGroupIds((prev) => {
-                              if (event.target.checked) {
-                                return [...prev, group.id];
-                              }
-                              return prev.filter((id) => id !== group.id);
-                            });
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {partnerGroups.length === 0 && (
-                    <div className="text-sm text-muted-foreground">
-                      No partner groups yet.
-                    </div>
-                  )}
-                </div>
               </div>
             </CardContent>
           </Card>
