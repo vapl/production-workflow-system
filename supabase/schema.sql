@@ -24,6 +24,7 @@ create table if not exists public.orders (
   product_name text,
   quantity integer check (quantity > 0),
   hierarchy jsonb,
+  hierarchy_labels jsonb,
   due_date date not null,
   priority text not null check (priority in ('low', 'normal', 'high', 'urgent')),
   status text not null check (status in ('pending', 'in_progress', 'completed', 'cancelled')),
@@ -96,6 +97,7 @@ create table if not exists public.order_input_fields (
   options jsonb,
   is_required boolean not null default false,
   is_active boolean not null default true,
+  show_in_production boolean not null default false,
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -109,6 +111,8 @@ create index if not exists order_input_fields_group_key_idx
   on public.order_input_fields(group_key);
 create index if not exists order_input_fields_sort_order_idx
   on public.order_input_fields(sort_order);
+create index if not exists order_input_fields_show_in_production_idx
+  on public.order_input_fields(show_in_production);
 
 create table if not exists public.order_input_values (
   id uuid primary key default gen_random_uuid(),

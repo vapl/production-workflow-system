@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useHierarchy } from "./HierarchyContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
 import { useCurrentUser, type UserRole } from "@/contexts/UserContext";
@@ -131,6 +132,7 @@ const orderInputColumnTypeOptions: {
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
+  const { confirm, dialog } = useConfirmDialog();
   const {
     levels,
     nodes,
@@ -226,6 +228,8 @@ export default function SettingsPage() {
   >([]);
   const [orderFieldRequired, setOrderFieldRequired] = useState(false);
   const [orderFieldActive, setOrderFieldActive] = useState(true);
+  const [orderFieldShowInProduction, setOrderFieldShowInProduction] =
+    useState(false);
   const [orderFieldSortOrder, setOrderFieldSortOrder] = useState(0);
   const [editingOrderFieldId, setEditingOrderFieldId] = useState<string | null>(
     null,
@@ -234,6 +238,7 @@ export default function SettingsPage() {
     [],
   );
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [bulkNodeInput, setBulkNodeInput] = useState("");
   const [selectedWorkStationIds, setSelectedWorkStationIds] = useState<
     string[]
   >([]);
@@ -829,8 +834,8 @@ export default function SettingsPage() {
     setNewAttachmentCategoryLabel("");
   }
 
-  function handleRemoveAttachmentCategory(id: string) {
-    if (!confirmRemove("Remove this attachment category?")) {
+  async function handleRemoveAttachmentCategory(id: string) {
+    if (!(await confirmRemove("Remove this attachment category?"))) {
       return;
     }
     const nextCategories = attachmentCategoryDrafts.filter(
@@ -865,6 +870,10 @@ export default function SettingsPage() {
       setSelectedLevelId(selectableLevels[0]?.id ?? "");
     }
   }, [levels, selectableLevels, selectedLevelId]);
+
+  useEffect(() => {
+    setNodeParentId("none");
+  }, [selectedLevelId]);
 
   useEffect(() => {
     setLevelOrder(sortedLevels.length + 1);
@@ -1189,6 +1198,33 @@ export default function SettingsPage() {
     setNodeParentId(node.parentId ?? "none");
   }
 
+  async function handleBulkAddNodes() {
+    if (!selectedLevel) {
+      return;
+    }
+    const parentIdValue = nodeParentId === "none" ? null : nodeParentId;
+    const lines = bulkNodeInput.split(/\r?\n/).map((line) => line.trim());
+    const entries = lines.filter(Boolean);
+    if (entries.length === 0) {
+      return;
+    }
+    for (const entry of entries) {
+      const parts = entry.split(/[|\t;]+/).map((part) => part.trim());
+      const label = parts[0];
+      if (!label) {
+        continue;
+      }
+      const code = parts[1] || undefined;
+      await addNode({
+        levelId: selectedLevel.id,
+        label,
+        code,
+        parentId: parentIdValue,
+      });
+    }
+    setBulkNodeInput("");
+  }
+
   async function handleCopyNode(nodeId: string) {
     const node = nodes.find((item) => item.id === nodeId);
     if (!node) {
@@ -1208,9 +1244,9 @@ export default function SettingsPage() {
       return;
     }
     if (
-      !confirmRemove(
+      !(await confirmRemove(
         `Remove ${selectedNodeIds.length} selected item(s) from ${selectedLevel?.name ?? "list"}?`,
-      )
+      ))
     ) {
       return;
     }
@@ -1259,9 +1295,9 @@ export default function SettingsPage() {
       return;
     }
     if (
-      !confirmRemove(
+      !(await confirmRemove(
         `Remove ${selectedWorkStationIds.length} selected workstation(s)?`,
-      )
+      ))
     ) {
       return;
     }
@@ -1285,9 +1321,9 @@ export default function SettingsPage() {
       return;
     }
     if (
-      !confirmRemove(
+      !(await confirmRemove(
         `Remove ${selectedStopReasonIds.length} selected reason(s)?`,
-      )
+      ))
     ) {
       return;
     }
@@ -1311,7 +1347,9 @@ export default function SettingsPage() {
       return;
     }
     if (
-      !confirmRemove(`Remove ${selectedPartnerIds.length} selected partner(s)?`)
+      !(await confirmRemove(
+        `Remove ${selectedPartnerIds.length} selected partner(s)?`,
+      ))
     ) {
       return;
     }
@@ -1335,9 +1373,9 @@ export default function SettingsPage() {
       return;
     }
     if (
-      !confirmRemove(
+      !(await confirmRemove(
         `Remove ${selectedPartnerGroupIds.length} selected group(s)?`,
-      )
+      ))
     ) {
       return;
     }
@@ -1391,6 +1429,7 @@ export default function SettingsPage() {
     setOrderFieldColumns([]);
     setOrderFieldRequired(false);
     setOrderFieldActive(true);
+    setOrderFieldShowInProduction(false);
     setOrderFieldSortOrder(0);
     setEditingOrderFieldId(null);
   }
@@ -1426,8 +1465,8 @@ export default function SettingsPage() {
     return parts.map((item) => item.trim()).filter(Boolean);
   }
 
-  function confirmRemove(message: string) {
-    return window.confirm(message);
+  async function confirmRemove(message: string) {
+    return confirm({ description: message });
   }
 
   useEffect(() => {
@@ -1537,6 +1576,7 @@ export default function SettingsPage() {
       columns,
       isRequired: orderFieldRequired,
       isActive: orderFieldActive,
+      showInProduction: orderFieldShowInProduction,
       sortOrder: Number.isFinite(orderFieldSortOrder) ? orderFieldSortOrder : 0,
     };
     if (editingOrderFieldId) {
@@ -1569,13 +1609,14 @@ export default function SettingsPage() {
     );
     setOrderFieldRequired(target.isRequired);
     setOrderFieldActive(target.isActive);
+    setOrderFieldShowInProduction(target.showInProduction ?? false);
     setOrderFieldSortOrder(target.sortOrder);
   }
 
   async function handleDeleteOrderField(fieldId: string) {
     const target = orderInputFields.find((field) => field.id === fieldId);
     const label = target?.label ?? "this field";
-    if (!confirmRemove(`Remove "${label}"?`)) {
+    if (!(await confirmRemove(`Remove "${label}"?`))) {
       return;
     }
     await removeOrderInputField(fieldId);
@@ -1587,9 +1628,9 @@ export default function SettingsPage() {
       return;
     }
     if (
-      !confirmRemove(
+      !(await confirmRemove(
         `Remove ${selectedOrderFieldIds.length} selected field(s)?`,
-      )
+      ))
     ) {
       return;
     }
@@ -1971,11 +2012,11 @@ export default function SettingsPage() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
+                                onClick={async () => {
                                   if (
-                                    !confirmRemove(
+                                    !(await confirmRemove(
                                       `Remove level "${level.name}"?`,
-                                    )
+                                    ))
                                   ) {
                                     return;
                                   }
@@ -2086,6 +2127,28 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
+                <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">
+                      Bulk add (one per line)
+                    </label>
+                    <textarea
+                      value={bulkNodeInput}
+                      onChange={(event) => setBulkNodeInput(event.target.value)}
+                      placeholder="PE 40 Durvis\nPE 40 Vitrina\nPE 40 Logs"
+                      className="min-h-[120px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                    />
+                    <div className="text-xs text-muted-foreground">
+                      Optional code: use "Label | Code" or "Label;Code".
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={handleBulkAddNodes}>
+                      Add list
+                    </Button>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-sm text-muted-foreground">
                     {selectedNodeIds.length > 0
@@ -2173,11 +2236,11 @@ export default function SettingsPage() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
+                                onClick={async () => {
                                   if (
-                                    !confirmRemove(
+                                    !(await confirmRemove(
                                       `Remove "${node.label}" from ${selectedLevel?.name ?? "list"}?`,
-                                    )
+                                    ))
                                   ) {
                                     return;
                                   }
@@ -2423,8 +2486,8 @@ export default function SettingsPage() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => {
-                                  if (!confirmRemove("Remove this column?")) {
+                                onClick={async () => {
+                                  if (!(await confirmRemove("Remove this column?"))) {
                                     return;
                                   }
                                   removeOrderFieldColumn(index);
@@ -2496,6 +2559,16 @@ export default function SettingsPage() {
                     />
                     Active
                   </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={orderFieldShowInProduction}
+                      onChange={(event) =>
+                        setOrderFieldShowInProduction(event.target.checked)
+                      }
+                    />
+                    Show in production
+                  </label>
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
@@ -2535,6 +2608,9 @@ export default function SettingsPage() {
                         <th className="px-4 py-2 text-left font-medium">
                           Active
                         </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Production
+                        </th>
                         <th className="px-4 py-2 text-right font-medium">
                           <div className="flex items-center justify-end gap-2">
                             <span>Actions</span>
@@ -2565,7 +2641,7 @@ export default function SettingsPage() {
                       {sortedOrderInputFields.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={7}
+                            colSpan={8}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
                             No order inputs configured.
@@ -2595,6 +2671,9 @@ export default function SettingsPage() {
                             </td>
                             <td className="px-4 py-2 text-sm">
                               {field.isActive ? "Yes" : "No"}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {field.showInProduction ? "Yes" : "No"}
                             </td>
                             <td className="px-4 py-2 text-right">
                               <div className="flex justify-end items-center gap-2">
@@ -2839,11 +2918,11 @@ export default function SettingsPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
+                            onClick={async () => {
                               if (
-                                !confirmRemove(
+                                !(await confirmRemove(
                                   `Remove workstation "${station.name}"?`,
-                                )
+                                ))
                               ) {
                                 return;
                               }
@@ -3072,9 +3151,11 @@ export default function SettingsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
+                          onClick={async () => {
                             if (
-                              !confirmRemove(`Remove reason "${reason.label}"?`)
+                              !(await confirmRemove(
+                                `Remove reason "${reason.label}"?`,
+                              ))
                             ) {
                               return;
                             }
@@ -3213,9 +3294,11 @@ export default function SettingsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
+                          onClick={async () => {
                             if (
-                              !confirmRemove(`Remove group "${group.name}"?`)
+                              !(await confirmRemove(
+                                `Remove group "${group.name}"?`,
+                              ))
                             ) {
                               return;
                             }
@@ -3369,9 +3452,11 @@ export default function SettingsPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
+                        onClick={async () => {
                           if (
-                            !confirmRemove(`Remove partner "${partner.name}"?`)
+                            !(await confirmRemove(
+                              `Remove partner "${partner.name}"?`,
+                            ))
                           ) {
                             return;
                           }
@@ -4185,11 +4270,11 @@ export default function SettingsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
+                          onClick={async () => {
                             if (
-                              !confirmRemove(
+                              !(await confirmRemove(
                                 `Remove checklist item "${item.label}"?`,
-                              )
+                              ))
                             ) {
                               return;
                             }
@@ -4237,8 +4322,12 @@ export default function SettingsPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
-                          if (!confirmRemove(`Remove reason "${reason}"?`)) {
+                        onClick={async () => {
+                          if (
+                            !(await confirmRemove(
+                              `Remove reason "${reason}"?`,
+                            ))
+                          ) {
                             return;
                           }
                           removeReturnReason(reason);
@@ -4324,6 +4413,7 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+      {dialog}
     </section>
   );
 }

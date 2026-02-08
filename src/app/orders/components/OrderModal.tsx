@@ -150,6 +150,22 @@ export function OrderModal({
       const selectedNode = nodes.find((node) => node.id === rawValue);
       nextProductName = selectedNode?.label ?? (rawValue || nextProductName);
     }
+    const nextHierarchy: Record<string, string> = {};
+    const nextHierarchyInput: Record<string, string> = {};
+    activeLevels.forEach((level) => {
+      const nodeId = nextValues.hierarchy?.[level.id];
+      if (!nodeId) {
+        return;
+      }
+      const node = nodes.find((item) => item.id === nodeId);
+      if (node) {
+        nextHierarchy[level.id] = nodeId;
+        nextHierarchyInput[level.id] = node.label;
+        return;
+      }
+      // Keep raw value in input for visibility, but drop invalid IDs from state.
+      nextHierarchyInput[level.id] = nodeId;
+    });
     setFormState({
       orderNumber: nextValues.orderNumber ?? "",
       customerName: nextValues.customerName,
@@ -159,18 +175,10 @@ export function OrderModal({
       dueDate: nextValues.dueDate,
       priority: nextValues.priority,
       notes: nextValues.notes ?? "",
-      hierarchy: nextValues.hierarchy ?? {},
+      hierarchy: nextHierarchy,
     });
     setErrors({});
     setTouched({});
-    const nextHierarchyInput: Record<string, string> = {};
-    activeLevels.forEach((level) => {
-      const nodeId = nextValues.hierarchy?.[level.id];
-      if (nodeId) {
-        const node = nodes.find((item) => item.id === nodeId);
-        nextHierarchyInput[level.id] = node?.label ?? nodeId;
-      }
-    });
     setHierarchyInput(nextHierarchyInput);
   }, [activeLevels, initialValues, nodes, open, productLevel]);
 
@@ -531,9 +539,13 @@ export function OrderModal({
             <div className="grid gap-4 md:grid-cols-2">
               {activeLevels.map((level, index) => {
                 const parentLevel = activeLevels[index - 1];
-                const parentId = parentLevel
+                const parentIdRaw = parentLevel
                   ? formState.hierarchy[parentLevel.id]
                   : null;
+                const parentId =
+                  parentIdRaw && nodes.some((node) => node.id === parentIdRaw)
+                    ? parentIdRaw
+                    : null;
                 const options = (levelNodeMap.get(level.id) || []).filter(
                   (node) => (parentId ? node.parentId === parentId : true),
                 );
@@ -575,6 +587,11 @@ export function OrderModal({
                         }));
                         const rawValue = event.target.value.trim();
                         if (!rawValue) {
+                          handleHierarchyChange(level.id, "");
+                          setHierarchyInput((prev) => ({
+                            ...prev,
+                            [level.id]: "",
+                          }));
                           if (level.isRequired) {
                             setErrors((prev) => ({
                               ...prev,

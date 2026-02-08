@@ -82,6 +82,7 @@ function mapOrderInputField(row: {
   options?: { options?: string[]; columns?: OrderInputField["columns"] } | null;
   is_required?: boolean | null;
   is_active?: boolean | null;
+  show_in_production?: boolean | null;
   sort_order?: number | null;
 }): OrderInputField {
   return {
@@ -95,6 +96,7 @@ function mapOrderInputField(row: {
     columns: row.options?.columns ?? undefined,
     isRequired: row.is_required ?? false,
     isActive: row.is_active ?? true,
+    showInProduction: row.show_in_production ?? false,
     sortOrder: row.sort_order ?? 0,
   };
 }
@@ -326,7 +328,7 @@ export function useSettingsData(): SettingsDataState {
       supabase
         .from("order_input_fields")
         .select(
-          "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+          "id, key, label, group_key, field_type, unit, options, is_required, is_active, show_in_production, sort_order",
         )
         .order("group_key", { ascending: true })
         .order("sort_order", { ascending: true })
@@ -505,10 +507,11 @@ export function useSettingsData(): SettingsDataState {
             options: optionsPayload,
             is_required: payload.isRequired,
             is_active: payload.isActive,
+            show_in_production: payload.showInProduction ?? false,
             sort_order: payload.sortOrder ?? 0,
           })
           .select(
-            "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+            "id, key, label, group_key, field_type, unit, options, is_required, is_active, show_in_production, sort_order",
           )
           .single();
         if (insertError || !data) {
@@ -545,6 +548,8 @@ export function useSettingsData(): SettingsDataState {
           updatePayload.is_required = patch.isRequired;
         if (patch.isActive !== undefined)
           updatePayload.is_active = patch.isActive;
+        if (patch.showInProduction !== undefined)
+          updatePayload.show_in_production = patch.showInProduction;
         if (patch.sortOrder !== undefined)
           updatePayload.sort_order = patch.sortOrder;
         const { data, error: updateError } = await supabase
@@ -552,7 +557,7 @@ export function useSettingsData(): SettingsDataState {
           .update(updatePayload)
           .eq("id", fieldId)
           .select(
-            "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+            "id, key, label, group_key, field_type, unit, options, is_required, is_active, show_in_production, sort_order",
           )
           .single();
         if (updateError || !data) {
@@ -613,13 +618,14 @@ export function useSettingsData(): SettingsDataState {
               : null,
           is_required: field.isRequired,
           is_active: field.isActive,
+          show_in_production: field.showInProduction ?? false,
           sort_order: field.sortOrder ?? 0,
         }));
         const { data, error: insertError } = await supabase
           .from("order_input_fields")
           .insert(rows)
           .select(
-            "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+            "id, key, label, group_key, field_type, unit, options, is_required, is_active, show_in_production, sort_order",
           );
         if (insertError) {
           setError(insertError.message);

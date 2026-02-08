@@ -169,6 +169,10 @@ export function OrderRow({
       </TableCell>
       {levels.map((level) => {
         const value = order.hierarchy?.[level.id];
+        const fallbackLabel = order.hierarchyLabels?.[level.id];
+        const displayValue = value
+          ? nodeLabelMap.get(value) ?? fallbackLabel ?? value
+          : "--";
         return (
           <TableCell
             key={level.id}
@@ -176,7 +180,7 @@ export function OrderRow({
               level.isRequired ? "table-cell" : "hidden md:table-cell"
             }`}
           >
-            {value ? (nodeLabelMap.get(value) ?? value) : "--"}
+            {displayValue}
           </TableCell>
         );
       })}

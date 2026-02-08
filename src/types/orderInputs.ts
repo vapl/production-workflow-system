@@ -33,6 +33,7 @@ export interface OrderInputField {
   columns?: OrderInputTableColumn[];
   isRequired: boolean;
   isActive: boolean;
+  showInProduction?: boolean;
   sortOrder: number;
 }
 

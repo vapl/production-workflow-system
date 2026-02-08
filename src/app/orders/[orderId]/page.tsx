@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   Card,
   CardContent,
@@ -91,8 +92,17 @@ export default function OrderDetailPage() {
   } = useOrders();
   const { levels, nodes } = useHierarchy();
   const { role, isAdmin, name, id: userId, tenantId } = useCurrentUser();
+  const { confirm, dialog } = useConfirmDialog();
   const { rules } = useWorkflowRules();
   const { activePartners, activeGroups } = usePartners();
+
+  async function confirmRemove(title: string, description?: string) {
+    return confirm({
+      title,
+      description,
+      confirmLabel: "Delete",
+    });
+  }
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
   const attachmentCategories = useMemo(() => {
@@ -874,7 +884,12 @@ export default function OrderDetailPage() {
     setAttachmentFiles((prev) => [...prev, ...next]);
   }
 
-  function handleRemovePendingFile(index: number) {
+  async function handleRemovePendingFile(index: number) {
+    const target = attachmentFiles[index];
+    const label = target?.name ? `Remove "${target.name}"?` : "Remove file?";
+    if (!(await confirmRemove(label))) {
+      return;
+    }
     setAttachmentFiles((prev) => prev.filter((_, idx) => idx !== index));
   }
 
@@ -1329,8 +1344,8 @@ export default function OrderDetailPage() {
           [field.id]: [...rows, {}],
         }));
       };
-      const removeRow = (rowIndex: number) => {
-        if (!window.confirm("Remove this row?")) {
+      const removeRow = async (rowIndex: number) => {
+        if (!(await confirmRemove("Delete row?", "This will remove the row."))) {
           return;
         }
         setOrderInputValues((prev) => ({
@@ -1344,11 +1359,16 @@ export default function OrderDetailPage() {
             .map((idx) => (idx > rowIndex ? idx - 1 : idx)),
         }));
       };
-      const removeSelectedRows = () => {
+      const removeSelectedRows = async () => {
         if (selectedRows.length === 0) {
           return;
         }
-        if (!window.confirm(`Remove ${selectedRows.length} selected row(s)?`)) {
+        if (
+          !(await confirmRemove(
+            "Delete selected rows?",
+            `This will remove ${selectedRows.length} selected row(s).`,
+          ))
+        ) {
           return;
         }
         const removeSet = new Set(selectedRows);
@@ -1708,6 +1728,15 @@ export default function OrderDetailPage() {
     const target = attachments.find(
       (attachment) => attachment.id === attachmentId,
     );
+    const targetLabel = target?.name ?? "attachment";
+    if (
+      !(await confirmRemove(
+        "Delete attachment?",
+        `This will remove "${targetLabel}".`,
+      ))
+    ) {
+      return;
+    }
     if (target?.url?.startsWith("blob:")) {
       URL.revokeObjectURL(target.url);
     }
@@ -1723,6 +1752,14 @@ export default function OrderDetailPage() {
   }
 
   async function handleRemoveComment(commentId: string) {
+    if (
+      !(await confirmRemove(
+        "Delete comment?",
+        "This will permanently remove the comment.",
+      ))
+    ) {
+      return;
+    }
     const removed = await removeOrderComment(orderState.id, commentId);
     if (removed) {
       const nextComments = comments.filter(
@@ -1812,6 +1849,14 @@ export default function OrderDetailPage() {
   }
 
   async function handleRemoveExternalJob(externalJobId: string) {
+    if (
+      !(await confirmRemove(
+        "Delete external job?",
+        "This will remove the external job from the order.",
+      ))
+    ) {
+      return;
+    }
     const removed = await removeExternalJob(externalJobId);
     if (removed) {
       setOrderState((prev) =>
@@ -1908,6 +1953,17 @@ export default function OrderDetailPage() {
     externalJobId: string,
     attachmentId: string,
   ) {
+    const job = orderState.externalJobs?.find((item) => item.id === externalJobId);
+    const attachment = job?.attachments?.find((item) => item.id === attachmentId);
+    const label = attachment?.name ?? "attachment";
+    if (
+      !(await confirmRemove(
+        "Delete attachment?",
+        `This will remove "${label}".`,
+      ))
+    ) {
+      return;
+    }
     const removed = await removeExternalJobAttachment(
       externalJobId,
       attachmentId,
@@ -3654,6 +3710,7 @@ export default function OrderDetailPage() {
           </div>
         </div>
       )}
+      {dialog}
     </section>
   );
 }

@@ -4,8 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
+import type { OrderInputField } from "@/types/orderInputs";
+import { ExternalLinkIcon, PaperclipIcon, XIcon } from "lucide-react";
+import Link from "next/link";
 
 type Priority = "low" | "normal" | "high" | "urgent";
 
@@ -41,6 +44,15 @@ type ReadyOrderRow = {
   priority: Priority;
   quantity: number | null;
   product_name: string | null;
+};
+
+type OrderAttachmentRow = {
+  id: string;
+  order_id: string;
+  name: string | null;
+  url: string | null;
+  category: string | null;
+  created_at: string;
 };
 
 type BatchRunRow = {
@@ -89,6 +101,8 @@ type QueueItem = {
   startedAt?: string | null;
   doneAt?: string | null;
 };
+
+const productionAttachmentCategory = "production_report";
 
 function priorityBadge(priority: Priority) {
   if (priority === "urgent") return "priority-urgent";
@@ -198,6 +212,26 @@ export default function ProductionPage() {
   const removeHintTimer = useRef<number | null>(null);
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [productionFields, setProductionFields] = useState<OrderInputField[]>(
+    [],
+  );
+  const [productionValues, setProductionValues] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
+  const [productionAttachments, setProductionAttachments] = useState<
+    Record<string, OrderAttachmentRow[]>
+  >({});
+  const [signedProductionUrls, setSignedProductionUrls] = useState<
+    Record<string, string>
+  >({});
+  const [filesPreview, setFilesPreview] = useState<{
+    orderId: string;
+    orderNumber: string;
+    files: OrderAttachmentRow[];
+  } | null>(null);
+  const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
+    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
+    : "";
 
   useEffect(() => {
     if (!supabase) {
@@ -274,6 +308,250 @@ export default function ProductionPage() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+    let isMounted = true;
+    const loadProductionDetails = async () => {
+      const orderIds = Array.from(
+        new Set([
+          ...readyOrders.map((order) => order.id),
+          ...productionItems.map((item) => item.order_id),
+        ]),
+      );
+      if (orderIds.length === 0) {
+        setProductionFields([]);
+        setProductionValues({});
+        setProductionAttachments({});
+        return;
+      }
+      const fieldsResult = await supabase
+        .from("order_input_fields")
+        .select(
+          "id, key, label, group_key, field_type, unit, options, is_required, is_active, show_in_production, sort_order",
+        )
+        .eq("is_active", true)
+        .eq("show_in_production", true)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (!isMounted) {
+        return;
+      }
+      const mappedFields =
+        (fieldsResult.data as Array<{
+          id: string;
+          key: string;
+          label: string;
+          group_key?: string | null;
+          field_type: string;
+          unit?: string | null;
+          options?: {
+            options?: string[];
+            columns?: OrderInputField["columns"];
+          } | null;
+          is_required?: boolean | null;
+          is_active?: boolean | null;
+          show_in_production?: boolean | null;
+          sort_order?: number | null;
+        }>) ?? [];
+      const normalizedFields = mappedFields
+        .filter((field) => field.show_in_production)
+        .map((field) => ({
+          id: field.id,
+          key: field.key,
+          label: field.label,
+          groupKey: (field.group_key ??
+            "order_info") as OrderInputField["groupKey"],
+          fieldType: field.field_type as OrderInputField["fieldType"],
+          unit: field.unit ?? undefined,
+          options: field.options?.options ?? undefined,
+          columns: field.options?.columns ?? undefined,
+          isRequired: field.is_required ?? false,
+          isActive: field.is_active ?? true,
+          showInProduction: field.show_in_production ?? false,
+          sortOrder: field.sort_order ?? 0,
+        })) satisfies OrderInputField[];
+
+      if (!isMounted) {
+        return;
+      }
+      setProductionFields(normalizedFields);
+
+      if (normalizedFields.length === 0) {
+        setProductionValues({});
+      } else {
+        const fieldIds = normalizedFields.map((field) => field.id);
+        const valuesResult = await supabase
+          .from("order_input_values")
+          .select("order_id, field_id, value")
+          .in("order_id", orderIds)
+          .in("field_id", fieldIds);
+        if (!isMounted) {
+          return;
+        }
+        const nextValues: Record<string, Record<string, unknown>> = {};
+        (valuesResult.data ?? []).forEach((row: any) => {
+          const orderId = row.order_id as string;
+          const fieldId = row.field_id as string;
+          if (!nextValues[orderId]) {
+            nextValues[orderId] = {};
+          }
+          nextValues[orderId][fieldId] = row.value;
+        });
+        setProductionValues(nextValues);
+      }
+
+      const attachmentsResult = await supabase
+        .from("order_attachments")
+        .select("id, order_id, name, url, category, created_at")
+        .in("order_id", orderIds)
+        .eq("category", productionAttachmentCategory)
+        .order("created_at", { ascending: false });
+      if (!isMounted) {
+        return;
+      }
+      const attachmentsMap: Record<string, OrderAttachmentRow[]> = {};
+      (attachmentsResult.data ?? []).forEach((row: OrderAttachmentRow) => {
+        if (!attachmentsMap[row.order_id]) {
+          attachmentsMap[row.order_id] = [];
+        }
+        attachmentsMap[row.order_id].push(row);
+      });
+      setProductionAttachments(attachmentsMap);
+    };
+    void loadProductionDetails();
+    return () => {
+      isMounted = false;
+    };
+  }, [productionItems, readyOrders]);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+    const allAttachments = Object.values(productionAttachments).flat();
+    const pending = allAttachments.filter(
+      (attachment) => attachment.url && !signedProductionUrls[attachment.id],
+    );
+    if (pending.length === 0) {
+      return;
+    }
+    let isMounted = true;
+    const signAll = async () => {
+      const results = await Promise.all(
+        pending.map(async (attachment) => {
+          let path = attachment.url as string;
+          if (storagePublicPrefix && path.startsWith(storagePublicPrefix)) {
+            path = path.slice(storagePublicPrefix.length);
+          }
+          const { data } = await supabase.storage
+            .from(supabaseBucket)
+            .createSignedUrl(path, 60 * 60);
+          return { id: attachment.id, url: data?.signedUrl };
+        }),
+      );
+      if (!isMounted) {
+        return;
+      }
+      setSignedProductionUrls((prev) => {
+        const next = { ...prev };
+        results.forEach((result) => {
+          if (result.url) {
+            next[result.id] = result.url;
+          }
+        });
+        return next;
+      });
+    };
+    void signAll();
+    return () => {
+      isMounted = false;
+    };
+  }, [productionAttachments, signedProductionUrls, storagePublicPrefix]);
+
+  const resolveProductionAttachmentUrl = (attachment: OrderAttachmentRow) => {
+    if (!attachment.url) {
+      return undefined;
+    }
+    if (!supabase) {
+      return attachment.url;
+    }
+    if (storagePublicPrefix && attachment.url.startsWith(storagePublicPrefix)) {
+      return signedProductionUrls[attachment.id];
+    }
+    if (attachment.url.startsWith("http")) {
+      return attachment.url;
+    }
+    return signedProductionUrls[attachment.id];
+  };
+
+  const formatProductionValue = (
+    field: OrderInputField,
+    value: unknown,
+  ): string[] => {
+    if (value === null || value === undefined) {
+      return [];
+    }
+    if (field.fieldType === "table") {
+      const rows = Array.isArray(value) ? value : [];
+      if (!field.columns || field.columns.length === 0) {
+        return rows.length > 0 ? [`${rows.length} rows`] : [];
+      }
+      return rows
+        .map((row) => {
+          if (!row || typeof row !== "object") {
+            return "";
+          }
+          const values = field.columns.map((column) => {
+            const cell = (row as Record<string, unknown>)[column.key];
+            if (Array.isArray(cell)) {
+              const joined = cell.map((item) => String(item)).join(" / ");
+              return column.unit ? `${joined} ${column.unit}` : joined;
+            }
+            if (cell === null || cell === undefined || cell === "") {
+              return "";
+            }
+            const text = String(cell);
+            return column.unit ? `${text} ${column.unit}` : text;
+          });
+          const filtered = values.filter((item) => item.trim().length > 0);
+          return filtered.length > 0 ? filtered.join(" | ") : "";
+        })
+        .filter((line) => line.trim().length > 0);
+    }
+    if (field.fieldType === "toggle_number") {
+      const payload =
+        typeof value === "object" && value !== null ? (value as any) : {};
+      const enabled = Boolean(payload.enabled);
+      const amount =
+        payload.amount === "" ||
+        payload.amount === null ||
+        payload.amount === undefined
+          ? null
+          : Number(payload.amount);
+      if (!enabled && amount === null) {
+        return [];
+      }
+      if (enabled && amount !== null) {
+        return [`${amount}`];
+      }
+      return enabled ? ["Yes"] : amount !== null ? [`${amount}`] : [];
+    }
+    if (field.fieldType === "toggle") {
+      return [value ? "Yes" : "No"];
+    }
+    if (Array.isArray(value)) {
+      const joined = value.map((item) => String(item)).join(", ");
+      return joined ? [joined] : [];
+    }
+    if (typeof value === "object") {
+      return [JSON.stringify(value)];
+    }
+    const text = String(value);
+    return text ? [text] : [];
+  };
 
   useEffect(() => {
     if (!supabase || !user?.tenantId) {
@@ -405,24 +683,21 @@ export default function ProductionPage() {
         planned_date: plannedDate,
       })),
     );
-      const { data: inserted, error } = await supabase
-        .from("batch_runs")
-        .insert(insertRows)
-        .select(
-          "id, order_id, batch_code, station_id, route_key, step_index, status, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
-        );
-      if (error) {
-        setDataError("Failed to create batch runs.");
-        return;
-      }
-      await supabase
-        .from("orders")
-        .update({ status: "in_production" })
-        .in(
-          "id",
-          Array.from(new Set(nextGroups.map((group) => group.orderId))),
-        );
-      setBatchRuns((prev) => [...(inserted ?? []), ...prev]);
+    const { data: inserted, error } = await supabase
+      .from("batch_runs")
+      .insert(insertRows)
+      .select(
+        "id, order_id, batch_code, station_id, route_key, step_index, status, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
+      );
+    if (error) {
+      setDataError("Failed to create batch runs.");
+      return;
+    }
+    await supabase
+      .from("orders")
+      .update({ status: "in_production" })
+      .in("id", Array.from(new Set(nextGroups.map((group) => group.orderId))));
+    setBatchRuns((prev) => [...(inserted ?? []), ...prev]);
     setSelectedBatchKeys([]);
   };
 
@@ -508,8 +783,7 @@ export default function ProductionPage() {
       prev.filter(
         (item) =>
           !(
-            item.order_id === run.order_id &&
-            item.batch_code === run.batch_code
+            item.order_id === run.order_id && item.batch_code === run.batch_code
           ),
       ),
     );
@@ -603,6 +877,29 @@ export default function ProductionPage() {
               </div>
               {filteredReadyGroups.map((group) => {
                 const isSelected = selectedBatchKeys.includes(group.key);
+                const fieldValues = productionValues[group.orderId] ?? {};
+                const productionDetails = productionFields
+                  .map((field) => {
+                    const raw = fieldValues[field.id];
+                    const formatted = formatProductionValue(field, raw);
+                    return formatted.length > 0
+                      ? {
+                          label: field.label,
+                          values: formatted,
+                          unit:
+                            field.fieldType === "table"
+                              ? undefined
+                              : field.unit,
+                        }
+                      : null;
+                  })
+                  .filter(Boolean) as Array<{
+                  label: string;
+                  values: string[];
+                  unit?: string;
+                }>;
+                const productionFiles =
+                  productionAttachments[group.orderId] ?? [];
                 return (
                   <label
                     key={group.key}
@@ -629,9 +926,37 @@ export default function ProductionPage() {
                         <span className="font-medium">
                           {group.orderNumber} / {group.batchCode}
                         </span>
-                        <Badge variant={priorityBadge(group.priority)}>
-                          {group.priority}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/orders/${group.orderId}`}
+                            onClick={(event) => event.stopPropagation()}
+                            className="inline-flex"
+                            aria-label="Open order"
+                          >
+                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+                              <ExternalLinkIcon className="h-4 w-4" />
+                            </span>
+                          </Link>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setFilesPreview({
+                                orderId: group.orderId,
+                                orderNumber: group.orderNumber,
+                                files: productionFiles,
+                              });
+                            }}
+                            aria-label="View production files"
+                          >
+                            <PaperclipIcon className="h-4 w-4" />
+                          </Button>
+                          <Badge variant={priorityBadge(group.priority)}>
+                            {group.priority}
+                          </Badge>
+                        </div>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {group.customerName}
@@ -642,6 +967,37 @@ export default function ProductionPage() {
                       <div className="mt-1 text-xs text-muted-foreground">
                         {group.material}
                       </div>
+                      {productionDetails.length > 0 && (
+                        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                          {productionDetails.map((detail) => (
+                            <div key={detail.label} className="space-y-1">
+                              <div className="flex items-start gap-2">
+                                <span className="min-w-[110px] text-foreground/80">
+                                  {detail.label}:
+                                </span>
+                                <span className="text-foreground">
+                                  {detail.values[0]}
+                                  {detail.unit ? ` ${detail.unit}` : ""}
+                                </span>
+                              </div>
+                              {detail.values.slice(1).map((value, index) => (
+                                <div
+                                  key={`${detail.label}-${index}`}
+                                  className="flex items-start gap-2"
+                                >
+                                  <span className="min-w-[110px] text-foreground/60">
+                                    &nbsp;
+                                  </span>
+                                  <span className="text-foreground">
+                                    {value}
+                                    {detail.unit ? ` ${detail.unit}` : ""}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </label>
                 );
@@ -683,7 +1039,7 @@ export default function ProductionPage() {
                   className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
                 />
               </label>
-              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <div className="rounded-lg border border-border bg-muted/30 mt-2 px-3 py-2 text-xs text-muted-foreground">
                 Planning date affects new work orders only. Use the queue view
                 controls to switch days.
               </div>
@@ -855,6 +1211,71 @@ export default function ProductionPage() {
           </div>
         </div>
       </div>
+
+      {filesPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Production files</h2>
+                <p className="text-sm text-muted-foreground">
+                  Order {filesPreview.orderNumber}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setFilesPreview(null)}
+                aria-label="Close files"
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="mt-4 space-y-2">
+              {filesPreview.files.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No production files uploaded.
+                </p>
+              ) : (
+                filesPreview.files.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">
+                        {file.name ?? "File"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(file.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                    {resolveProductionAttachmentUrl(file) ? (
+                      <a
+                        href={resolveProductionAttachmentUrl(file)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm text-primary hover:underline"
+                      >
+                        Open
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        No url
+                      </span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button variant="outline" onClick={() => setFilesPreview(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

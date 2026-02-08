@@ -200,11 +200,15 @@ function OrderCard({
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         {activeLevels.map((level) => {
           const value = order.hierarchy?.[level.id];
+          const fallbackLabel = order.hierarchyLabels?.[level.id];
+          const displayValue = value
+            ? nodeLabelMap.get(value) ?? fallbackLabel ?? value
+            : "--";
           return (
             <div key={level.id} className="text-xs">
               <div className="text-muted-foreground">{level.name}</div>
               <div className="text-foreground">
-                {value ? (nodeLabelMap.get(value) ?? value) : "--"}
+                {displayValue}
               </div>
             </div>
           );
