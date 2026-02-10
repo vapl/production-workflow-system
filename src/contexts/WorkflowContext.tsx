@@ -46,6 +46,8 @@ export interface ExternalJobRule {
 interface WorkflowContextValue {
   rules: WorkflowRules;
   setRules: (patch: Partial<WorkflowRules>) => void;
+  saveError: string | null;
+  isLoadedFromDb: boolean;
   addChecklistItem: (
     label: string,
     requiredFor: WorkflowTargetStatus[],
@@ -126,6 +128,8 @@ const defaultRules: WorkflowRules = {
 const WorkflowContext = createContext<WorkflowContextValue>({
   rules: defaultRules,
   setRules: () => undefined,
+  saveError: null,
+  isLoadedFromDb: false,
   addChecklistItem: () => undefined,
   updateChecklistItem: () => undefined,
   removeChecklistItem: () => undefined,
@@ -137,7 +141,42 @@ const WorkflowContext = createContext<WorkflowContextValue>({
 export function WorkflowProvider({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
   const [rules, setRulesState] = useState<WorkflowRules>(defaultRules);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isLoadedFromDb, setIsLoadedFromDb] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  const cacheKey = useMemo(() => {
+    if (!user.tenantId) {
+      return null;
+    }
+    return `pws_workflow_rules_${user.tenantId}`;
+  }, [user.tenantId]);
+
+  const readCachedRules = () => {
+    if (!cacheKey || typeof window === "undefined") {
+      return null;
+    }
+    try {
+      const raw = window.localStorage.getItem(cacheKey);
+      if (!raw) {
+        return null;
+      }
+      return JSON.parse(raw) as WorkflowRules;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeCachedRules = (nextRules: WorkflowRules) => {
+    if (!cacheKey || typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(cacheKey, JSON.stringify(nextRules));
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   useEffect(() => {
     if (!supabase || user.loading || !user.isAuthenticated) {
@@ -148,8 +187,14 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
     const fetchRules = async () => {
       if (!user.tenantId) {
         setIsLoadedFromDb(true);
+        setHasHydrated(true);
         return;
       }
+      const cached = readCachedRules();
+      if (cached) {
+        setRulesState(cached);
+      }
+      setHasHydrated(true);
       const [
         { data: rulesData },
         { data: checklistData },
@@ -184,7 +229,8 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      setRulesState((prev) => ({
+      setRulesState((prev) => {
+        const next = {
         ...prev,
         minAttachmentsForEngineering:
           rulesData?.min_attachments_engineering ??
@@ -236,7 +282,10 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
                 minAttachments: row.min_attachments ?? 0,
               }))
             : prev.externalJobRules,
-      }));
+        };
+        writeCachedRules(next);
+        return next;
+      });
 
       if (!rulesData) {
         await supabase.from("workflow_rules").insert({
@@ -274,6 +323,13 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user.isAuthenticated, user.loading, user.tenantId]);
 
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+    writeCachedRules(rules);
+  }, [rules, hasHydrated]);
+
   const setRules = (patch: Partial<WorkflowRules>) => {
     setRulesState((prev) => {
       const next = {
@@ -290,21 +346,36 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           patch.attachmentCategoryDefaults ?? prev.attachmentCategoryDefaults,
       };
       if (supabase && user.tenantId) {
-        void supabase.from("workflow_rules").upsert({
-          tenant_id: user.tenantId,
-          min_attachments_engineering: next.minAttachmentsForEngineering,
-          min_attachments_production: next.minAttachmentsForProduction,
-          require_comment_engineering: next.requireCommentForEngineering,
-          require_comment_production: next.requireCommentForProduction,
-          due_soon_days: next.dueSoonDays,
-          due_indicator_enabled: next.dueIndicatorEnabled,
-          due_indicator_statuses: next.dueIndicatorStatuses,
-          status_labels: next.statusLabels,
-          assignment_labels: next.assignmentLabels,
-          attachment_categories: next.attachmentCategories,
-          attachment_category_defaults: next.attachmentCategoryDefaults,
-        });
+        void supabase
+          .from("workflow_rules")
+          .upsert(
+            {
+              tenant_id: user.tenantId,
+              min_attachments_engineering: next.minAttachmentsForEngineering,
+              min_attachments_production: next.minAttachmentsForProduction,
+              require_comment_engineering: next.requireCommentForEngineering,
+              require_comment_production: next.requireCommentForProduction,
+              due_soon_days: next.dueSoonDays,
+              due_indicator_enabled: next.dueIndicatorEnabled,
+              due_indicator_statuses: next.dueIndicatorStatuses,
+              status_labels: next.statusLabels,
+              assignment_labels: next.assignmentLabels,
+              attachment_categories: next.attachmentCategories,
+              attachment_category_defaults: next.attachmentCategoryDefaults,
+            },
+            { onConflict: "tenant_id" },
+          )
+          .then(({ error }) => {
+            if (error) {
+              setSaveError(error.message);
+            } else {
+              setSaveError(null);
+            }
+          });
+      } else if (!user.tenantId) {
+        setSaveError("No tenant assigned for this user.");
       }
+      writeCachedRules(next);
       return next;
     });
   };
@@ -318,18 +389,18 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (!supabase || !user.tenantId) {
-      setRulesState((prev) => ({
-        ...prev,
-        checklistItems: [
-          ...prev.checklistItems,
-          {
-            id: `cl-${Date.now()}`,
-            label: trimmed,
-            requiredFor,
-            isActive: true,
-          },
-        ],
-      }));
+    setRulesState((prev) => ({
+      ...prev,
+      checklistItems: [
+        ...prev.checklistItems,
+        {
+          id: `cl-${Date.now()}`,
+          label: trimmed,
+          requiredFor,
+          isActive: true,
+        },
+      ],
+    }));
       return;
     }
     void supabase
@@ -342,10 +413,15 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       })
       .select("id, label, required_for, is_active")
       .single()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          setSaveError(error.message);
+          return;
+        }
         if (!data) {
           return;
         }
+        setSaveError(null);
         setRulesState((prev) => ({
           ...prev,
           checklistItems: [
@@ -381,7 +457,14 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         required_for: patch.requiredFor,
         is_active: patch.isActive,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .then(({ error }) => {
+        if (error) {
+          setSaveError(error.message);
+        } else {
+          setSaveError(null);
+        }
+      });
   };
 
   const removeChecklistItem = (id: string) => {
@@ -392,7 +475,17 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
     if (!supabase) {
       return;
     }
-    void supabase.from("workflow_checklist_items").delete().eq("id", id);
+    void supabase
+      .from("workflow_checklist_items")
+      .delete()
+      .eq("id", id)
+      .then(({ error }) => {
+        if (error) {
+          setSaveError(error.message);
+        } else {
+          setSaveError(null);
+        }
+      });
   };
 
   const addReturnReason = (label: string) => {
@@ -414,7 +507,12 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         label: trimmed,
         is_active: true,
       })
-      .then(() => {
+      .then(({ error }) => {
+        if (error) {
+          setSaveError(error.message);
+          return;
+        }
+        setSaveError(null);
         setRulesState((prev) => ({
           ...prev,
           returnReasons: [...prev.returnReasons, trimmed],
@@ -435,7 +533,12 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       .update({ is_active: false })
       .eq("label", label)
       .eq("tenant_id", user.tenantId ?? "")
-      .then(() => {
+      .then(({ error }) => {
+        if (error) {
+          setSaveError(error.message);
+          return;
+        }
+        setSaveError(null);
         setRulesState((prev) => ({
           ...prev,
           returnReasons: prev.returnReasons.filter((item) => item !== label),
@@ -461,13 +564,22 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       .update({
         min_attachments: patch.minAttachments,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .then(({ error }) => {
+        if (error) {
+          setSaveError(error.message);
+        } else {
+          setSaveError(null);
+        }
+      });
   };
 
   const value = useMemo<WorkflowContextValue>(
     () => ({
       rules,
       setRules,
+      saveError,
+      isLoadedFromDb,
       addChecklistItem,
       updateChecklistItem,
       removeChecklistItem,
@@ -475,7 +587,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       removeReturnReason,
       updateExternalJobRule,
     }),
-    [rules],
+    [rules, saveError, isLoadedFromDb],
   );
 
   return (

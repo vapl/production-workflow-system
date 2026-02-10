@@ -378,6 +378,8 @@ export default function SettingsPage() {
     addReturnReason,
     removeReturnReason,
     updateExternalJobRule,
+    saveError,
+    isLoadedFromDb,
   } = useWorkflowRules();
   const [newChecklistLabel, setNewChecklistLabel] = useState("");
   const [newChecklistRequired, setNewChecklistRequired] = useState<
@@ -549,10 +551,13 @@ export default function SettingsPage() {
       setStatusLabelMessage("Saved locally.");
       return;
     }
-    const { error } = await supabase.from("workflow_rules").upsert({
-      tenant_id: currentUser.tenantId,
-      status_labels: statusLabelDrafts,
-    });
+    const { error } = await supabase.from("workflow_rules").upsert(
+      {
+        tenant_id: currentUser.tenantId,
+        status_labels: statusLabelDrafts,
+      },
+      { onConflict: "tenant_id" },
+    );
     if (error) {
       setStatusLabelState("error");
       setStatusLabelMessage(error.message);
@@ -584,14 +589,17 @@ export default function SettingsPage() {
       setAssignmentLabelMessage("Saved locally.");
       return;
     }
-    const { error } = await supabase.from("workflow_rules").upsert({
-      tenant_id: currentUser.tenantId,
-      assignment_labels: {
-        ...rules.assignmentLabels,
-        engineer: nextEngineer,
-        manager: nextManager,
+    const { error } = await supabase.from("workflow_rules").upsert(
+      {
+        tenant_id: currentUser.tenantId,
+        assignment_labels: {
+          ...rules.assignmentLabels,
+          engineer: nextEngineer,
+          manager: nextManager,
+        },
       },
-    });
+      { onConflict: "tenant_id" },
+    );
     if (error) {
       setAssignmentLabelState("error");
       setAssignmentLabelMessage(error.message);
@@ -618,11 +626,14 @@ export default function SettingsPage() {
       setAttachmentCategoryMessage("Saved locally.");
       return;
     }
-    const { error } = await supabase.from("workflow_rules").upsert({
-      tenant_id: currentUser.tenantId,
-      attachment_categories: attachmentCategoryDrafts,
-      attachment_category_defaults: attachmentDefaultDrafts,
-    });
+    const { error } = await supabase.from("workflow_rules").upsert(
+      {
+        tenant_id: currentUser.tenantId,
+        attachment_categories: attachmentCategoryDrafts,
+        attachment_category_defaults: attachmentDefaultDrafts,
+      },
+      { onConflict: "tenant_id" },
+    );
     if (error) {
       setAttachmentCategoryState("error");
       setAttachmentCategoryMessage(error.message);
@@ -3854,615 +3865,664 @@ export default function SettingsPage() {
               <CardDescription>
                 Define what must be complete before moving orders forward.
               </CardDescription>
+              {saveError ? (
+                <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  {saveError}
+                </div>
+              ) : null}
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid gap-4 lg:grid-cols-2">
-                <label className="space-y-2 text-sm font-medium">
-                  Min attachments for engineering
-                  <input
-                    type="number"
-                    min={0}
-                    value={rules.minAttachmentsForEngineering}
-                    onChange={(event) =>
-                      setRules({
-                        minAttachmentsForEngineering:
-                          Number(event.target.value) || 0,
-                      })
-                    }
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Min attachments for production
-                  <input
-                    type="number"
-                    min={0}
-                    value={rules.minAttachmentsForProduction}
-                    onChange={(event) =>
-                      setRules({
-                        minAttachmentsForProduction:
-                          Number(event.target.value) || 0,
-                      })
-                    }
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Due soon threshold (days)
-                  <input
-                    type="number"
-                    min={0}
-                    value={rules.dueSoonDays}
-                    onChange={(event) =>
-                      setRules({
-                        dueSoonDays: Math.max(
-                          0,
-                          Number(event.target.value) || 0,
-                        ),
-                      })
-                    }
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </label>
-              </div>
-              <div className="space-y-2 text-sm">
-                <label className="flex items-center gap-2 font-medium">
-                  <input
-                    type="checkbox"
-                    checked={rules.dueIndicatorEnabled}
-                    onChange={(event) =>
-                      setRules({ dueIndicatorEnabled: event.target.checked })
-                    }
-                  />
-                  Enable due date indicators
-                </label>
-                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  {workflowStatusOptions.map((option) => {
-                    const isChecked = rules.dueIndicatorStatuses.includes(
-                      option.value,
-                    );
-                    return (
-                      <label
-                        key={option.value}
-                        className="flex items-center gap-2"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          disabled={!rules.dueIndicatorEnabled}
-                          onChange={(event) => {
-                            setRules({
-                              dueIndicatorStatuses: event.target.checked
-                                ? [...rules.dueIndicatorStatuses, option.value]
-                                : rules.dueIndicatorStatuses.filter(
-                                    (status) => status !== option.value,
-                                  ),
-                            });
-                          }}
-                        />
-                        {option.label}
-                      </label>
-                    );
-                  })}
+              {!isLoadedFromDb ? (
+                <div className="text-xs text-muted-foreground">
+                  Syncing workflow rules...
                 </div>
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm font-medium">Assignment labels</div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="space-y-2 text-sm font-medium">
-                    Engineer
-                    <input
-                      value={assignmentLabelDrafts.engineer}
-                      onChange={(event) =>
-                        setAssignmentLabelDrafts((prev) => ({
-                          ...prev,
-                          engineer: event.target.value,
-                        }))
-                      }
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </label>
-                  <label className="space-y-2 text-sm font-medium">
-                    Manager
-                    <input
-                      value={assignmentLabelDrafts.manager}
-                      onChange={(event) =>
-                        setAssignmentLabelDrafts((prev) => ({
-                          ...prev,
-                          manager: event.target.value,
-                        }))
-                      }
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </label>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      setAssignmentLabelDrafts({
-                        engineer:
-                          rules.assignmentLabels?.engineer ?? "Engineer",
-                        manager: rules.assignmentLabels?.manager ?? "Manager",
-                      })
-                    }
-                    disabled={!hasAssignmentLabelChanges}
-                  >
-                    Reset
-                  </Button>
-                  <Button
-                    onClick={handleSaveAssignmentLabels}
-                    disabled={
-                      !hasAssignmentLabelChanges ||
-                      assignmentLabelState === "saving"
-                    }
-                  >
-                    {assignmentLabelState === "saving"
-                      ? "Saving..."
-                      : "Save assignment labels"}
-                  </Button>
-                  {assignmentLabelState !== "idle" &&
-                    assignmentLabelMessage && (
-                      <span
-                        className={`text-xs ${
-                          assignmentLabelState === "error"
-                            ? "text-destructive"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        {assignmentLabelMessage}
-                      </span>
-                    )}
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm font-medium">Status labels</div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {workflowStatusOptions.map((option) => (
-                    <label
-                      key={option.value}
-                      className="space-y-2 text-sm font-medium"
-                    >
-                      {option.label}
+              ) : null}
+              <div className="grid gap-6">
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                  <div className="text-sm font-semibold">Core rules</div>
+                  <div className="mt-3 grid gap-4 lg:grid-cols-3">
+                    <label className="space-y-2 text-sm font-medium">
+                      Min attachments for engineering
                       <input
-                        value={statusLabelDrafts[option.value] ?? option.label}
+                        type="number"
+                        min={0}
+                        value={rules.minAttachmentsForEngineering}
                         onChange={(event) =>
-                          setStatusLabelDrafts({
-                            ...statusLabelDrafts,
-                            [option.value]: event.target.value,
+                          setRules({
+                            minAttachmentsForEngineering:
+                              Number(event.target.value) || 0,
                           })
                         }
                         className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       />
                     </label>
-                  ))}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setStatusLabelDrafts(rules.statusLabels)}
-                    disabled={!hasStatusLabelChanges}
-                  >
-                    Reset
-                  </Button>
-                  <Button
-                    onClick={handleSaveStatusLabels}
-                    disabled={
-                      !hasStatusLabelChanges || statusLabelState === "saving"
-                    }
-                  >
-                    {statusLabelState === "saving"
-                      ? "Saving..."
-                      : "Save status labels"}
-                  </Button>
-                  {statusLabelState !== "idle" && statusLabelMessage && (
-                    <span
-                      className={`text-xs ${
-                        statusLabelState === "error"
-                          ? "text-destructive"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      {statusLabelMessage}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm font-medium">Attachment categories</div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {attachmentCategoryDrafts.map((category) => (
-                    <div key={category.id} className="flex items-center gap-2">
+                    <label className="space-y-2 text-sm font-medium">
+                      Min attachments for production
                       <input
-                        value={category.label}
+                        type="number"
+                        min={0}
+                        value={rules.minAttachmentsForProduction}
                         onChange={(event) =>
-                          setAttachmentCategoryDrafts((prev) =>
-                            prev.map((item) =>
-                              item.id === category.id
-                                ? { ...item, label: event.target.value }
-                                : item,
-                            ),
-                          )
+                          setRules({
+                            minAttachmentsForProduction:
+                              Number(event.target.value) || 0,
+                          })
                         }
                         className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          handleRemoveAttachmentCategory(category.id)
+                    </label>
+                    <label className="space-y-2 text-sm font-medium">
+                      Due soon threshold (days)
+                      <input
+                        type="number"
+                        min={0}
+                        value={rules.dueSoonDays}
+                        onChange={(event) =>
+                          setRules({
+                            dueSoonDays: Math.max(
+                              0,
+                              Number(event.target.value) || 0,
+                            ),
+                          })
                         }
-                        disabled={attachmentCategoryDrafts.length <= 1}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    value={newAttachmentCategoryLabel}
-                    onChange={(event) =>
-                      setNewAttachmentCategoryLabel(event.target.value)
-                    }
-                    placeholder="Add category"
-                    className="h-10 min-w-[200px] flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                  <Button onClick={handleAddAttachmentCategory}>
-                    Add category
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">
-                    Default category by role
+                        className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                      />
+                    </label>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {attachmentRoles.map((role) => (
-                      <label
-                        key={role}
-                        className="space-y-2 text-sm font-medium"
+                  <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={rules.requireCommentForEngineering}
+                        onChange={(event) =>
+                          setRules({
+                            requireCommentForEngineering: event.target.checked,
+                          })
+                        }
+                      />
+                      Require comment before engineering
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={rules.requireCommentForProduction}
+                        onChange={(event) =>
+                          setRules({
+                            requireCommentForProduction: event.target.checked,
+                          })
+                        }
+                      />
+                      Require comment before production
+                    </label>
+                  </div>
+                  <div className="mt-4 rounded-lg border border-border bg-background/60 p-3">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        checked={rules.dueIndicatorEnabled}
+                        onChange={(event) =>
+                          setRules({
+                            dueIndicatorEnabled: event.target.checked,
+                          })
+                        }
+                      />
+                      Enable due date indicators
+                    </label>
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                      {workflowStatusOptions.map((option) => {
+                        const isChecked = rules.dueIndicatorStatuses.includes(
+                          option.value,
+                        );
+                        return (
+                          <label
+                            key={option.value}
+                            className="flex items-center gap-2"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={!rules.dueIndicatorEnabled}
+                              onChange={(event) => {
+                                setRules({
+                                  dueIndicatorStatuses: event.target.checked
+                                    ? [
+                                        ...rules.dueIndicatorStatuses,
+                                        option.value,
+                                      ]
+                                    : rules.dueIndicatorStatuses.filter(
+                                        (status) => status !== option.value,
+                                      ),
+                                });
+                              }}
+                            />
+                            {option.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-6 lg:grid-cols-2">
+                  <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                    <div className="text-sm font-semibold">Status labels</div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {workflowStatusOptions.map((option) => (
+                        <label
+                          key={option.value}
+                          className="space-y-2 text-sm font-medium"
+                        >
+                          {option.label}
+                          <input
+                            value={
+                              statusLabelDrafts[option.value] ?? option.label
+                            }
+                            onChange={(event) =>
+                              setStatusLabelDrafts({
+                                ...statusLabelDrafts,
+                                [option.value]: event.target.value,
+                              })
+                            }
+                            className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setStatusLabelDrafts(rules.statusLabels)}
+                        disabled={!hasStatusLabelChanges}
                       >
-                        {role}
-                        <select
-                          value={
-                            attachmentDefaultDrafts[role] ??
-                            attachmentCategoryDrafts[0]?.id ??
-                            ""
-                          }
+                        Reset
+                      </Button>
+                      <Button
+                        onClick={handleSaveStatusLabels}
+                        disabled={
+                          !hasStatusLabelChanges || statusLabelState === "saving"
+                        }
+                      >
+                        {statusLabelState === "saving"
+                          ? "Saving..."
+                          : "Save status labels"}
+                      </Button>
+                      {statusLabelState !== "idle" && statusLabelMessage && (
+                        <span
+                          className={`text-xs ${
+                            statusLabelState === "error"
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {statusLabelMessage}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                    <div className="text-sm font-semibold">Assignment labels</div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="space-y-2 text-sm font-medium">
+                        Engineer
+                        <input
+                          value={assignmentLabelDrafts.engineer}
                           onChange={(event) =>
-                            setAttachmentDefaultDrafts((prev) => ({
+                            setAssignmentLabelDrafts((prev) => ({
                               ...prev,
-                              [role]: event.target.value,
+                              engineer: event.target.value,
                             }))
                           }
                           className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                        >
-                          {attachmentCategoryDrafts.map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.label}
-                            </option>
-                          ))}
-                        </select>
+                        />
                       </label>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    New uploads will default to the selected category for each
-                    role.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setAttachmentCategoryDrafts(rules.attachmentCategories);
-                      setAttachmentDefaultDrafts(
-                        rules.attachmentCategoryDefaults,
-                      );
-                    }}
-                    disabled={!hasAttachmentCategoryChanges}
-                  >
-                    Reset
-                  </Button>
-                  <Button
-                    onClick={handleSaveAttachmentCategories}
-                    disabled={
-                      !hasAttachmentCategoryChanges ||
-                      attachmentCategoryState === "saving"
-                    }
-                  >
-                    {attachmentCategoryState === "saving"
-                      ? "Saving..."
-                      : "Save attachment categories"}
-                  </Button>
-                  {attachmentCategoryState !== "idle" &&
-                    attachmentCategoryMessage && (
-                      <span
-                        className={`text-xs ${
-                          attachmentCategoryState === "error"
-                            ? "text-destructive"
-                            : "text-muted-foreground"
-                        }`}
+                      <label className="space-y-2 text-sm font-medium">
+                        Manager
+                        <input
+                          value={assignmentLabelDrafts.manager}
+                          onChange={(event) =>
+                            setAssignmentLabelDrafts((prev) => ({
+                              ...prev,
+                              manager: event.target.value,
+                            }))
+                          }
+                          className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setAssignmentLabelDrafts({
+                            engineer:
+                              rules.assignmentLabels?.engineer ?? "Engineer",
+                            manager:
+                              rules.assignmentLabels?.manager ?? "Manager",
+                          })
+                        }
+                        disabled={!hasAssignmentLabelChanges}
                       >
-                        {attachmentCategoryMessage}
-                      </span>
-                    )}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-4 text-sm">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={rules.requireCommentForEngineering}
-                    onChange={(event) =>
-                      setRules({
-                        requireCommentForEngineering: event.target.checked,
-                      })
-                    }
-                  />
-                  Require comment before engineering
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={rules.requireCommentForProduction}
-                    onChange={(event) =>
-                      setRules({
-                        requireCommentForProduction: event.target.checked,
-                      })
-                    }
-                  />
-                  Require comment before production
-                </label>
-              </div>
-
-              {isStationOrderSaving ? (
-                <div className="text-xs text-muted-foreground">
-                  Saving station order...
-                </div>
-              ) : null}
-
-              <div className="space-y-3">
-                <div className="text-sm font-medium">Checklist items</div>
-                <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
-                  <div className="space-y-2">
-                    <input
-                      value={newChecklistLabel}
-                      onChange={(event) =>
-                        setNewChecklistLabel(event.target.value)
-                      }
-                      placeholder="Checklist item"
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                    <Button
-                      onClick={() => {
-                        addChecklistItem(
-                          newChecklistLabel,
-                          newChecklistRequired,
-                        );
-                        setNewChecklistLabel("");
-                      }}
-                    >
-                      Add item
-                    </Button>
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={newChecklistRequired.includes(
-                            "ready_for_engineering",
-                          )}
-                          onChange={(event) => {
-                            setNewChecklistRequired((prev) => {
-                              const next = new Set(prev);
-                              if (event.target.checked) {
-                                next.add("ready_for_engineering");
-                              } else {
-                                next.delete("ready_for_engineering");
-                              }
-                              return Array.from(next);
-                            });
-                          }}
-                        />
-                        Required for engineering
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={newChecklistRequired.includes(
-                            "ready_for_production",
-                            "in_production",
-                          )}
-                          onChange={(event) => {
-                            setNewChecklistRequired((prev) => {
-                              const next = new Set(prev);
-                              if (event.target.checked) {
-                                next.add("ready_for_production");
-                              } else {
-                                next.delete("ready_for_production");
-                              }
-                              return Array.from(next);
-                            });
-                          }}
-                        />
-                        Required for production
-                      </label>
+                        Reset
+                      </Button>
+                      <Button
+                        onClick={handleSaveAssignmentLabels}
+                        disabled={
+                          !hasAssignmentLabelChanges ||
+                          assignmentLabelState === "saving"
+                        }
+                      >
+                        {assignmentLabelState === "saving"
+                          ? "Saving..."
+                          : "Save assignment labels"}
+                      </Button>
+                      {assignmentLabelState !== "idle" &&
+                        assignmentLabelMessage && (
+                          <span
+                            className={`text-xs ${
+                              assignmentLabelState === "error"
+                                ? "text-destructive"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            {assignmentLabelMessage}
+                          </span>
+                        )}
                     </div>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  {rules.checklistItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3 text-sm"
+
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                  <div className="text-sm font-semibold">Attachments</div>
+                  <div className="mt-3 grid gap-6 lg:grid-cols-2">
+                    <div className="space-y-3">
+                      <div className="text-sm font-medium">
+                        Attachment categories
+                      </div>
+                      <div className="grid gap-3">
+                        {attachmentCategoryDrafts.map((category) => (
+                          <div
+                            key={category.id}
+                            className="flex items-center gap-2"
+                          >
+                            <input
+                              value={category.label}
+                              onChange={(event) =>
+                                setAttachmentCategoryDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item.id === category.id
+                                      ? {
+                                          ...item,
+                                          label: event.target.value,
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                              className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                handleRemoveAttachmentCategory(category.id)
+                              }
+                              disabled={attachmentCategoryDrafts.length <= 1}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          value={newAttachmentCategoryLabel}
+                          onChange={(event) =>
+                            setNewAttachmentCategoryLabel(event.target.value)
+                          }
+                          placeholder="Add category"
+                          className="h-10 min-w-[200px] flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                        />
+                        <Button onClick={handleAddAttachmentCategory}>
+                          Add category
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="text-sm font-medium">
+                        Default category by role
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {attachmentRoles.map((role) => (
+                          <label
+                            key={role}
+                            className="space-y-2 text-sm font-medium"
+                          >
+                            {role}
+                            <select
+                              value={
+                                attachmentDefaultDrafts[role] ??
+                                attachmentCategoryDrafts[0]?.id ??
+                                ""
+                              }
+                              onChange={(event) =>
+                                setAttachmentDefaultDrafts((prev) => ({
+                                  ...prev,
+                                  [role]: event.target.value,
+                                }))
+                              }
+                              className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                            >
+                              {attachmentCategoryDrafts.map((category) => (
+                                <option key={category.id} value={category.id}>
+                                  {category.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        New uploads will default to the selected category for
+                        each role.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setAttachmentCategoryDrafts(rules.attachmentCategories);
+                        setAttachmentDefaultDrafts(
+                          rules.attachmentCategoryDefaults,
+                        );
+                      }}
+                      disabled={!hasAttachmentCategoryChanges}
                     >
-                      <div className="font-medium">{item.label}</div>
+                      Reset
+                    </Button>
+                    <Button
+                      onClick={handleSaveAttachmentCategories}
+                      disabled={
+                        !hasAttachmentCategoryChanges ||
+                        attachmentCategoryState === "saving"
+                      }
+                    >
+                      {attachmentCategoryState === "saving"
+                        ? "Saving..."
+                        : "Save attachment categories"}
+                    </Button>
+                    {attachmentCategoryState !== "idle" &&
+                      attachmentCategoryMessage && (
+                        <span
+                          className={`text-xs ${
+                            attachmentCategoryState === "error"
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {attachmentCategoryMessage}
+                        </span>
+                      )}
+                  </div>
+                </div>
+
+                {isStationOrderSaving ? (
+                  <div className="text-xs text-muted-foreground">
+                    Saving station order...
+                  </div>
+                ) : null}
+
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                  <div className="text-sm font-semibold">Checklist items</div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
+                    <div className="space-y-2">
+                      <input
+                        value={newChecklistLabel}
+                        onChange={(event) =>
+                          setNewChecklistLabel(event.target.value)
+                        }
+                        placeholder="Checklist item"
+                        className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                      />
+                      <Button
+                        onClick={() => {
+                          addChecklistItem(
+                            newChecklistLabel,
+                            newChecklistRequired,
+                          );
+                          setNewChecklistLabel("");
+                        }}
+                      >
+                        Add item
+                      </Button>
                       <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                         <label className="flex items-center gap-2">
                           <input
                             type="checkbox"
-                            checked={item.requiredFor.includes(
+                            checked={newChecklistRequired.includes(
                               "ready_for_engineering",
                             )}
                             onChange={(event) => {
-                              const next = new Set(item.requiredFor);
-                              if (event.target.checked) {
-                                next.add("ready_for_engineering");
-                              } else {
-                                next.delete("ready_for_engineering");
-                              }
-                              updateChecklistItem(item.id, {
-                                requiredFor: Array.from(next),
+                              setNewChecklistRequired((prev) => {
+                                const next = new Set(prev);
+                                if (event.target.checked) {
+                                  next.add("ready_for_engineering");
+                                } else {
+                                  next.delete("ready_for_engineering");
+                                }
+                                return Array.from(next);
                               });
                             }}
                           />
-                          Eng.
+                          Required for engineering
                         </label>
                         <label className="flex items-center gap-2">
                           <input
                             type="checkbox"
-                            checked={item.requiredFor.includes(
+                            checked={newChecklistRequired.includes(
                               "ready_for_production",
                               "in_production",
                             )}
                             onChange={(event) => {
-                              const next = new Set(item.requiredFor);
-                              if (event.target.checked) {
-                                next.add("ready_for_production");
-                              } else {
-                                next.delete("ready_for_production");
-                              }
-                              updateChecklistItem(item.id, {
-                                requiredFor: Array.from(next),
+                              setNewChecklistRequired((prev) => {
+                                const next = new Set(prev);
+                                if (event.target.checked) {
+                                  next.add("ready_for_production");
+                                } else {
+                                  next.delete("ready_for_production");
+                                }
+                                return Array.from(next);
                               });
                             }}
                           />
-                          Prod.
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={item.isActive}
-                            onChange={(event) =>
-                              updateChecklistItem(item.id, {
-                                isActive: event.target.checked,
-                              })
-                            }
-                          />
-                          Active
+                          Required for production
                         </label>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={async () => {
-                            if (
-                              !(await confirmRemove(
-                                `Remove checklist item "${item.label}"?`,
-                              ))
-                            ) {
-                              return;
-                            }
-                            removeChecklistItem(item.id);
-                          }}
-                        >
-                          Remove
-                        </Button>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {rules.checklistItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3 text-sm"
+                      >
+                        <div className="font-medium">{item.label}</div>
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={item.requiredFor.includes(
+                                "ready_for_engineering",
+                              )}
+                              onChange={(event) => {
+                                const next = new Set(item.requiredFor);
+                                if (event.target.checked) {
+                                  next.add("ready_for_engineering");
+                                } else {
+                                  next.delete("ready_for_engineering");
+                                }
+                                updateChecklistItem(item.id, {
+                                  requiredFor: Array.from(next),
+                                });
+                              }}
+                            />
+                            Eng.
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={item.requiredFor.includes(
+                                "ready_for_production",
+                                "in_production",
+                              )}
+                              onChange={(event) => {
+                                const next = new Set(item.requiredFor);
+                                if (event.target.checked) {
+                                  next.add("ready_for_production");
+                                } else {
+                                  next.delete("ready_for_production");
+                                }
+                                updateChecklistItem(item.id, {
+                                  requiredFor: Array.from(next),
+                                });
+                              }}
+                            />
+                            Prod.
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={item.isActive}
+                              onChange={(event) =>
+                                updateChecklistItem(item.id, {
+                                  isActive: event.target.checked,
+                                })
+                              }
+                            />
+                            Active
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              if (
+                                !(await confirmRemove(
+                                  `Remove checklist item "${item.label}"?`,
+                                ))
+                              ) {
+                                return;
+                              }
+                              removeChecklistItem(item.id);
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  {rules.checklistItems.length === 0 && (
-                    <div className="text-sm text-muted-foreground">
-                      No checklist items yet.
-                    </div>
-                  )}
+                    ))}
+                    {rules.checklistItems.length === 0 && (
+                      <div className="text-sm text-muted-foreground">
+                        No checklist items yet.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              <div className="space-y-3">
-                <div className="text-sm font-medium">Return reasons</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    value={newReturnReason}
-                    onChange={(event) => setNewReturnReason(event.target.value)}
-                    placeholder="Add reason"
-                    className="h-10 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                  <Button
-                    onClick={() => {
-                      addReturnReason(newReturnReason);
-                      setNewReturnReason("");
-                    }}
-                  >
-                    Add reason
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  {rules.returnReasons.map((reason) => (
-                    <div
-                      key={reason}
-                      className="flex items-center justify-between rounded-lg border border-border px-4 py-2 text-sm"
-                    >
-                      <span>{reason}</span>
+                <div className="grid gap-6 lg:grid-cols-2">
+                  <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                    <div className="text-sm font-semibold">Return reasons</div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <input
+                        value={newReturnReason}
+                        onChange={(event) =>
+                          setNewReturnReason(event.target.value)
+                        }
+                        placeholder="Add reason"
+                        className="h-10 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                      />
                       <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={async () => {
-                          if (
-                            !(await confirmRemove(`Remove reason "${reason}"?`))
-                          ) {
-                            return;
-                          }
-                          removeReturnReason(reason);
+                        onClick={() => {
+                          addReturnReason(newReturnReason);
+                          setNewReturnReason("");
                         }}
                       >
-                        Remove
+                        Add reason
                       </Button>
                     </div>
-                  ))}
-                  {rules.returnReasons.length === 0 && (
-                    <div className="text-sm text-muted-foreground">
-                      No return reasons yet.
+                    <div className="mt-3 space-y-2">
+                      {rules.returnReasons.map((reason) => (
+                        <div
+                          key={reason}
+                          className="flex items-center justify-between rounded-lg border border-border px-4 py-2 text-sm"
+                        >
+                          <span>{reason}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              if (
+                                !(await confirmRemove(
+                                  `Remove reason "${reason}"?`,
+                                ))
+                              ) {
+                                return;
+                              }
+                              removeReturnReason(reason);
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                      {rules.returnReasons.length === 0 && (
+                        <div className="text-sm text-muted-foreground">
+                          No return reasons yet.
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                    <div className="text-sm font-semibold">External job rules</div>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      {rules.externalJobRules.map((rule) => (
+                        <div
+                          key={rule.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+                        >
+                          <div className="text-sm font-medium capitalize">
+                            {rule.status.replace("_", " ")}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>Min</span>
+                            <input
+                              type="number"
+                              min={0}
+                              value={rule.minAttachments}
+                              onChange={(event) =>
+                                updateExternalJobRule(rule.id, {
+                                  minAttachments:
+                                    Number(event.target.value) || 0,
+                                })
+                              }
+                              className="h-8 w-16 rounded-md border border-border bg-input-background px-2 text-sm text-foreground"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      {rules.externalJobRules.length === 0 && (
+                        <div className="text-sm text-muted-foreground">
+                          No external job rules yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <div className="text-sm font-medium">External job rules</div>
-                <div className="space-y-2">
-                  {rules.externalJobRules.map((rule) => (
-                    <div
-                      key={rule.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
-                    >
-                      <div className="font-medium capitalize">
-                        {rule.status.replace("_", " ")}
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <span>Min attachments</span>
-                        <input
-                          type="number"
-                          min={0}
-                          value={rule.minAttachments}
-                          onChange={(event) =>
-                            updateExternalJobRule(rule.id, {
-                              minAttachments: Number(event.target.value) || 0,
-                            })
-                          }
-                          className="h-9 w-20 rounded-md border border-border bg-input-background px-2 text-sm text-foreground"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {rules.externalJobRules.length === 0 && (
-                    <div className="text-sm text-muted-foreground">
-                      No external job rules yet.
-                    </div>
-                  )}
-                </div>
-              </div>
             </CardContent>
           </Card>
         </TabsContent>

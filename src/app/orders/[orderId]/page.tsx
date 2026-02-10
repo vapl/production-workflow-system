@@ -182,6 +182,7 @@ export default function OrderDetailPage() {
   const [checklistState, setChecklistState] = useState<Record<string, boolean>>(
     {},
   );
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const [isReturnOpen, setIsReturnOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnNote, setReturnNote] = useState("");
@@ -270,6 +271,13 @@ export default function OrderDetailPage() {
   const requiredForProduction = activeChecklistItems.filter((item) =>
     item.requiredFor.includes("ready_for_production"),
   );
+  const checklistDoneCount = activeChecklistItems.filter(
+    (item) => checklistState[item.id],
+  ).length;
+  const statusHistory = orderState.statusHistory ?? [];
+  const visibleStatusHistory = showAllHistory
+    ? statusHistory
+    : statusHistory.slice(0, 5);
 
   useEffect(() => {
     if (!orderState?.assignedEngineerId) {
@@ -2198,216 +2206,363 @@ export default function OrderDetailPage() {
 
         <TabsContent value="workflow">
           <div className="space-y-6">
-            <Card className="lg:sticky lg:top-6">
+            <Card>
               <CardHeader>
-                <CardTitle>Workflow</CardTitle>
+                <CardTitle>Workflow summary</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={priorityVariant}>{orderState.priority}</Badge>
-                  <Badge variant={statusVariant}>
-                    {statusLabel(orderState.status)}
-                  </Badge>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {canSendToEngineering && (
-                    <Button
-                      size="sm"
-                      disabled={!canAdvanceToEngineering}
-                      onClick={() =>
-                        handleStatusChange("ready_for_engineering")
-                      }
-                    >
-                      Send to engineering
-                    </Button>
-                  )}
-                  {canStartEngineering && (
-                    <Button
-                      size="sm"
-                      onClick={() => handleStatusChange("in_engineering")}
-                    >
-                      Start engineering
-                    </Button>
-                  )}
-                  {canBlockEngineering && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleStatusChange("engineering_blocked")}
-                    >
-                      Block engineering
-                    </Button>
-                  )}
-                  {canSendToProduction && (
-                    <Button
-                      size="sm"
-                      disabled={!canAdvanceToProduction}
-                      onClick={() => handleStatusChange("ready_for_production")}
-                    >
-                      {statusLabel("ready_for_production")}
-                    </Button>
-                  )}
-                  {canSendBack && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIsReturnOpen(true)}
-                    >
-                      Send back
-                    </Button>
-                  )}
-                  {canTakeOrder && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleTakeOrder}
-                    >
-                      Take order
-                    </Button>
-                  )}
-                  {canReturnToQueue && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleReturnToQueue}
-                    >
-                      Return to queue
-                    </Button>
+              <CardContent className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-md border border-border px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Next step</div>
+                  <div className="mt-1 font-medium">
+                    {nextGate === "engineering"
+                      ? "Engineering"
+                      : nextGate === "production"
+                        ? "Production"
+                        : "—"}
+                  </div>
+                  {nextGate && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Checklist {nextChecklistDone}/{nextChecklistTotal || 0}
+                    </div>
                   )}
                 </div>
-
-                <div className="space-y-2 text-xs text-muted-foreground">
-                  {orderState.assignedManagerName && (
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
-                        {getInitials(orderState.assignedManagerName)}
-                      </div>
-                      <span>
-                        {managerLabel}: {orderState.assignedManagerName}
-                      </span>
-                    </div>
-                  )}
-                  {canAssignManager && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <select
-                        value={selectedManagerId}
-                        onChange={(event) =>
-                          setSelectedManagerId(event.target.value)
-                        }
-                        className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
-                      >
-                        <option value="">
-                          Assign {managerLabel.toLowerCase()}...
-                        </option>
-                        {managers.map((manager) => (
-                          <option key={manager.id} value={manager.id}>
-                            {manager.name}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAssignManager}
-                        disabled={!selectedManagerId}
-                      >
-                        Assign
-                      </Button>
-                      {orderState.assignedManagerId && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleClearManager}
-                        >
-                          Clear
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  {orderState.assignedEngineerName && (
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
-                        {getInitials(orderState.assignedEngineerName)}
-                      </div>
-                      <span>
-                        {engineerLabel}: {orderState.assignedEngineerName}
-                      </span>
-                    </div>
-                  )}
-                  {canAssignEngineer && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <select
-                        value={selectedEngineerId}
-                        onChange={(event) =>
-                          setSelectedEngineerId(event.target.value)
-                        }
-                        className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
-                      >
-                        <option value="">
-                          Assign {engineerLabel.toLowerCase()}...
-                        </option>
-                        {engineers.map((engineer) => (
-                          <option key={engineer.id} value={engineer.id}>
-                            {engineer.name}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAssignEngineer}
-                        disabled={!selectedEngineerId}
-                      >
-                        Assign
-                      </Button>
-                      {orderState.assignedEngineerId && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleClearEngineer}
-                        >
-                          Clear
-                        </Button>
-                      )}
-                    </div>
-                  )}
+                <div className="rounded-md border border-border px-3 py-2">
+                  <div className="text-xs text-muted-foreground">
+                    Attachments
+                  </div>
+                  <div className="mt-1 font-medium">
+                    {attachments.length}/{nextMinAttachments}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {nextGate ? "Required for next step" : "—"}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Comment</div>
+                  <div className="mt-1 font-medium">
+                    {nextGate
+                      ? nextRequireComment
+                        ? comments.length > 0
+                          ? "Added"
+                          : "Required"
+                        : "Optional"
+                      : "—"}
+                  </div>
                   {orderState.statusChangedAt && (
-                    <div>
-                      Status updated{" "}
-                      {orderState.statusChangedBy
-                        ? `by ${orderState.statusChangedBy}`
-                        : ""}
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {`Updated ${formatDate(
+                        orderState.statusChangedAt.slice(0, 10),
+                      )}`}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+              <Card className="lg:sticky lg:top-6">
+                <CardHeader>
+                  <CardTitle>Workflow</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={priorityVariant}>
+                      {orderState.priority}
+                    </Badge>
+                    <Badge variant={statusVariant}>
+                      {statusLabel(orderState.status)}
+                    </Badge>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {canSendToEngineering && (
+                      <Button
+                        size="sm"
+                        disabled={!canAdvanceToEngineering}
+                        onClick={() =>
+                          handleStatusChange("ready_for_engineering")
+                        }
+                      >
+                        Send to engineering
+                      </Button>
+                    )}
+                    {canStartEngineering && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleStatusChange("in_engineering")}
+                      >
+                        Start engineering
+                      </Button>
+                    )}
+                    {canBlockEngineering && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          handleStatusChange("engineering_blocked")
+                        }
+                      >
+                        Block engineering
+                      </Button>
+                    )}
+                    {canSendToProduction && (
+                      <Button
+                        size="sm"
+                        disabled={!canAdvanceToProduction}
+                        onClick={() =>
+                          handleStatusChange("ready_for_production")
+                        }
+                      >
+                        {statusLabel("ready_for_production")}
+                      </Button>
+                    )}
+                    {canSendBack && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setIsReturnOpen(true)}
+                      >
+                        Send back
+                      </Button>
+                    )}
+                    {canTakeOrder && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleTakeOrder}
+                      >
+                        Take order
+                      </Button>
+                    )}
+                    {canReturnToQueue && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleReturnToQueue}
+                      >
+                        Return to queue
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 text-xs text-muted-foreground">
+                    {orderState.assignedManagerName && (
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
+                          {getInitials(orderState.assignedManagerName)}
+                        </div>
+                        <span>
+                          {managerLabel}: {orderState.assignedManagerName}
+                        </span>
+                      </div>
+                    )}
+                    {canAssignManager && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={selectedManagerId}
+                          onChange={(event) =>
+                            setSelectedManagerId(event.target.value)
+                          }
+                          className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                        >
+                          <option value="">
+                            Assign {managerLabel.toLowerCase()}...
+                          </option>
+                          {managers.map((manager) => (
+                            <option key={manager.id} value={manager.id}>
+                              {manager.name}
+                            </option>
+                          ))}
+                        </select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleAssignManager}
+                          disabled={!selectedManagerId}
+                        >
+                          Assign
+                        </Button>
+                        {orderState.assignedManagerId && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleClearManager}
+                          >
+                            Clear
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {orderState.assignedEngineerName && (
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
+                          {getInitials(orderState.assignedEngineerName)}
+                        </div>
+                        <span>
+                          {engineerLabel}: {orderState.assignedEngineerName}
+                        </span>
+                      </div>
+                    )}
+                    {canAssignEngineer && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={selectedEngineerId}
+                          onChange={(event) =>
+                            setSelectedEngineerId(event.target.value)
+                          }
+                          className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                        >
+                          <option value="">
+                            Assign {engineerLabel.toLowerCase()}...
+                          </option>
+                          {engineers.map((engineer) => (
+                            <option key={engineer.id} value={engineer.id}>
+                              {engineer.name}
+                            </option>
+                          ))}
+                        </select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleAssignEngineer}
+                          disabled={!selectedEngineerId}
+                        >
+                          Assign
+                        </Button>
+                        {orderState.assignedEngineerId && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleClearEngineer}
+                          >
+                            Clear
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {orderState.statusChangedAt && (
+                      <div>
+                        Status updated{" "}
+                        {orderState.statusChangedBy
+                          ? `by ${orderState.statusChangedBy}`
+                          : ""}
+                        {orderState.statusChangedByRole
+                          ? ` (${orderState.statusChangedByRole})`
+                          : ""}
+                        {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Preparation Checklist</CardTitle>
+                    <div className="text-xs text-muted-foreground">
+                      {checklistDoneCount}/{activeChecklistItems.length}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  {activeChecklistItems.length === 0 ? (
+                    <p className="text-muted-foreground">
+                      No checklist items configured.
+                    </p>
+                  ) : (
+                    activeChecklistItems.map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                      >
+                        <span className="font-medium">{item.label}</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(checklistState[item.id])}
+                          onChange={(event) =>
+                            handleChecklistToggle(item.id, event.target.checked)
+                          }
+                        />
+                      </label>
+                    ))
+                  )}
+                  {canSendToEngineering && !canAdvanceToEngineering && (
+                    <p className="text-xs text-muted-foreground">
+                      Complete required attachments, comments, and checklist
+                      items before sending to engineering.
+                    </p>
+                  )}
+                  {canSendToProduction && !canAdvanceToProduction && (
+                    <p className="text-xs text-muted-foreground">
+                      Complete required attachments, comments, and checklist
+                      items before sending to production.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Status History</CardTitle>
+                  {statusHistory.length > 5 ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAllHistory((prev) => !prev)}
+                    >
+                      {showAllHistory ? "Show recent" : "Show all"}
+                    </Button>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {statusHistory.length > 0 ? (
+                  <div className="space-y-4">
+                    {visibleStatusHistory.map((entry, index) => (
+                      <div key={entry.id} className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className="h-2.5 w-2.5 rounded-full bg-primary" />
+                          {index < visibleStatusHistory.length - 1 && (
+                            <div className="mt-1 h-full w-px bg-border" />
+                          )}
+                        </div>
+                        <div className="flex-1 rounded-md border border-border px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Badge variant={`status-${entry.status}`}>
+                              {statusLabel(entry.status)}
+                            </Badge>
+                            <div className="text-xs text-muted-foreground">
+                              {formatDate(entry.changedAt.slice(0, 10))}
+                            </div>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {entry.changedBy}
+                            {entry.changedByRole
+                              ? ` (${entry.changedByRole})`
+                              : ""}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : orderState.statusChangedAt ? (
+                  <div className="rounded-md border border-border px-3 py-2">
+                    <div className="font-medium">
+                      {statusLabel(orderState.status)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {orderState.statusChangedBy ?? "Unknown"}
                       {orderState.statusChangedByRole
                         ? ` (${orderState.statusChangedByRole})`
                         : ""}
                       {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
                     </div>
-                  )}
-                </div>
-
-                {nextGate && (
-                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                    <div className="font-medium text-foreground">
-                      Next step readiness
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      <div>
-                        Checklist: {nextChecklistDone}/{nextChecklistTotal || 0}
-                      </div>
-                      <div>
-                        Attachments: {attachments.length}/{nextMinAttachments}
-                      </div>
-                      <div>
-                        Comment:{" "}
-                        {nextRequireComment
-                          ? comments.length > 0
-                            ? "Added"
-                            : "Required"
-                          : "Optional"}
-                      </div>
-                    </div>
                   </div>
+                ) : (
+                  <p className="text-muted-foreground">
+                    No status changes yet.
+                  </p>
                 )}
               </CardContent>
             </Card>
@@ -3028,108 +3183,6 @@ export default function OrderDetailPage() {
             </Card>
           </div>
         </TabsContent>
-
-        <TabsContent value="workflow">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Status History</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {orderState.statusHistory &&
-                orderState.statusHistory.length > 0 ? (
-                  <div className="space-y-4">
-                    {orderState.statusHistory.map((entry, index) => (
-                      <div key={entry.id} className="flex gap-3">
-                        <div className="flex flex-col items-center">
-                          <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                          {index < orderState.statusHistory.length - 1 && (
-                            <div className="mt-1 h-full w-px bg-border" />
-                          )}
-                        </div>
-                        <div className="flex-1 rounded-md border border-border px-3 py-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <Badge variant={`status-${entry.status}`}>
-                              {statusLabel(entry.status)}
-                            </Badge>
-                            <div className="text-xs text-muted-foreground">
-                              {formatDate(entry.changedAt.slice(0, 10))}
-                            </div>
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {entry.changedBy}
-                            {entry.changedByRole
-                              ? ` (${entry.changedByRole})`
-                              : ""}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : orderState.statusChangedAt ? (
-                  <div className="rounded-md border border-border px-3 py-2">
-                    <div className="font-medium">
-                      {statusLabel(orderState.status)}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {orderState.statusChangedBy ?? "Unknown"}
-                      {orderState.statusChangedByRole
-                        ? ` (${orderState.statusChangedByRole})`
-                        : ""}
-                      {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground">
-                    No status changes yet.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Preparation Checklist</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {activeChecklistItems.length === 0 ? (
-                  <p className="text-muted-foreground">
-                    No checklist items configured.
-                  </p>
-                ) : (
-                  activeChecklistItems.map((item) => (
-                    <label
-                      key={item.id}
-                      className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                    >
-                      <span className="font-medium">{item.label}</span>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(checklistState[item.id])}
-                        onChange={(event) =>
-                          handleChecklistToggle(item.id, event.target.checked)
-                        }
-                      />
-                    </label>
-                  ))
-                )}
-                {canSendToEngineering && !canAdvanceToEngineering && (
-                  <p className="text-xs text-muted-foreground">
-                    Complete required attachments, comments, and checklist items
-                    before sending to engineering.
-                  </p>
-                )}
-                {canSendToProduction && !canAdvanceToProduction && (
-                  <p className="text-xs text-muted-foreground">
-                    Complete required attachments, comments, and checklist items
-                    before sending to production.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
       </Tabs>
 
       <OrderModal
