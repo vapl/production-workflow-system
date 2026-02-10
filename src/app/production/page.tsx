@@ -4,10 +4,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import type { OrderInputField } from "@/types/orderInputs";
-import { ExternalLinkIcon, PaperclipIcon, XIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ExternalLinkIcon,
+  PaperclipIcon,
+  XIcon,
+} from "lucide-react";
 import Link from "next/link";
 
 type Priority = "low" | "normal" | "high" | "urgent";
@@ -28,6 +36,7 @@ type ProductionItemRow = {
   status: "queued" | "in_progress" | "blocked" | "done";
   station_id: string | null;
   meta: Record<string, unknown> | null;
+  duration_minutes?: number | null;
   orders?: {
     order_number: string | null;
     due_date: string | null;
@@ -44,6 +53,7 @@ type ReadyOrderRow = {
   priority: Priority;
   quantity: number | null;
   product_name: string | null;
+  production_duration_minutes?: number | null;
 };
 
 type OrderAttachmentRow = {
@@ -68,6 +78,7 @@ type BatchRunRow = {
   planned_date?: string | null;
   started_at: string | null;
   done_at: string | null;
+  duration_minutes?: number | null;
   orders?: {
     order_number: string | null;
     due_date: string | null;
@@ -100,6 +111,8 @@ type QueueItem = {
   material: string;
   startedAt?: string | null;
   doneAt?: string | null;
+  durationMinutes?: number | null;
+  items: ProductionItemRow[];
 };
 
 const productionAttachmentCategory = "production_report";
@@ -187,6 +200,70 @@ function formatDuration(totalMinutes: number) {
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
+function formatDateInput(value: string) {
+  if (!value) return "";
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return "";
+  return `${day}.${month}.${year}`;
+}
+
+type DatePickerFieldProps = {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  className?: string;
+  disabled?: boolean;
+  min?: string;
+};
+
+function DatePickerField({
+  label,
+  value,
+  onChange,
+  className,
+  disabled,
+  min,
+}: DatePickerFieldProps) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const openPicker = () => {
+    if (disabled) return;
+    const target = inputRef.current as (HTMLInputElement & {
+      showPicker?: () => void;
+    }) | null;
+    if (!target) return;
+    if (typeof target.showPicker === "function") {
+      target.showPicker();
+    } else {
+      target.focus();
+    }
+  };
+  return (
+    <label className={className ?? "space-y-1 text-xs text-muted-foreground"}>
+      {label}
+      <div className="relative cursor-pointer" onClick={openPicker}>
+        <input
+          type="text"
+          readOnly
+          value={formatDateInput(value)}
+          placeholder="DD.MM.YYYY"
+          className="h-9 w-full cursor-pointer rounded-lg border border-border bg-input-background px-3 pr-9 text-sm text-foreground"
+          onClick={openPicker}
+        />
+        <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          type="date"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          min={min}
+          className="absolute inset-0 h-full w-full opacity-0"
+        />
+      </div>
+    </label>
+  );
+}
+
 export default function ProductionPage() {
   const user = useCurrentUser();
   const [selectedBatchKeys, setSelectedBatchKeys] = useState<string[]>([]);
@@ -197,6 +274,7 @@ export default function ProductionPage() {
   const [viewDate, setViewDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
+  const todayIso = new Date().toISOString().slice(0, 10);
   const [plannedRangeDays, setPlannedRangeDays] = useState(7);
   const [stations, setStations] = useState<Station[]>([]);
   const [readyOrders, setReadyOrders] = useState<ReadyOrderRow[]>([]);
@@ -212,6 +290,7 @@ export default function ProductionPage() {
   const removeHintTimer = useRef<number | null>(null);
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const { confirm, dialog } = useConfirmDialog();
   const [productionFields, setProductionFields] = useState<OrderInputField[]>(
     [],
   );
@@ -229,6 +308,32 @@ export default function ProductionPage() {
     orderNumber: string;
     files: OrderAttachmentRow[];
   } | null>(null);
+  const [expandedQueueItems, setExpandedQueueItems] = useState<Set<string>>(
+    new Set(),
+  );
+  const [expandedReadyItems, setExpandedReadyItems] = useState<Set<string>>(
+    new Set(),
+  );
+  const [isSplitOpen, setIsSplitOpen] = useState(false);
+  const [splitRows, setSplitRows] = useState<
+    Array<{
+      id: string;
+      orderId: string;
+      orderNumber: string;
+      customerName: string;
+      batchCode: string;
+      priority: Priority;
+      fieldLabel: string;
+      itemName: string;
+      qty: number;
+      material: string;
+      rowIndex: number;
+      rawRow: Record<string, unknown>;
+    }>
+  >([]);
+  const [splitSelections, setSplitSelections] = useState<
+    Record<string, string[]>
+  >({});
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
     : "";
@@ -258,19 +363,19 @@ export default function ProductionPage() {
           supabase
             .from("production_items")
             .select(
-              "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, orders (order_number, due_date, priority, customer_name)",
+              "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, duration_minutes, orders (order_number, due_date, priority, customer_name)",
             )
             .order("created_at", { ascending: false }),
           supabase
             .from("batch_runs")
             .select(
-              "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
+              "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
             )
             .order("created_at", { ascending: false }),
           supabase
             .from("orders")
             .select(
-              "id, order_number, customer_name, due_date, priority, quantity, product_name",
+              "id, order_number, customer_name, due_date, priority, quantity, product_name, production_duration_minutes",
             )
             .eq("status", "ready_for_production")
             .order("due_date", { ascending: true }),
@@ -649,6 +754,16 @@ export default function ProductionPage() {
     return Array.from(groups.values());
   }, [productionItems, readyOrders, batchRuns]);
 
+  const readyOrderDurationMap = useMemo(() => {
+    const map = new Map<string, number>();
+    readyOrders.forEach((order) => {
+      if (order.production_duration_minutes != null) {
+        map.set(order.id, order.production_duration_minutes);
+      }
+    });
+    return map;
+  }, [readyOrders]);
+
   const routes = [
     {
       key: "default",
@@ -660,9 +775,155 @@ export default function ProductionPage() {
     routes.find((route) => route.key === selectedRouteKey) ?? routes[0];
   const routeStations = useMemo(() => [...stations], [stations]);
 
-  const canRelease = selectedBatchKeys.length > 0 && routeStations.length > 0;
+  const plannedDateValid = Boolean(plannedDate);
+  const canRelease =
+    selectedBatchKeys.length > 0 && routeStations.length > 0 && plannedDateValid;
 
-  const handleRelease = async () => {
+  const formatTableRow = (
+    field: OrderInputField,
+    row: Record<string, unknown>,
+  ) => {
+    if (!field.columns || field.columns.length === 0) {
+      return "";
+    }
+    const parts = field.columns
+      .map((column) => {
+        const value = row[column.key];
+        if (Array.isArray(value)) {
+          const joined = value.map((item) => String(item)).join(" / ");
+          return column.unit ? `${joined} ${column.unit}` : joined;
+        }
+        if (value === null || value === undefined || value === "") {
+          return "";
+        }
+        const text = String(value);
+        return column.unit ? `${text} ${column.unit}` : text;
+      })
+      .filter((part) => part.trim().length > 0);
+    return parts.join(" | ");
+  };
+
+  const resolveRowQty = (
+    field: OrderInputField,
+    row: Record<string, unknown>,
+  ) => {
+    const numericValue = (value: unknown) => {
+      if (value === null || value === undefined || value === "") {
+        return null;
+      }
+      const parsed = Number(value);
+      return Number.isNaN(parsed) ? null : parsed;
+    };
+    const columns = field.columns ?? [];
+    for (const column of columns) {
+      const label = column.label.toLowerCase();
+      const unit = (column.unit ?? "").toLowerCase();
+      if (
+        label.includes("skaits") ||
+        label.includes("qty") ||
+        label.includes("quantity") ||
+        unit === "pcs" ||
+        unit === "gab"
+      ) {
+        const value = numericValue(row[column.key]);
+        if (value !== null) {
+          return value;
+        }
+      }
+    }
+    return 1;
+  };
+
+  const buildSplitRows = (groups: BatchGroup[]) => {
+    const rows: Array<{
+      id: string;
+      orderId: string;
+      orderNumber: string;
+      customerName: string;
+      batchCode: string;
+      priority: Priority;
+      fieldLabel: string;
+      itemName: string;
+      qty: number;
+      material: string;
+      rowIndex: number;
+      rawRow: Record<string, unknown>;
+    }> = [];
+    groups.forEach((group) => {
+      const values = productionValues[group.orderId] ?? {};
+      let added = false;
+      productionFields
+        .filter((field) => field.fieldType === "table")
+        .forEach((field) => {
+          const raw = values[field.id];
+          const tableRows = Array.isArray(raw) ? raw : [];
+          tableRows.forEach((row, rowIndex) => {
+            const normalized =
+              typeof row === "object" && row !== null
+                ? (row as Record<string, unknown>)
+                : {};
+            const itemName = formatTableRow(field, normalized);
+            if (!itemName) {
+              return;
+            }
+            rows.push({
+              id: `${group.orderId}:${field.id}:${rowIndex}`,
+              orderId: group.orderId,
+              orderNumber: group.orderNumber,
+              customerName: group.customerName,
+              batchCode: group.batchCode,
+              priority: group.priority,
+              fieldLabel: field.label,
+              itemName,
+              qty: resolveRowQty(field, normalized),
+              material: group.material ?? "",
+              rowIndex,
+              rawRow: normalized,
+            });
+            added = true;
+          });
+        });
+      if (!added) {
+        rows.push({
+          id: `${group.orderId}:fallback:0`,
+          orderId: group.orderId,
+          orderNumber: group.orderNumber,
+          customerName: group.customerName,
+          batchCode: group.batchCode,
+          priority: group.priority,
+          fieldLabel: "Order",
+          itemName: group.material || group.orderNumber,
+          qty: group.totalQty || 1,
+          material: group.material ?? "",
+          rowIndex: 0,
+          rawRow: {},
+        });
+      }
+    });
+    return rows;
+  };
+
+  const handleOpenSplit = () => {
+    if (!canRelease) {
+      return;
+    }
+    const nextGroups = readyBatchGroups.filter((group) =>
+      selectedBatchKeys.includes(group.key),
+    );
+    if (nextGroups.length === 0) {
+      return;
+    }
+    const rows = buildSplitRows(nextGroups);
+    const defaults: Record<string, string[]> = {};
+    rows.forEach((row) => {
+      defaults[row.id] = routeStations.map((station) => station.id);
+    });
+    setSplitRows(rows);
+    setSplitSelections(defaults);
+    setIsSplitOpen(true);
+  };
+
+  const handleConfirmSplit = async () => {
     if (!supabase || !canRelease) {
       return;
     }
@@ -671,6 +932,41 @@ export default function ProductionPage() {
     );
     if (nextGroups.length === 0) {
       return;
+    }
+    const selectedRows = splitRows.filter(
+      (row) => (splitSelections[row.id] ?? []).length > 0,
+    );
+    const productionRows = selectedRows.flatMap((row) =>
+      (splitSelections[row.id] ?? []).map((stationId) => ({
+        order_id: row.orderId,
+        batch_code: row.batchCode,
+        item_name: row.itemName,
+        qty: row.qty,
+        material: row.material || null,
+        priority: row.priority,
+        status: "queued",
+        station_id: stationId,
+        meta: {
+          fieldLabel: row.fieldLabel,
+          rowIndex: row.rowIndex,
+          rowKey: row.id,
+          plannedDate,
+          row: row.rawRow,
+        },
+      })),
+    );
+    if (productionRows.length > 0) {
+      const { data, error } = await supabase
+        .from("production_items")
+        .insert(productionRows)
+        .select(
+          "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, orders (order_number, due_date, priority, customer_name)",
+        );
+      if (error) {
+        setDataError("Failed to create production items.");
+        return;
+      }
+      setProductionItems((prev) => [...(data ?? []), ...prev]);
     }
     const insertRows = nextGroups.flatMap((group) =>
       routeStations.map((station, index) => ({
@@ -699,6 +995,7 @@ export default function ProductionPage() {
       .in("id", Array.from(new Set(nextGroups.map((group) => group.orderId))));
     setBatchRuns((prev) => [...(inserted ?? []), ...prev]);
     setSelectedBatchKeys([]);
+    setIsSplitOpen(false);
   };
 
   const queueByStation = useMemo(() => {
@@ -724,16 +1021,11 @@ export default function ProductionPage() {
           return;
         }
       }
-      if (run.step_index > 0) {
-        const prevKey = `${run.order_id}-${run.batch_code}-${run.step_index - 1}`;
-        const prevRun = runMap.get(prevKey);
-        if (!prevRun || prevRun.status !== "done") {
-          return;
-        }
-      }
       const items = productionItems.filter(
         (item) =>
-          item.order_id === run.order_id && item.batch_code === run.batch_code,
+          item.order_id === run.order_id &&
+          item.batch_code === run.batch_code &&
+          item.station_id === run.station_id,
       );
       const totalQty = items.reduce(
         (sum, item) => sum + Number(item.qty ?? 0),
@@ -756,6 +1048,8 @@ export default function ProductionPage() {
         material,
         startedAt: run.started_at,
         doneAt: run.done_at,
+        durationMinutes: run.duration_minutes ?? null,
+        items,
       } satisfies QueueItem;
       map.get(run.station_id)?.push(queueItem);
     });
@@ -773,24 +1067,65 @@ export default function ProductionPage() {
     const { error } = await supabase
       .from("batch_runs")
       .delete()
-      .eq("order_id", run.order_id)
-      .eq("batch_code", run.batch_code);
+      .eq("id", run.id);
     if (error) {
       setDataError("Failed to remove from queue.");
       return;
     }
-    setBatchRuns((prev) =>
-      prev.filter(
-        (item) =>
-          !(
-            item.order_id === run.order_id && item.batch_code === run.batch_code
-          ),
-      ),
-    );
+    const { error: itemsError } = await supabase
+      .from("production_items")
+      .delete()
+      .eq("order_id", run.order_id)
+      .eq("batch_code", run.batch_code)
+      .eq("station_id", run.station_id);
+    if (itemsError) {
+      setDataError("Removed queue entry, but failed to remove station items.");
+    } else {
+      setProductionItems((prev) =>
+        prev.filter(
+          (item) =>
+            !(
+              item.order_id === run.order_id &&
+              item.batch_code === run.batch_code &&
+              item.station_id === run.station_id
+            ),
+        ),
+      );
+    }
+    setBatchRuns((prev) => prev.filter((item) => item.id !== run.id));
     await supabase
       .from("orders")
       .update({ status: "ready_for_production" })
       .eq("id", run.order_id);
+  };
+
+  const handleRemoveFromQueue = async (
+    id: string,
+    orderLabel?: string,
+    stationName?: string,
+  ) => {
+    const descriptionParts = [];
+    if (orderLabel) {
+      descriptionParts.push(orderLabel);
+    }
+    if (stationName) {
+      descriptionParts.push(stationName);
+    }
+    const description =
+      descriptionParts.length > 0
+        ? `This will remove ${descriptionParts.join(" from ")} from the queue.`
+        : "This will remove the work order from the station queue.";
+    const ok = await confirm({
+      title: "Remove work order?",
+      description,
+      confirmLabel: "Remove",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!ok) {
+      return;
+    }
+    await removeFromQueue(id);
   };
 
   const handleRemoveHintStart = (id: string) => {
@@ -827,16 +1162,27 @@ export default function ProductionPage() {
     });
   }, [readyBatchGroups, readyPriority, readySearch]);
 
+  const isReadyLoading = isLoading;
+  const isQueuesLoading = isLoading;
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold">Production</h2>
-        <p className="text-sm text-muted-foreground">
-          Plan work orders, batch similar items, and assign to stations.
-        </p>
+    <Tabs defaultValue="planning" className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold">Production</h2>
+          <p className="text-sm text-muted-foreground">
+            Plan work orders, batch similar items, and assign to stations.
+          </p>
+        </div>
+        <TabsList>
+          <TabsTrigger value="planning">Planning</TabsTrigger>
+          <TabsTrigger value="list">Orders</TabsTrigger>
+          <TabsTrigger value="calendar">Calendar</TabsTrigger>
+        </TabsList>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
+      <TabsContent value="planning" className="space-y-6">
+        <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>Ready for production</CardTitle>
@@ -845,6 +1191,12 @@ export default function ProductionPage() {
             {dataError ? (
               <div className="rounded-lg border border-dashed border-destructive/40 bg-destructive/5 px-3 py-3 text-xs text-destructive">
                 {dataError}
+              </div>
+            ) : null}
+            {isReadyLoading ? (
+              <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                Loading ready batches...
               </div>
             ) : null}
             <div className="space-y-3">
@@ -898,6 +1250,12 @@ export default function ProductionPage() {
                   values: string[];
                   unit?: string;
                 }>;
+                const constructionDetails = productionDetails.filter(
+                  (detail) => detail.label.toLowerCase() === "konstrukcijas",
+                );
+                const otherDetails = productionDetails.filter(
+                  (detail) => detail.label.toLowerCase() !== "konstrukcijas",
+                );
                 const productionFiles =
                   productionAttachments[group.orderId] ?? [];
                 return (
@@ -967,35 +1325,73 @@ export default function ProductionPage() {
                       <div className="mt-1 text-xs text-muted-foreground">
                         {group.material}
                       </div>
-                      {productionDetails.length > 0 && (
-                        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                          {productionDetails.map((detail) => (
-                            <div key={detail.label} className="space-y-1">
-                              <div className="flex items-start gap-2">
-                                <span className="min-w-[110px] text-foreground/80">
-                                  {detail.label}:
-                                </span>
-                                <span className="text-foreground">
-                                  {detail.values[0]}
-                                  {detail.unit ? ` ${detail.unit}` : ""}
-                                </span>
-                              </div>
-                              {detail.values.slice(1).map((value, index) => (
-                                <div
-                                  key={`${detail.label}-${index}`}
-                                  className="flex items-start gap-2"
-                                >
-                                  <span className="min-w-[110px] text-foreground/60">
-                                    &nbsp;
-                                  </span>
-                                  <span className="text-foreground">
-                                    {value}
-                                    {detail.unit ? ` ${detail.unit}` : ""}
-                                  </span>
+                      {otherDetails.length > 0 && (
+                        <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+                          {otherDetails.flatMap((detail) =>
+                            detail.values.map((value, index) => (
+                              <div
+                                key={`${detail.label}-${index}`}
+                                className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="text-[11px] text-muted-foreground">
+                                    {detail.label}
+                                  </div>
                                 </div>
-                              ))}
+                                <div className="mt-1 text-[11px] text-foreground">
+                                  {value}
+                                  {detail.unit ? ` ${detail.unit}` : ""}
+                                </div>
+                              </div>
+                            )),
+                          )}
+                        </div>
+                      )}
+                      {constructionDetails.length > 0 && (
+                        <div className="mt-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-2 px-2 text-[11px]"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setExpandedReadyItems((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(group.key)) {
+                                  next.delete(group.key);
+                                } else {
+                                  next.add(group.key);
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            {expandedReadyItems.has(group.key) ? (
+                              <ChevronUpIcon className="h-3.5 w-3.5" />
+                            ) : (
+                              <ChevronDownIcon className="h-3.5 w-3.5" />
+                            )}
+                            Konstrukcijas
+                          </Button>
+                          {expandedReadyItems.has(group.key) ? (
+                            <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+                              {constructionDetails.flatMap((detail) =>
+                                detail.values.map((value, index) => (
+                                  <div
+                                    key={`${detail.label}-${index}`}
+                                    className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                                  >
+                                    <div className="mt-1 text-[11px] text-foreground">
+                                      {value}
+                                      {detail.unit ? ` ${detail.unit}` : ""}
+                                    </div>
+                                  </div>
+                                )),
+                              )}
                             </div>
-                          ))}
+                          ) : null}
                         </div>
                       )}
                     </div>
@@ -1010,45 +1406,68 @@ export default function ProductionPage() {
             </div>
 
             <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-3">
-              <div className="text-sm font-medium">Release to production</div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium">Release to production</div>
+                  <div className="text-xs text-muted-foreground">
+                    Unit of work: Batch (e.g. AL-1042 / B1)
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {selectedBatchKeys.length > 0
+                    ? `${selectedBatchKeys.length} selected`
+                    : "No selection"}
+                </div>
+              </div>
               <label className="space-y-1 text-xs text-muted-foreground">
                 Route
-                <select
-                  value={selectedRouteKey}
-                  onChange={(event) => setSelectedRouteKey(event.target.value)}
-                  className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                >
-                  {routes.map((route) => (
-                    <option key={route.key} value={route.key}>
-                      {route.label}
-                    </option>
-                  ))}
-                </select>
+                {routes.length > 1 ? (
+                  <select
+                    value={selectedRouteKey}
+                    onChange={(event) => setSelectedRouteKey(event.target.value)}
+                    className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                  >
+                    {routes.map((route) => (
+                      <option key={route.key} value={route.key}>
+                        {route.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
+                    {routes[0]?.label ?? "Default route"}
+                  </div>
+                )}
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
-                  {routeStations.length > 0
-                    ? routeStations.map((station) => station.name).join(" → ")
-                    : "No matching stations for default route."}
+                  {routeStations.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {routeStations.map((station, index) => (
+                        <span
+                          key={station.id}
+                          className="rounded-full border border-border bg-background px-2 py-0.5 text-xs"
+                        >
+                          {index + 1}. {station.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    "No matching stations for default route."
+                  )}
                 </div>
               </label>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                Planned date
-                <input
-                  type="date"
-                  value={plannedDate}
-                  onChange={(event) => setPlannedDate(event.target.value)}
-                  className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                />
-              </label>
+              <DatePickerField
+                label="Planned date"
+                value={plannedDate}
+                onChange={setPlannedDate}
+                className="space-y-1 text-xs text-muted-foreground"
+                min={todayIso}
+              />
               <div className="rounded-lg border border-border bg-muted/30 mt-2 px-3 py-2 text-xs text-muted-foreground">
                 Planning date affects new work orders only. Use the queue view
                 controls to switch days.
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  className="mt-3"
-                  onClick={handleRelease}
-                  disabled={!canRelease}
-                >
+              <div className="flex items-center justify-between gap-2">
+                <Button onClick={handleOpenSplit} disabled={!canRelease}>
                   Create work order
                 </Button>
                 <Button
@@ -1059,9 +1478,6 @@ export default function ProductionPage() {
                   Clear
                 </Button>
               </div>
-              <div className="text-xs text-muted-foreground">
-                Unit of work: Batch (e.g. AL-1042 / B1)
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -1070,15 +1486,12 @@ export default function ProductionPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
             <span>Station queues</span>
             <div className="flex flex-wrap items-center gap-2 text-xs font-normal text-muted-foreground">
-              <label className="flex items-center gap-2">
-                View date
-                <input
-                  type="date"
-                  value={viewDate}
-                  onChange={(event) => setViewDate(event.target.value)}
-                  className="h-9 rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                />
-              </label>
+              <DatePickerField
+                label="View date"
+                value={viewDate}
+                onChange={setViewDate}
+                className="flex items-center gap-2 text-xs"
+              />
               <label className="flex items-center gap-2">
                 Range
                 <select
@@ -1096,19 +1509,47 @@ export default function ProductionPage() {
               </label>
             </div>
           </div>
+          {isQueuesLoading ? (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+              Loading station queues...
+            </div>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {stations.map((station) => {
               const queue = queueByStation.get(station.id) ?? [];
+              const stationTotalMinutes = queue.reduce((sum, item) => {
+                const itemMinutes =
+                  item.durationMinutes ??
+                  item.items.reduce(
+                    (rowSum, row) =>
+                      rowSum + Number(row.duration_minutes ?? 0),
+                    0,
+                  );
+                return sum + Number(itemMinutes ?? 0);
+              }, 0);
               return (
                 <Card key={station.id} className="min-h-60">
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">
-                        {station.name}
-                      </CardTitle>
-                      <span className="text-xs text-muted-foreground">
-                        {queue.length} items
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-base">
+                          {station.name}
+                        </CardTitle>
+                        <Link
+                          href={`/production/operator?station=${station.id}`}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                          aria-label={`Open ${station.name} in operator view`}
+                        >
+                          <ExternalLinkIcon className="h-4 w-4" />
+                        </Link>
+                      </div>
+                      <div className="text-right text-xs text-muted-foreground">
+                        <div>{queue.length} items</div>
+                        {stationTotalMinutes > 0 ? (
+                          <div>{formatDuration(stationTotalMinutes)}</div>
+                        ) : null}
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -1135,7 +1576,13 @@ export default function ProductionPage() {
                                 ? "flex"
                                 : "hidden group-hover:flex"
                             }`}
-                            onClick={() => removeFromQueue(item.id)}
+                            onClick={() =>
+                              handleRemoveFromQueue(
+                                item.id,
+                                `${item.orderNumber} / ${item.batchCode}`,
+                                station.name,
+                              )
+                            }
                           >
                             ×
                           </button>
@@ -1169,6 +1616,12 @@ export default function ProductionPage() {
                               metaParts.push(`Due ${item.dueDate}`);
                             }
                             const metaLine = metaParts.join(" - ");
+                            const stationDurationMinutes =
+                              item.durationMinutes ??
+                              item.items.reduce(
+                                (sum, row) => sum + Number(row.duration_minutes ?? 0),
+                                0,
+                              );
                             const elapsedMinutes = item.startedAt
                               ? computeWorkingMinutes(
                                   item.startedAt,
@@ -1187,6 +1640,11 @@ export default function ProductionPage() {
                                     {metaLine}
                                   </div>
                                 ) : null}
+                                {stationDurationMinutes > 0 ? (
+                                  <div className="mt-1 text-[11px] text-muted-foreground">
+                                    Station time: {formatDuration(stationDurationMinutes)}
+                                  </div>
+                                ) : null}
                                 {elapsedLabel ? (
                                   <div className="mt-1 text-[11px] text-muted-foreground">
                                     Time: {elapsedLabel}
@@ -1198,9 +1656,63 @@ export default function ProductionPage() {
                           <div className="mt-1 text-muted-foreground">
                             {item.material}
                           </div>
-                          <div className="mt-2 text-[11px] text-muted-foreground">
-                            {item.batchCode}
+                          <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>{item.batchCode}</span>
+                            {item.items.length > 0 ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 gap-2 px-2 text-[11px]"
+                                onClick={() =>
+                                  setExpandedQueueItems((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(item.id)) {
+                                      next.delete(item.id);
+                                    } else {
+                                      next.add(item.id);
+                                    }
+                                    return next;
+                                  })
+                                }
+                              >
+                                {expandedQueueItems.has(item.id) ? (
+                                  <ChevronUpIcon className="h-3.5 w-3.5" />
+                                ) : (
+                                  <ChevronDownIcon className="h-3.5 w-3.5" />
+                                )}
+                                {expandedQueueItems.has(item.id)
+                                  ? "Hide constructions"
+                                  : "Show constructions"}
+                              </Button>
+                            ) : null}
                           </div>
+                          {expandedQueueItems.has(item.id) && item.items.length > 0 && (
+                            <div className="mt-2 space-y-2">
+                              {item.items.map((row) => (
+                                <div
+                                  key={row.id}
+                                  className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="text-[11px] text-muted-foreground">
+                                      {row.item_name}
+                                    </div>
+                                    <Badge variant={statusBadge(row.status)}>
+                                      {String(row.status ?? "queued").replace(
+                                        "_",
+                                        " ",
+                                      )}
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-1 text-[11px] text-muted-foreground">
+                                    Qty: {row.qty}
+                                    {row.material ? ` • ${row.material}` : ""}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ))
                     )}
@@ -1211,6 +1723,144 @@ export default function ProductionPage() {
           </div>
         </div>
       </div>
+
+      {isSplitOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-2xl bg-card p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Split by stations</h2>
+                <p className="text-sm text-muted-foreground">
+                  Select which stations should process each construction row.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsSplitOpen(false)}
+                aria-label="Close split"
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const next: Record<string, string[]> = {};
+                  splitRows.forEach((row) => {
+                    next[row.id] = routeStations.map((station) => station.id);
+                  });
+                  setSplitSelections(next);
+                }}
+              >
+                Select all stations
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const next: Record<string, string[]> = {};
+                  splitRows.forEach((row) => {
+                    next[row.id] = [];
+                  });
+                  setSplitSelections(next);
+                }}
+              >
+                Clear all
+              </Button>
+            </div>
+
+            <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto">
+              {splitRows.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                  No construction rows found for this selection.
+                </div>
+              ) : (
+                Array.from(
+                  splitRows.reduce((acc, row) => {
+                    const key = row.orderId;
+                    const list = acc.get(key) ?? [];
+                    list.push(row);
+                    acc.set(key, list);
+                    return acc;
+                  }, new Map<string, typeof splitRows>()),
+                ).map(([orderId, rows]) => (
+                  <div key={orderId} className="rounded-lg border border-border p-3">
+                    <div className="text-sm font-medium">
+                      {rows[0]?.orderNumber} / {rows[0]?.batchCode}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {rows[0]?.customerName}
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {rows.map((row) => (
+                        <div
+                          key={row.id}
+                          className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+                        >
+                          <div className="text-xs text-muted-foreground">
+                            {row.fieldLabel}
+                          </div>
+                          <div className="font-medium">{row.itemName}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {routeStations.map((station) => {
+                              const selected =
+                                splitSelections[row.id]?.includes(station.id) ??
+                                false;
+                              return (
+                                <label
+                                  key={station.id}
+                                  className={`flex items-center gap-2 rounded-md border px-2 py-1 text-xs ${
+                                    selected
+                                      ? "border-primary/40 bg-primary/5 text-foreground"
+                                      : "border-border text-muted-foreground"
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selected}
+                                    onChange={(event) => {
+                                      setSplitSelections((prev) => {
+                                        const current = new Set(
+                                          prev[row.id] ?? [],
+                                        );
+                                        if (event.target.checked) {
+                                          current.add(station.id);
+                                        } else {
+                                          current.delete(station.id);
+                                        }
+                                        return {
+                                          ...prev,
+                                          [row.id]: Array.from(current),
+                                        };
+                                      });
+                                    }}
+                                  />
+                                  {station.name}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsSplitOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleConfirmSplit}>Create work order</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {filesPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -1276,6 +1926,32 @@ export default function ProductionPage() {
           </div>
         </div>
       )}
-    </div>
+      {dialog}
+      </TabsContent>
+
+      <TabsContent value="list">
+        <Card>
+          <CardHeader>
+            <CardTitle>Orders & constructions</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            This view will show a table of orders with construction rows and
+            station statuses. Coming next.
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="calendar">
+        <Card>
+          <CardHeader>
+            <CardTitle>Production calendar</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            This view will show the planned workload by day and station. Coming
+            next.
+          </CardContent>
+        </Card>
+      </TabsContent>
+    </Tabs>
   );
 }

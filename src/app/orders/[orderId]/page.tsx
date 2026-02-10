@@ -37,33 +37,26 @@ import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { uploadOrderAttachment } from "@/lib/uploadOrderAttachment";
 import { uploadExternalJobAttachment } from "@/lib/uploadExternalJobAttachment";
-import { parseOrdersWorkbook } from "@/lib/excel/ordersExcel";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { usePartners } from "@/hooks/usePartners";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const productionReportCategory = "production_report";
 const defaultAttachmentCategories = [
   { id: "order_documents", label: "Order documents" },
   { id: "technical_docs", label: "Technical documentation" },
-  { id: productionReportCategory, label: "Production reports" },
   { id: "photos", label: "Site photos" },
   { id: "other", label: "Other" },
 ];
 
-type ProductionItem = {
-  id: string;
-  itemName: string;
-  qty: number;
-  material: string;
-  batchCode?: string;
-  status?: string;
-  routing?: string;
-  notes?: string;
-  sourceAttachmentId?: string;
-};
+function formatDuration(totalMinutes?: number | null) {
+  if (!totalMinutes || totalMinutes <= 0) return "0m";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+}
 
 export default function OrderDetailPage() {
   const params = useParams<{ orderId?: string }>();
@@ -106,17 +99,9 @@ export default function OrderDetailPage() {
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
   const attachmentCategories = useMemo(() => {
-    const base =
-      rules.attachmentCategories && rules.attachmentCategories.length > 0
-        ? rules.attachmentCategories
-        : defaultAttachmentCategories;
-    if (base.some((item) => item.id === productionReportCategory)) {
-      return base;
-    }
-    return [
-      ...base,
-      { id: productionReportCategory, label: "Production reports" },
-    ];
+    return rules.attachmentCategories && rules.attachmentCategories.length > 0
+      ? rules.attachmentCategories
+      : defaultAttachmentCategories;
   }, [rules.attachmentCategories]);
   const attachmentCategoryLabels = useMemo(
     () =>
@@ -180,17 +165,6 @@ export default function OrderDetailPage() {
   const [attachmentError, setAttachmentError] = useState("");
   const [attachmentNotice, setAttachmentNotice] = useState("");
   const [isUploading, setIsUploading] = useState(false);
-  const [productionReportError, setProductionReportError] = useState("");
-  const [productionItems, setProductionItems] = useState<ProductionItem[]>([]);
-  const [productionItemsError, setProductionItemsError] = useState("");
-  const [isMappingOpen, setIsMappingOpen] = useState(false);
-  const [mappingHeaders, setMappingHeaders] = useState<string[]>([]);
-  const [mappingRows, setMappingRows] = useState<Record<string, unknown>[]>([]);
-  const [mappingFileName, setMappingFileName] = useState("");
-  const [mappingSelection, setMappingSelection] = useState<
-    Record<string, string>
-  >({});
-  const [selectedReportId, setSelectedReportId] = useState("");
   const [attachmentCategory, setAttachmentCategory] = useState<string>(
     defaultAttachmentCategory,
   );
@@ -247,79 +221,6 @@ export default function OrderDetailPage() {
   >({});
   const [signedExternalAttachmentUrls, setSignedExternalAttachmentUrls] =
     useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!supabase || !orderState?.id) {
-      return;
-    }
-    let isMounted = true;
-    setProductionItemsError("");
-    const loadItems = async () => {
-      const { data, error } = await supabase
-        .from("production_items")
-        .select(
-          "id, batch_code, item_name, qty, material, status, source_attachment_id, meta",
-        )
-        .eq("order_id", orderState.id)
-        .order("created_at", { ascending: false });
-      if (!isMounted) {
-        return;
-      }
-      if (error) {
-        setProductionItemsError("Failed to load production items.");
-        return;
-      }
-      const next = (data ?? []).map((item) => ({
-        id: item.id,
-        itemName: item.item_name ?? "",
-        qty: Number(item.qty ?? 0),
-        material: item.material ?? "",
-        batchCode: item.batch_code ?? undefined,
-        status: item.status ?? undefined,
-        routing:
-          item.meta && typeof item.meta === "object"
-            ? (item.meta as { routing?: string }).routing
-            : undefined,
-        notes:
-          item.meta && typeof item.meta === "object"
-            ? (item.meta as { notes?: string }).notes
-            : undefined,
-        sourceAttachmentId: item.source_attachment_id ?? undefined,
-      }));
-      setProductionItems(next);
-    };
-    void loadItems();
-    return () => {
-      isMounted = false;
-    };
-  }, [orderState?.id, supabase]);
-
-  useEffect(() => {
-    if (!supabase || !orderState?.id) {
-      return;
-    }
-    let isMounted = true;
-    const loadMapping = async () => {
-      const { data, error } = await supabase
-        .from("order_production_maps")
-        .select("mapping")
-        .eq("order_id", orderState.id)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (!isMounted) {
-        return;
-      }
-      if (error || !data?.mapping) {
-        return;
-      }
-      setMappingSelection(data.mapping as Record<string, string>);
-    };
-    void loadMapping();
-    return () => {
-      isMounted = false;
-    };
-  }, [orderState?.id, supabase]);
 
   const canTakeOrder =
     role === "Engineering" &&
@@ -682,13 +583,6 @@ export default function OrderDetailPage() {
       items,
     }));
   }, [attachments]);
-  const productionReports = useMemo(
-    () =>
-      attachments.filter(
-        (attachment) => attachment.category === productionReportCategory,
-      ),
-    [attachments],
-  );
   const canAdvanceToEngineering =
     meetsEngineeringChecklist &&
     meetsEngineeringAttachments &&
@@ -860,14 +754,6 @@ export default function OrderDetailPage() {
     const rule = rules.externalJobRules.find((item) => item.status === status);
     return rule?.minAttachments ?? 0;
   };
-  const productionMappingFields = [
-    { key: "itemName", label: "Item name", required: true },
-    { key: "qty", label: "Quantity", required: true },
-    { key: "material", label: "Material / Decor", required: true },
-    { key: "routing", label: "Routing (optional)" },
-    { key: "notes", label: "Notes (optional)" },
-  ];
-
   function handleFilesAdded(files: FileList | File[]) {
     const next = Array.from(files);
     if (next.length === 0) {
@@ -949,176 +835,6 @@ export default function OrderDetailPage() {
     } finally {
       setIsUploading(false);
     }
-  }
-
-  async function handleOpenMapping(reportId: string) {
-    const target = attachments.find((item) => item.id === reportId);
-    if (!target) {
-      return;
-    }
-    const fileUrl = resolveAttachmentUrl(target);
-    if (!fileUrl) {
-      setProductionReportError("Unable to open report.");
-      return;
-    }
-    setSelectedReportId(reportId);
-    setMappingFileName(target.name ?? "Production report");
-    try {
-      const response = await fetch(fileUrl);
-      const blob = await response.blob();
-      const file = new File([blob], target.name ?? "report.xlsx", {
-        type: blob.type || "application/octet-stream",
-      });
-      const rows = await parseOrdersWorkbook(file);
-      if (rows.length === 0) {
-        setProductionReportError("No rows found in report.");
-        return;
-      }
-      const headerSet = new Set<string>();
-      Object.keys(rows[0] ?? {}).forEach((key) => headerSet.add(key.trim()));
-      setMappingHeaders(Array.from(headerSet));
-      setMappingRows(rows);
-      setIsMappingOpen(true);
-    } catch {
-      setProductionReportError("Failed to read report file.");
-    }
-  }
-
-  async function applyMapping() {
-    if (!orderState) {
-      return;
-    }
-    if (!supabase) {
-      setProductionReportError("Supabase is not configured.");
-      return;
-    }
-    const requiredKeys = ["itemName", "qty", "material"];
-    if (requiredKeys.some((key) => !mappingSelection[key])) {
-      setProductionReportError("Map required fields before continuing.");
-      return;
-    }
-    setProductionReportError("");
-    setProductionItemsError("");
-    const nextItems = mappingRows
-      .map((row, index) => {
-        const itemName = String(row[mappingSelection.itemName] ?? "").trim();
-        const qtyRaw = row[mappingSelection.qty];
-        const qty = Number(String(qtyRaw ?? "").replace(",", "."));
-        const material = String(row[mappingSelection.material] ?? "").trim();
-        if (!itemName || !material || Number.isNaN(qty) || qty <= 0) {
-          return null;
-        }
-        const routing = mappingSelection.routing
-          ? String(row[mappingSelection.routing] ?? "").trim()
-          : "";
-        const notes = mappingSelection.notes
-          ? String(row[mappingSelection.notes] ?? "").trim()
-          : "";
-        return {
-          id: `${orderState.id}-${Date.now()}-${index}`,
-          itemName,
-          qty,
-          material,
-          batchCode: orderState.orderNumber
-            ? `${orderState.orderNumber} / B1`
-            : "B1",
-          routing: routing || undefined,
-          notes: notes || undefined,
-          sourceAttachmentId: selectedReportId || undefined,
-        } satisfies ProductionItem;
-      })
-      .filter(Boolean) as ProductionItem[];
-    if (nextItems.length === 0) {
-      setProductionReportError("No valid rows found in report.");
-      return;
-    }
-
-    const batchCode = orderState.orderNumber
-      ? `${orderState.orderNumber} / B1`
-      : "B1";
-    const insertRows = nextItems.map((item) => ({
-      order_id: orderState.id,
-      batch_code: item.batchCode ?? batchCode,
-      item_name: item.itemName,
-      qty: item.qty,
-      material: item.material,
-      status: "queued",
-      source_attachment_id: item.sourceAttachmentId ?? null,
-      meta: {
-        routing: item.routing ?? null,
-        notes: item.notes ?? null,
-      },
-    }));
-
-    const { error: mappingError } = await supabase
-      .from("order_production_maps")
-      .upsert(
-        {
-          order_id: orderState.id,
-          source_attachment_id: selectedReportId || null,
-          mapping: mappingSelection,
-        },
-        { onConflict: "order_id" },
-      );
-    if (mappingError) {
-      setProductionReportError("Failed to save mapping.");
-      return;
-    }
-
-    const { data: inserted, error: insertError } = await supabase
-      .from("production_items")
-      .insert(insertRows)
-      .select(
-        "id, batch_code, item_name, qty, material, status, source_attachment_id, meta",
-      );
-    if (insertError) {
-      setProductionReportError("Failed to save production items.");
-      return;
-    }
-
-    const createdItems = (inserted ?? []).map((item) => ({
-      id: item.id,
-      itemName: item.item_name ?? "",
-      qty: Number(item.qty ?? 0),
-      material: item.material ?? "",
-      batchCode: item.batch_code ?? undefined,
-      status: item.status ?? undefined,
-      routing:
-        item.meta && typeof item.meta === "object"
-          ? (item.meta as { routing?: string }).routing
-          : undefined,
-      notes:
-        item.meta && typeof item.meta === "object"
-          ? (item.meta as { notes?: string }).notes
-          : undefined,
-      sourceAttachmentId: item.source_attachment_id ?? undefined,
-    }));
-    setProductionItems((prev) => [...createdItems, ...prev]);
-    setIsMappingOpen(false);
-    setMappingRows([]);
-    setMappingHeaders([]);
-    setMappingFileName("");
-  }
-
-  async function handleClearProductionItems() {
-    if (!orderState?.id) {
-      setProductionItems([]);
-      return;
-    }
-    if (!supabase) {
-      setProductionItemsError("Supabase is not configured.");
-      return;
-    }
-    const { error } = await supabase
-      .from("production_items")
-      .delete()
-      .eq("order_id", orderState.id);
-    if (error) {
-      setProductionItemsError("Failed to clear production items.");
-      return;
-    }
-    setProductionItems([]);
-    setProductionItemsError("");
   }
 
   async function handleAddComment() {
@@ -1345,7 +1061,9 @@ export default function OrderDetailPage() {
         }));
       };
       const removeRow = async (rowIndex: number) => {
-        if (!(await confirmRemove("Delete row?", "This will remove the row."))) {
+        if (
+          !(await confirmRemove("Delete row?", "This will remove the row."))
+        ) {
           return;
         }
         setOrderInputValues((prev) => ({
@@ -1953,8 +1671,12 @@ export default function OrderDetailPage() {
     externalJobId: string,
     attachmentId: string,
   ) {
-    const job = orderState.externalJobs?.find((item) => item.id === externalJobId);
-    const attachment = job?.attachments?.find((item) => item.id === attachmentId);
+    const job = orderState.externalJobs?.find(
+      (item) => item.id === externalJobId,
+    );
+    const attachment = job?.attachments?.find(
+      (item) => item.id === attachmentId,
+    );
     const label = attachment?.name ?? "attachment";
     if (
       !(await confirmRemove(
@@ -2322,7 +2044,6 @@ export default function OrderDetailPage() {
                 <TabsTrigger value="workflow">Workflow</TabsTrigger>
                 <TabsTrigger value="files">Files & Comments</TabsTrigger>
                 <TabsTrigger value="external">External Jobs</TabsTrigger>
-                <TabsTrigger value="production">Production</TabsTrigger>
               </TabsList>
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
@@ -2365,6 +2086,16 @@ export default function OrderDetailPage() {
                       <span className="text-muted-foreground">Quantity</span>
                       <span className="font-medium">
                         {orderState.quantity ?? "--"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                      <span className="text-muted-foreground">
+                        Production time
+                      </span>
+                      <span className="font-medium">
+                        {orderState.productionDurationMinutes != null
+                          ? formatDuration(orderState.productionDurationMinutes)
+                          : "--"}
                       </span>
                     </div>
                   </div>
@@ -3399,201 +3130,6 @@ export default function OrderDetailPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="production">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Production Reports</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                  <div>
-                    Upload production reports in the Files tab and map them
-                    here.
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setAttachmentCategory(productionReportCategory);
-                      setIsAttachmentCategoryManual(true);
-                      setActiveTab("files");
-                    }}
-                  >
-                    Go to Files
-                  </Button>
-                </div>
-                {productionReportError ? (
-                  <p className="text-xs text-destructive">
-                    {productionReportError}
-                  </p>
-                ) : null}
-
-                {productionReports.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                    No production reports uploaded yet.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {productionReports.map((report) => {
-                      const name = report.name ?? "Report";
-                      return (
-                        <div
-                          key={report.id}
-                          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
-                        >
-                          <div>
-                            <div className="font-medium">{name}</div>
-                            <div className="text-muted-foreground">
-                              Added by {report.addedBy}
-                              {report.addedByRole
-                                ? ` (${report.addedByRole})`
-                                : ""}{" "}
-                              on {formatDate(report.createdAt.slice(0, 10))}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {resolveAttachmentUrl(report) ? (
-                              <a
-                                href={resolveAttachmentUrl(report)}
-                                className="text-xs text-primary underline"
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Open
-                              </a>
-                            ) : null}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleOpenMapping(report.id)}
-                            >
-                              Create from report
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRemoveAttachment(report.id)}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Production Items</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {productionItemsError ? (
-                  <p className="text-xs text-destructive">
-                    {productionItemsError}
-                  </p>
-                ) : null}
-                {productionItems.length === 0 ? (
-                  <p className="text-muted-foreground">
-                    No production items created yet. Map a report to start.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {productionItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className="rounded-md border border-border px-3 py-2"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-medium">{item.itemName}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {item.qty} pcs
-                          </span>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {item.material}
-                          {item.routing ? ` - Route: ${item.routing}` : ""}
-                          {item.notes ? ` - ${item.notes}` : ""}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {productionItems.length > 0 && (
-                  <Button variant="ghost" onClick={handleClearProductionItems}>
-                    Clear items
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-          {isMappingOpen ? (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-              onClick={() => setIsMappingOpen(false)}
-            >
-              <div
-                className="w-full max-w-2xl rounded-lg border border-border bg-card p-4 shadow-lg"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">
-                    Map production report
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setIsMappingOpen(false)}
-                  >
-                    <XIcon className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  {mappingFileName || "Report"} - {mappingRows.length} rows
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {productionMappingFields.map((field) => (
-                    <label key={field.key} className="space-y-1 text-xs">
-                      <span className="font-medium">
-                        {field.label}
-                        {field.required ? " *" : ""}
-                      </span>
-                      <select
-                        value={mappingSelection[field.key] ?? ""}
-                        onChange={(event) =>
-                          setMappingSelection((prev) => ({
-                            ...prev,
-                            [field.key]: event.target.value,
-                          }))
-                        }
-                        className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                      >
-                        <option value="">Not mapped</option>
-                        {mappingHeaders.map((header) => (
-                          <option key={header} value={header}>
-                            {header}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ))}
-                </div>
-                <div className="mt-4 flex items-center gap-2">
-                  <Button onClick={applyMapping}>Create items</Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setIsMappingOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </TabsContent>
       </Tabs>
 
       <OrderModal

@@ -171,6 +171,7 @@ export default function SettingsPage() {
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const {
     workStations,
+    stationDependencies,
     orderInputFields,
     stopReasons,
     partners,
@@ -178,6 +179,7 @@ export default function SettingsPage() {
     addWorkStation,
     updateWorkStation,
     removeWorkStation,
+    updateStationDependencies,
     addOrderInputField,
     updateOrderInputField,
     removeOrderInputField,
@@ -286,6 +288,16 @@ export default function SettingsPage() {
   );
   const [localStations, setLocalStations] = useState(sortedStations);
   const displayStations = localStations.length ? localStations : sortedStations;
+  const stationDependenciesByStation = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    stationDependencies.forEach((row) => {
+      if (!map.has(row.stationId)) {
+        map.set(row.stationId, new Set());
+      }
+      map.get(row.stationId)?.add(row.dependsOnStationId);
+    });
+    return map;
+  }, [stationDependencies]);
 
   useEffect(() => {
     setLocalStations(sortedStations);
@@ -2143,9 +2155,7 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button onClick={handleBulkAddNodes}>
-                      Add list
-                    </Button>
+                    <Button onClick={handleBulkAddNodes}>Add list</Button>
                   </div>
                 </div>
 
@@ -2487,7 +2497,11 @@ export default function SettingsPage() {
                                 size="sm"
                                 variant="ghost"
                                 onClick={async () => {
-                                  if (!(await confirmRemove("Remove this column?"))) {
+                                  if (
+                                    !(await confirmRemove(
+                                      "Remove this column?",
+                                    ))
+                                  ) {
                                     return;
                                   }
                                   removeOrderFieldColumn(index);
@@ -2879,12 +2893,12 @@ export default function SettingsPage() {
                       >
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                            <span className="rounded-full h-6 w-6 flex justify-center items-center border border-border text-xs text-muted-foreground">
                               {index + 1}
                             </span>
                             <span className="font-medium">{station.name}</span>
                           </div>
-                          <div className="text-sm text-muted-foreground">
+                          <div className="text-sm text-muted-foreground text-wrap">
                             {station.description ?? "No description"}
                           </div>
                         </div>
@@ -2949,6 +2963,78 @@ export default function SettingsPage() {
                       </div>
                     ))}
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Station dependencies</CardTitle>
+                  <CardDescription>
+                    Define which stations must finish before another can start.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {displayStations.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                      Add work stations to configure dependencies.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {displayStations.map((station) => {
+                        const selected =
+                          stationDependenciesByStation.get(station.id) ??
+                          new Set<string>();
+                        const available = displayStations.filter(
+                          (other) => other.id !== station.id,
+                        );
+                        return (
+                          <div
+                            key={station.id}
+                            className="rounded-lg border border-border px-4 py-3"
+                          >
+                            <div className="text-sm font-medium">
+                              {station.name}
+                            </div>
+                            {available.length === 0 ? (
+                              <div className="mt-2 text-xs text-muted-foreground">
+                                No other stations available.
+                              </div>
+                            ) : (
+                              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                {available.map((dep) => {
+                                  const checked = selected.has(dep.id);
+                                  return (
+                                    <label
+                                      key={dep.id}
+                                      className="flex items-center gap-2 rounded-md border border-border px-2 py-1"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(event) => {
+                                          const next = new Set(selected);
+                                          if (event.target.checked) {
+                                            next.add(dep.id);
+                                          } else {
+                                            next.delete(dep.id);
+                                          }
+                                          updateStationDependencies(
+                                            station.id,
+                                            Array.from(next),
+                                          );
+                                        }}
+                                      />
+                                      {dep.name}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -4324,9 +4410,7 @@ export default function SettingsPage() {
                         size="sm"
                         onClick={async () => {
                           if (
-                            !(await confirmRemove(
-                              `Remove reason "${reason}"?`,
-                            ))
+                            !(await confirmRemove(`Remove reason "${reason}"?`))
                           ) {
                             return;
                           }

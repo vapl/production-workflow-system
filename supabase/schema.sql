@@ -32,6 +32,7 @@ create table if not exists public.orders (
   external_id text,
   source_payload jsonb,
   synced_at timestamptz,
+  production_duration_minutes integer,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -520,6 +521,23 @@ create table if not exists public.tenant_settings (
 create index if not exists workstations_tenant_id_idx on public.workstations(tenant_id);
 create index if not exists workstations_sort_order_idx on public.workstations(sort_order);
 
+create table if not exists public.station_dependencies (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  station_id uuid not null references public.workstations(id) on delete cascade,
+  depends_on_station_id uuid not null references public.workstations(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists station_dependencies_unique
+  on public.station_dependencies(tenant_id, station_id, depends_on_station_id);
+create index if not exists station_dependencies_tenant_id_idx
+  on public.station_dependencies(tenant_id);
+create index if not exists station_dependencies_station_id_idx
+  on public.station_dependencies(station_id);
+create index if not exists station_dependencies_depends_on_idx
+  on public.station_dependencies(depends_on_station_id);
+
 create table if not exists public.operators (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
@@ -635,6 +653,9 @@ create table if not exists public.production_items (
   station_id uuid references public.workstations(id) on delete set null,
   source_attachment_id uuid references public.order_attachments(id) on delete set null,
   meta jsonb,
+  started_at timestamptz,
+  done_at timestamptz,
+  duration_minutes integer,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -667,6 +688,7 @@ create table if not exists public.batch_runs (
   planned_date date,
   started_at timestamptz,
   done_at timestamptz,
+  duration_minutes integer,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -771,6 +793,7 @@ for each row execute procedure public.set_order_child_tenant_id();
 alter table public.hierarchy_levels enable row level security;
 alter table public.hierarchy_nodes enable row level security;
 alter table public.workstations enable row level security;
+alter table public.station_dependencies enable row level security;
 alter table public.tenant_settings enable row level security;
 alter table public.operators enable row level security;
 alter table public.stop_reasons enable row level security;
@@ -904,6 +927,33 @@ create policy "workstations_delete_by_tenant" on public.workstations
     exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.tenant_id = workstations.tenant_id
+    )
+  );
+
+create policy "station_dependencies_select_by_tenant" on public.station_dependencies
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = station_dependencies.tenant_id
+    )
+  );
+
+create policy "station_dependencies_insert_by_tenant" on public.station_dependencies
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = station_dependencies.tenant_id
+    )
+  );
+
+create policy "station_dependencies_delete_by_tenant" on public.station_dependencies
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = station_dependencies.tenant_id
     )
   );
 

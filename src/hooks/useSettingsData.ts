@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
-import type { WorkStation } from "@/types/workstation";
+import type { StationDependency, WorkStation } from "@/types/workstation";
 import type {
   OrderInputField,
   OrderInputFieldType,
@@ -21,6 +21,7 @@ export interface StopReason {
 
 interface SettingsDataState {
   workStations: WorkStation[];
+  stationDependencies: StationDependency[];
   orderInputFields: OrderInputField[];
   stopReasons: StopReason[];
   partners: Partner[];
@@ -33,6 +34,10 @@ interface SettingsDataState {
     patch: Partial<WorkStation>,
   ) => Promise<void>;
   removeWorkStation: (stationId: string) => Promise<void>;
+  updateStationDependencies: (
+    stationId: string,
+    dependsOnIds: string[],
+  ) => Promise<void>;
   addOrderInputField: (
     payload: Omit<OrderInputField, "id">,
   ) => Promise<void>;
@@ -69,6 +74,18 @@ function mapWorkStation(row: {
     description: row.description ?? undefined,
     isActive: row.is_active,
     sortOrder: row.sort_order ?? 0,
+  };
+}
+
+function mapStationDependency(row: {
+  id: string;
+  station_id: string;
+  depends_on_station_id: string;
+}): StationDependency {
+  return {
+    id: row.id,
+    stationId: row.station_id,
+    dependsOnStationId: row.depends_on_station_id,
   };
 }
 
@@ -143,6 +160,9 @@ export function useSettingsData(): SettingsDataState {
   const user = useCurrentUser();
   const { notify } = useNotifications();
   const [workStations, setWorkStations] = useState<WorkStation[]>([]);
+  const [stationDependencies, setStationDependencies] = useState<
+    StationDependency[]
+  >([]);
   const [orderInputFields, setOrderInputFields] = useState<OrderInputField[]>([]);
   const [stopReasons, setStopReasons] = useState<StopReason[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
@@ -315,6 +335,7 @@ export function useSettingsData(): SettingsDataState {
     setError(null);
     const [
       stationsResult,
+      stationDependenciesResult,
       orderInputFieldsResult,
       reasonsResult,
       partnersResult,
@@ -324,6 +345,10 @@ export function useSettingsData(): SettingsDataState {
         .from("workstations")
         .select("id, name, description, is_active, sort_order")
         .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("station_dependencies")
+        .select("id, station_id, depends_on_station_id")
         .order("created_at", { ascending: true }),
       supabase
         .from("order_input_fields")
@@ -349,12 +374,14 @@ export function useSettingsData(): SettingsDataState {
 
     if (
       stationsResult.error ||
+      stationDependenciesResult.error ||
       reasonsResult.error ||
       partnersResult.error ||
       partnerGroupsResult.error
     ) {
       setError(
         stationsResult.error?.message ||
+          stationDependenciesResult.error?.message ||
           reasonsResult.error?.message ||
           partnersResult.error?.message ||
           partnerGroupsResult.error?.message ||
@@ -365,6 +392,9 @@ export function useSettingsData(): SettingsDataState {
     }
 
     setWorkStations((stationsResult.data ?? []).map(mapWorkStation));
+    setStationDependencies(
+      (stationDependenciesResult.data ?? []).map(mapStationDependency),
+    );
     setOrderInputFields(
       (orderInputFieldsResult.data ?? [])
         .filter((field) => !orderInputFieldBlacklist.has(field.key))
@@ -386,6 +416,7 @@ export function useSettingsData(): SettingsDataState {
     }
     if (!user.isAuthenticated) {
       setWorkStations([]);
+      setStationDependencies([]);
       setOrderInputFields([]);
       setStopReasons([]);
       setPartners([]);
@@ -398,6 +429,7 @@ export function useSettingsData(): SettingsDataState {
   const value = useMemo<SettingsDataState>(
     () => ({
       workStations,
+      stationDependencies,
       orderInputFields,
       stopReasons,
       partners,
@@ -486,6 +518,52 @@ export function useSettingsData(): SettingsDataState {
           prev.filter((station) => station.id !== stationId),
         );
         notify({ title: "Workstation deleted", variant: "success" });
+      },
+      updateStationDependencies: async (stationId, dependsOnIds) => {
+        if (!supabase || !user.tenantId) {
+          return;
+        }
+        const { error: deleteError } = await supabase
+          .from("station_dependencies")
+          .delete()
+          .eq("station_id", stationId);
+        if (deleteError) {
+          setError(deleteError.message);
+          notify({
+            title: "Dependencies not saved",
+            variant: "error",
+          });
+          return;
+        }
+        if (dependsOnIds.length === 0) {
+          setStationDependencies((prev) =>
+            prev.filter((row) => row.stationId !== stationId),
+          );
+          notify({ title: "Dependencies saved", variant: "success" });
+          return;
+        }
+        const rows = dependsOnIds.map((dependsOnId) => ({
+          tenant_id: user.tenantId,
+          station_id: stationId,
+          depends_on_station_id: dependsOnId,
+        }));
+        const { data, error: insertError } = await supabase
+          .from("station_dependencies")
+          .insert(rows)
+          .select("id, station_id, depends_on_station_id");
+        if (insertError) {
+          setError(insertError.message);
+          notify({
+            title: "Dependencies not saved",
+            variant: "error",
+          });
+          return;
+        }
+        setStationDependencies((prev) => [
+          ...prev.filter((row) => row.stationId !== stationId),
+          ...(data ?? []).map(mapStationDependency),
+        ]);
+        notify({ title: "Dependencies saved", variant: "success" });
       },
       addOrderInputField: async (payload) => {
         if (!supabase || !user.tenantId) {
@@ -887,6 +965,7 @@ export function useSettingsData(): SettingsDataState {
     }),
     [
       workStations,
+      stationDependencies,
       orderInputFields,
       stopReasons,
       partners,

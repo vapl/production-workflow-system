@@ -5,3 +5,9 @@ export interface WorkStation {
   isActive: boolean;
   sortOrder: number;
 }
+
+export interface StationDependency {
+  id: string;
+  stationId: string;
+  dependsOnStationId: string;
+}

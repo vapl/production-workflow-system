@@ -324,6 +324,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     external_id?: string | null;
     source_payload?: Record<string, unknown> | null;
     synced_at?: string | null;
+    production_duration_minutes?: number | null;
     order_attachments?: Array<{
       id: string;
       name: string;
@@ -393,6 +394,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     externalId: row.external_id ?? undefined,
     sourcePayload: row.source_payload ?? undefined,
     syncedAt: row.synced_at ?? undefined,
+    productionDurationMinutes: row.production_duration_minutes ?? undefined,
     attachments: row.order_attachments?.map(mapAttachment) ?? undefined,
     comments: row.order_comments?.map(mapComment) ?? undefined,
     statusHistory: row.order_status_history?.map(mapStatusEntry) ?? undefined,
@@ -440,6 +442,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         external_id,
         source_payload,
         synced_at,
+        production_duration_minutes,
         order_attachments (
           id,
           name,

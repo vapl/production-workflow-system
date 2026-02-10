@@ -107,6 +107,7 @@ export interface Order {
   externalId?: string;
   sourcePayload?: Record<string, unknown>;
   syncedAt?: string;
+  productionDurationMinutes?: number;
   attachments?: OrderAttachment[];
   comments?: OrderComment[];
   attachmentCount?: number;
