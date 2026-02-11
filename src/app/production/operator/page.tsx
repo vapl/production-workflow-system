@@ -5,6 +5,13 @@ import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { formatDate } from "@/lib/domain/formatters";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
@@ -1562,18 +1569,24 @@ export default function OperatorProductionPage() {
             <div className="mt-4 space-y-3 text-sm">
               <label className="space-y-1 text-xs text-muted-foreground">
                 Reason template
-                <select
-                  value={blockedReasonId}
-                  onChange={(event) => setBlockedReasonId(event.target.value)}
-                  className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                <Select
+                  value={blockedReasonId || "__none__"}
+                  onValueChange={(value) =>
+                    setBlockedReasonId(value === "__none__" ? "" : value)
+                  }
                 >
-                  <option value="">Select reason...</option>
-                  {stopReasons.map((reason) => (
-                    <option key={reason.id} value={reason.id}>
-                      {reason.label}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="h-9 w-full">
+                    <SelectValue placeholder="Select reason..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select reason...</SelectItem>
+                    {stopReasons.map((reason) => (
+                      <SelectItem key={reason.id} value={reason.id}>
+                        {reason.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="space-y-1 text-xs text-muted-foreground">
                 Manual note

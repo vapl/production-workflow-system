@@ -2,6 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { DatePicker } from "@/components/ui/DatePicker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { XIcon } from "lucide-react";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 
@@ -49,6 +57,9 @@ export function OrderModal({
   editMode = "full",
   existingOrderNumbers = [],
 }: OrderModalProps) {
+  const minDueDate = initialValues?.dueDate
+    ? undefined
+    : new Date().toISOString().slice(0, 10);
   const [formState, setFormState] = useState({
     orderNumber: defaultValues.orderNumber,
     customerName: defaultValues.customerName,
@@ -677,66 +688,64 @@ export function OrderModal({
                 </span>
               )}
             </label>
-            <label className="space-y-2 text-sm font-medium">
-              Due Date *
-              <input
+            <div className="space-y-2 text-sm font-medium">
+              <DatePicker
+                label="Due Date *"
                 value={formState.dueDate}
-                onChange={(event) =>
+                onChange={(next) => {
                   setFormState((prev) => ({
                     ...prev,
-                    dueDate: event.target.value,
-                  }))
-                }
-                onBlur={(event) => {
+                    dueDate: next,
+                  }));
                   if (isCategoryProductOnly) {
                     return;
                   }
-                  const message = validateField("dueDate", event.target.value);
+                  const message = validateField("dueDate", next);
                   setErrors((prev) => ({
                     ...prev,
                     dueDate: message,
                   }));
                   setTouched((prev) => ({ ...prev, dueDate: true }));
                 }}
-                className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
+                min={minDueDate}
+                disabled={isCategoryProductOnly}
+                className="space-y-2 text-sm font-medium"
+                triggerClassName={`h-10 ${
                   touched.dueDate && errors.dueDate
                     ? "border-destructive"
                     : "border-border"
-                } bg-input-background`}
-                type="date"
-                required
-                disabled={isCategoryProductOnly}
+                }`}
               />
               {touched.dueDate && errors.dueDate && (
                 <span className="text-xs text-destructive">
                   {errors.dueDate}
                 </span>
               )}
-            </label>
+            </div>
           </div>
 
           <label className="space-y-2 text-sm font-medium">
             Priority
-            <select
+            <Select
               value={formState.priority}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setFormState((prev) => ({
                   ...prev,
-                  priority: event.target.value as
-                    | "low"
-                    | "normal"
-                    | "high"
-                    | "urgent",
+                  priority: value as "low" | "normal" | "high" | "urgent",
                 }))
               }
-              className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
               disabled={isCategoryProductOnly}
             >
-              <option value="low">Low</option>
-              <option value="normal">Normal</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
-            </select>
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+              </SelectContent>
+            </Select>
           </label>
 
           <label className="space-y-2 text-sm font-medium">

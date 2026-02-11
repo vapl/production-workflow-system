@@ -10,6 +10,13 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useHierarchy } from "./HierarchyContext";
@@ -2215,39 +2222,43 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-3">
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Level</label>
-                    <select
+                    <Select
                       value={selectedLevelId}
-                      onChange={(event) =>
-                        setSelectedLevelId(event.target.value)
-                      }
-                      className="h-10 min-w-50 rounded-lg border border-border bg-input-background px-3 text-sm"
+                      onValueChange={setSelectedLevelId}
                     >
-                      {selectableLevels.map((level) => (
-                        <option key={level.id} value={level.id}>
-                          {level.name}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-10 min-w-50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectableLevels.map((level) => (
+                          <SelectItem key={level.id} value={level.id}>
+                            {level.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   {parentLevel && (
                     <div className="flex flex-col gap-2">
                       <label className="text-sm font-medium">
                         Parent ({parentLevel.name})
                       </label>
-                      <select
+                      <Select
                         value={nodeParentId}
-                        onChange={(event) =>
-                          setNodeParentId(event.target.value)
-                        }
-                        className="h-10 min-w-50 rounded-lg border border-border bg-input-background px-3 text-sm"
+                        onValueChange={setNodeParentId}
                       >
-                        <option value="none">No parent</option>
-                        {parentNodes.map((node) => (
-                          <option key={node.id} value={node.id}>
-                            {node.label}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-10 min-w-50">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No parent</SelectItem>
+                          {parentNodes.map((node) => (
+                            <SelectItem key={node.id} value={node.id}>
+                              {node.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
                 </div>
@@ -2474,39 +2485,43 @@ export default function SettingsPage() {
                   </div>
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Group</label>
-                    <select
+                    <Select
                       value={orderFieldGroup}
-                      onChange={(event) =>
-                        setOrderFieldGroup(
-                          event.target.value as OrderInputGroupKey,
-                        )
+                      onValueChange={(value) =>
+                        setOrderFieldGroup(value as OrderInputGroupKey)
                       }
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
                     >
-                      {orderInputGroupOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {orderInputGroupOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Type</label>
-                    <select
+                    <Select
                       value={orderFieldType}
-                      onChange={(event) =>
-                        setOrderFieldType(
-                          event.target.value as OrderInputFieldType,
-                        )
+                      onValueChange={(value) =>
+                        setOrderFieldType(value as OrderInputFieldType)
                       }
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
                     >
-                      {orderInputFieldTypeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {orderInputFieldTypeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Order</label>
@@ -2593,25 +2608,28 @@ export default function SettingsPage() {
                               </label>
                               <label className="flex flex-col gap-1 text-xs font-medium">
                                 Type
-                                <select
+                                <Select
                                   value={column.fieldType}
-                                  onChange={(event) =>
+                                  onValueChange={(value) =>
                                     updateOrderFieldColumn(index, {
-                                      fieldType: event.target
-                                        .value as OrderInputTableColumnType,
+                                      fieldType: value as OrderInputTableColumnType,
                                     })
                                   }
-                                  className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
                                 >
-                                  {orderInputColumnTypeOptions.map((option) => (
-                                    <option
-                                      key={option.value}
-                                      value={option.value}
-                                    >
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
+                                  <SelectTrigger className="h-9 w-full rounded-md text-sm">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {orderInputColumnTypeOptions.map((option) => (
+                                      <SelectItem
+                                        key={option.value}
+                                        value={option.value}
+                                      >
+                                        {option.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               </label>
                               <label className="flex flex-col gap-1 text-xs font-medium">
                                 Unit
@@ -3153,21 +3171,25 @@ export default function SettingsPage() {
                     </div>
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Default size</div>
-                      <select
+                      <Select
                         value={qrDefaultSize}
-                        onChange={(event) => setQrDefaultSize(event.target.value)}
-                        className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                        onValueChange={setQrDefaultSize}
                       >
-                        {qrLabelSizeOptions
-                          .filter((option) =>
-                            qrEnabledSizes.includes(option.value),
-                          )
-                          .map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                      </select>
+                        <SelectTrigger className="h-10 w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {qrLabelSizeOptions
+                            .filter((option) =>
+                              qrEnabledSizes.includes(option.value),
+                            )
+                            .map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
                       <div className="text-xs text-muted-foreground">
                         Used as the default print format in Production.
                       </div>
@@ -3747,20 +3769,26 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex flex-col gap-2">
                   <label className="text-sm font-medium">Group</label>
-                  <select
-                    value={partnerGroupId}
-                    onChange={(event) => setPartnerGroupId(event.target.value)}
-                    className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                  <Select
+                    value={partnerGroupId || "__none__"}
+                    onValueChange={(value) =>
+                      setPartnerGroupId(value === "__none__" ? "" : value)
+                    }
                   >
-                    <option value="">No group</option>
-                    {partnerGroups
-                      .filter((group) => group.isActive)
-                      .map((group) => (
-                        <option key={group.id} value={group.id}>
-                          {group.name}
-                        </option>
-                      ))}
-                  </select>
+                    <SelectTrigger className="h-10 w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No group</SelectItem>
+                      {partnerGroups
+                        .filter((group) => group.isActive)
+                        .map((group) => (
+                          <SelectItem key={group.id} value={group.id}>
+                            {group.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleSavePartner}>
@@ -3932,20 +3960,24 @@ export default function SettingsPage() {
                   </label>
                   <label className="space-y-2 text-sm font-medium">
                     Role
-                    <select
+                    <Select
                       value={inviteRole}
-                      onChange={(event) =>
-                        setInviteRole(event.target.value as UserRole)
+                      onValueChange={(value) =>
+                        setInviteRole(value as UserRole)
                       }
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       disabled={!currentUser.isAdmin}
                     >
-                      {userRoleOptions.map((roleOption) => (
-                        <option key={roleOption} value={roleOption}>
-                          {roleOption}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {userRoleOptions.map((roleOption) => (
+                          <SelectItem key={roleOption} value={roleOption}>
+                            {roleOption}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                   <Button
                     onClick={handleInviteUser}
@@ -4025,26 +4057,30 @@ export default function SettingsPage() {
                         <tr key={user.id} className="border-t border-border">
                           <td className="px-4 py-2 font-medium">{user.name}</td>
                           <td className="px-4 py-2">
-                            <select
+                            <Select
                               value={user.role}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 handleUpdateUserRole(
                                   user.id,
-                                  event.target.value as UserRole,
+                                  value as UserRole,
                                 )
                               }
-                              className="h-9 rounded-md border border-border bg-input-background px-3 text-sm"
                               disabled={
                                 !currentUser.isAdmin &&
                                 !(devRoleOverride && user.id === currentUser.id)
                               }
                             >
-                              {userRoleOptions.map((roleOption) => (
-                                <option key={roleOption} value={roleOption}>
-                                  {roleOption}
-                                </option>
-                              ))}
-                            </select>
+                              <SelectTrigger className="h-9 w-[160px] rounded-md text-sm">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {userRoleOptions.map((roleOption) => (
+                                  <SelectItem key={roleOption} value={roleOption}>
+                                    {roleOption}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </td>
                           <td className="px-4 py-2">
                             <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -4507,26 +4543,30 @@ export default function SettingsPage() {
                             className="space-y-2 text-sm font-medium"
                           >
                             {role}
-                            <select
+                            <Select
                               value={
                                 attachmentDefaultDrafts[role] ??
                                 attachmentCategoryDrafts[0]?.id ??
                                 ""
                               }
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 setAttachmentDefaultDrafts((prev) => ({
                                   ...prev,
-                                  [role]: event.target.value,
+                                  [role]: value,
                                 }))
                               }
-                              className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                             >
-                              {attachmentCategoryDrafts.map((category) => (
-                                <option key={category.id} value={category.id}>
-                                  {category.label}
-                                </option>
-                              ))}
-                            </select>
+                              <SelectTrigger className="h-10 w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {attachmentCategoryDrafts.map((category) => (
+                                  <SelectItem key={category.id} value={category.id}>
+                                    {category.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </label>
                         ))}
                       </div>

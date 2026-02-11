@@ -2,6 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { XIcon } from "lucide-react";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useOrders } from "@/app/orders/OrdersContext";
@@ -550,23 +557,27 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                 <label key={field.key} className="space-y-2 text-sm font-medium">
                   {field.label}
                   {"required" in field && field.required ? " *" : ""}
-                  <select
-                    value={mapping[field.key] ?? ""}
-                    onChange={(event) =>
+                  <Select
+                    value={mapping[field.key] ?? "__none__"}
+                    onValueChange={(value) =>
                       setMapping((prev) => ({
                         ...prev,
-                        [field.key]: event.target.value,
+                        [field.key]: value === "__none__" ? "" : value,
                       }))
                     }
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                   >
-                    <option value="">-- Not mapped --</option>
-                    {headers.map((header) => (
-                      <option key={header} value={header}>
-                        {header}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="h-10 w-full">
+                      <SelectValue placeholder="-- Not mapped --" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">-- Not mapped --</SelectItem>
+                      {headers.map((header) => (
+                        <SelectItem key={header} value={header}>
+                          {header}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
               ))}
             </div>
@@ -581,23 +592,27 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                       className="space-y-2 text-sm font-medium"
                     >
                       {field.label}
-                      <select
-                        value={mapping[field.key] ?? ""}
-                        onChange={(event) =>
+                      <Select
+                        value={mapping[field.key] ?? "__none__"}
+                        onValueChange={(value) =>
                           setMapping((prev) => ({
                             ...prev,
-                            [field.key]: event.target.value,
+                            [field.key]: value === "__none__" ? "" : value,
                           }))
                         }
-                        className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       >
-                        <option value="">-- Not mapped --</option>
-                        {headers.map((header) => (
-                          <option key={header} value={header}>
-                            {header}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-10 w-full">
+                          <SelectValue placeholder="-- Not mapped --" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">-- Not mapped --</SelectItem>
+                          {headers.map((header) => (
+                            <SelectItem key={header} value={header}>
+                              {header}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </label>
                   ))}
                 </div>
@@ -618,33 +633,37 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                           <span className="text-xs text-muted-foreground">
                             {value}
                           </span>
-                          <select
+                          <Select
                             value={statusMapping[value] ?? "draft"}
-                              onChange={(event) =>
-                                setStatusMapping((prev) => ({
-                                  ...prev,
-                                  [value]: event.target.value as OrderStatus,
-                                }))
-                              }
-                              className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-xs"
-                            >
-                              <option value="draft">draft</option>
-                              <option value="ready_for_engineering">
+                            onValueChange={(next) =>
+                              setStatusMapping((prev) => ({
+                                ...prev,
+                                [value]: next as OrderStatus,
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="h-9 w-full text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="draft">draft</SelectItem>
+                              <SelectItem value="ready_for_engineering">
                                 ready for engineering
-                              </option>
-                              <option value="in_engineering">
+                              </SelectItem>
+                              <SelectItem value="in_engineering">
                                 in engineering
-                              </option>
-                              <option value="engineering_blocked">
+                              </SelectItem>
+                              <SelectItem value="engineering_blocked">
                                 engineering blocked
-                              </option>
-                              <option value="ready_for_production">
-                                  ready for production
-                                </option>
-                              <option value="in_production">
-                                  in production
-                                </option>
-                            </select>
+                              </SelectItem>
+                              <SelectItem value="ready_for_production">
+                                ready for production
+                              </SelectItem>
+                              <SelectItem value="in_production">
+                                in production
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
                         </label>
                       ))}
                     </div>
@@ -661,25 +680,29 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                           <span className="text-xs text-muted-foreground">
                             {value}
                           </span>
-                          <select
+                          <Select
                             value={priorityMapping[value] ?? "normal"}
-                            onChange={(event) =>
+                            onValueChange={(next) =>
                               setPriorityMapping((prev) => ({
                                 ...prev,
-                                [value]: event.target.value as
+                                [value]: next as
                                   | "low"
                                   | "normal"
                                   | "high"
                                   | "urgent",
                               }))
                             }
-                            className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-xs"
                           >
-                            <option value="low">low</option>
-                            <option value="normal">normal</option>
-                            <option value="high">high</option>
-                            <option value="urgent">urgent</option>
-                          </select>
+                            <SelectTrigger className="h-9 w-full text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="low">low</SelectItem>
+                              <SelectItem value="normal">normal</SelectItem>
+                              <SelectItem value="high">high</SelectItem>
+                              <SelectItem value="urgent">urgent</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </label>
                       ))}
                     </div>

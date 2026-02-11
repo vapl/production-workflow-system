@@ -5,6 +5,14 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DatePicker } from "@/components/ui/DatePicker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
@@ -269,65 +277,6 @@ function formatDateInput(value: string) {
   const [year, month, day] = value.split("-");
   if (!year || !month || !day) return "";
   return `${day}.${month}.${year}`;
-}
-
-type DatePickerFieldProps = {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  className?: string;
-  disabled?: boolean;
-  min?: string;
-};
-
-function DatePickerField({
-  label,
-  value,
-  onChange,
-  className,
-  disabled,
-  min,
-}: DatePickerFieldProps) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const openPicker = () => {
-    if (disabled) return;
-    const target = inputRef.current as
-      | (HTMLInputElement & {
-          showPicker?: () => void;
-        })
-      | null;
-    if (!target) return;
-    if (typeof target.showPicker === "function") {
-      target.showPicker();
-    } else {
-      target.focus();
-    }
-  };
-  return (
-    <label className={className ?? "space-y-1 text-xs text-muted-foreground"}>
-      {label}
-      <div className="relative cursor-pointer" onClick={openPicker}>
-        <input
-          type="text"
-          readOnly
-          value={formatDateInput(value)}
-          placeholder="DD.MM.YYYY"
-          className="h-9 w-full cursor-pointer rounded-lg border border-border bg-input-background px-3 pr-9 text-sm text-foreground"
-          onClick={openPicker}
-        />
-        <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          ref={inputRef}
-          type="date"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          disabled={disabled}
-          min={min}
-          className="absolute inset-0 h-full w-full opacity-0"
-        />
-      </div>
-    </label>
-  );
 }
 
 export default function ProductionPage() {
@@ -1800,7 +1749,7 @@ export default function ProductionPage() {
                   </div>
                 ) : null}
                 <div className="space-y-3">
-                  <div className="flex flex-wrap items-end gap-2">
+                  <div className="flex flex-wrap items-start gap-2">
                     <label className="flex-1 space-y-1 text-xs text-muted-foreground">
                       Search
                       <input
@@ -1812,21 +1761,23 @@ export default function ProductionPage() {
                     </label>
                     <label className="space-y-1 text-xs text-muted-foreground">
                       Priority
-                      <select
+                      <Select
                         value={readyPriority}
-                        onChange={(event) =>
-                          setReadyPriority(
-                            event.target.value as Priority | "all",
-                          )
+                        onValueChange={(value) =>
+                          setReadyPriority(value as Priority | "all")
                         }
-                        className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
                       >
-                        <option value="all">All</option>
-                        <option value="urgent">Urgent</option>
-                        <option value="high">High</option>
-                        <option value="normal">Normal</option>
-                        <option value="low">Low</option>
-                      </select>
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="urgent">Urgent</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                          <SelectItem value="normal">Normal</SelectItem>
+                          <SelectItem value="low">Low</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </label>
                   </div>
                   {filteredReadyGroups.map((group) => {
@@ -1899,26 +1850,26 @@ export default function ProductionPage() {
                                   <ExternalLinkIcon className="h-4 w-4" />
                                 </span>
                               </Link>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                if (productionFiles.length === 0) {
-                                  return;
-                                }
-                                setFilesPreview({
-                                  orderId: group.orderId,
-                                  orderNumber: group.orderNumber,
-                                  files: productionFiles,
-                                });
-                              }}
-                              aria-label="View production files"
-                              disabled={productionFiles.length === 0}
-                            >
-                              <PaperclipIcon className="h-4 w-4" />
-                            </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  if (productionFiles.length === 0) {
+                                    return;
+                                  }
+                                  setFilesPreview({
+                                    orderId: group.orderId,
+                                    orderNumber: group.orderNumber,
+                                    files: productionFiles,
+                                  });
+                                }}
+                                aria-label="View production files"
+                                disabled={productionFiles.length === 0}
+                              >
+                                <PaperclipIcon className="h-4 w-4" />
+                              </Button>
                               <Badge variant={priorityBadge(group.priority)}>
                                 {group.priority}
                               </Badge>
@@ -2032,19 +1983,21 @@ export default function ProductionPage() {
                   <label className="space-y-1 text-xs text-muted-foreground">
                     Route
                     {routes.length > 1 ? (
-                      <select
+                      <Select
                         value={selectedRouteKey}
-                        onChange={(event) =>
-                          setSelectedRouteKey(event.target.value)
-                        }
-                        className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                        onValueChange={setSelectedRouteKey}
                       >
-                        {routes.map((route) => (
-                          <option key={route.key} value={route.key}>
-                            {route.label}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {routes.map((route) => (
+                            <SelectItem key={route.key} value={route.key}>
+                              {route.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     ) : (
                       <div className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
                         {routes[0]?.label ?? "Default route"}
@@ -2067,7 +2020,7 @@ export default function ProductionPage() {
                       )}
                     </div>
                   </label>
-                  <DatePickerField
+                  <DatePicker
                     label="Planned date"
                     value={plannedDate}
                     onChange={setPlannedDate}
@@ -2098,27 +2051,31 @@ export default function ProductionPage() {
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
                 <span>Station queues</span>
                 <div className="flex flex-wrap items-center gap-2 text-xs font-normal text-muted-foreground">
-                  <DatePickerField
+                  <DatePicker
                     label="View date"
                     value={viewDate}
                     onChange={setViewDate}
                     className="flex items-center gap-2 text-xs"
                   />
-                  <label className="flex items-center gap-2">
-                    Range
-                    <select
-                      value={plannedRangeDays}
-                      onChange={(event) =>
-                        setPlannedRangeDays(Number(event.target.value))
-                      }
-                      className="h-9 rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                    >
-                      <option value={1}>Today</option>
-                      <option value={3}>3 days</option>
-                      <option value={7}>7 days</option>
-                      <option value={14}>14 days</option>
-                    </select>
-                  </label>
+                <label className="flex items-center gap-2">
+                  Range
+                  <Select
+                    value={String(plannedRangeDays)}
+                    onValueChange={(value) =>
+                      setPlannedRangeDays(Number(value))
+                    }
+                  >
+                    <SelectTrigger className="h-9 w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">Today</SelectItem>
+                      <SelectItem value="3">3 days</SelectItem>
+                      <SelectItem value="7">7 days</SelectItem>
+                      <SelectItem value="14">14 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
                 </div>
               </div>
               {isQueuesLoading ? (
@@ -2181,7 +2138,9 @@ export default function ProductionPage() {
                               }
                               onTouchEnd={handleRemoveHintEnd}
                               onTouchCancel={handleRemoveHintEnd}
-                            >                              {(() => {
+                            >
+                              {" "}
+                              {(() => {
                                 const canRemove = !item.items.some(
                                   (row) =>
                                     row.started_at ||
@@ -2254,7 +2213,9 @@ export default function ProductionPage() {
                                             });
                                           }}
                                           aria-label="View production files"
-                                          disabled={productionFiles.length === 0}
+                                          disabled={
+                                            productionFiles.length === 0
+                                          }
                                         >
                                           <PaperclipIcon className="h-4 w-4" />
                                         </Button>
@@ -2267,9 +2228,11 @@ export default function ProductionPage() {
                                     (row) => row.status === "blocked",
                                   );
                                   const hasActive = item.items.some((row) =>
-                                    ["queued", "pending", "in_progress"].includes(
-                                      row.status,
-                                    ),
+                                    [
+                                      "queued",
+                                      "pending",
+                                      "in_progress",
+                                    ].includes(row.status),
                                   );
                                   const isPartiallyBlocked =
                                     hasBlocked && hasActive;
@@ -2278,7 +2241,9 @@ export default function ProductionPage() {
                                     item.status === "in_progress";
                                   return (
                                     <div className="flex flex-col items-end gap-2">
-                                      <Badge variant={priorityBadge(item.priority)}>
+                                      <Badge
+                                        variant={priorityBadge(item.priority)}
+                                      >
                                         {item.priority}
                                       </Badge>
                                       <Badge
@@ -2288,10 +2253,9 @@ export default function ProductionPage() {
                                             : statusBadge(item.status)
                                         }
                                       >
-                                        {String(item.status ?? "queued").replace(
-                                          "_",
-                                          " ",
-                                        )}
+                                        {String(
+                                          item.status ?? "queued",
+                                        ).replace("_", " ")}
                                       </Badge>
                                     </div>
                                   );
@@ -2599,7 +2563,10 @@ export default function ProductionPage() {
                   >
                     Cancel
                   </Button>
-                  <Button onClick={handleConfirmSplit} disabled={isCreatingWorkOrders}>
+                  <Button
+                    onClick={handleConfirmSplit}
+                    disabled={isCreatingWorkOrders}
+                  >
                     {isCreatingWorkOrders && (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                     )}
@@ -2635,22 +2602,20 @@ export default function ProductionPage() {
                     className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
                   />
                 </label>
-                <label className="space-y-1 text-xs text-muted-foreground">
-                  Date
-                  <input
-                    type="date"
-                    value={qrFilterDate}
-                    onChange={(event) => setQrFilterDate(event.target.value)}
-                    className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
-                  />
-                </label>
+                <DatePicker
+                  label="Date"
+                  value={qrFilterDate}
+                  onChange={setQrFilterDate}
+                  className="space-y-1 text-xs text-muted-foreground"
+                  triggerClassName="h-9"
+                />
                 <label className="space-y-1 text-xs text-muted-foreground">
                   Status
-                  <select
+                  <Select
                     value={qrFilterStatus}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setQrFilterStatus(
-                        event.target.value as
+                        value as
                           | "all"
                           | "queued"
                           | "pending"
@@ -2659,30 +2624,38 @@ export default function ProductionPage() {
                           | "done",
                       )
                     }
-                    className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
                   >
-                    <option value="all">All</option>
-                    <option value="queued">Queued</option>
-                    <option value="pending">Pending</option>
-                    <option value="in_progress">In progress</option>
-                    <option value="blocked">Blocked</option>
-                    <option value="done">Done</option>
-                  </select>
+                    <SelectTrigger className="h-9 w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="queued">Queued</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="in_progress">In progress</SelectItem>
+                      <SelectItem value="blocked">Blocked</SelectItem>
+                      <SelectItem value="done">Done</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </label>
                 <label className="space-y-1 text-xs text-muted-foreground">
                   Station
-                  <select
+                  <Select
                     value={qrFilterStation}
-                    onChange={(event) => setQrFilterStation(event.target.value)}
-                    className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
+                    onValueChange={setQrFilterStation}
                   >
-                    <option value="all">All stations</option>
-                    {stations.map((station) => (
-                      <option key={station.id} value={station.id}>
-                        {station.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="h-9 w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All stations</SelectItem>
+                      {stations.map((station) => (
+                        <SelectItem key={station.id} value={station.id}>
+                          {station.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
                 <div className="flex items-center gap-2">
                   <Button
@@ -2875,7 +2848,7 @@ export default function ProductionPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                <DatePickerField
+                <DatePicker
                   label="Start date"
                   value={viewDate}
                   onChange={setViewDate}
@@ -2883,18 +2856,22 @@ export default function ProductionPage() {
                 />
                 <label className="flex items-center gap-2">
                   Range
-                  <select
-                    value={plannedRangeDays}
-                    onChange={(event) =>
-                      setPlannedRangeDays(Number(event.target.value))
+                  <Select
+                    value={String(plannedRangeDays)}
+                    onValueChange={(value) =>
+                      setPlannedRangeDays(Number(value))
                     }
-                    className="h-9 rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
                   >
-                    <option value={1}>1 day</option>
-                    <option value={3}>3 days</option>
-                    <option value={7}>7 days</option>
-                    <option value={14}>14 days</option>
-                  </select>
+                    <SelectTrigger className="h-9 w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1 day</SelectItem>
+                      <SelectItem value="3">3 days</SelectItem>
+                      <SelectItem value="7">7 days</SelectItem>
+                      <SelectItem value="14">14 days</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </label>
               </div>
 
@@ -2920,10 +2897,7 @@ export default function ProductionPage() {
                     </thead>
                     <tbody>
                       {stations.map((station) => (
-                        <tr
-                          key={station.id}
-                          className="border-t border-border"
-                        >
+                        <tr key={station.id} className="border-t border-border">
                           <td className="px-3 py-2 text-sm font-medium">
                             {station.name}
                           </td>
@@ -3084,17 +3058,18 @@ export default function ProductionPage() {
               <div className="space-y-4 overflow-y-auto pr-2">
                 <label className="space-y-2 text-sm font-medium">
                   Label size
-                  <select
-                    value={qrSize}
-                    onChange={(event) => setQrSize(event.target.value)}
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  >
-                    {qrEnabledSizes.map((size) => (
-                      <option key={size} value={size}>
-                        {qrLabelSizePresets[size]?.label ?? size}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={qrSize} onValueChange={setQrSize}>
+                    <SelectTrigger className="h-10 w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {qrEnabledSizes.map((size) => (
+                        <SelectItem key={size} value={size}>
+                          {qrLabelSizePresets[size]?.label ?? size}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Content fields</div>
@@ -3166,18 +3141,20 @@ export default function ProductionPage() {
                 <div className="grid gap-3">
                   <label className="space-y-2 text-sm font-medium">
                     Orientation
-                    <select
+                    <Select
                       value={qrOrientation}
-                      onChange={(event) =>
-                        setQrOrientation(
-                          event.target.value as "portrait" | "landscape",
-                        )
+                      onValueChange={(value) =>
+                        setQrOrientation(value as "portrait" | "landscape")
                       }
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                     >
-                      <option value="portrait">Vertical</option>
-                      <option value="landscape">Horizontal</option>
-                    </select>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="portrait">Vertical</SelectItem>
+                        <SelectItem value="landscape">Horizontal</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </label>
                   <label className="space-y-2 text-sm font-medium">
                     Preview zoom
@@ -3269,5 +3246,3 @@ export default function ProductionPage() {
     </>
   );
 }
-
-

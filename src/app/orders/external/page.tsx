@@ -8,6 +8,13 @@ import type { ExternalJobStatus } from "@/types/orders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
@@ -348,55 +355,71 @@ export default function ExternalJobsPage() {
             </div>
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Status</label>
-              <select
+              <Select
                 value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as ExternalJobStatus | "all")
+                onValueChange={(value) =>
+                  setStatusFilter(value as ExternalJobStatus | "all")
                 }
-                className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
               >
-                {statusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="h-10 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Partner group</label>
-              <select
-                value={partnerGroupFilter}
-                onChange={(event) => setPartnerGroupFilter(event.target.value)}
-                className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-              >
-                <option value="">All groups</option>
+            <Select
+              value={partnerGroupFilter || "__all__"}
+              onValueChange={(value) =>
+                setPartnerGroupFilter(value === "__all__" ? "" : value)
+              }
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All groups</SelectItem>
                 {activeGroups.map((group) => (
-                  <option key={group.id} value={group.id}>
+                  <SelectItem key={group.id} value={group.id}>
                     {group.name}
-                  </option>
-                ))}
-              </select>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Partner</label>
-              <select
-                value={partnerFilter}
-                onChange={(event) => setPartnerFilter(event.target.value)}
-                className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-              >
-                <option value="">All partners</option>
+            <Select
+              value={partnerFilter || "__all__"}
+              onValueChange={(value) =>
+                setPartnerFilter(value === "__all__" ? "" : value)
+              }
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All partners</SelectItem>
                 {activePartners
                   .filter((partner) =>
                     partnerGroupFilter
                       ? partner.groupId === partnerGroupFilter
-                      : true,
-                  )
-                  .map((partner) => (
-                    <option key={partner.id} value={partner.id}>
-                      {partner.name}
-                    </option>
-                  ))}
-              </select>
+                        : true,
+                    )
+                    .map((partner) => (
+                      <SelectItem key={partner.id} value={partner.id}>
+                        {partner.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex items-center gap-2">
               <Button

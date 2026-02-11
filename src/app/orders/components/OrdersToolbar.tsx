@@ -9,6 +9,13 @@ import {
 } from "lucide-react";
 
 import type { OrderStatus } from "@/types/orders";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 
 export type StatusOption = { value: OrderStatus | "all"; label: string };
 type StatusFilter = StatusOption["value"];
@@ -56,14 +63,18 @@ export function OrdersToolbar({
     if (!filtersOpen) {
       return;
     }
-    function handleClick(event: MouseEvent) {
-      const target = event.target as Node;
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest("[data-radix-popper-content-wrapper]")) {
+        return;
+      }
       if (filtersRef.current && !filtersRef.current.contains(target)) {
         setFiltersOpen(false);
       }
     }
-    document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [filtersOpen]);
 
   return (
@@ -148,23 +159,6 @@ export function OrdersToolbar({
                       })}
                     </div>
                   </div>
-                )}
-                {partnerGroupOptions.length > 0 && onPartnerGroupChange && (
-                  <label className="space-y-2 text-sm font-medium">
-                    Partner group
-                    <select
-                      value={partnerGroupFilter}
-                      onChange={(event) => onPartnerGroupChange(event.target.value)}
-                      className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    >
-                      <option value="">All partner groups</option>
-                      {partnerGroupOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                 )}
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Status</div>

@@ -12,6 +12,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/Card";
+import { DatePicker } from "@/components/ui/DatePicker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type {
@@ -1007,24 +1015,32 @@ export default function OrderDetailPage() {
           className="flex flex-col gap-2 text-sm font-medium"
         >
           {label}
-          <select
-            value={String(normalized ?? "")}
+          <Select
+            value={
+              normalized === undefined || normalized === null || normalized === ""
+                ? "__none__"
+                : String(normalized)
+            }
             disabled={!canEditOrderInputs}
-            onChange={(event) =>
+            onValueChange={(value) =>
               setOrderInputValues((prev) => ({
                 ...prev,
-                [field.id]: event.target.value,
+                [field.id]: value === "__none__" ? "" : value,
               }))
             }
-            className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
           >
-            <option value="">Select</option>
-            {(field.options ?? []).map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="h-10 w-full">
+              <SelectValue placeholder="Select" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">Select</SelectItem>
+              {(field.options ?? []).map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
       );
     }
@@ -1247,25 +1263,32 @@ export default function OrderDetailPage() {
                             };
                             return (
                               <td key={column.key} className="px-3 py-2">
-                                <select
-                                  value=""
+                                <Select
+                                  value="__none__"
                                   disabled={!canEditOrderInputs || !canAddMore}
-                                  onChange={(event) => {
-                                    const next = event.target.value;
-                                    handleAddValue(next);
-                                    event.currentTarget.value = "";
+                                  onValueChange={(value) => {
+                                    if (value === "__none__") return;
+                                    handleAddValue(value);
                                   }}
-                                  className="h-9 w-full rounded-md border border-border bg-input-background px-2 text-sm"
                                 >
-                                  <option value="">
-                                    {canAddMore ? "Select" : "Max selected"}
-                                  </option>
-                                  {(column.options ?? []).map((option) => (
-                                    <option key={option} value={option}>
-                                      {option}
-                                    </option>
-                                  ))}
-                                </select>
+                                  <SelectTrigger className="h-9 w-full rounded-md">
+                                    <SelectValue
+                                      placeholder={
+                                        canAddMore ? "Select" : "Max selected"
+                                      }
+                                    />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">
+                                      {canAddMore ? "Select" : "Max selected"}
+                                    </SelectItem>
+                                    {(column.options ?? []).map((option) => (
+                                      <SelectItem key={option} value={option}>
+                                        {option}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                                 {currentValues.length > 0 && (
                                   <div className="mt-2 flex flex-wrap gap-1">
                                     {currentValues.map((chip) => (
@@ -1388,24 +1411,19 @@ export default function OrderDetailPage() {
 
     if (field.fieldType === "date") {
       return (
-        <label
-          key={field.id}
+        <DatePicker
+          label={label}
+          value={String(normalized ?? "")}
+          onChange={(next) =>
+            setOrderInputValues((prev) => ({
+              ...prev,
+              [field.id]: next,
+            }))
+          }
+          disabled={!canEditOrderInputs}
           className="flex flex-col gap-2 text-sm font-medium"
-        >
-          {label}
-          <input
-            type="date"
-            value={String(normalized ?? "")}
-            disabled={!canEditOrderInputs}
-            onChange={(event) =>
-              setOrderInputValues((prev) => ({
-                ...prev,
-                [field.id]: event.target.value,
-              }))
-            }
-            className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-          />
-        </label>
+          triggerClassName="h-10"
+        />
       );
     }
 
@@ -2357,22 +2375,26 @@ export default function OrderDetailPage() {
                     )}
                     {canAssignManager && (
                       <div className="flex flex-wrap items-center gap-2">
-                        <select
+                        <Select
                           value={selectedManagerId}
-                          onChange={(event) =>
-                            setSelectedManagerId(event.target.value)
-                          }
-                          className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                          onValueChange={setSelectedManagerId}
                         >
-                          <option value="">
-                            Assign {managerLabel.toLowerCase()}...
-                          </option>
-                          {managers.map((manager) => (
-                            <option key={manager.id} value={manager.id}>
-                              {manager.name}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger className="h-8 w-[220px] rounded-md text-xs">
+                            <SelectValue
+                              placeholder={`Assign ${managerLabel.toLowerCase()}...`}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">
+                              Assign {managerLabel.toLowerCase()}...
+                            </SelectItem>
+                            {managers.map((manager) => (
+                              <SelectItem key={manager.id} value={manager.id}>
+                                {manager.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <Button
                           variant="outline"
                           size="sm"
@@ -2404,22 +2426,26 @@ export default function OrderDetailPage() {
                     )}
                     {canAssignEngineer && (
                       <div className="flex flex-wrap items-center gap-2">
-                        <select
+                        <Select
                           value={selectedEngineerId}
-                          onChange={(event) =>
-                            setSelectedEngineerId(event.target.value)
-                          }
-                          className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
+                          onValueChange={setSelectedEngineerId}
                         >
-                          <option value="">
-                            Assign {engineerLabel.toLowerCase()}...
-                          </option>
-                          {engineers.map((engineer) => (
-                            <option key={engineer.id} value={engineer.id}>
-                              {engineer.name}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger className="h-8 w-[220px] rounded-md text-xs">
+                            <SelectValue
+                              placeholder={`Assign ${engineerLabel.toLowerCase()}...`}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">
+                              Assign {engineerLabel.toLowerCase()}...
+                            </SelectItem>
+                            {engineers.map((engineer) => (
+                              <SelectItem key={engineer.id} value={engineer.id}>
+                                {engineer.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <Button
                           variant="outline"
                           size="sm"
@@ -2578,20 +2604,24 @@ export default function OrderDetailPage() {
               <CardContent className="space-y-3 text-sm">
                 <label className="space-y-2 text-sm font-medium">
                   Category
-                  <select
+                  <Select
                     value={attachmentCategory}
-                    onChange={(event) => {
-                      setAttachmentCategory(event.target.value);
+                    onValueChange={(value) => {
+                      setAttachmentCategory(value);
                       setIsAttachmentCategoryManual(true);
                     }}
-                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                   >
-                    {attachmentCategories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.label}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="h-10 w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {attachmentCategories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <span className="text-xs text-muted-foreground">
                     Pick the best bucket before uploading files.
                   </span>
@@ -2799,43 +2829,53 @@ export default function OrderDetailPage() {
                 <div className="grid gap-3 lg:grid-cols-2">
                   <label className="space-y-2 text-sm font-medium">
                     Partner group
-                    <select
-                      value={externalPartnerGroupId}
-                      onChange={(event) =>
-                        setExternalPartnerGroupId(event.target.value)
+                    <Select
+                      value={externalPartnerGroupId || "__all__"}
+                      onValueChange={(value) =>
+                        setExternalPartnerGroupId(
+                          value === "__all__" ? "" : value,
+                        )
                       }
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                     >
-                      <option value="">All groups</option>
-                      {activeGroups.map((group) => (
-                        <option key={group.id} value={group.id}>
-                          {group.name}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All groups</SelectItem>
+                        {activeGroups.map((group) => (
+                          <SelectItem key={group.id} value={group.id}>
+                            {group.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                   <label className="space-y-2 text-sm font-medium">
                     Partner
-                    <select
-                      value={externalPartnerId}
-                      onChange={(event) =>
-                        setExternalPartnerId(event.target.value)
+                    <Select
+                      value={externalPartnerId || "__none__"}
+                      onValueChange={(value) =>
+                        setExternalPartnerId(value === "__none__" ? "" : value)
                       }
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                     >
-                      <option value="">Select partner</option>
-                      {activePartners
-                        .filter((partner) =>
-                          externalPartnerGroupId
-                            ? partner.groupId === externalPartnerGroupId
-                            : true,
-                        )
-                        .map((partner) => (
-                          <option key={partner.id} value={partner.id}>
-                            {partner.name}
-                          </option>
-                        ))}
-                    </select>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Select partner</SelectItem>
+                        {activePartners
+                          .filter((partner) =>
+                            externalPartnerGroupId
+                              ? partner.groupId === externalPartnerGroupId
+                              : true,
+                          )
+                          .map((partner) => (
+                            <SelectItem key={partner.id} value={partner.id}>
+                              {partner.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                   <label className="space-y-2 text-sm font-medium">
                     External order #
@@ -2861,36 +2901,34 @@ export default function OrderDetailPage() {
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                     />
                   </label>
-                  <label className="space-y-2 text-sm font-medium">
-                    Due date
-                    <input
-                      type="date"
-                      value={externalDueDate}
-                      onChange={(event) =>
-                        setExternalDueDate(event.target.value)
-                      }
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </label>
+                  <DatePicker
+                    label="Due date"
+                    value={externalDueDate}
+                    onChange={setExternalDueDate}
+                    className="space-y-2 text-sm font-medium"
+                    triggerClassName="h-10"
+                  />
                   <label className="space-y-2 text-sm font-medium">
                     Status
-                    <select
+                    <Select
                       value={externalStatus}
-                      onChange={(event) =>
-                        setExternalStatus(
-                          event.target.value as ExternalJobStatus,
-                        )
+                      onValueChange={(value) =>
+                        setExternalStatus(value as ExternalJobStatus)
                       }
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                     >
-                      {Object.entries(externalJobStatusLabels).map(
-                        ([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ),
-                      )}
-                    </select>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(externalJobStatusLabels).map(
+                          ([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ),
+                        )}
+                      </SelectContent>
+                    </Select>
                   </label>
                 </div>
                 {externalError && (
@@ -2952,24 +2990,28 @@ export default function OrderDetailPage() {
                               >
                                 {externalJobStatusLabels[job.status]}
                               </Badge>
-                              <select
+                              <Select
                                 value={job.status}
-                                onChange={(event) =>
+                                onValueChange={(value) =>
                                   handleExternalStatusChange(
                                     job.id,
-                                    event.target.value as ExternalJobStatus,
+                                    value as ExternalJobStatus,
                                   )
                                 }
-                                className="h-8 rounded-md border border-border bg-input-background px-2 text-xs text-foreground"
                               >
-                                {Object.entries(externalJobStatusLabels).map(
-                                  ([value, label]) => (
-                                    <option key={value} value={value}>
-                                      {label}
-                                    </option>
-                                  ),
-                                )}
-                              </select>
+                                <SelectTrigger className="h-8 w-[160px] rounded-md text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {Object.entries(externalJobStatusLabels).map(
+                                    ([value, label]) => (
+                                      <SelectItem key={value} value={value}>
+                                        {label}
+                                      </SelectItem>
+                                    ),
+                                  )}
+                                </SelectContent>
+                              </Select>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -3236,18 +3278,24 @@ export default function OrderDetailPage() {
             <div className="mt-4 space-y-3">
               <label className="space-y-2 text-sm font-medium">
                 Reason
-                <select
-                  value={returnReason}
-                  onChange={(event) => setReturnReason(event.target.value)}
-                  className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                <Select
+                  value={returnReason || "__none__"}
+                  onValueChange={(value) =>
+                    setReturnReason(value === "__none__" ? "" : value)
+                  }
                 >
-                  <option value="">Select reason</option>
-                  {rules.returnReasons.map((reason) => (
-                    <option key={reason} value={reason}>
-                      {reason}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="h-10 w-full">
+                    <SelectValue placeholder="Select reason" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select reason</SelectItem>
+                    {rules.returnReasons.map((reason) => (
+                      <SelectItem key={reason} value={reason}>
+                        {reason}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="space-y-2 text-sm font-medium">
                 Comment
