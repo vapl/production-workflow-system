@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import type { OrderInputField } from "@/types/orderInputs";
 import {
   ChevronDownIcon,
@@ -15,8 +17,10 @@ import {
   ExternalLinkIcon,
   PaperclipIcon,
   XIcon,
+  Info,
 } from "lucide-react";
 import Link from "next/link";
+import QRCode from "qrcode";
 
 type Priority = "low" | "normal" | "high" | "urgent";
 
@@ -33,7 +37,7 @@ type ProductionItemRow = {
   item_name: string;
   qty: number;
   material: string | null;
-  status: "queued" | "in_progress" | "blocked" | "done";
+  status: "queued" | "pending" | "in_progress" | "blocked" | "done";
   station_id: string | null;
   meta: Record<string, unknown> | null;
   duration_minutes?: number | null;
@@ -72,7 +76,7 @@ type BatchRunRow = {
   station_id: string | null;
   route_key: string;
   step_index: number;
-  status: "queued" | "in_progress" | "blocked" | "done";
+  status: "queued" | "pending" | "in_progress" | "blocked" | "done";
   blocked_reason?: string | null;
   blocked_reason_id?: string | null;
   planned_date?: string | null;
@@ -101,6 +105,7 @@ type BatchGroup = {
 
 type QueueItem = {
   id: string;
+  orderId: string;
   orderNumber: string;
   customerName: string;
   dueDate: string;
@@ -115,7 +120,65 @@ type QueueItem = {
   items: ProductionItemRow[];
 };
 
-const productionAttachmentCategory = "production_report";
+type SplitRow = {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  dueDate: string;
+  batchCode: string;
+  priority: Priority;
+  fieldId: string;
+  fieldLabel: string;
+  itemName: string;
+  qty: number;
+  material: string;
+  rowIndex: number;
+  rawRow: Record<string, unknown>;
+};
+
+const productionAttachmentFallbackCategory = "production_report";
+
+const qrLabelSizePresets: Record<
+  string,
+  { label: string; widthMm: number; heightMm: number }
+> = {
+  A4: { label: "A4", widthMm: 210, heightMm: 297 },
+  A5: { label: "A5", widthMm: 148, heightMm: 210 },
+  A6: { label: "A6", widthMm: 105, heightMm: 148 },
+  LABEL_70x35: { label: "Label 70 x 35", widthMm: 70, heightMm: 35 },
+  LABEL_105x148: { label: "Label 105 x 148", widthMm: 105, heightMm: 148 },
+};
+
+const qrFieldLabels: Record<string, string> = {
+  order_number: "Order",
+  customer_name: "Customer",
+  batch_code: "Batch",
+  item_name: "Construction",
+  qty: "Qty",
+  material: "Material",
+  field_label: "Field",
+  due_date: "Due",
+};
+
+const qrFieldOrderDefault = Object.keys(qrFieldLabels);
+
+const defaultQrEnabledSizes = [
+  "A4",
+  "A5",
+  "A6",
+  "LABEL_70x35",
+  "LABEL_105x148",
+];
+
+const defaultQrContentFields = [
+  "order_number",
+  "customer_name",
+  "batch_code",
+  "item_name",
+  "qty",
+  "material",
+];
 
 function priorityBadge(priority: Priority) {
   if (priority === "urgent") return "priority-urgent";
@@ -125,7 +188,8 @@ function priorityBadge(priority: Priority) {
 }
 
 function statusBadge(status: BatchRunRow["status"]) {
-  if (status === "blocked") return "status-engineering_blocked";
+  if (status === "blocked") return "status-blocked";
+  if (status === "pending") return "status-pending";
   if (status === "in_progress") return "status-in_engineering";
   if (status === "done") return "status-ready_for_production";
   return "status-draft";
@@ -227,9 +291,11 @@ function DatePickerField({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const openPicker = () => {
     if (disabled) return;
-    const target = inputRef.current as (HTMLInputElement & {
-      showPicker?: () => void;
-    }) | null;
+    const target = inputRef.current as
+      | (HTMLInputElement & {
+          showPicker?: () => void;
+        })
+      | null;
     if (!target) return;
     if (typeof target.showPicker === "function") {
       target.showPicker();
@@ -266,6 +332,7 @@ function DatePickerField({
 
 export default function ProductionPage() {
   const user = useCurrentUser();
+  const { rules } = useWorkflowRules();
   const [selectedBatchKeys, setSelectedBatchKeys] = useState<string[]>([]);
   const [selectedRouteKey, setSelectedRouteKey] = useState("default");
   const [plannedDate, setPlannedDate] = useState(
@@ -303,6 +370,42 @@ export default function ProductionPage() {
   const [signedProductionUrls, setSignedProductionUrls] = useState<
     Record<string, string>
   >({});
+  const [qrEnabledSizes, setQrEnabledSizes] = useState<string[]>(
+    defaultQrEnabledSizes,
+  );
+  const [qrDefaultSize, setQrDefaultSize] = useState<string>("A4");
+  const [qrContentFields, setQrContentFields] = useState<string[]>(
+    defaultQrContentFields,
+  );
+  const [qrFieldOrder, setQrFieldOrder] =
+    useState<string[]>(qrFieldOrderDefault);
+  const [qrFieldSelection, setQrFieldSelection] = useState<string[]>(
+    defaultQrContentFields,
+  );
+  const [qrDragField, setQrDragField] = useState<string | null>(null);
+  const [qrSelectedRowIds, setQrSelectedRowIds] = useState<string[]>([]);
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [qrSize, setQrSize] = useState<string>("A4");
+  const [qrOrientation, setQrOrientation] = useState<"portrait" | "landscape">(
+    "portrait",
+  );
+  const [qrPreviewScale, setQrPreviewScale] = useState(1);
+  const [qrRows, setQrRows] = useState<Array<{ row: SplitRow; token: string }>>(
+    [],
+  );
+  const [qrImages, setQrImages] = useState<Record<string, string>>({});
+  const [qrState, setQrState] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [qrSearch, setQrSearch] = useState("");
+  const [qrFilterDate, setQrFilterDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [qrFilterStatus, setQrFilterStatus] = useState<
+    "all" | "queued" | "pending" | "in_progress" | "blocked" | "done"
+  >("all");
+  const [qrFilterStation, setQrFilterStation] = useState("all");
   const [filesPreview, setFilesPreview] = useState<{
     orderId: string;
     orderNumber: string;
@@ -315,6 +418,8 @@ export default function ProductionPage() {
     new Set(),
   );
   const [isSplitOpen, setIsSplitOpen] = useState(false);
+  const [isCreatingWorkOrders, setIsCreatingWorkOrders] = useState(false);
+  const [removingQueueId, setRemovingQueueId] = useState<string | null>(null);
   const [splitRows, setSplitRows] = useState<
     Array<{
       id: string;
@@ -337,6 +442,10 @@ export default function ProductionPage() {
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
     : "";
+
+  const productionAttachmentCategory =
+    rules.attachmentCategoryDefaults?.Production ??
+    productionAttachmentFallbackCategory;
 
   useEffect(() => {
     if (!supabase) {
@@ -533,6 +642,67 @@ export default function ProductionPage() {
   }, [productionItems, readyOrders]);
 
   useEffect(() => {
+    if (!supabase || !user?.tenantId) {
+      return;
+    }
+    const channel = supabase
+      .channel(`production-live-${user.tenantId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "production_items",
+          filter: `tenant_id=eq.${user.tenantId}`,
+        },
+        (payload) => {
+          const next = payload.new as ProductionItemRow | undefined;
+          if (!next) {
+            return;
+          }
+          setProductionItems((prev) => {
+            const idx = prev.findIndex((item) => item.id === next.id);
+            if (idx === -1) {
+              return [next, ...prev];
+            }
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...next };
+            return copy;
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "batch_runs",
+          filter: `tenant_id=eq.${user.tenantId}`,
+        },
+        (payload) => {
+          const next = payload.new as BatchRunRow | undefined;
+          if (!next) {
+            return;
+          }
+          setBatchRuns((prev) => {
+            const idx = prev.findIndex((item) => item.id === next.id);
+            if (idx === -1) {
+              return [next, ...prev];
+            }
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...next };
+            return copy;
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.tenantId]);
+
+  useEffect(() => {
     if (!supabase) {
       return;
     }
@@ -666,7 +836,9 @@ export default function ProductionPage() {
     const loadWorkHours = async () => {
       const { data, error } = await supabase
         .from("tenant_settings")
-        .select("workday_start, workday_end")
+        .select(
+          "workday_start, workday_end, qr_enabled_sizes, qr_default_size, qr_content_fields",
+        )
         .eq("tenant_id", user.tenantId)
         .maybeSingle();
       if (!isMounted) {
@@ -680,6 +852,35 @@ export default function ProductionPage() {
       }
       if (data.workday_end) {
         setWorkdayEnd(data.workday_end);
+      }
+      if (Array.isArray(data.qr_enabled_sizes)) {
+        const nextSizes = data.qr_enabled_sizes.filter(
+          (value: unknown) => typeof value === "string",
+        );
+        if (nextSizes.length > 0) {
+          setQrEnabledSizes(nextSizes);
+        }
+      }
+      if (typeof data.qr_default_size === "string") {
+        setQrDefaultSize(data.qr_default_size);
+        setQrSize(data.qr_default_size);
+      }
+      if (Array.isArray(data.qr_content_fields)) {
+        const nextFields = data.qr_content_fields.filter(
+          (value: unknown) => typeof value === "string",
+        );
+        if (nextFields.length > 0) {
+          setQrContentFields(nextFields);
+          setQrFieldSelection(nextFields);
+          setQrFieldOrder((prev) => {
+            const base = prev.length > 0 ? prev : qrFieldOrderDefault;
+            const merged = [
+              ...base.filter((field) => field !== null),
+              ...nextFields.filter((field) => !base.includes(field)),
+            ];
+            return Array.from(new Set(merged));
+          });
+        }
       }
     };
     void loadWorkHours();
@@ -754,6 +955,246 @@ export default function ProductionPage() {
     return Array.from(groups.values());
   }, [productionItems, readyOrders, batchRuns]);
 
+  const productionConstructionRows = useMemo(() => {
+    const rows: SplitRow[] = [];
+    const seen = new Set<string>();
+    productionItems.forEach((item) => {
+      const rowKey =
+        typeof item.meta?.rowKey === "string" ? item.meta?.rowKey : null;
+      if (rowKey && seen.has(rowKey)) {
+        return;
+      }
+      if (rowKey) {
+        seen.add(rowKey);
+      }
+      const parts = rowKey ? rowKey.split(":") : [];
+      const fieldId = parts[1] ?? "fallback";
+      const rowIndex = Number(parts[2] ?? 0);
+      const normalizedIndex = Number.isFinite(rowIndex) ? rowIndex : 0;
+      rows.push({
+        id: rowKey ?? item.id,
+        orderId: item.order_id,
+        orderNumber: item.orders?.order_number ?? "Order",
+        customerName: item.orders?.customer_name ?? "Customer",
+        dueDate: item.orders?.due_date ?? "",
+        batchCode: item.batch_code || "B1",
+        priority: item.orders?.priority ?? "normal",
+        fieldId,
+        fieldLabel:
+          typeof item.meta?.fieldLabel === "string"
+            ? item.meta.fieldLabel
+            : "Order",
+        itemName: item.item_name,
+        qty: Number(item.qty ?? 1),
+        material: item.material ?? "",
+        rowIndex: normalizedIndex,
+        rawRow:
+          typeof item.meta?.row === "object" && item.meta?.row !== null
+            ? (item.meta.row as Record<string, unknown>)
+            : {},
+      });
+    });
+    return rows;
+  }, [productionItems]);
+
+  const orderConstructionRows = useMemo(() => {
+    if (productionConstructionRows.length > 0) {
+      return productionConstructionRows;
+    }
+    return buildSplitRows(readyBatchGroups);
+  }, [
+    productionConstructionRows,
+    readyBatchGroups,
+    productionFields,
+    productionValues,
+  ]);
+
+  const rowKeyForRow = (row: SplitRow) =>
+    `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
+
+  const stationStatusMap = useMemo(() => {
+    const map = new Map<
+      string,
+      Map<
+        string,
+        { status: ProductionItemRow["status"]; blockedReason?: string }
+      >
+    >();
+    productionItems.forEach((item) => {
+      const rowKey =
+        typeof item.meta?.rowKey === "string"
+          ? item.meta.rowKey
+          : `${item.order_id}:fallback:${
+              typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
+            }`;
+      const stationId = item.station_id ?? "unassigned";
+      if (!map.has(rowKey)) {
+        map.set(rowKey, new Map());
+      }
+      const blockedReason =
+        typeof (item.meta as Record<string, unknown> | null)?.blocked_reason ===
+        "string"
+          ? ((item.meta as Record<string, unknown>).blocked_reason as string)
+          : undefined;
+      map.get(rowKey)?.set(stationId, {
+        status: item.status,
+        blockedReason,
+      });
+    });
+    return map;
+  }, [productionItems]);
+
+  const rowPlannedDateMap = useMemo(() => {
+    const map = new Map<string, string>();
+    productionItems.forEach((item) => {
+      const rowKey =
+        typeof item.meta?.rowKey === "string"
+          ? item.meta.rowKey
+          : `${item.order_id}:fallback:${
+              typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
+            }`;
+      const plannedDate =
+        typeof item.meta?.plannedDate === "string" ? item.meta.plannedDate : "";
+      if (plannedDate && !map.has(rowKey)) {
+        map.set(rowKey, plannedDate);
+      }
+    });
+    return map;
+  }, [productionItems]);
+
+  const selectableConstructionRows = useMemo(
+    () => orderConstructionRows.filter((row) => row.fieldId !== "fallback"),
+    [orderConstructionRows],
+  );
+
+  const filteredQrRows = useMemo(() => {
+    const query = qrSearch.trim().toLowerCase();
+    return orderConstructionRows.filter((row) => {
+      const rowKey = rowKeyForRow(row);
+      const stationStatuses = stationStatusMap.get(rowKey);
+      const plannedDate = rowPlannedDateMap.get(rowKey) ?? "";
+
+      if (qrFilterDate && plannedDate && plannedDate !== qrFilterDate) {
+        return false;
+      }
+      if (qrFilterDate && !plannedDate) {
+        return false;
+      }
+
+      if (qrFilterStation !== "all") {
+        const entry = stationStatuses?.get(qrFilterStation);
+        if (!entry) {
+          return false;
+        }
+        if (qrFilterStatus !== "all" && entry.status !== qrFilterStatus) {
+          return false;
+        }
+      } else if (qrFilterStatus !== "all") {
+        const hasStatus = Array.from(stationStatuses?.values() ?? []).some(
+          (entry) => entry.status === qrFilterStatus,
+        );
+        if (!hasStatus) {
+          return false;
+        }
+      }
+
+      if (!query) {
+        return true;
+      }
+      return (
+        row.orderNumber.toLowerCase().includes(query) ||
+        row.customerName.toLowerCase().includes(query) ||
+        row.batchCode.toLowerCase().includes(query) ||
+        row.itemName.toLowerCase().includes(query) ||
+        row.fieldLabel.toLowerCase().includes(query)
+      );
+    });
+  }, [
+    orderConstructionRows,
+    qrSearch,
+    qrFilterDate,
+    qrFilterStatus,
+    qrFilterStation,
+    stationStatusMap,
+    rowPlannedDateMap,
+  ]);
+
+  const filteredSelectableRows = useMemo(
+    () => filteredQrRows.filter((row) => row.fieldId !== "fallback"),
+    [filteredQrRows],
+  );
+
+  const activeQrSize = qrLabelSizePresets[qrSize] ?? qrLabelSizePresets.A4;
+  const orientedQrSize =
+    qrOrientation === "landscape"
+      ? { widthMm: activeQrSize.heightMm, heightMm: activeQrSize.widthMm }
+      : { widthMm: activeQrSize.widthMm, heightMm: activeQrSize.heightMm };
+  const qrPageSizeCss = `${orientedQrSize.widthMm}mm ${orientedQrSize.heightMm}mm`;
+  const qrPageStyle = {
+    width: `${orientedQrSize.widthMm}mm`,
+    height: `${orientedQrSize.heightMm}mm`,
+  };
+  const orderedQrFields = useMemo(
+    () => qrFieldOrder.filter((field) => qrFieldSelection.includes(field)),
+    [qrFieldOrder, qrFieldSelection],
+  );
+
+  const calendarDates = useMemo(() => {
+    const base = new Date(viewDate);
+    if (Number.isNaN(base.getTime())) {
+      return [];
+    }
+    const days = Math.max(1, plannedRangeDays);
+    return Array.from({ length: days }).map((_, index) => {
+      const next = new Date(base);
+      next.setDate(base.getDate() + index);
+      return next;
+    });
+  }, [viewDate, plannedRangeDays]);
+
+  const calendarCells = useMemo(() => {
+    const map = new Map<
+      string,
+      { count: number; minutes: number; orders: Set<string> }
+    >();
+    if (calendarDates.length === 0) {
+      return map;
+    }
+    const dateKeys = new Set(
+      calendarDates.map((date) => date.toISOString().slice(0, 10)),
+    );
+    batchRuns.forEach((run) => {
+      if (!run.station_id || !run.planned_date) {
+        return;
+      }
+      if (!dateKeys.has(run.planned_date)) {
+        return;
+      }
+      const key = `${run.station_id}:${run.planned_date}`;
+      const existing = map.get(key) ?? {
+        count: 0,
+        minutes: 0,
+        orders: new Set<string>(),
+      };
+      existing.count += 1;
+      existing.orders.add(run.order_id);
+      const relatedItems = productionItems.filter(
+        (item) =>
+          item.order_id === run.order_id &&
+          item.batch_code === run.batch_code &&
+          item.station_id === run.station_id,
+      );
+      const duration =
+        relatedItems.reduce(
+          (sum, item) => sum + Number(item.duration_minutes ?? 0),
+          0,
+        ) || Number(run.duration_minutes ?? 0);
+      existing.minutes += duration;
+      map.set(key, existing);
+    });
+    return map;
+  }, [batchRuns, productionItems, calendarDates]);
+
   const readyOrderDurationMap = useMemo(() => {
     const map = new Map<string, number>();
     readyOrders.forEach((order) => {
@@ -777,7 +1218,9 @@ export default function ProductionPage() {
 
   const plannedDateValid = Boolean(plannedDate);
   const canRelease =
-    selectedBatchKeys.length > 0 && routeStations.length > 0 && plannedDateValid;
+    selectedBatchKeys.length > 0 &&
+    routeStations.length > 0 &&
+    plannedDateValid;
 
   const formatTableRow = (
     field: OrderInputField,
@@ -834,21 +1277,8 @@ export default function ProductionPage() {
     return 1;
   };
 
-  const buildSplitRows = (groups: BatchGroup[]) => {
-    const rows: Array<{
-      id: string;
-      orderId: string;
-      orderNumber: string;
-      customerName: string;
-      batchCode: string;
-      priority: Priority;
-      fieldLabel: string;
-      itemName: string;
-      qty: number;
-      material: string;
-      rowIndex: number;
-      rawRow: Record<string, unknown>;
-    }> = [];
+  function buildSplitRows(groups: BatchGroup[]): SplitRow[] {
+    const rows: SplitRow[] = [];
     groups.forEach((group) => {
       const values = productionValues[group.orderId] ?? {};
       let added = false;
@@ -871,8 +1301,10 @@ export default function ProductionPage() {
               orderId: group.orderId,
               orderNumber: group.orderNumber,
               customerName: group.customerName,
+              dueDate: group.dueDate,
               batchCode: group.batchCode,
               priority: group.priority,
+              fieldId: field.id,
               fieldLabel: field.label,
               itemName,
               qty: resolveRowQty(field, normalized),
@@ -889,8 +1321,10 @@ export default function ProductionPage() {
           orderId: group.orderId,
           orderNumber: group.orderNumber,
           customerName: group.customerName,
+          dueDate: group.dueDate,
           batchCode: group.batchCode,
           priority: group.priority,
+          fieldId: "fallback",
           fieldLabel: "Order",
           itemName: group.material || group.orderNumber,
           qty: group.totalQty || 1,
@@ -901,6 +1335,156 @@ export default function ProductionPage() {
       }
     });
     return rows;
+  }
+
+  const getQrFieldValue = (row: SplitRow, fieldKey: string) => {
+    switch (fieldKey) {
+      case "order_number":
+        return row.orderNumber;
+      case "customer_name":
+        return row.customerName;
+      case "batch_code":
+        return row.batchCode;
+      case "item_name":
+        return row.itemName;
+      case "qty":
+        return String(row.qty ?? "");
+      case "material":
+        return row.material;
+      case "field_label":
+        return row.fieldLabel;
+      case "due_date":
+        return row.dueDate ? formatDateInput(row.dueDate) : "";
+      default:
+        return "";
+    }
+  };
+
+  const buildQrRows = async (rows: SplitRow[]) => {
+    if (!supabase || !user?.isAuthenticated) {
+      return;
+    }
+    setQrState("loading");
+    setQrError(null);
+    try {
+      const orderIds = Array.from(new Set(rows.map((row) => row.orderId)));
+      const fieldIds = Array.from(new Set(rows.map((row) => row.fieldId)));
+      const { data: existingRows, error: existingError } = await supabase
+        .from("production_qr_codes")
+        .select("order_id, field_id, row_index, token")
+        .in("order_id", orderIds)
+        .in("field_id", fieldIds);
+      if (existingError) {
+        throw new Error(existingError.message);
+      }
+      const existingMap = new Map<string, string>();
+      const existingList =
+        (existingRows as Array<{
+          order_id: string;
+          field_id: string;
+          row_index: number;
+          token: string;
+        }>) ?? [];
+      existingList.forEach((entry) => {
+        const key = `${entry.order_id}:${entry.field_id}:${entry.row_index}`;
+        existingMap.set(key, entry.token);
+      });
+      const missing = rows.filter((row) => {
+        const key = `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
+        return !existingMap.has(key);
+      });
+      if (missing.length > 0) {
+        const { data: inserted, error: insertError } = await supabase
+          .from("production_qr_codes")
+          .insert(
+            missing.map((row) => ({
+              order_id: row.orderId,
+              field_id: row.fieldId,
+              row_index: row.rowIndex,
+              created_by: user?.id ?? null,
+            })),
+          )
+          .select("order_id, field_id, row_index, token");
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
+        const insertedList =
+          (inserted as Array<{
+            order_id: string;
+            field_id: string;
+            row_index: number;
+            token: string;
+          }>) ?? [];
+        insertedList.forEach((entry) => {
+          const key = `${entry.order_id}:${entry.field_id}:${entry.row_index}`;
+          existingMap.set(key, entry.token);
+        });
+      }
+      const withTokens = rows
+        .map((row) => {
+          const key = `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
+          const token = existingMap.get(key);
+          return token ? { row, token } : null;
+        })
+        .filter(Boolean) as Array<{ row: SplitRow; token: string }>;
+      setQrRows(withTokens);
+
+      const baseUrl =
+        typeof window !== "undefined" ? window.location.origin : "";
+      const images = await Promise.all(
+        withTokens.map(async (entry) => {
+          const url = `${baseUrl}/qr/${entry.token}`;
+          const dataUrl = await QRCode.toDataURL(url, {
+            margin: 1,
+            width: 256,
+          });
+          return { token: entry.token, dataUrl };
+        }),
+      );
+      const imageMap: Record<string, string> = {};
+      images.forEach((img) => {
+        imageMap[img.token] = img.dataUrl;
+      });
+      setQrImages(imageMap);
+      setQrState("ready");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to prepare QR codes.";
+      setQrError(message);
+      setQrState("error");
+    }
+  };
+
+  const handleOpenQrModal = async (rows: SplitRow[]) => {
+    if (rows.length === 0) {
+      return;
+    }
+    setQrSize(qrDefaultSize || "A4");
+    const nextFields =
+      qrContentFields.length > 0
+        ? qrContentFields
+        : qrFieldSelection.length > 0
+          ? qrFieldSelection
+          : defaultQrContentFields;
+    setQrFieldSelection(nextFields);
+    setQrFieldOrder((prev) => {
+      const base = prev.length > 0 ? prev : qrFieldOrderDefault;
+      const merged = [
+        ...base,
+        ...nextFields.filter((field) => !base.includes(field)),
+      ];
+      return Array.from(new Set(merged));
+    });
+    setQrModalOpen(true);
+    await buildQrRows(rows);
+  };
+
+  const handleCloseQrModal = () => {
+    setQrModalOpen(false);
+    setQrRows([]);
+    setQrImages({});
+    setQrState("idle");
+    setQrError(null);
   };
 
   const handleOpenSplit = () => {
@@ -927,10 +1511,15 @@ export default function ProductionPage() {
     if (!supabase || !canRelease) {
       return;
     }
+    if (isCreatingWorkOrders) {
+      return;
+    }
+    setIsCreatingWorkOrders(true);
     const nextGroups = readyBatchGroups.filter((group) =>
       selectedBatchKeys.includes(group.key),
     );
     if (nextGroups.length === 0) {
+      setIsCreatingWorkOrders(false);
       return;
     }
     const selectedRows = splitRows.filter(
@@ -964,6 +1553,7 @@ export default function ProductionPage() {
         );
       if (error) {
         setDataError("Failed to create production items.");
+        setIsCreatingWorkOrders(false);
         return;
       }
       setProductionItems((prev) => [...(data ?? []), ...prev]);
@@ -987,6 +1577,7 @@ export default function ProductionPage() {
       );
     if (error) {
       setDataError("Failed to create batch runs.");
+      setIsCreatingWorkOrders(false);
       return;
     }
     await supabase
@@ -996,19 +1587,21 @@ export default function ProductionPage() {
     setBatchRuns((prev) => [...(inserted ?? []), ...prev]);
     setSelectedBatchKeys([]);
     setIsSplitOpen(false);
+    setIsCreatingWorkOrders(false);
   };
 
   const queueByStation = useMemo(() => {
     const map = new Map<string, QueueItem[]>();
     stations.forEach((station) => map.set(station.id, []));
-    const runMap = new Map<string, BatchRunRow>();
-    batchRuns.forEach((run) => {
-      runMap.set(`${run.order_id}-${run.batch_code}-${run.step_index}`, run);
-    });
+    const seenRuns = new Set<string>();
     const startDate = new Date(viewDate);
     const endDate = new Date(viewDate);
     endDate.setDate(endDate.getDate() + Math.max(plannedRangeDays - 1, 0));
     batchRuns.forEach((run) => {
+      if (seenRuns.has(run.id)) {
+        return;
+      }
+      seenRuns.add(run.id);
       if (!run.station_id) {
         return;
       }
@@ -1038,6 +1631,7 @@ export default function ProductionPage() {
       const priority = run.orders?.priority ?? "normal";
       const queueItem = {
         id: run.id,
+        orderId: run.order_id,
         orderNumber,
         customerName,
         dueDate,
@@ -1104,6 +1698,9 @@ export default function ProductionPage() {
     orderLabel?: string,
     stationName?: string,
   ) => {
+    if (removingQueueId) {
+      return;
+    }
     const descriptionParts = [];
     if (orderLabel) {
       descriptionParts.push(orderLabel);
@@ -1125,7 +1722,9 @@ export default function ProductionPage() {
     if (!ok) {
       return;
     }
+    setRemovingQueueId(id);
     await removeFromQueue(id);
+    setRemovingQueueId(null);
   };
 
   const handleRemoveHintStart = (id: string) => {
@@ -1166,223 +1765,187 @@ export default function ProductionPage() {
   const isQueuesLoading = isLoading;
 
   return (
-    <Tabs defaultValue="planning" className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold">Production</h2>
-          <p className="text-sm text-muted-foreground">
-            Plan work orders, batch similar items, and assign to stations.
-          </p>
+    <>
+      <Tabs defaultValue="planning" className="space-y-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold">Production</h2>
+            <p className="text-sm text-muted-foreground">
+              Plan work orders, batch similar items, and assign to stations.
+            </p>
+          </div>
+          <TabsList>
+            <TabsTrigger value="planning">Planning</TabsTrigger>
+            <TabsTrigger value="list">Orders</TabsTrigger>
+            <TabsTrigger value="calendar">Calendar</TabsTrigger>
+          </TabsList>
         </div>
-        <TabsList>
-          <TabsTrigger value="planning">Planning</TabsTrigger>
-          <TabsTrigger value="list">Orders</TabsTrigger>
-          <TabsTrigger value="calendar">Calendar</TabsTrigger>
-        </TabsList>
-      </div>
 
-      <TabsContent value="planning" className="space-y-6">
-        <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
-        <Card className="h-fit">
-          <CardHeader>
-            <CardTitle>Ready for production</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {dataError ? (
-              <div className="rounded-lg border border-dashed border-destructive/40 bg-destructive/5 px-3 py-3 text-xs text-destructive">
-                {dataError}
-              </div>
-            ) : null}
-            {isReadyLoading ? (
-              <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                Loading ready batches...
-              </div>
-            ) : null}
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="flex-1 space-y-1 text-xs text-muted-foreground">
-                  Search
-                  <input
-                    value={readySearch}
-                    onChange={(event) => setReadySearch(event.target.value)}
-                    placeholder="Order, customer, batch..."
-                    className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                  />
-                </label>
-                <label className="space-y-1 text-xs text-muted-foreground">
-                  Priority
-                  <select
-                    value={readyPriority}
-                    onChange={(event) =>
-                      setReadyPriority(event.target.value as Priority | "all")
-                    }
-                    className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
-                  >
-                    <option value="all">All</option>
-                    <option value="urgent">Urgent</option>
-                    <option value="high">High</option>
-                    <option value="normal">Normal</option>
-                    <option value="low">Low</option>
-                  </select>
-                </label>
-              </div>
-              {filteredReadyGroups.map((group) => {
-                const isSelected = selectedBatchKeys.includes(group.key);
-                const fieldValues = productionValues[group.orderId] ?? {};
-                const productionDetails = productionFields
-                  .map((field) => {
-                    const raw = fieldValues[field.id];
-                    const formatted = formatProductionValue(field, raw);
-                    return formatted.length > 0
-                      ? {
-                          label: field.label,
-                          values: formatted,
-                          unit:
-                            field.fieldType === "table"
-                              ? undefined
-                              : field.unit,
+        <TabsContent value="planning" className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
+            <Card className="h-fit">
+              <CardHeader>
+                <CardTitle>Ready for production</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {dataError ? (
+                  <div className="rounded-lg border border-dashed border-destructive/40 bg-destructive/5 px-3 py-3 text-xs text-destructive">
+                    {dataError}
+                  </div>
+                ) : null}
+                {isReadyLoading ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                    Loading ready batches...
+                  </div>
+                ) : null}
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="flex-1 space-y-1 text-xs text-muted-foreground">
+                      Search
+                      <input
+                        value={readySearch}
+                        onChange={(event) => setReadySearch(event.target.value)}
+                        placeholder="Order, customer, batch..."
+                        className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-muted-foreground">
+                      Priority
+                      <select
+                        value={readyPriority}
+                        onChange={(event) =>
+                          setReadyPriority(
+                            event.target.value as Priority | "all",
+                          )
                         }
-                      : null;
-                  })
-                  .filter(Boolean) as Array<{
-                  label: string;
-                  values: string[];
-                  unit?: string;
-                }>;
-                const constructionDetails = productionDetails.filter(
-                  (detail) => detail.label.toLowerCase() === "konstrukcijas",
-                );
-                const otherDetails = productionDetails.filter(
-                  (detail) => detail.label.toLowerCase() !== "konstrukcijas",
-                );
-                const productionFiles =
-                  productionAttachments[group.orderId] ?? [];
-                return (
-                  <label
-                    key={group.key}
-                    className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm transition ${
-                      isSelected
-                        ? "border-primary/40 bg-primary/5"
-                        : "border-border bg-background hover:bg-muted/40"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() =>
-                        setSelectedBatchKeys((prev) =>
+                        className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
+                      >
+                        <option value="all">All</option>
+                        <option value="urgent">Urgent</option>
+                        <option value="high">High</option>
+                        <option value="normal">Normal</option>
+                        <option value="low">Low</option>
+                      </select>
+                    </label>
+                  </div>
+                  {filteredReadyGroups.map((group) => {
+                    const isSelected = selectedBatchKeys.includes(group.key);
+                    const fieldValues = productionValues[group.orderId] ?? {};
+                    const productionDetails = productionFields
+                      .map((field) => {
+                        const raw = fieldValues[field.id];
+                        const formatted = formatProductionValue(field, raw);
+                        return formatted.length > 0
+                          ? {
+                              label: field.label,
+                              values: formatted,
+                              unit:
+                                field.fieldType === "table"
+                                  ? undefined
+                                  : field.unit,
+                            }
+                          : null;
+                      })
+                      .filter(Boolean) as Array<{
+                      label: string;
+                      values: string[];
+                      unit?: string;
+                    }>;
+                    const constructionDetails = productionDetails.filter(
+                      (detail) =>
+                        detail.label.toLowerCase() === "konstrukcijas",
+                    );
+                    const otherDetails = productionDetails.filter(
+                      (detail) =>
+                        detail.label.toLowerCase() !== "konstrukcijas",
+                    );
+                    const productionFiles =
+                      productionAttachments[group.orderId] ?? [];
+                    return (
+                      <label
+                        key={group.key}
+                        className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm transition ${
                           isSelected
-                            ? prev.filter((id) => id !== group.key)
-                            : [...prev, group.key],
-                        )
-                      }
-                      className="mt-1"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">
-                          {group.orderNumber} / {group.batchCode}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={`/orders/${group.orderId}`}
-                            onClick={(event) => event.stopPropagation()}
-                            className="inline-flex"
-                            aria-label="Open order"
-                          >
-                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground">
-                              <ExternalLinkIcon className="h-4 w-4" />
+                            ? "border-primary/40 bg-primary/5"
+                            : "border-border bg-background hover:bg-muted/40"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() =>
+                            setSelectedBatchKeys((prev) =>
+                              isSelected
+                                ? prev.filter((id) => id !== group.key)
+                                : [...prev, group.key],
+                            )
+                          }
+                          className="mt-1"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">
+                              {group.orderNumber} / {group.batchCode}
                             </span>
-                          </Link>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              setFilesPreview({
-                                orderId: group.orderId,
-                                orderNumber: group.orderNumber,
-                                files: productionFiles,
-                              });
-                            }}
-                            aria-label="View production files"
-                          >
-                            <PaperclipIcon className="h-4 w-4" />
-                          </Button>
-                          <Badge variant={priorityBadge(group.priority)}>
-                            {group.priority}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {group.customerName}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {group.totalQty} pcs - Due {group.dueDate}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {group.material}
-                      </div>
-                      {otherDetails.length > 0 && (
-                        <div className="mt-2 space-y-2 text-xs text-muted-foreground">
-                          {otherDetails.flatMap((detail) =>
-                            detail.values.map((value, index) => (
-                              <div
-                                key={`${detail.label}-${index}`}
-                                className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                            <div className="flex items-center gap-2">
+                              <Link
+                                href={`/orders/${group.orderId}`}
+                                onClick={(event) => event.stopPropagation()}
+                                className="inline-flex"
+                                aria-label="Open order"
                               >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="text-[11px] text-muted-foreground">
-                                    {detail.label}
-                                  </div>
-                                </div>
-                                <div className="mt-1 text-[11px] text-foreground">
-                                  {value}
-                                  {detail.unit ? ` ${detail.unit}` : ""}
-                                </div>
-                              </div>
-                            )),
-                          )}
-                        </div>
-                      )}
-                      {constructionDetails.length > 0 && (
-                        <div className="mt-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-2 px-2 text-[11px]"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              setExpandedReadyItems((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(group.key)) {
-                                  next.delete(group.key);
-                                } else {
-                                  next.add(group.key);
+                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+                                  <ExternalLinkIcon className="h-4 w-4" />
+                                </span>
+                              </Link>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (productionFiles.length === 0) {
+                                  return;
                                 }
-                                return next;
-                              });
-                            }}
-                          >
-                            {expandedReadyItems.has(group.key) ? (
-                              <ChevronUpIcon className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronDownIcon className="h-3.5 w-3.5" />
-                            )}
-                            Konstrukcijas
-                          </Button>
-                          {expandedReadyItems.has(group.key) ? (
+                                setFilesPreview({
+                                  orderId: group.orderId,
+                                  orderNumber: group.orderNumber,
+                                  files: productionFiles,
+                                });
+                              }}
+                              aria-label="View production files"
+                              disabled={productionFiles.length === 0}
+                            >
+                              <PaperclipIcon className="h-4 w-4" />
+                            </Button>
+                              <Badge variant={priorityBadge(group.priority)}>
+                                {group.priority}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {group.customerName}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {group.totalQty} pcs - Due {group.dueDate}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {group.material}
+                          </div>
+                          {otherDetails.length > 0 && (
                             <div className="mt-2 space-y-2 text-xs text-muted-foreground">
-                              {constructionDetails.flatMap((detail) =>
+                              {otherDetails.flatMap((detail) =>
                                 detail.values.map((value, index) => (
                                   <div
                                     key={`${detail.label}-${index}`}
                                     className="rounded-md border border-border bg-muted/20 px-2 py-2"
                                   >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="text-[11px] text-muted-foreground">
+                                        {detail.label}
+                                      </div>
+                                    </div>
                                     <div className="mt-1 text-[11px] text-foreground">
                                       {value}
                                       {detail.unit ? ` ${detail.unit}` : ""}
@@ -1391,477 +1954,1021 @@ export default function ProductionPage() {
                                 )),
                               )}
                             </div>
-                          ) : null}
-                        </div>
-                      )}
-                    </div>
-                  </label>
-                );
-              })}
-              {filteredReadyGroups.length === 0 && !isLoading ? (
-                <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                  No batches ready for release.
-                </div>
-              ) : null}
-            </div>
-
-            <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium">Release to production</div>
-                  <div className="text-xs text-muted-foreground">
-                    Unit of work: Batch (e.g. AL-1042 / B1)
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {selectedBatchKeys.length > 0
-                    ? `${selectedBatchKeys.length} selected`
-                    : "No selection"}
-                </div>
-              </div>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                Route
-                {routes.length > 1 ? (
-                  <select
-                    value={selectedRouteKey}
-                    onChange={(event) => setSelectedRouteKey(event.target.value)}
-                    className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                  >
-                    {routes.map((route) => (
-                      <option key={route.key} value={route.key}>
-                        {route.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
-                    {routes[0]?.label ?? "Default route"}
-                  </div>
-                )}
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
-                  {routeStations.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {routeStations.map((station, index) => (
-                        <span
-                          key={station.id}
-                          className="rounded-full border border-border bg-background px-2 py-0.5 text-xs"
-                        >
-                          {index + 1}. {station.name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    "No matching stations for default route."
-                  )}
-                </div>
-              </label>
-              <DatePickerField
-                label="Planned date"
-                value={plannedDate}
-                onChange={setPlannedDate}
-                className="space-y-1 text-xs text-muted-foreground"
-                min={todayIso}
-              />
-              <div className="rounded-lg border border-border bg-muted/30 mt-2 px-3 py-2 text-xs text-muted-foreground">
-                Planning date affects new work orders only. Use the queue view
-                controls to switch days.
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <Button onClick={handleOpenSplit} disabled={!canRelease}>
-                  Create work order
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => setSelectedBatchKeys([])}
-                  disabled={selectedBatchKeys.length === 0}
-                >
-                  Clear
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
-            <span>Station queues</span>
-            <div className="flex flex-wrap items-center gap-2 text-xs font-normal text-muted-foreground">
-              <DatePickerField
-                label="View date"
-                value={viewDate}
-                onChange={setViewDate}
-                className="flex items-center gap-2 text-xs"
-              />
-              <label className="flex items-center gap-2">
-                Range
-                <select
-                  value={plannedRangeDays}
-                  onChange={(event) =>
-                    setPlannedRangeDays(Number(event.target.value))
-                  }
-                  className="h-9 rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                >
-                  <option value={1}>Today</option>
-                  <option value={3}>3 days</option>
-                  <option value={7}>7 days</option>
-                  <option value={14}>14 days</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          {isQueuesLoading ? (
-            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-              Loading station queues...
-            </div>
-          ) : null}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {stations.map((station) => {
-              const queue = queueByStation.get(station.id) ?? [];
-              const stationTotalMinutes = queue.reduce((sum, item) => {
-                const itemMinutes =
-                  item.durationMinutes ??
-                  item.items.reduce(
-                    (rowSum, row) =>
-                      rowSum + Number(row.duration_minutes ?? 0),
-                    0,
-                  );
-                return sum + Number(itemMinutes ?? 0);
-              }, 0);
-              return (
-                <Card key={station.id} className="min-h-60">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <CardTitle className="text-base">
-                          {station.name}
-                        </CardTitle>
-                        <Link
-                          href={`/production/operator?station=${station.id}`}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                          aria-label={`Open ${station.name} in operator view`}
-                        >
-                          <ExternalLinkIcon className="h-4 w-4" />
-                        </Link>
-                      </div>
-                      <div className="text-right text-xs text-muted-foreground">
-                        <div>{queue.length} items</div>
-                        {stationTotalMinutes > 0 ? (
-                          <div>{formatDuration(stationTotalMinutes)}</div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {queue.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                        No work queued
-                      </div>
-                    ) : (
-                      queue.map((item) => (
-                        <div
-                          key={item.id}
-                          className="group relative rounded-lg border border-border bg-background px-3 py-2 text-xs shadow-sm"
-                          onMouseEnter={() => setRemoveHintId(item.id)}
-                          onMouseLeave={() => setRemoveHintId(null)}
-                          onTouchStart={() => handleRemoveHintStart(item.id)}
-                          onTouchEnd={handleRemoveHintEnd}
-                          onTouchCancel={handleRemoveHintEnd}
-                        >
-                          <button
-                            type="button"
-                            aria-label="Remove from queue"
-                            className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full border border-border bg-foreground text-[16px] text-background shadow-sm transition ${
-                              removeHintId === item.id
-                                ? "flex"
-                                : "hidden group-hover:flex"
-                            }`}
-                            onClick={() =>
-                              handleRemoveFromQueue(
-                                item.id,
-                                `${item.orderNumber} / ${item.batchCode}`,
-                                station.name,
-                              )
-                            }
-                          >
-                            ×
-                          </button>
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <span className="font-semibold">
-                                {item.orderNumber} / {item.batchCode}
-                              </span>
-                              <div className="mt-1 text-[11px] text-muted-foreground">
-                                {item.customerName}
-                              </div>
-                            </div>
-                            <div className="flex flex-col items-end gap-2">
-                              <Badge variant={priorityBadge(item.priority)}>
-                                {item.priority}
-                              </Badge>
-                              <Badge variant={statusBadge(item.status)}>
-                                {String(item.status ?? "queued").replace(
-                                  "_",
-                                  " ",
-                                )}
-                              </Badge>
-                            </div>
-                          </div>
-                          {(() => {
-                            const metaParts: string[] = [];
-                            if (item.totalQty > 0) {
-                              metaParts.push(`${item.totalQty} pcs`);
-                            }
-                            if (item.dueDate) {
-                              metaParts.push(`Due ${item.dueDate}`);
-                            }
-                            const metaLine = metaParts.join(" - ");
-                            const stationDurationMinutes =
-                              item.durationMinutes ??
-                              item.items.reduce(
-                                (sum, row) => sum + Number(row.duration_minutes ?? 0),
-                                0,
-                              );
-                            const elapsedMinutes = item.startedAt
-                              ? computeWorkingMinutes(
-                                  item.startedAt,
-                                  item.doneAt ?? null,
-                                  workdayStart,
-                                  workdayEnd,
-                                )
-                              : 0;
-                            const elapsedLabel = item.startedAt
-                              ? formatDuration(elapsedMinutes)
-                              : null;
-                            return (
-                              <>
-                                {metaLine ? (
-                                  <div className="mt-1 text-muted-foreground">
-                                    {metaLine}
-                                  </div>
-                                ) : null}
-                                {stationDurationMinutes > 0 ? (
-                                  <div className="mt-1 text-[11px] text-muted-foreground">
-                                    Station time: {formatDuration(stationDurationMinutes)}
-                                  </div>
-                                ) : null}
-                                {elapsedLabel ? (
-                                  <div className="mt-1 text-[11px] text-muted-foreground">
-                                    Time: {elapsedLabel}
-                                  </div>
-                                ) : null}
-                              </>
-                            );
-                          })()}
-                          <div className="mt-1 text-muted-foreground">
-                            {item.material}
-                          </div>
-                          <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-                            <span>{item.batchCode}</span>
-                            {item.items.length > 0 ? (
+                          )}
+                          {constructionDetails.length > 0 && (
+                            <div className="mt-2">
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
                                 className="h-7 gap-2 px-2 text-[11px]"
-                                onClick={() =>
-                                  setExpandedQueueItems((prev) => {
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setExpandedReadyItems((prev) => {
                                     const next = new Set(prev);
-                                    if (next.has(item.id)) {
-                                      next.delete(item.id);
+                                    if (next.has(group.key)) {
+                                      next.delete(group.key);
                                     } else {
-                                      next.add(item.id);
+                                      next.add(group.key);
                                     }
                                     return next;
-                                  })
-                                }
+                                  });
+                                }}
                               >
-                                {expandedQueueItems.has(item.id) ? (
+                                {expandedReadyItems.has(group.key) ? (
                                   <ChevronUpIcon className="h-3.5 w-3.5" />
                                 ) : (
                                   <ChevronDownIcon className="h-3.5 w-3.5" />
                                 )}
-                                {expandedQueueItems.has(item.id)
-                                  ? "Hide constructions"
-                                  : "Show constructions"}
+                                Konstrukcijas
                               </Button>
-                            ) : null}
-                          </div>
-                          {expandedQueueItems.has(item.id) && item.items.length > 0 && (
-                            <div className="mt-2 space-y-2">
-                              {item.items.map((row) => (
-                                <div
-                                  key={row.id}
-                                  className="rounded-md border border-border bg-muted/20 px-2 py-2"
-                                >
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="text-[11px] text-muted-foreground">
-                                      {row.item_name}
-                                    </div>
-                                    <Badge variant={statusBadge(row.status)}>
-                                      {String(row.status ?? "queued").replace(
-                                        "_",
-                                        " ",
-                                      )}
-                                    </Badge>
-                                  </div>
-                                  <div className="mt-1 text-[11px] text-muted-foreground">
-                                    Qty: {row.qty}
-                                    {row.material ? ` • ${row.material}` : ""}
-                                  </div>
+                              {expandedReadyItems.has(group.key) ? (
+                                <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+                                  {constructionDetails.flatMap((detail) =>
+                                    detail.values.map((value, index) => (
+                                      <div
+                                        key={`${detail.label}-${index}`}
+                                        className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                                      >
+                                        <div className="mt-1 text-[11px] text-foreground">
+                                          {value}
+                                          {detail.unit ? ` ${detail.unit}` : ""}
+                                        </div>
+                                      </div>
+                                    )),
+                                  )}
                                 </div>
-                              ))}
+                              ) : null}
                             </div>
                           )}
                         </div>
-                      ))
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {isSplitOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-card p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">Split by stations</h2>
-                <p className="text-sm text-muted-foreground">
-                  Select which stations should process each construction row.
-                </p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsSplitOpen(false)}
-                aria-label="Close split"
-              >
-                <XIcon className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const next: Record<string, string[]> = {};
-                  splitRows.forEach((row) => {
-                    next[row.id] = routeStations.map((station) => station.id);
-                  });
-                  setSplitSelections(next);
-                }}
-              >
-                Select all stations
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const next: Record<string, string[]> = {};
-                  splitRows.forEach((row) => {
-                    next[row.id] = [];
-                  });
-                  setSplitSelections(next);
-                }}
-              >
-                Clear all
-              </Button>
-            </div>
-
-            <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto">
-              {splitRows.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                  No construction rows found for this selection.
+                      </label>
+                    );
+                  })}
+                  {filteredReadyGroups.length === 0 && !isLoading ? (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+                      No batches ready for release.
+                    </div>
+                  ) : null}
                 </div>
-              ) : (
-                Array.from(
-                  splitRows.reduce((acc, row) => {
-                    const key = row.orderId;
-                    const list = acc.get(key) ?? [];
-                    list.push(row);
-                    acc.set(key, list);
-                    return acc;
-                  }, new Map<string, typeof splitRows>()),
-                ).map(([orderId, rows]) => (
-                  <div key={orderId} className="rounded-lg border border-border p-3">
-                    <div className="text-sm font-medium">
-                      {rows[0]?.orderNumber} / {rows[0]?.batchCode}
+
+                <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">
+                        Release to production
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Unit of work: Batch (e.g. AL-1042 / B1)
+                      </div>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {rows[0]?.customerName}
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {rows.map((row) => (
-                        <div
-                          key={row.id}
-                          className="rounded-md border border-border bg-background px-3 py-2 text-sm"
-                        >
-                          <div className="text-xs text-muted-foreground">
-                            {row.fieldLabel}
-                          </div>
-                          <div className="font-medium">{row.itemName}</div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {routeStations.map((station) => {
-                              const selected =
-                                splitSelections[row.id]?.includes(station.id) ??
-                                false;
-                              return (
-                                <label
-                                  key={station.id}
-                                  className={`flex items-center gap-2 rounded-md border px-2 py-1 text-xs ${
-                                    selected
-                                      ? "border-primary/40 bg-primary/5 text-foreground"
-                                      : "border-border text-muted-foreground"
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selected}
-                                    onChange={(event) => {
-                                      setSplitSelections((prev) => {
-                                        const current = new Set(
-                                          prev[row.id] ?? [],
-                                        );
-                                        if (event.target.checked) {
-                                          current.add(station.id);
-                                        } else {
-                                          current.delete(station.id);
-                                        }
-                                        return {
-                                          ...prev,
-                                          [row.id]: Array.from(current),
-                                        };
-                                      });
-                                    }}
-                                  />
-                                  {station.name}
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
+                      {selectedBatchKeys.length > 0
+                        ? `${selectedBatchKeys.length} selected`
+                        : "No selection"}
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                  <label className="space-y-1 text-xs text-muted-foreground">
+                    Route
+                    {routes.length > 1 ? (
+                      <select
+                        value={selectedRouteKey}
+                        onChange={(event) =>
+                          setSelectedRouteKey(event.target.value)
+                        }
+                        className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                      >
+                        {routes.map((route) => (
+                          <option key={route.key} value={route.key}>
+                            {route.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
+                        {routes[0]?.label ?? "Default route"}
+                      </div>
+                    )}
+                    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+                      {routeStations.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {routeStations.map((station, index) => (
+                            <span
+                              key={station.id}
+                              className="rounded-full border border-border bg-background px-2 py-0.5 text-xs"
+                            >
+                              {index + 1}. {station.name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        "No matching stations for default route."
+                      )}
+                    </div>
+                  </label>
+                  <DatePickerField
+                    label="Planned date"
+                    value={plannedDate}
+                    onChange={setPlannedDate}
+                    className="space-y-1 text-xs text-muted-foreground"
+                    min={todayIso}
+                  />
+                  <div className="rounded-lg border border-border bg-muted/30 mt-2 px-3 py-2 text-xs text-muted-foreground">
+                    Planning date affects new work orders only. Use the queue
+                    view controls to switch days.
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <Button onClick={handleOpenSplit} disabled={!canRelease}>
+                      Create work order
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setSelectedBatchKeys([])}
+                      disabled={selectedBatchKeys.length === 0}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsSplitOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleConfirmSplit}>Create work order</Button>
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
+                <span>Station queues</span>
+                <div className="flex flex-wrap items-center gap-2 text-xs font-normal text-muted-foreground">
+                  <DatePickerField
+                    label="View date"
+                    value={viewDate}
+                    onChange={setViewDate}
+                    className="flex items-center gap-2 text-xs"
+                  />
+                  <label className="flex items-center gap-2">
+                    Range
+                    <select
+                      value={plannedRangeDays}
+                      onChange={(event) =>
+                        setPlannedRangeDays(Number(event.target.value))
+                      }
+                      className="h-9 rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                    >
+                      <option value={1}>Today</option>
+                      <option value={3}>3 days</option>
+                      <option value={7}>7 days</option>
+                      <option value={14}>14 days</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              {isQueuesLoading ? (
+                <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                  Loading station queues...
+                </div>
+              ) : null}
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {stations.map((station) => {
+                  const queue = queueByStation.get(station.id) ?? [];
+                  const stationTotalMinutes = queue.reduce((sum, item) => {
+                    const itemMinutes =
+                      item.durationMinutes ??
+                      item.items.reduce(
+                        (rowSum, row) =>
+                          rowSum + Number(row.duration_minutes ?? 0),
+                        0,
+                      );
+                    return sum + Number(itemMinutes ?? 0);
+                  }, 0);
+                  return (
+                    <Card key={station.id} className="min-h-60">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <CardTitle className="text-base">
+                              {station.name}
+                            </CardTitle>
+                            <Link
+                              href={`/production/operator?station=${station.id}`}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                              aria-label={`Open ${station.name} in operator view`}
+                            >
+                              <ExternalLinkIcon className="h-4 w-4" />
+                            </Link>
+                          </div>
+                          <div className="text-right text-xs text-muted-foreground">
+                            <div>{queue.length} items</div>
+                            {stationTotalMinutes > 0 ? (
+                              <div>{formatDuration(stationTotalMinutes)}</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {queue.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+                            No work queued
+                          </div>
+                        ) : (
+                          queue.map((item) => (
+                            <div
+                              key={item.id}
+                              className="group relative rounded-lg border border-border bg-background px-3 py-2 text-xs shadow-sm"
+                              onMouseEnter={() => setRemoveHintId(item.id)}
+                              onMouseLeave={() => setRemoveHintId(null)}
+                              onTouchStart={() =>
+                                handleRemoveHintStart(item.id)
+                              }
+                              onTouchEnd={handleRemoveHintEnd}
+                              onTouchCancel={handleRemoveHintEnd}
+                            >                              {(() => {
+                                const canRemove = !item.items.some(
+                                  (row) =>
+                                    row.started_at ||
+                                    row.status === "in_progress" ||
+                                    row.status === "done",
+                                );
+                                return (
+                                  <button
+                                    type="button"
+                                    aria-label="Remove from queue"
+                                    className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full border border-border bg-foreground text-[16px] text-background shadow-sm transition ${
+                                      canRemove && removeHintId === item.id
+                                        ? "flex"
+                                        : canRemove
+                                          ? "hidden group-hover:flex"
+                                          : "hidden"
+                                    }`}
+                                    onClick={() =>
+                                      canRemove
+                                        ? handleRemoveFromQueue(
+                                            item.id,
+                                            `${item.orderNumber} / ${item.batchCode}`,
+                                            station.name,
+                                          )
+                                        : undefined
+                                    }
+                                  >
+                                    {removingQueueId === item.id ? (
+                                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-background/60 border-t-background" />
+                                    ) : (
+                                      "×"
+                                    )}
+                                  </button>
+                                );
+                              })()}
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="space-y-2">
+                                  <div>
+                                    <span className="font-semibold">
+                                      {item.orderNumber} / {item.batchCode}
+                                    </span>
+                                    <div className="mt-1 text-[11px] text-muted-foreground">
+                                      {item.customerName}
+                                    </div>
+                                  </div>
+                                  {(() => {
+                                    const productionFiles =
+                                      productionAttachments[item.orderId] ?? [];
+                                    return (
+                                      <div className="flex items-center gap-2">
+                                        <Link
+                                          href={`/orders/${item.orderId}`}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                                          aria-label="Open order"
+                                        >
+                                          <ExternalLinkIcon className="h-4 w-4" />
+                                        </Link>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7"
+                                          onClick={() => {
+                                            if (productionFiles.length === 0) {
+                                              return;
+                                            }
+                                            setFilesPreview({
+                                              orderId: item.orderId,
+                                              orderNumber: item.orderNumber,
+                                              files: productionFiles,
+                                            });
+                                          }}
+                                          aria-label="View production files"
+                                          disabled={productionFiles.length === 0}
+                                        >
+                                          <PaperclipIcon className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                                {(() => {
+                                  const hasBlocked = item.items.some(
+                                    (row) => row.status === "blocked",
+                                  );
+                                  const hasActive = item.items.some((row) =>
+                                    ["queued", "pending", "in_progress"].includes(
+                                      row.status,
+                                    ),
+                                  );
+                                  const isPartiallyBlocked =
+                                    hasBlocked && hasActive;
+                                  const showBlockedStyle =
+                                    isPartiallyBlocked &&
+                                    item.status === "in_progress";
+                                  return (
+                                    <div className="flex flex-col items-end gap-2">
+                                      <Badge variant={priorityBadge(item.priority)}>
+                                        {item.priority}
+                                      </Badge>
+                                      <Badge
+                                        variant={
+                                          showBlockedStyle
+                                            ? "status-blocked"
+                                            : statusBadge(item.status)
+                                        }
+                                      >
+                                        {String(item.status ?? "queued").replace(
+                                          "_",
+                                          " ",
+                                        )}
+                                      </Badge>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                              {(() => {
+                                const metaParts: string[] = [];
+                                if (item.totalQty > 0) {
+                                  metaParts.push(`${item.totalQty} pcs`);
+                                }
+                                if (item.dueDate) {
+                                  metaParts.push(`Due ${item.dueDate}`);
+                                }
+                                const metaLine = metaParts.join(" - ");
+                                const stationDurationMinutes =
+                                  item.durationMinutes ??
+                                  item.items.reduce(
+                                    (sum, row) =>
+                                      sum + Number(row.duration_minutes ?? 0),
+                                    0,
+                                  );
+                                const elapsedMinutes = item.startedAt
+                                  ? computeWorkingMinutes(
+                                      item.startedAt,
+                                      item.doneAt ?? null,
+                                      workdayStart,
+                                      workdayEnd,
+                                    )
+                                  : 0;
+                                const elapsedLabel = item.startedAt
+                                  ? formatDuration(elapsedMinutes)
+                                  : null;
+                                return (
+                                  <>
+                                    {metaLine ? (
+                                      <div className="mt-1 text-muted-foreground">
+                                        {metaLine}
+                                      </div>
+                                    ) : null}
+                                    {stationDurationMinutes > 0 ? (
+                                      <div className="mt-1 text-[11px] text-muted-foreground">
+                                        Station time:{" "}
+                                        {formatDuration(stationDurationMinutes)}
+                                      </div>
+                                    ) : null}
+                                    {elapsedLabel ? (
+                                      <div className="mt-1 text-[11px] text-muted-foreground">
+                                        Time: {elapsedLabel}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                );
+                              })()}
+                              <div className="mt-1 text-muted-foreground">
+                                {item.material}
+                              </div>
+                              <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                                <span>{item.batchCode}</span>
+                                {item.items.length > 0 ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 gap-2 px-2 text-[11px]"
+                                    onClick={() =>
+                                      setExpandedQueueItems((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(item.id)) {
+                                          next.delete(item.id);
+                                        } else {
+                                          next.add(item.id);
+                                        }
+                                        return next;
+                                      })
+                                    }
+                                  >
+                                    {expandedQueueItems.has(item.id) ? (
+                                      <ChevronUpIcon className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <ChevronDownIcon className="h-3.5 w-3.5" />
+                                    )}
+                                    {expandedQueueItems.has(item.id)
+                                      ? "Hide constructions"
+                                      : "Show constructions"}
+                                  </Button>
+                                ) : null}
+                              </div>
+                              {expandedQueueItems.has(item.id) &&
+                                item.items.length > 0 && (
+                                  <div className="mt-2 space-y-2">
+                                    {item.items.map((row) => {
+                                      const rowKey =
+                                        typeof row.meta?.rowKey === "string"
+                                          ? row.meta.rowKey
+                                          : `${row.order_id}:fallback:${
+                                              typeof row.meta?.rowIndex ===
+                                              "number"
+                                                ? row.meta.rowIndex
+                                                : 0
+                                            }`;
+                                      const stationStatuses =
+                                        stationStatusMap.get(rowKey);
+                                      const entry = stationStatuses?.get(
+                                        station.id,
+                                      );
+                                      return (
+                                        <div
+                                          key={row.id}
+                                          className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                                        >
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="text-[11px] text-muted-foreground">
+                                              {row.item_name}
+                                            </div>
+                                            {entry?.status ? (
+                                              <div className="relative flex items-center justify-center gap-2">
+                                                <Badge
+                                                  variant={statusBadge(
+                                                    row.status,
+                                                  )}
+                                                >
+                                                  {String(
+                                                    row.status ?? "queued",
+                                                  ).replace("_", " ")}
+                                                </Badge>
+                                                {entry.status === "blocked" &&
+                                                entry.blockedReason ? (
+                                                  <Tooltip
+                                                    content={
+                                                      entry.blockedReason
+                                                    }
+                                                  >
+                                                    <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
+                                                  </Tooltip>
+                                                ) : null}
+                                              </div>
+                                            ) : (
+                                              <span className="text-muted-foreground">
+                                                -
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          <div className="mt-1 text-[11px] text-muted-foreground">
+                                            Qty: {row.qty}
+                                            {row.material
+                                              ? ` - ${row.material}`
+                                              : ""}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                            </div>
+                          ))
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
-      )}
 
+          {isSplitOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="w-full max-w-3xl rounded-2xl bg-card p-6 shadow-xl">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">Split by stations</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Select which stations should process each construction
+                      row.
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsSplitOpen(false)}
+                    aria-label="Close split"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const next: Record<string, string[]> = {};
+                      splitRows.forEach((row) => {
+                        next[row.id] = routeStations.map(
+                          (station) => station.id,
+                        );
+                      });
+                      setSplitSelections(next);
+                    }}
+                  >
+                    Select all stations
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const next: Record<string, string[]> = {};
+                      splitRows.forEach((row) => {
+                        next[row.id] = [];
+                      });
+                      setSplitSelections(next);
+                    }}
+                  >
+                    Clear all
+                  </Button>
+                </div>
+
+                <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto">
+                  {splitRows.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                      No construction rows found for this selection.
+                    </div>
+                  ) : (
+                    Array.from(
+                      splitRows.reduce((acc, row) => {
+                        const key = row.orderId;
+                        const list = acc.get(key) ?? [];
+                        list.push(row);
+                        acc.set(key, list);
+                        return acc;
+                      }, new Map<string, typeof splitRows>()),
+                    ).map(([orderId, rows]) => (
+                      <div
+                        key={orderId}
+                        className="rounded-lg border border-border p-3"
+                      >
+                        <div className="text-sm font-medium">
+                          {rows[0]?.orderNumber} / {rows[0]?.batchCode}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {rows[0]?.customerName}
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          {rows.map((row) => (
+                            <div
+                              key={row.id}
+                              className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+                            >
+                              <div className="text-xs text-muted-foreground">
+                                {row.fieldLabel}
+                              </div>
+                              <div className="font-medium">{row.itemName}</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {routeStations.map((station) => {
+                                  const selected =
+                                    splitSelections[row.id]?.includes(
+                                      station.id,
+                                    ) ?? false;
+                                  return (
+                                    <label
+                                      key={station.id}
+                                      className={`flex items-center gap-2 rounded-md border px-2 py-1 text-xs ${
+                                        selected
+                                          ? "border-primary/40 bg-primary/5 text-foreground"
+                                          : "border-border text-muted-foreground"
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selected}
+                                        onChange={(event) => {
+                                          setSplitSelections((prev) => {
+                                            const current = new Set(
+                                              prev[row.id] ?? [],
+                                            );
+                                            if (event.target.checked) {
+                                              current.add(station.id);
+                                            } else {
+                                              current.delete(station.id);
+                                            }
+                                            return {
+                                              ...prev,
+                                              [row.id]: Array.from(current),
+                                            };
+                                          });
+                                        }}
+                                      />
+                                      {station.name}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsSplitOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={handleConfirmSplit} disabled={isCreatingWorkOrders}>
+                    {isCreatingWorkOrders && (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                    )}
+                    Create work order
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {dialog}
+        </TabsContent>
+
+        <TabsContent value="list">
+          <Card>
+            <CardHeader>
+              <CardTitle>Orders & constructions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {isLoading ? (
+                <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                  Loading orders...
+                </div>
+              ) : null}
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <label className="flex-1 space-y-1 text-xs text-muted-foreground">
+                  Search
+                  <input
+                    value={qrSearch}
+                    onChange={(event) => setQrSearch(event.target.value)}
+                    placeholder="Order, customer, batch, construction..."
+                    className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  Date
+                  <input
+                    type="date"
+                    value={qrFilterDate}
+                    onChange={(event) => setQrFilterDate(event.target.value)}
+                    className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  Status
+                  <select
+                    value={qrFilterStatus}
+                    onChange={(event) =>
+                      setQrFilterStatus(
+                        event.target.value as
+                          | "all"
+                          | "queued"
+                          | "pending"
+                          | "in_progress"
+                          | "blocked"
+                          | "done",
+                      )
+                    }
+                    className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
+                  >
+                    <option value="all">All</option>
+                    <option value="queued">Queued</option>
+                    <option value="pending">Pending</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="blocked">Blocked</option>
+                    <option value="done">Done</option>
+                  </select>
+                </label>
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  Station
+                  <select
+                    value={qrFilterStation}
+                    onChange={(event) => setQrFilterStation(event.target.value)}
+                    className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground"
+                  >
+                    <option value="all">All stations</option>
+                    {stations.map((station) => (
+                      <option key={station.id} value={station.id}>
+                        {station.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      setQrFilterDate(new Date().toISOString().slice(0, 10))
+                    }
+                  >
+                    Today
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setQrSearch("");
+                      setQrFilterDate("");
+                      setQrFilterStatus("all");
+                      setQrFilterStation("all");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setQrSelectedRowIds([])}
+                    disabled={qrSelectedRowIds.length === 0}
+                  >
+                    Clear selection
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      handleOpenQrModal(
+                        filteredSelectableRows.filter((row) =>
+                          qrSelectedRowIds.includes(row.id),
+                        ),
+                      )
+                    }
+                    disabled={
+                      qrSelectedRowIds.length === 0 || qrState === "loading"
+                    }
+                    className="gap-2"
+                  >
+                    {qrState === "loading" ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                    ) : null}
+                    Print QR
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredSelectableRows.length > 0 &&
+                      qrSelectedRowIds.length === filteredSelectableRows.length
+                    }
+                    onChange={(event) => {
+                      if (event.target.checked) {
+                        setQrSelectedRowIds(
+                          filteredSelectableRows.map((row) => row.id),
+                        );
+                      } else {
+                        setQrSelectedRowIds([]);
+                      }
+                    }}
+                    disabled={filteredSelectableRows.length === 0}
+                  />
+                  Select all
+                </label>
+                <span>
+                  {qrSelectedRowIds.length > 0
+                    ? `${qrSelectedRowIds.length} selected`
+                    : `${filteredQrRows.length} rows`}
+                </span>
+              </div>
+
+              {orderConstructionRows.length > 0 &&
+              selectableConstructionRows.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                  No selectable construction rows found. Make sure your
+                  construction tables are marked as Production in Settings.
+                </div>
+              ) : null}
+
+              {filteredQrRows.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+                  No construction rows found for the current filters.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-muted/40 text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2"></th>
+                        <th className="px-3 py-2">Order</th>
+                        <th className="px-3 py-2">Customer</th>
+                        <th className="px-3 py-2">Construction</th>
+                        <th className="px-3 py-2">Qty</th>
+                        <th className="px-3 py-2">Batch</th>
+                        {stations.map((station) => (
+                          <th
+                            key={station.id}
+                            className="px-3 py-2 text-center"
+                          >
+                            {station.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredQrRows.map((row) => {
+                        const isChecked = qrSelectedRowIds.includes(row.id);
+                        const isSelectable = row.fieldId !== "fallback";
+                        const rowKey = rowKeyForRow(row);
+                        const stationStatuses = stationStatusMap.get(rowKey);
+                        return (
+                          <tr key={row.id} className="border-t border-border">
+                            <td className="px-3 py-2">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={!isSelectable}
+                                onChange={(event) => {
+                                  if (!isSelectable) {
+                                    return;
+                                  }
+                                  setQrSelectedRowIds((prev) => {
+                                    if (event.target.checked) {
+                                      return [...prev, row.id];
+                                    }
+                                    return prev.filter((id) => id !== row.id);
+                                  });
+                                }}
+                              />
+                            </td>
+                            <td className="px-3 py-2 font-medium">
+                              {row.orderNumber}
+                            </td>
+                            <td className="px-3 py-2">{row.customerName}</td>
+                            <td className="px-3 py-2">{row.itemName}</td>
+                            <td className="px-3 py-2">{row.qty}</td>
+                            <td className="px-3 py-2">{row.batchCode}</td>
+                            {stations.map((station) => {
+                              const entry = stationStatuses?.get(station.id);
+                              return (
+                                <td
+                                  key={station.id}
+                                  className="px-3 py-2 text-center text-xs"
+                                >
+                                  {entry?.status ? (
+                                    <div className="relative flex items-center justify-center gap-2">
+                                      <Badge
+                                        variant={statusBadge(
+                                          entry.status as BatchRunRow["status"],
+                                        )}
+                                      >
+                                        {entry.status.replace("_", " ")}
+                                      </Badge>
+                                      {entry.status === "blocked" &&
+                                      entry.blockedReason ? (
+                                        <Tooltip content={entry.blockedReason}>
+                                          <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
+                                        </Tooltip>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      -
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="calendar">
+          <Card>
+            <CardHeader>
+              <CardTitle>Production calendar</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <DatePickerField
+                  label="Start date"
+                  value={viewDate}
+                  onChange={setViewDate}
+                  className="flex items-center gap-2"
+                />
+                <label className="flex items-center gap-2">
+                  Range
+                  <select
+                    value={plannedRangeDays}
+                    onChange={(event) =>
+                      setPlannedRangeDays(Number(event.target.value))
+                    }
+                    className="h-9 rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                  >
+                    <option value={1}>1 day</option>
+                    <option value={3}>3 days</option>
+                    <option value={7}>7 days</option>
+                    <option value={14}>14 days</option>
+                  </select>
+                </label>
+              </div>
+
+              {calendarDates.length === 0 || stations.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+                  No calendar data available.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-muted/40 text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2">Station</th>
+                        {calendarDates.map((date) => {
+                          const key = date.toISOString().slice(0, 10);
+                          return (
+                            <th key={key} className="px-3 py-2 text-center">
+                              {formatDateInput(key)}
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stations.map((station) => (
+                        <tr
+                          key={station.id}
+                          className="border-t border-border"
+                        >
+                          <td className="px-3 py-2 text-sm font-medium">
+                            {station.name}
+                          </td>
+                          {calendarDates.map((date) => {
+                            const key = date.toISOString().slice(0, 10);
+                            const cell = calendarCells.get(
+                              `${station.id}:${key}`,
+                            );
+                            return (
+                              <td
+                                key={key}
+                                className="px-3 py-2 text-center text-xs"
+                              >
+                                {cell ? (
+                                  <div className="space-y-1">
+                                    <div className="font-medium text-foreground">
+                                      {cell.count} runs
+                                    </div>
+                                    <div className="text-[11px] text-muted-foreground">
+                                      {cell.orders.size} orders
+                                    </div>
+                                    {cell.minutes > 0 ? (
+                                      <div className="text-[11px] text-muted-foreground">
+                                        {formatDuration(cell.minutes)}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    -
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
       {filesPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
@@ -1926,32 +3033,241 @@ export default function ProductionPage() {
           </div>
         </div>
       )}
+      {qrModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <style jsx global>{`
+            @media print {
+              @page {
+                size: ${qrPageSizeCss};
+                margin: 8mm;
+              }
+              body * {
+                visibility: hidden;
+              }
+              .qr-print-root,
+              .qr-print-root * {
+                visibility: visible;
+              }
+              .qr-print-root {
+                position: fixed;
+                left: 0;
+                top: 0;
+                width: 100%;
+              }
+              .qr-print-page {
+                page-break-after: always;
+              }
+            }
+          `}</style>
+          <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div>
+                <div className="text-lg font-semibold">Print QR codes</div>
+                <div className="text-xs text-muted-foreground">
+                  {qrRows.length} label(s) ready
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => window.print()}
+                  disabled={qrState !== "ready" || qrRows.length === 0}
+                >
+                  Print
+                </Button>
+                <Button variant="outline" onClick={handleCloseQrModal}>
+                  Close
+                </Button>
+              </div>
+            </div>
+            <div className="grid h-[calc(90vh-72px)] gap-6 overflow-hidden px-6 py-4 lg:grid-cols-[320px_1fr]">
+              <div className="space-y-4 overflow-y-auto pr-2">
+                <label className="space-y-2 text-sm font-medium">
+                  Label size
+                  <select
+                    value={qrSize}
+                    onChange={(event) => setQrSize(event.target.value)}
+                    className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                  >
+                    {qrEnabledSizes.map((size) => (
+                      <option key={size} value={size}>
+                        {qrLabelSizePresets[size]?.label ?? size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Content fields</div>
+                  <div className="text-xs text-muted-foreground">
+                    Drag to reorder. Checked fields appear on the label.
+                  </div>
+                  <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+                    {qrFieldOrder.map((value) => {
+                      const label = qrFieldLabels[value] ?? value;
+                      const checked = qrFieldSelection.includes(value);
+                      return (
+                        <div
+                          key={value}
+                          className={`flex items-center gap-2 rounded-md border border-border px-2 py-2 ${
+                            qrDragField === value ? "bg-muted/40" : "bg-card"
+                          }`}
+                          draggable
+                          onDragStart={() => setQrDragField(value)}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={() => {
+                            if (!qrDragField || qrDragField === value) {
+                              setQrDragField(null);
+                              return;
+                            }
+                            setQrFieldOrder((prev) => {
+                              const next = [...prev];
+                              const from = next.indexOf(qrDragField);
+                              const to = next.indexOf(value);
+                              if (from === -1 || to === -1) {
+                                return prev;
+                              }
+                              next.splice(from, 1);
+                              next.splice(to, 0, qrDragField);
+                              return next;
+                            });
+                            setQrDragField(null);
+                          }}
+                        >
+                          <span className="text-xs text-muted-foreground">
+                            ↕
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              setQrFieldSelection((prev) => {
+                                if (event.target.checked) {
+                                  if (prev.includes(value)) {
+                                    return prev;
+                                  }
+                                  const next = [...prev, value];
+                                  setQrContentFields(next);
+                                  return next;
+                                }
+                                const next = prev.filter(
+                                  (item) => item !== value,
+                                );
+                                setQrContentFields(next);
+                                return next;
+                              });
+                            }}
+                          />
+                          {label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="grid gap-3">
+                  <label className="space-y-2 text-sm font-medium">
+                    Orientation
+                    <select
+                      value={qrOrientation}
+                      onChange={(event) =>
+                        setQrOrientation(
+                          event.target.value as "portrait" | "landscape",
+                        )
+                      }
+                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                    >
+                      <option value="portrait">Vertical</option>
+                      <option value="landscape">Horizontal</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    Preview zoom
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={1.5}
+                      step={0.1}
+                      value={qrPreviewScale}
+                      onChange={(event) =>
+                        setQrPreviewScale(Number(event.target.value))
+                      }
+                      className="w-full"
+                    />
+                    <div className="text-xs text-muted-foreground">
+                      {Math.round(qrPreviewScale * 100)}%
+                    </div>
+                  </label>
+                </div>
+                {qrState === "loading" ? (
+                  <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                    Generating QR codes...
+                  </div>
+                ) : null}
+                {qrState === "error" && qrError ? (
+                  <div className="rounded-lg border border-dashed border-destructive/40 bg-destructive/5 px-3 py-3 text-xs text-destructive">
+                    {qrError}
+                  </div>
+                ) : null}
+              </div>
+              <div className="qr-print-root overflow-y-auto rounded-xl border border-border bg-muted/10 p-4">
+                {qrRows.length === 0 ? (
+                  <div className="text-center text-xs text-muted-foreground">
+                    No QR labels to preview.
+                  </div>
+                ) : (
+                  <div
+                    className="space-y-4"
+                    style={{
+                      transform: `scale(${qrPreviewScale})`,
+                      transformOrigin: "top left",
+                    }}
+                  >
+                    {qrRows.map((entry) => (
+                      <div
+                        key={entry.token}
+                        className="qr-print-page mx-auto flex items-center gap-4 rounded-lg border border-border bg-background p-4 shadow-sm"
+                        style={qrPageStyle}
+                      >
+                        <div className="flex h-full items-center">
+                          {qrImages[entry.token] ? (
+                            <img
+                              src={qrImages[entry.token]}
+                              alt="QR"
+                              className="h-24 w-24"
+                            />
+                          ) : (
+                            <div className="h-24 w-24 rounded-md border border-dashed border-border" />
+                          )}
+                        </div>
+                        <div className="space-y-1 text-xs">
+                          {orderedQrFields.map((fieldKey) => {
+                            const value = getQrFieldValue(entry.row, fieldKey);
+                            if (!value) {
+                              return null;
+                            }
+                            return (
+                              <div key={fieldKey} className="flex gap-2">
+                                <span className="min-w-[72px] text-muted-foreground">
+                                  {qrFieldLabels[fieldKey] ?? fieldKey}
+                                </span>
+                                <span className="font-medium text-foreground">
+                                  {value}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {dialog}
-      </TabsContent>
-
-      <TabsContent value="list">
-        <Card>
-          <CardHeader>
-            <CardTitle>Orders & constructions</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            This view will show a table of orders with construction rows and
-            station statuses. Coming next.
-          </CardContent>
-        </Card>
-      </TabsContent>
-
-      <TabsContent value="calendar">
-        <Card>
-          <CardHeader>
-            <CardTitle>Production calendar</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            This view will show the planned workload by day and station. Coming
-            next.
-          </CardContent>
-        </Card>
-      </TabsContent>
-    </Tabs>
+    </>
   );
 }
+
+

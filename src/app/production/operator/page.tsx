@@ -31,7 +31,7 @@ type ProductionItemRow = {
   item_name: string;
   qty: number;
   material: string | null;
-  status: "queued" | "in_progress" | "blocked" | "done";
+  status: "queued" | "pending" | "in_progress" | "blocked" | "done";
   station_id: string | null;
   meta?: Record<string, unknown> | null;
   started_at?: string | null;
@@ -47,7 +47,7 @@ type BatchRunRow = {
   station_id: string | null;
   route_key: string;
   step_index: number;
-  status: "queued" | "in_progress" | "blocked" | "done";
+  status: "queued" | "pending" | "in_progress" | "blocked" | "done";
   blocked_reason?: string | null;
   blocked_reason_id?: string | null;
   started_at: string | null;
@@ -95,6 +95,11 @@ type OrderAttachmentRow = {
     items: ProductionItemRow[];
   };
 
+type PendingAction = {
+  itemId: string;
+  action: "in_progress" | "done" | "blocked";
+};
+
 function priorityBadge(priority: Priority) {
   if (priority === "urgent") return "priority-urgent";
   if (priority === "high") return "priority-high";
@@ -103,7 +108,8 @@ function priorityBadge(priority: Priority) {
 }
 
 function statusBadge(status: BatchRunRow["status"]) {
-  if (status === "blocked") return "status-engineering_blocked";
+  if (status === "blocked") return "status-blocked";
+  if (status === "pending") return "status-pending";
   if (status === "in_progress") return "status-in_engineering";
   if (status === "done") return "status-ready_for_production";
   return "status-draft";
@@ -289,8 +295,13 @@ export default function OperatorProductionPage() {
   const [blockedItemId, setBlockedItemId] = useState<string | null>(null);
   const [blockedReasonId, setBlockedReasonId] = useState<string>("");
   const [blockedReasonText, setBlockedReasonText] = useState<string>("");
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [notificationRoles, setNotificationRoles] = useState<string[]>([
+    "Production",
+    "Admin",
+  ]);
 
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
@@ -481,6 +492,98 @@ export default function OperatorProductionPage() {
   }, [currentUser.id, currentUser.tenantId, cacheKey]);
 
   useEffect(() => {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    let isMounted = true;
+    const loadNotificationRoles = async () => {
+      const { data, error } = await supabase
+        .from("tenant_settings")
+        .select("notification_roles")
+        .eq("tenant_id", currentUser.tenantId)
+        .maybeSingle();
+      if (!isMounted) {
+        return;
+      }
+      if (error || !data) {
+        return;
+      }
+      if (Array.isArray(data.notification_roles)) {
+        setNotificationRoles(
+          data.notification_roles.filter(
+            (value: unknown) => typeof value === "string",
+          ),
+        );
+      }
+    };
+    void loadNotificationRoles();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.tenantId]);
+
+  useEffect(() => {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    const channel = supabase
+      .channel(`operator-live-${currentUser.tenantId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "production_items",
+          filter: `tenant_id=eq.${currentUser.tenantId}`,
+        },
+        (payload) => {
+          const next = payload.new as ProductionItemRow | undefined;
+          if (!next) {
+            return;
+          }
+          setProductionItems((prev) => {
+            const idx = prev.findIndex((item) => item.id === next.id);
+            if (idx === -1) {
+              return [next, ...prev];
+            }
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...next };
+            return copy;
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "batch_runs",
+          filter: `tenant_id=eq.${currentUser.tenantId}`,
+        },
+        (payload) => {
+          const next = payload.new as BatchRunRow | undefined;
+          if (!next) {
+            return;
+          }
+          setBatchRuns((prev) => {
+            const idx = prev.findIndex((item) => item.id === next.id);
+            if (idx === -1) {
+              return [next, ...prev];
+            }
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...next };
+            return copy;
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser.tenantId]);
+
+  useEffect(() => {
     if (!supabase) {
       return;
     }
@@ -632,14 +735,20 @@ export default function OperatorProductionPage() {
     if (items.length === 0) {
       return "queued" as BatchRunRow["status"];
     }
-    if (items.some((item) => item.status === "blocked")) {
-      return "blocked" as BatchRunRow["status"];
-    }
     if (items.every((item) => item.status === "done")) {
       return "done" as BatchRunRow["status"];
     }
     if (items.some((item) => item.status === "in_progress")) {
       return "in_progress" as BatchRunRow["status"];
+    }
+    if (items.some((item) => item.status === "queued")) {
+      return "queued" as BatchRunRow["status"];
+    }
+    if (items.some((item) => item.status === "pending")) {
+      return "pending" as BatchRunRow["status"];
+    }
+    if (items.some((item) => item.status === "blocked")) {
+      return "blocked" as BatchRunRow["status"];
     }
     return "queued" as BatchRunRow["status"];
   };
@@ -757,6 +866,31 @@ export default function OperatorProductionPage() {
       setDataError("Failed to update item status.");
       return;
     }
+
+    if (status === "blocked" && currentUser.tenantId) {
+      const stationName = targetItem.station_id
+        ? stationsById.get(targetItem.station_id) ?? "Station"
+        : "Station";
+      const orderNumber = run.orders?.order_number ?? "Order";
+      const reason =
+        extra?.blockedReason ?? (nextMeta.blocked_reason as string) ?? "Blocked";
+      const roles =
+        notificationRoles.length > 0 ? notificationRoles : ["Production", "Admin"];
+      await supabase.from("notifications").insert({
+        tenant_id: currentUser.tenantId,
+        user_id: null,
+        audience_roles: roles.length > 0 ? roles : null,
+        type: "blocked",
+        title: `Blocked: ${orderNumber}`,
+        body: `${targetItem.item_name} at ${stationName}. ${reason}`,
+        data: {
+          order_id: run.order_id,
+          production_item_id: targetItem.id,
+          station_id: targetItem.station_id,
+          reason,
+        },
+      });
+    }
     setProductionItems((prev) =>
       prev.map((item) =>
         item.id === itemId
@@ -848,6 +982,89 @@ export default function OperatorProductionPage() {
     }
   };
 
+  const handleUserStatusUpdate = async (
+    itemId: string,
+    runId: string,
+    status: PendingAction["action"],
+    extra?: { blockedReason?: string | null; blockedReasonId?: string | null },
+  ) => {
+    if (pendingAction) {
+      return;
+    }
+    setPendingAction({ itemId, action: status });
+    try {
+      await updateItemStatus(itemId, runId, status, extra);
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const isActionLoading = (itemId: string, action: PendingAction["action"]) =>
+    pendingAction?.itemId === itemId && pendingAction.action === action;
+
+  useEffect(() => {
+    if (!supabase || productionItems.length === 0) {
+      return;
+    }
+    const updates: Array<{
+      itemId: string;
+      runId: string;
+      status: BatchRunRow["status"];
+    }> = [];
+
+    productionItems.forEach((item) => {
+      if (!item.station_id) {
+        return;
+      }
+      if (
+        item.status === "in_progress" ||
+        item.status === "done" ||
+        item.status === "blocked"
+      ) {
+        return;
+      }
+      const dependencies = dependenciesByStation.get(item.station_id) ?? [];
+      const run = batchRuns.find(
+        (candidate) =>
+          candidate.order_id === item.order_id &&
+          candidate.batch_code === item.batch_code &&
+          candidate.station_id === item.station_id,
+      );
+      if (!run) {
+        return;
+      }
+      if (dependencies.length === 0) {
+        if (item.status === "pending") {
+          updates.push({ itemId: item.id, runId: run.id, status: "queued" });
+        }
+        return;
+      }
+      const groupKey = getItemGroupKey(item);
+      const stationMap = itemsByGroupAndStation.get(groupKey);
+      const hasBlocking = dependencies.some((depId) => {
+        const depItem = stationMap?.get(depId);
+        return depItem && depItem.status !== "done";
+      });
+      const desiredStatus = hasBlocking ? "pending" : "queued";
+      if (item.status !== desiredStatus) {
+        updates.push({ itemId: item.id, runId: run.id, status: desiredStatus });
+      }
+    });
+
+    if (updates.length === 0) {
+      return;
+    }
+    updates.forEach((update) => {
+      updateItemStatus(update.itemId, update.runId, update.status);
+    });
+  }, [
+    supabase,
+    productionItems,
+    dependenciesByStation,
+    itemsByGroupAndStation,
+    batchRuns,
+  ]);
+
   const handleOpenBlocked = (runId: string, itemId: string) => {
     setBlockedRunId(runId);
     setBlockedItemId(itemId);
@@ -864,7 +1081,7 @@ export default function OperatorProductionPage() {
       stopReasons.find((reason) => reason.id === blockedReasonId)?.label ??
       "";
     const reason = manual || selectedLabel || "Blocked";
-    await updateItemStatus(blockedItemId, blockedRunId, "blocked", {
+    await handleUserStatusUpdate(blockedItemId, blockedRunId, "blocked", {
       blockedReason: reason,
       blockedReasonId: blockedReasonId || null,
     });
@@ -959,6 +1176,17 @@ export default function OperatorProductionPage() {
                         );
                         const orderDurationMinutes =
                           orderDurationMap.get(item.orderId) ?? 0;
+                        const hasBlocked = item.items.some(
+                          (row) => row.status === "blocked",
+                        );
+                        const hasActive = item.items.some((row) =>
+                          ["queued", "pending", "in_progress"].includes(
+                            row.status,
+                          ),
+                        );
+                        const isPartiallyBlocked = hasBlocked && hasActive;
+                        const showBlockedStyle =
+                          isPartiallyBlocked && item.status === "in_progress";
                         const elapsedMinutes = item.startedAt
                           ? computeWorkingMinutes(
                               item.startedAt,
@@ -990,7 +1218,13 @@ export default function OperatorProductionPage() {
                           <Badge variant={priorityBadge(item.priority)}>
                             {item.priority}
                           </Badge>
-                          <Badge variant={statusBadge(item.status)}>
+                          <Badge
+                            variant={
+                              showBlockedStyle
+                                ? "status-blocked"
+                                : statusBadge(item.status)
+                            }
+                          >
                             {String(item.status ?? "queued").replace("_", " ")}
                           </Badge>
                         </div>
@@ -1075,13 +1309,6 @@ export default function OperatorProductionPage() {
                                   stationId: string;
                                   status: ProductionItemRow["status"];
                                 }>;
-                                const blockingLabel = blockingDependencies
-                                  .map((dep) => {
-                                    const name =
-                                      stationsById.get(dep.stationId) ?? "Station";
-                                    return `${name} (${String(dep.status).replace("_", " ")})`;
-                                  })
-                                  .join(", ");
                                 const hasBlockingDependencies =
                                   blockingDependencies.length > 0;
                                 const itemElapsedMinutes = prodItem.started_at
@@ -1116,8 +1343,25 @@ export default function OperatorProductionPage() {
                                       {prodItem.material ? ` - ${prodItem.material}` : ""}
                                     </div>
                                     {hasBlockingDependencies ? (
-                                      <div className="mt-1 text-[11px] text-amber-600">
-                                        Waiting for: {blockingLabel}
+                                      <div className="mt-2 space-y-1">
+                                        <div className="text-[11px] text-amber-600">
+                                          Waiting for
+                                        </div>
+                                        <div className="flex flex-wrap gap-1">
+                                          {blockingDependencies.map((dep) => {
+                                            const name =
+                                              stationsById.get(dep.stationId) ??
+                                              "Station";
+                                            return (
+                                              <span
+                                                key={dep.stationId}
+                                                className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700"
+                                              >
+                                                {name} · {String(dep.status).replace("_", " ")}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
                                       </div>
                                     ) : null}
                                     {itemElapsedLabel ? (
@@ -1137,38 +1381,57 @@ export default function OperatorProductionPage() {
                                     prodItem.status === "in_progress";
                                   const isDone = prodItem.status === "done";
                                   const isBlocked = prodItem.status === "blocked";
+                                  const isStarting = isActionLoading(
+                                    prodItem.id,
+                                    "in_progress",
+                                  );
+                                  const isCompleting = isActionLoading(
+                                    prodItem.id,
+                                    "done",
+                                  );
                                   return (
                                     <>
                                 <Button
                                   variant="outline"
                                   size="sm"
+                                  className="gap-2"
                                   disabled={
                                     isDone ||
                                     (hasStarted && !isBlocked) ||
-                                    (!isBlocked && hasBlockingDependencies)
+                                    (!isBlocked && hasBlockingDependencies) ||
+                                    isStarting
                                   }
                                   onClick={() =>
-                                    updateItemStatus(
+                                    handleUserStatusUpdate(
                                       prodItem.id,
                                       item.id,
                                       "in_progress",
                                     )
                                   }
                                 >
+                                  {isStarting ? (
+                                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                  ) : null}
                                   {isBlocked ? "Resume" : "Start"}
                                 </Button>
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  disabled={!hasStarted || isDone || isBlocked}
+                                  className="gap-2"
+                                  disabled={
+                                    !hasStarted || isDone || isBlocked || isCompleting
+                                  }
                                   onClick={() =>
-                                    updateItemStatus(
+                                    handleUserStatusUpdate(
                                       prodItem.id,
                                       item.id,
                                       "done",
                                     )
                                   }
                                 >
+                                  {isCompleting ? (
+                                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                  ) : null}
                                   Done
                                 </Button>
                                 <Button
@@ -1222,6 +1485,9 @@ export default function OperatorProductionPage() {
                               }
                             }}
                           >
+                            {signingJobs.has(item.id) ? (
+                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                            ) : null}
                             {expandedJobs.has(item.id) ? (
                               <ChevronUpIcon className="h-3.5 w-3.5" />
                             ) : (
@@ -1329,7 +1595,19 @@ export default function OperatorProductionPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="button" onClick={handleConfirmBlocked}>
+                <Button
+                  type="button"
+                  onClick={handleConfirmBlocked}
+                  disabled={
+                    blockedItemId
+                      ? isActionLoading(blockedItemId, "blocked")
+                      : false
+                  }
+                  className="gap-2"
+                >
+                  {blockedItemId && isActionLoading(blockedItemId, "blocked") ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                  ) : null}
                   Save
                 </Button>
               </div>

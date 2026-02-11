@@ -129,6 +129,42 @@ const orderInputColumnTypeOptions: {
   { value: "select", label: "Select" },
 ];
 
+const qrLabelSizeOptions = [
+  { value: "A4", label: "A4 (210 x 297 mm)" },
+  { value: "A5", label: "A5 (148 x 210 mm)" },
+  { value: "A6", label: "A6 (105 x 148 mm)" },
+  { value: "LABEL_70x35", label: "Label 70 x 35 mm" },
+  { value: "LABEL_105x148", label: "Label 105 x 148 mm" },
+];
+
+const qrContentFieldOptions = [
+  { value: "order_number", label: "Order number" },
+  { value: "customer_name", label: "Customer name" },
+  { value: "batch_code", label: "Batch code" },
+  { value: "item_name", label: "Construction" },
+  { value: "qty", label: "Quantity" },
+  { value: "material", label: "Material" },
+  { value: "field_label", label: "Field label" },
+  { value: "due_date", label: "Due date" },
+];
+
+const defaultQrEnabledSizes = [
+  "A4",
+  "A5",
+  "A6",
+  "LABEL_70x35",
+  "LABEL_105x148",
+];
+
+const defaultQrContentFields = [
+  "order_number",
+  "customer_name",
+  "batch_code",
+  "item_name",
+  "qty",
+  "material",
+];
+
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
@@ -276,6 +312,25 @@ export default function SettingsPage() {
     string | null
   >(null);
   const [isAssignmentsLoading, setIsAssignmentsLoading] = useState(false);
+  const [qrEnabledSizes, setQrEnabledSizes] = useState<string[]>(
+    defaultQrEnabledSizes,
+  );
+  const [qrDefaultSize, setQrDefaultSize] = useState<string>("A4");
+  const [qrContentFields, setQrContentFields] = useState<string[]>(
+    defaultQrContentFields,
+  );
+  const [qrSettingsState, setQrSettingsState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [qrSettingsMessage, setQrSettingsMessage] = useState("");
+  const [notificationRoles, setNotificationRoles] = useState<string[]>([
+    "Production",
+    "Admin",
+  ]);
+  const [notificationState, setNotificationState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [notificationMessage, setNotificationMessage] = useState("");
   const [devRoleOverride, setDevRoleOverride] = useState(false);
   const sortedStations = useMemo(
     () =>
@@ -311,7 +366,9 @@ export default function SettingsPage() {
     const loadWorkHours = async () => {
       const { data, error } = await supabase
         .from("tenant_settings")
-        .select("workday_start, workday_end")
+        .select(
+          "workday_start, workday_end, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles",
+        )
         .eq("tenant_id", currentUser.tenantId)
         .maybeSingle();
       if (!isMounted) {
@@ -325,6 +382,30 @@ export default function SettingsPage() {
       }
       if (data.workday_end) {
         setWorkdayEnd(data.workday_end);
+      }
+      if (Array.isArray(data.qr_enabled_sizes)) {
+        setQrEnabledSizes(
+          data.qr_enabled_sizes.filter(
+            (value: unknown) => typeof value === "string",
+          ),
+        );
+      }
+      if (typeof data.qr_default_size === "string") {
+        setQrDefaultSize(data.qr_default_size);
+      }
+      if (Array.isArray(data.qr_content_fields)) {
+        setQrContentFields(
+          data.qr_content_fields.filter(
+            (value: unknown) => typeof value === "string",
+          ),
+        );
+      }
+      if (Array.isArray(data.notification_roles)) {
+        setNotificationRoles(
+          data.notification_roles.filter(
+            (value: unknown) => typeof value === "string",
+          ),
+        );
       }
     };
     void loadWorkHours();
@@ -1442,6 +1523,60 @@ export default function SettingsPage() {
     setIsWorkdaySaving(false);
   }
 
+  async function handleSaveQrSettings() {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    setQrSettingsState("saving");
+    setQrSettingsMessage("");
+    const enabledSizes =
+      qrEnabledSizes.length > 0 ? qrEnabledSizes : defaultQrEnabledSizes;
+    const nextDefaultSize = enabledSizes.includes(qrDefaultSize)
+      ? qrDefaultSize
+      : enabledSizes[0];
+    const contentFields =
+      qrContentFields.length > 0 ? qrContentFields : defaultQrContentFields;
+    setQrEnabledSizes(enabledSizes);
+    setQrDefaultSize(nextDefaultSize);
+    setQrContentFields(contentFields);
+    const { error } = await supabase.from("tenant_settings").upsert({
+      tenant_id: currentUser.tenantId,
+      qr_enabled_sizes: enabledSizes,
+      qr_default_size: nextDefaultSize,
+      qr_content_fields: contentFields,
+    });
+    if (error) {
+      setQrSettingsState("error");
+      setQrSettingsMessage(error.message ?? "Failed to save QR settings.");
+      return;
+    }
+    setQrSettingsState("saved");
+    setQrSettingsMessage("Saved.");
+  }
+
+  async function handleSaveNotificationRoles() {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    const roles = notificationRoles.length
+      ? notificationRoles
+      : ["Production", "Admin"];
+    setNotificationRoles(roles);
+    setNotificationState("saving");
+    setNotificationMessage("");
+    const { error } = await supabase.from("tenant_settings").upsert({
+      tenant_id: currentUser.tenantId,
+      notification_roles: roles,
+    });
+    if (error) {
+      setNotificationState("error");
+      setNotificationMessage(error.message ?? "Failed to save roles.");
+      return;
+    }
+    setNotificationState("saved");
+    setNotificationMessage("Saved.");
+  }
+
   function resetOrderFieldForm() {
     setOrderFieldLabel("");
     setOrderFieldKey("");
@@ -1846,7 +1981,7 @@ export default function SettingsPage() {
         <div className="sticky top-16 z-20 border-b border-border bg-background/90 pb-2 pt-2 backdrop-blur">
           <TabsList className="w-full justify-start overflow-x-auto flex-nowrap">
             <TabsTrigger value="structure">Structure</TabsTrigger>
-            <TabsTrigger value="operations">Operations</TabsTrigger>
+            <TabsTrigger value="operations">Production</TabsTrigger>
             <TabsTrigger value="partners">Partners</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="workflow">Workflow</TabsTrigger>
@@ -2973,6 +3108,179 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>QR label settings</CardTitle>
+                  <CardDescription>
+                    Configure the default QR label layout for production.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Label sizes</div>
+                      <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                        {qrLabelSizeOptions.map((option) => {
+                          const checked = qrEnabledSizes.includes(option.value);
+                          return (
+                            <label
+                              key={option.value}
+                              className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) => {
+                                  setQrEnabledSizes((prev) => {
+                                    if (event.target.checked) {
+                                      return [...prev, option.value];
+                                    }
+                                    return prev.filter(
+                                      (value) => value !== option.value,
+                                    );
+                                  });
+                                }}
+                              />
+                              {option.label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Default size</div>
+                      <select
+                        value={qrDefaultSize}
+                        onChange={(event) => setQrDefaultSize(event.target.value)}
+                        className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                      >
+                        {qrLabelSizeOptions
+                          .filter((option) =>
+                            qrEnabledSizes.includes(option.value),
+                          )
+                          .map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                      </select>
+                      <div className="text-xs text-muted-foreground">
+                        Used as the default print format in Production.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Content fields</div>
+                    <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                      {qrContentFieldOptions.map((option) => {
+                        const checked = qrContentFields.includes(option.value);
+                        return (
+                          <label
+                            key={option.value}
+                            className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => {
+                                setQrContentFields((prev) => {
+                                  if (event.target.checked) {
+                                    return [...prev, option.value];
+                                  }
+                                  return prev.filter(
+                                    (value) => value !== option.value,
+                                  );
+                                });
+                              }}
+                            />
+                            {option.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={handleSaveQrSettings}
+                      disabled={qrSettingsState === "saving"}
+                    >
+                      {qrSettingsState === "saving"
+                        ? "Saving..."
+                        : "Save QR settings"}
+                    </Button>
+                    {qrSettingsState !== "idle" && qrSettingsMessage ? (
+                      <span
+                        className={`text-xs ${
+                          qrSettingsState === "error"
+                            ? "text-destructive"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {qrSettingsMessage}
+                      </span>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Notifications</CardTitle>
+                  <CardDescription>
+                    Choose who receives system notifications about blocked work.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                    {["Sales", "Engineering", "Production", "Admin"].map(
+                      (role) => (
+                        <label
+                          key={role}
+                          className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={notificationRoles.includes(role)}
+                            onChange={(event) => {
+                              setNotificationRoles((prev) => {
+                                if (event.target.checked) {
+                                  return [...new Set([...prev, role])];
+                                }
+                                return prev.filter((item) => item !== role);
+                              });
+                            }}
+                          />
+                          {role}
+                        </label>
+                      ),
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={handleSaveNotificationRoles}
+                      disabled={notificationState === "saving"}
+                    >
+                      {notificationState === "saving"
+                        ? "Saving..."
+                        : "Save notification roles"}
+                    </Button>
+                    {notificationState !== "idle" && notificationMessage ? (
+                      <span
+                        className={`text-xs ${
+                          notificationState === "error"
+                            ? "text-destructive"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {notificationMessage}
+                      </span>
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>

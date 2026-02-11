@@ -274,7 +274,7 @@ export default function OrderDetailPage() {
   const checklistDoneCount = activeChecklistItems.filter(
     (item) => checklistState[item.id],
   ).length;
-  const statusHistory = orderState.statusHistory ?? [];
+  const statusHistory = orderState?.statusHistory ?? [];
   const visibleStatusHistory = showAllHistory
     ? statusHistory
     : statusHistory.slice(0, 5);
