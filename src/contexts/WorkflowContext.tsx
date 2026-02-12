@@ -25,6 +25,8 @@ export interface WorkflowRules {
   dueSoonDays: number;
   dueIndicatorEnabled: boolean;
   dueIndicatorStatuses: OrderStatus[];
+  orderStatusConfig: Record<OrderStatus, WorkflowStatusConfig>;
+  externalJobStatusConfig: Record<ExternalJobStatus, WorkflowStatusConfig>;
   statusLabels: Record<OrderStatus, string>;
   externalJobStatusLabels: Record<ExternalJobStatus, string>;
   assignmentLabels: {
@@ -43,6 +45,45 @@ export interface ExternalJobRule {
   status: ExternalJobStatus;
   minAttachments: number;
 }
+
+export type WorkflowStatusColor =
+  | "slate"
+  | "blue"
+  | "amber"
+  | "emerald"
+  | "rose";
+
+export interface WorkflowStatusConfig {
+  label: string;
+  color: WorkflowStatusColor;
+  isActive: boolean;
+}
+
+const validStatusColors: WorkflowStatusColor[] = [
+  "slate",
+  "blue",
+  "amber",
+  "emerald",
+  "rose",
+];
+
+const requiredOrderStatusesActive: OrderStatus[] = [
+  "draft",
+  "ready_for_engineering",
+  "in_engineering",
+  "engineering_blocked",
+  "ready_for_production",
+  "in_production",
+];
+
+const requiredExternalStatusesActive: ExternalJobStatus[] = [
+  "requested",
+  "ordered",
+  "in_progress",
+  "delivered",
+  "approved",
+  "cancelled",
+];
 
 interface WorkflowContextValue {
   rules: WorkflowRules;
@@ -77,6 +118,35 @@ const defaultRules: WorkflowRules = {
     "ready_for_production",
     "in_production",
   ],
+  orderStatusConfig: {
+    draft: { label: "Draft", color: "slate", isActive: true },
+    ready_for_engineering: {
+      label: "Ready for eng.",
+      color: "blue",
+      isActive: true,
+    },
+    in_engineering: { label: "In eng.", color: "blue", isActive: true },
+    engineering_blocked: {
+      label: "Eng. blocked",
+      color: "amber",
+      isActive: true,
+    },
+    ready_for_production: {
+      label: "Ready for prod.",
+      color: "emerald",
+      isActive: true,
+    },
+    in_production: { label: "In prod.", color: "blue", isActive: true },
+    done: { label: "Done", color: "emerald", isActive: true },
+  },
+  externalJobStatusConfig: {
+    requested: { label: "Requested", color: "slate", isActive: true },
+    ordered: { label: "Ordered", color: "blue", isActive: true },
+    in_progress: { label: "In progress", color: "blue", isActive: true },
+    delivered: { label: "In Stock", color: "emerald", isActive: true },
+    approved: { label: "Approved", color: "emerald", isActive: true },
+    cancelled: { label: "Cancelled", color: "rose", isActive: true },
+  },
   statusLabels: {
     draft: "Draft",
     ready_for_engineering: "Ready for eng.",
@@ -84,6 +154,7 @@ const defaultRules: WorkflowRules = {
     engineering_blocked: "Eng. blocked",
     ready_for_production: "Ready for prod.",
     in_production: "In prod.",
+    done: "Done",
   },
   externalJobStatusLabels: {
     requested: "Requested",
@@ -132,6 +203,126 @@ const defaultRules: WorkflowRules = {
     { id: "ext-approved", status: "approved", minAttachments: 1 },
     { id: "ext-cancelled", status: "cancelled", minAttachments: 0 },
   ],
+};
+
+const mergeOrderStatusConfig = (
+  raw: Partial<Record<OrderStatus, Partial<WorkflowStatusConfig>>> | null,
+  labels: Partial<Record<OrderStatus, string>> | null,
+): Record<OrderStatus, WorkflowStatusConfig> => {
+  const next = { ...defaultRules.orderStatusConfig };
+  (Object.keys(defaultRules.orderStatusConfig) as OrderStatus[]).forEach(
+    (status) => {
+      const current = next[status];
+      const patch = raw?.[status];
+      const labelPatch = labels?.[status];
+      next[status] = {
+        label: patch?.label ?? labelPatch ?? current.label,
+        color: patch?.color ?? current.color,
+        isActive: patch?.isActive ?? current.isActive,
+      };
+    },
+  );
+  return next;
+};
+
+const mergeExternalStatusConfig = (
+  raw: Partial<Record<ExternalJobStatus, Partial<WorkflowStatusConfig>>> | null,
+  labels: Partial<Record<ExternalJobStatus, string>> | null,
+): Record<ExternalJobStatus, WorkflowStatusConfig> => {
+  const next = { ...defaultRules.externalJobStatusConfig };
+  (
+    Object.keys(defaultRules.externalJobStatusConfig) as ExternalJobStatus[]
+  ).forEach((status) => {
+    const current = next[status];
+    const patch = raw?.[status];
+    const labelPatch = labels?.[status];
+    next[status] = {
+      label: patch?.label ?? labelPatch ?? current.label,
+      color: patch?.color ?? current.color,
+      isActive: patch?.isActive ?? current.isActive,
+    };
+  });
+  return next;
+};
+
+const mapOrderStatusLabels = (
+  config: Record<OrderStatus, WorkflowStatusConfig>,
+): Record<OrderStatus, string> => ({
+  draft: config.draft.label,
+  ready_for_engineering: config.ready_for_engineering.label,
+  in_engineering: config.in_engineering.label,
+  engineering_blocked: config.engineering_blocked.label,
+  ready_for_production: config.ready_for_production.label,
+  in_production: config.in_production.label,
+  done: config.done.label,
+});
+
+const mapExternalStatusLabels = (
+  config: Record<ExternalJobStatus, WorkflowStatusConfig>,
+): Record<ExternalJobStatus, string> => ({
+  requested: config.requested.label,
+  ordered: config.ordered.label,
+  in_progress: config.in_progress.label,
+  delivered: config.delivered.label,
+  approved: config.approved.label,
+  cancelled: config.cancelled.label,
+});
+
+const sanitizeOrderStatusConfig = (
+  raw: Record<OrderStatus, WorkflowStatusConfig>,
+) => {
+  const next = { ...raw };
+  (Object.keys(next) as OrderStatus[]).forEach((status) => {
+    const fallback = defaultRules.orderStatusConfig[status];
+    const current = next[status];
+    next[status] = {
+      label: (current.label ?? "").trim() || fallback.label,
+      color: validStatusColors.includes(current.color)
+        ? current.color
+        : fallback.color,
+      isActive: current.isActive ?? fallback.isActive,
+    };
+  });
+  requiredOrderStatusesActive.forEach((status) => {
+    next[status] = { ...next[status], isActive: true };
+  });
+  return next;
+};
+
+const sanitizeExternalStatusConfig = (
+  raw: Record<ExternalJobStatus, WorkflowStatusConfig>,
+) => {
+  const next = { ...raw };
+  (Object.keys(next) as ExternalJobStatus[]).forEach((status) => {
+    const fallback = defaultRules.externalJobStatusConfig[status];
+    const current = next[status];
+    next[status] = {
+      label: (current.label ?? "").trim() || fallback.label,
+      color: validStatusColors.includes(current.color)
+        ? current.color
+        : fallback.color,
+      isActive: current.isActive ?? fallback.isActive,
+    };
+  });
+  requiredExternalStatusesActive.forEach((status) => {
+    next[status] = { ...next[status], isActive: true };
+  });
+  return next;
+};
+
+const sanitizeDueIndicatorStatuses = (
+  statuses: OrderStatus[],
+  config: Record<OrderStatus, WorkflowStatusConfig>,
+) => {
+  const deduped = Array.from(new Set(statuses));
+  const active = deduped.filter((status) => config[status]?.isActive);
+  if (active.length > 0) {
+    return active;
+  }
+  const fallback = defaultRules.dueIndicatorStatuses.filter(
+    (status) => config[status]?.isActive,
+  );
+  return fallback.length > 0 ? fallback : [...defaultRules.dueIndicatorStatuses];
 };
 
 const WorkflowContext = createContext<WorkflowContextValue>({
@@ -201,17 +392,28 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       }
       const cached = readCachedRules();
       if (cached) {
+        const orderStatusConfig = sanitizeOrderStatusConfig(
+          mergeOrderStatusConfig(cached.orderStatusConfig, cached.statusLabels),
+        );
+        const externalJobStatusConfig = sanitizeExternalStatusConfig(
+          mergeExternalStatusConfig(
+            cached.externalJobStatusConfig,
+            cached.externalJobStatusLabels,
+          ),
+        );
+        const dueIndicatorStatuses = sanitizeDueIndicatorStatuses(
+          cached.dueIndicatorStatuses ?? defaultRules.dueIndicatorStatuses,
+          orderStatusConfig,
+        );
         setRulesState({
           ...defaultRules,
           ...cached,
-          statusLabels: {
-            ...defaultRules.statusLabels,
-            ...(cached.statusLabels ?? {}),
-          },
-          externalJobStatusLabels: {
-            ...defaultRules.externalJobStatusLabels,
-            ...(cached.externalJobStatusLabels ?? {}),
-          },
+          dueIndicatorStatuses,
+          orderStatusConfig,
+          externalJobStatusConfig,
+          statusLabels: mapOrderStatusLabels(orderStatusConfig),
+          externalJobStatusLabels:
+            mapExternalStatusLabels(externalJobStatusConfig),
           assignmentLabels: {
             ...defaultRules.assignmentLabels,
             ...(cached.assignmentLabels ?? {}),
@@ -238,7 +440,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           supabase
             .from("workflow_rules")
             .select(
-              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, external_job_status_labels, assignment_labels, attachment_categories, attachment_category_defaults",
+              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, external_job_status_labels, order_status_config, external_job_status_config, assignment_labels, attachment_categories, attachment_category_defaults",
             )
             .eq("tenant_id", user.tenantId)
             .maybeSingle(),
@@ -264,6 +466,31 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       }
 
       setRulesState((prev) => {
+        const orderStatusConfig = sanitizeOrderStatusConfig(
+          mergeOrderStatusConfig(
+            (rulesData?.order_status_config as
+              | Partial<Record<OrderStatus, Partial<WorkflowStatusConfig>>>
+              | null) ?? null,
+            (rulesData?.status_labels as
+              | Partial<Record<OrderStatus, string>>
+              | null) ?? null,
+          ),
+        );
+        const externalJobStatusConfig = sanitizeExternalStatusConfig(
+          mergeExternalStatusConfig(
+            (rulesData?.external_job_status_config as
+              | Partial<Record<ExternalJobStatus, Partial<WorkflowStatusConfig>>>
+              | null) ?? null,
+            (rulesData?.external_job_status_labels as
+              | Partial<Record<ExternalJobStatus, string>>
+              | null) ?? null,
+          ),
+        );
+        const dueIndicatorStatuses = sanitizeDueIndicatorStatuses(
+          (rulesData?.due_indicator_statuses as OrderStatus[] | null) ??
+            prev.dueIndicatorStatuses,
+          orderStatusConfig,
+        );
         const next = {
         ...prev,
         minAttachmentsForEngineering:
@@ -281,17 +508,12 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         dueSoonDays: rulesData?.due_soon_days ?? prev.dueSoonDays,
         dueIndicatorEnabled:
           rulesData?.due_indicator_enabled ?? prev.dueIndicatorEnabled,
-        dueIndicatorStatuses:
-          (rulesData?.due_indicator_statuses as OrderStatus[] | null) ??
-          prev.dueIndicatorStatuses,
-        statusLabels: {
-          ...prev.statusLabels,
-          ...(rulesData?.status_labels ?? {}),
-        },
-        externalJobStatusLabels: {
-          ...prev.externalJobStatusLabels,
-          ...(rulesData?.external_job_status_labels ?? {}),
-        },
+        dueIndicatorStatuses,
+        orderStatusConfig,
+        externalJobStatusConfig,
+        statusLabels: mapOrderStatusLabels(orderStatusConfig),
+        externalJobStatusLabels:
+          mapExternalStatusLabels(externalJobStatusConfig),
         assignmentLabels: {
           ...prev.assignmentLabels,
           ...(rulesData?.assignment_labels ?? {}),
@@ -335,6 +557,8 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           due_soon_days: defaultRules.dueSoonDays,
           due_indicator_enabled: defaultRules.dueIndicatorEnabled,
           due_indicator_statuses: defaultRules.dueIndicatorStatuses,
+          order_status_config: defaultRules.orderStatusConfig,
+          external_job_status_config: defaultRules.externalJobStatusConfig,
           status_labels: defaultRules.statusLabels,
           external_job_status_labels: defaultRules.externalJobStatusLabels,
           assignment_labels: defaultRules.assignmentLabels,
@@ -371,15 +595,32 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
 
   const setRules = (patch: Partial<WorkflowRules>) => {
     setRulesState((prev) => {
+      const orderStatusConfig = sanitizeOrderStatusConfig(
+        patch.orderStatusConfig ?? prev.orderStatusConfig,
+      );
+      const externalJobStatusConfig = sanitizeExternalStatusConfig(
+        patch.externalJobStatusConfig ?? prev.externalJobStatusConfig,
+      );
+      const dueIndicatorStatuses = sanitizeDueIndicatorStatuses(
+        patch.dueIndicatorStatuses ?? prev.dueIndicatorStatuses,
+        orderStatusConfig,
+      );
+      const statusLabels =
+        patch.statusLabels ?? mapOrderStatusLabels(orderStatusConfig);
+      const externalJobStatusLabels =
+        patch.externalJobStatusLabels ??
+        mapExternalStatusLabels(externalJobStatusConfig);
       const next = {
         ...prev,
         ...patch,
+        dueIndicatorStatuses,
+        orderStatusConfig,
+        externalJobStatusConfig,
         checklistItems: patch.checklistItems ?? prev.checklistItems,
         returnReasons: patch.returnReasons ?? prev.returnReasons,
         externalJobRules: patch.externalJobRules ?? prev.externalJobRules,
-        statusLabels: patch.statusLabels ?? prev.statusLabels,
-        externalJobStatusLabels:
-          patch.externalJobStatusLabels ?? prev.externalJobStatusLabels,
+        statusLabels,
+        externalJobStatusLabels,
         assignmentLabels: patch.assignmentLabels ?? prev.assignmentLabels,
         attachmentCategories:
           patch.attachmentCategories ?? prev.attachmentCategories,
@@ -399,6 +640,8 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
               due_soon_days: next.dueSoonDays,
               due_indicator_enabled: next.dueIndicatorEnabled,
               due_indicator_statuses: next.dueIndicatorStatuses,
+              order_status_config: next.orderStatusConfig,
+              external_job_status_config: next.externalJobStatusConfig,
               status_labels: next.statusLabels,
               external_job_status_labels: next.externalJobStatusLabels,
               assignment_labels: next.assignmentLabels,
@@ -629,7 +872,18 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       removeReturnReason,
       updateExternalJobRule,
     }),
-    [rules, saveError, isLoadedFromDb],
+    [
+      rules,
+      setRules,
+      saveError,
+      isLoadedFromDb,
+      addChecklistItem,
+      updateChecklistItem,
+      removeChecklistItem,
+      addReturnReason,
+      removeReturnReason,
+      updateExternalJobRule,
+    ],
   );
 
   return (

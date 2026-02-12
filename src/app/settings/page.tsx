@@ -24,6 +24,7 @@ import { useSettingsData } from "@/hooks/useSettingsData";
 import { useCurrentUser, type UserRole } from "@/contexts/UserContext";
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
 import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
+import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 import type { WorkStation } from "@/types/workstation";
 import type {
   OrderInputFieldType,
@@ -34,6 +35,7 @@ import type {
 import {
   useWorkflowRules,
   type WorkflowTargetStatus,
+  type WorkflowStatusColor,
 } from "@/contexts/WorkflowContext";
 import type {
   ExternalJobFieldScope,
@@ -93,6 +95,7 @@ const workflowStatusOptions: { value: OrderStatus; label: string }[] = [
   { value: "engineering_blocked", label: "Engineering blocked" },
   { value: "ready_for_production", label: "Ready for production" },
   { value: "in_production", label: "In production" },
+  { value: "done", label: "Done" },
 ];
 
 type AttachmentRole = UserRole | "Admin";
@@ -154,6 +157,36 @@ const externalJobStatusOptions: {
   { value: "delivered", label: "In Stock" },
   { value: "approved", label: "Approved" },
   { value: "cancelled", label: "Cancelled" },
+];
+
+const statusColorOptions: {
+  value: WorkflowStatusColor;
+  label: string;
+  swatchClass: string;
+}[] = [
+  { value: "slate", label: "Gray", swatchClass: "bg-slate-500" },
+  { value: "blue", label: "Blue", swatchClass: "bg-blue-500" },
+  { value: "amber", label: "Amber", swatchClass: "bg-amber-500" },
+  { value: "emerald", label: "Green", swatchClass: "bg-emerald-500" },
+  { value: "rose", label: "Red", swatchClass: "bg-rose-500" },
+];
+
+const requiredActiveOrderStatuses: OrderStatus[] = [
+  "draft",
+  "ready_for_engineering",
+  "in_engineering",
+  "engineering_blocked",
+  "ready_for_production",
+  "in_production",
+];
+
+const requiredActiveExternalStatuses: ExternalJobStatus[] = [
+  "requested",
+  "ordered",
+  "in_progress",
+  "delivered",
+  "approved",
+  "cancelled",
 ];
 
 const externalJobFieldScopeOptions: {
@@ -555,11 +588,11 @@ export default function SettingsPage() {
     WorkflowTargetStatus[]
   >(["ready_for_engineering"]);
   const [newReturnReason, setNewReturnReason] = useState("");
-  const [statusLabelDrafts, setStatusLabelDrafts] = useState<
-    Record<OrderStatus, string>
-  >(rules.statusLabels);
-  const [externalJobStatusLabelDrafts, setExternalJobStatusLabelDrafts] =
-    useState<Record<ExternalJobStatus, string>>(rules.externalJobStatusLabels);
+  const [orderStatusConfigDrafts, setOrderStatusConfigDrafts] = useState(
+    rules.orderStatusConfig,
+  );
+  const [externalJobStatusConfigDrafts, setExternalJobStatusConfigDrafts] =
+    useState(rules.externalJobStatusConfig);
   const [statusLabelState, setStatusLabelState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
@@ -595,36 +628,18 @@ export default function SettingsPage() {
     "Production",
     "Admin",
   ];
-  const hasStatusLabelChanges = useMemo(() => {
-    const keys = new Set([
-      ...Object.keys(rules.statusLabels),
-      ...Object.keys(statusLabelDrafts),
-    ]);
-    for (const key of keys) {
-      if (
-        (rules.statusLabels as Record<string, string>)[key] !==
-        (statusLabelDrafts as Record<string, string>)[key]
-      ) {
-        return true;
-      }
-    }
-    return false;
-  }, [rules.statusLabels, statusLabelDrafts]);
-  const hasExternalJobStatusLabelChanges = useMemo(() => {
-    const keys = new Set([
-      ...Object.keys(rules.externalJobStatusLabels),
-      ...Object.keys(externalJobStatusLabelDrafts),
-    ]);
-    for (const key of keys) {
-      if (
-        (rules.externalJobStatusLabels as Record<string, string>)[key] !==
-        (externalJobStatusLabelDrafts as Record<string, string>)[key]
-      ) {
-        return true;
-      }
-    }
-    return false;
-  }, [rules.externalJobStatusLabels, externalJobStatusLabelDrafts]);
+  const hasStatusLabelChanges = useMemo(
+    () =>
+      JSON.stringify(orderStatusConfigDrafts) !==
+      JSON.stringify(rules.orderStatusConfig),
+    [orderStatusConfigDrafts, rules.orderStatusConfig],
+  );
+  const hasExternalJobStatusLabelChanges = useMemo(
+    () =>
+      JSON.stringify(externalJobStatusConfigDrafts) !==
+      JSON.stringify(rules.externalJobStatusConfig),
+    [externalJobStatusConfigDrafts, rules.externalJobStatusConfig],
+  );
 
   const maxLogoBytes = 2 * 1024 * 1024;
   const hasAssignmentLabelChanges =
@@ -652,11 +667,11 @@ export default function SettingsPage() {
   ]);
 
   useEffect(() => {
-    setStatusLabelDrafts(rules.statusLabels);
-  }, [rules.statusLabels]);
+    setOrderStatusConfigDrafts(rules.orderStatusConfig);
+  }, [rules.orderStatusConfig]);
   useEffect(() => {
-    setExternalJobStatusLabelDrafts(rules.externalJobStatusLabels);
-  }, [rules.externalJobStatusLabels]);
+    setExternalJobStatusConfigDrafts(rules.externalJobStatusConfig);
+  }, [rules.externalJobStatusConfig]);
   useEffect(() => {
     setAssignmentLabelDrafts({
       engineer: rules.assignmentLabels?.engineer ?? "Engineer",
@@ -667,6 +682,46 @@ export default function SettingsPage() {
     setAttachmentCategoryDrafts(rules.attachmentCategories);
     setAttachmentDefaultDrafts(rules.attachmentCategoryDefaults);
   }, [rules.attachmentCategories, rules.attachmentCategoryDefaults]);
+
+  const sanitizeOrderStatusDrafts = (
+    drafts: typeof orderStatusConfigDrafts,
+  ) => {
+    const next = { ...drafts };
+    workflowStatusOptions.forEach((option) => {
+      const current = next[option.value];
+      const fallback = rules.orderStatusConfig[option.value];
+      next[option.value] = {
+        label: (current?.label ?? "").trim() || fallback.label || option.label,
+        color: statusColorOptions.some((item) => item.value === current?.color)
+          ? (current?.color ?? fallback.color)
+          : fallback.color,
+        isActive:
+          requiredActiveOrderStatuses.includes(option.value) ||
+          (current?.isActive ?? true),
+      };
+    });
+    return next;
+  };
+
+  const sanitizeExternalStatusDrafts = (
+    drafts: typeof externalJobStatusConfigDrafts,
+  ) => {
+    const next = { ...drafts };
+    externalJobStatusOptions.forEach((option) => {
+      const current = next[option.value];
+      const fallback = rules.externalJobStatusConfig[option.value];
+      next[option.value] = {
+        label: (current?.label ?? "").trim() || fallback.label || option.label,
+        color: statusColorOptions.some((item) => item.value === current?.color)
+          ? (current?.color ?? fallback.color)
+          : fallback.color,
+        isActive:
+          requiredActiveExternalStatuses.includes(option.value) ||
+          (current?.isActive ?? true),
+      };
+    });
+    return next;
+  };
 
   useEffect(() => {
     if (!supabase || !currentUser.tenantId) {
@@ -743,7 +798,9 @@ export default function SettingsPage() {
     }
     setStatusLabelState("saving");
     setStatusLabelMessage("");
-    setRules({ statusLabels: statusLabelDrafts });
+    const safeOrderConfig = sanitizeOrderStatusDrafts(orderStatusConfigDrafts);
+    setOrderStatusConfigDrafts(safeOrderConfig);
+    setRules({ orderStatusConfig: safeOrderConfig });
     if (!supabase || !currentUser.tenantId) {
       setStatusLabelState("saved");
       setStatusLabelMessage("Saved locally.");
@@ -752,7 +809,13 @@ export default function SettingsPage() {
     const { error } = await supabase.from("workflow_rules").upsert(
       {
         tenant_id: currentUser.tenantId,
-        status_labels: statusLabelDrafts,
+        order_status_config: safeOrderConfig,
+        status_labels: Object.fromEntries(
+          Object.entries(safeOrderConfig).map(([key, value]) => [
+            key,
+            value.label,
+          ]),
+        ),
       },
       { onConflict: "tenant_id" },
     );
@@ -773,7 +836,11 @@ export default function SettingsPage() {
     }
     setExternalJobStatusLabelState("saving");
     setExternalJobStatusLabelMessage("");
-    setRules({ externalJobStatusLabels: externalJobStatusLabelDrafts });
+    const safeExternalConfig = sanitizeExternalStatusDrafts(
+      externalJobStatusConfigDrafts,
+    );
+    setExternalJobStatusConfigDrafts(safeExternalConfig);
+    setRules({ externalJobStatusConfig: safeExternalConfig });
     if (!supabase || !currentUser.tenantId) {
       setExternalJobStatusLabelState("saved");
       setExternalJobStatusLabelMessage("Saved locally.");
@@ -782,7 +849,13 @@ export default function SettingsPage() {
     const { error } = await supabase.from("workflow_rules").upsert(
       {
         tenant_id: currentUser.tenantId,
-        external_job_status_labels: externalJobStatusLabelDrafts,
+        external_job_status_config: safeExternalConfig,
+        external_job_status_labels: Object.fromEntries(
+          Object.entries(safeExternalConfig).map(([key, value]) => [
+            key,
+            value.label,
+          ]),
+        ),
       },
       { onConflict: "tenant_id" },
     );
@@ -3539,7 +3612,8 @@ export default function SettingsPage() {
                                 });
                               }}
                             />
-                            {option.label}
+                            {rules.orderStatusConfig[option.value]?.label ??
+                              option.label}
                           </label>
                         );
                       })}
@@ -5007,33 +5081,111 @@ export default function SettingsPage() {
 
                 <div className="grid gap-6 lg:grid-cols-2">
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                    <div className="text-sm font-semibold">Status labels</div>
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      {workflowStatusOptions.map((option) => (
-                        <label
-                          key={option.value}
-                          className="space-y-2 text-sm font-medium"
-                        >
-                          {option.label}
-                          <input
-                            value={
-                              statusLabelDrafts[option.value] ?? option.label
-                            }
-                            onChange={(event) =>
-                              setStatusLabelDrafts({
-                                ...statusLabelDrafts,
-                                [option.value]: event.target.value,
-                              })
-                            }
-                            className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                          />
-                        </label>
-                      ))}
+                    <div className="text-sm font-semibold">
+                      Order status configuration
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      {workflowStatusOptions.map((option) => {
+                        const config = orderStatusConfigDrafts[option.value];
+                        const previewLabel = config?.label?.trim() || option.label;
+                        return (
+                          <div
+                            key={option.value}
+                            className="rounded-lg border border-border bg-background/50 p-3"
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <div className="text-sm font-medium">{option.label}</div>
+                              <span
+                                className={`inline-flex w-fit items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getStatusBadgeColorClass(config?.color)}`}
+                              >
+                                {previewLabel}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <input
+                                value={config?.label ?? option.label}
+                                onChange={(event) =>
+                                  setOrderStatusConfigDrafts((prev) => ({
+                                    ...prev,
+                                    [option.value]: {
+                                      ...prev[option.value],
+                                      label: event.target.value,
+                                    },
+                                  }))
+                                }
+                                className="h-9 min-w-[180px] flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                              />
+                              <Select
+                                value={config?.color ?? "slate"}
+                                onValueChange={(value) =>
+                                  setOrderStatusConfigDrafts((prev) => ({
+                                    ...prev,
+                                    [option.value]: {
+                                      ...prev[option.value],
+                                      color: value as WorkflowStatusColor,
+                                    },
+                                  }))
+                                }
+                              >
+                                <SelectTrigger className="h-9 w-[140px] rounded-lg border border-border bg-input-background px-3 text-sm">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {statusColorOptions.map((colorOption) => (
+                                    <SelectItem
+                                      key={colorOption.value}
+                                      value={colorOption.value}
+                                    >
+                                      <span className="inline-flex items-center gap-2">
+                                        <span
+                                          className={`inline-block h-2.5 w-2.5 rounded-full ${colorOption.swatchClass}`}
+                                        />
+                                        {colorOption.label}
+                                      </span>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <label className="flex min-w-[110px] items-center gap-2 text-sm">
+                                {requiredActiveOrderStatuses.includes(
+                                  option.value,
+                                ) ? (
+                                  <span
+                                    className="text-xs text-muted-foreground"
+                                    title="Required for workflow transitions"
+                                  >
+                                    Required
+                                  </span>
+                                ) : null}
+                                <input
+                                  type="checkbox"
+                                  checked={config?.isActive ?? true}
+                                  disabled={requiredActiveOrderStatuses.includes(
+                                    option.value,
+                                  )}
+                                  onChange={(event) =>
+                                    setOrderStatusConfigDrafts((prev) => ({
+                                      ...prev,
+                                      [option.value]: {
+                                        ...prev[option.value],
+                                        isActive: event.target.checked,
+                                      },
+                                    }))
+                                  }
+                                />
+                                <span>Active</span>
+                              </label>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Button
                         variant="outline"
-                        onClick={() => setStatusLabelDrafts(rules.statusLabels)}
+                        onClick={() =>
+                          setOrderStatusConfigDrafts(rules.orderStatusConfig)
+                        }
                         disabled={!hasStatusLabelChanges}
                       >
                         Reset
@@ -5047,7 +5199,7 @@ export default function SettingsPage() {
                       >
                         {statusLabelState === "saving"
                           ? "Saving..."
-                          : "Save status labels"}
+                          : "Save order statuses"}
                       </Button>
                       {statusLabelState !== "idle" && statusLabelMessage && (
                         <span
@@ -5065,37 +5217,110 @@ export default function SettingsPage() {
 
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                     <div className="text-sm font-semibold">
-                      External job status labels
+                      External job status configuration
                     </div>
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      {externalJobStatusOptions.map((option) => (
-                        <label
-                          key={option.value}
-                          className="space-y-2 text-sm font-medium"
-                        >
-                          {option.label}
-                          <input
-                            value={
-                              externalJobStatusLabelDrafts[option.value] ??
-                              option.label
-                            }
-                            onChange={(event) =>
-                              setExternalJobStatusLabelDrafts((prev) => ({
-                                ...prev,
-                                [option.value]: event.target.value,
-                              }))
-                            }
-                            className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                          />
-                        </label>
-                      ))}
+                    <div className="mt-2 space-y-2">
+                      {externalJobStatusOptions.map((option) => {
+                        const config = externalJobStatusConfigDrafts[option.value];
+                        const previewLabel = config?.label?.trim() || option.label;
+                        return (
+                          <div
+                            key={option.value}
+                            className="rounded-lg border border-border bg-background/50 p-3"
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <div className="text-sm font-medium">{option.label}</div>
+                              <span
+                                className={`inline-flex w-fit items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getStatusBadgeColorClass(config?.color)}`}
+                              >
+                                {previewLabel}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <input
+                                value={config?.label ?? option.label}
+                                onChange={(event) =>
+                                  setExternalJobStatusConfigDrafts((prev) => ({
+                                    ...prev,
+                                    [option.value]: {
+                                      ...prev[option.value],
+                                      label: event.target.value,
+                                    },
+                                  }))
+                                }
+                                className="h-9 min-w-[180px] flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                              />
+                              <Select
+                                value={config?.color ?? "slate"}
+                                onValueChange={(value) =>
+                                  setExternalJobStatusConfigDrafts((prev) => ({
+                                    ...prev,
+                                    [option.value]: {
+                                      ...prev[option.value],
+                                      color: value as WorkflowStatusColor,
+                                    },
+                                  }))
+                                }
+                              >
+                                <SelectTrigger className="h-9 w-[140px] rounded-lg border border-border bg-input-background px-3 text-sm">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {statusColorOptions.map((colorOption) => (
+                                    <SelectItem
+                                      key={colorOption.value}
+                                      value={colorOption.value}
+                                    >
+                                      <span className="inline-flex items-center gap-2">
+                                        <span
+                                          className={`inline-block h-2.5 w-2.5 rounded-full ${colorOption.swatchClass}`}
+                                        />
+                                        {colorOption.label}
+                                      </span>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <label className="flex min-w-[110px] items-center gap-2 text-sm">
+                                {requiredActiveExternalStatuses.includes(
+                                  option.value,
+                                ) ? (
+                                  <span
+                                    className="text-xs text-muted-foreground"
+                                    title="Required for external job lifecycle"
+                                  >
+                                    Required
+                                  </span>
+                                ) : null}
+                                <input
+                                  type="checkbox"
+                                  checked={config?.isActive ?? true}
+                                  disabled={requiredActiveExternalStatuses.includes(
+                                    option.value,
+                                  )}
+                                  onChange={(event) =>
+                                    setExternalJobStatusConfigDrafts((prev) => ({
+                                      ...prev,
+                                      [option.value]: {
+                                        ...prev[option.value],
+                                        isActive: event.target.checked,
+                                      },
+                                    }))
+                                  }
+                                />
+                                <span>Active</span>
+                              </label>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Button
                         variant="outline"
                         onClick={() =>
-                          setExternalJobStatusLabelDrafts(
-                            rules.externalJobStatusLabels,
+                          setExternalJobStatusConfigDrafts(
+                            rules.externalJobStatusConfig,
                           )
                         }
                         disabled={!hasExternalJobStatusLabelChanges}
@@ -5111,7 +5336,7 @@ export default function SettingsPage() {
                       >
                         {externalJobStatusLabelState === "saving"
                           ? "Saving..."
-                          : "Save external status labels"}
+                          : "Save external statuses"}
                       </Button>
                       {externalJobStatusLabelState !== "idle" &&
                         externalJobStatusLabelMessage && (

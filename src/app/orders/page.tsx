@@ -34,49 +34,55 @@ export default function OrdersPage() {
   const user = useCurrentUser();
   const { rules } = useWorkflowRules();
   const { activeGroups, partners } = usePartners();
-  const statusLabel = (status: OrderStatus) =>
-    rules.statusLabels?.[status] ?? formatOrderStatus(status);
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const roleStatusOptions = useMemo(() => {
+    const engineeringStatuses: OrderStatus[] = [
+      "ready_for_engineering",
+      "in_engineering",
+      "engineering_blocked",
+      "ready_for_production",
+      "in_production",
+    ];
+    const salesStatuses: OrderStatus[] = [
+      "draft",
+      "ready_for_engineering",
+      "in_engineering",
+      "engineering_blocked",
+      "ready_for_production",
+      "in_production",
+    ];
+    const productionStatuses: OrderStatus[] = [
+      "ready_for_production",
+      "in_production",
+    ];
+    const build = (statuses: OrderStatus[]) =>
+      statuses
+        .filter((status) => rules.orderStatusConfig?.[status]?.isActive ?? true)
+        .map((status) => ({
+          value: status,
+          label: rules.statusLabels?.[status] ?? formatOrderStatus(status),
+        }));
+
     if (user.role === "Engineering") {
-      return [
-        { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
-        { value: "in_engineering", label: statusLabel("in_engineering") },
-        { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
-          { value: "ready_for_production", label: statusLabel("ready_for_production") },
-          { value: "in_production", label: statusLabel("in_production") },
-      ];
+      return build(engineeringStatuses);
     }
     if (user.role === "Production") {
-        return [
-          { value: "ready_for_production", label: statusLabel("ready_for_production") },
-          { value: "in_production", label: statusLabel("in_production") },
-        ];
+      return build(productionStatuses);
     }
     if (user.role === "Sales") {
       return [
         { value: "all", label: "All" },
-        { value: "draft", label: statusLabel("draft") },
-        { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
-        { value: "in_engineering", label: statusLabel("in_engineering") },
-        { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
-          { value: "ready_for_production", label: statusLabel("ready_for_production") },
-          { value: "in_production", label: statusLabel("in_production") },
+        ...build(salesStatuses),
       ];
     }
     return [
       { value: "all", label: "All" },
-      { value: "draft", label: statusLabel("draft") },
-      { value: "ready_for_engineering", label: statusLabel("ready_for_engineering") },
-      { value: "in_engineering", label: statusLabel("in_engineering") },
-      { value: "engineering_blocked", label: statusLabel("engineering_blocked") },
-        { value: "ready_for_production", label: statusLabel("ready_for_production") },
-        { value: "in_production", label: statusLabel("in_production") },
+      ...build(salesStatuses),
     ];
-  }, [rules.statusLabels, user.role]);
+  }, [rules.orderStatusConfig, rules.statusLabels, user.role]);
   const defaultStatusFilter =
     roleStatusOptions[0]?.value ?? ("all" as const);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">(
@@ -355,115 +361,118 @@ export default function OrdersPage() {
 
     const fetchOrdersPage = async (offset: number, append: boolean) => {
       setIsListLoading(true);
-      const query = supabase
-        .from("orders")
-        .select(
-          `
-          id,
-          order_number,
-          customer_name,
-          product_name,
-          quantity,
-          hierarchy,
-          due_date,
-          priority,
-          status,
-          assigned_engineer_id,
-          assigned_engineer_name,
-          assigned_manager_id,
-          assigned_manager_name,
-          order_attachments ( id ),
-          order_comments ( id ),
-          external_jobs ( partner_id, due_date, status )
-        `,
-          { count: "exact" },
-        )
-        .order("created_at", { ascending: false })
-        .range(offset, offset + pageSize - 1);
-      if (user.tenantId) {
-        query.eq("tenant_id", user.tenantId);
-      }
-      if (statusFilter !== "all") {
-        query.eq("status", statusFilter);
-      }
-      if (user.role === "Engineering") {
-        if (assignmentFilter === "queue") {
-          query.is("assigned_engineer_id", null);
-        } else {
-          query.eq("assigned_engineer_id", user.id);
+      try {
+        const query = supabase
+          .from("orders")
+          .select(
+            `
+            id,
+            order_number,
+            customer_name,
+            product_name,
+            quantity,
+            hierarchy,
+            due_date,
+            priority,
+            status,
+            assigned_engineer_id,
+            assigned_engineer_name,
+            assigned_manager_id,
+            assigned_manager_name,
+            order_attachments ( id ),
+            order_comments ( id ),
+            external_jobs ( partner_id, due_date, status )
+          `,
+            { count: "exact" },
+          )
+          .order("created_at", { ascending: false })
+          .range(offset, offset + pageSize - 1);
+        if (user.tenantId) {
+          query.eq("tenant_id", user.tenantId);
         }
-      }
-      if (searchQuery.trim().length > 0) {
-        const q = `%${searchQuery.trim()}%`;
-        query.or(
-          `order_number.ilike.${q},customer_name.ilike.${q},product_name.ilike.${q}`,
-        );
-      }
-      if (partnerGroupFilter) {
-        const orderIds = await getOrderIdsForPartnerGroup(partnerGroupFilter);
-        if (orderIds.length === 0) {
-          setVisibleOrders([]);
-          setTotalOrders(0);
-          setIsListLoading(false);
+        if (statusFilter !== "all") {
+          query.eq("status", statusFilter);
+        }
+        if (user.role === "Engineering") {
+          if (assignmentFilter === "queue") {
+            query.is("assigned_engineer_id", null);
+          } else {
+            query.eq("assigned_engineer_id", user.id);
+          }
+        }
+        if (searchQuery.trim().length > 0) {
+          const q = `%${searchQuery.trim()}%`;
+          query.or(
+            `order_number.ilike.${q},customer_name.ilike.${q},product_name.ilike.${q}`,
+          );
+        }
+        if (partnerGroupFilter) {
+          const orderIds = await getOrderIdsForPartnerGroup(partnerGroupFilter);
+          if (orderIds.length === 0) {
+            setVisibleOrders([]);
+            setTotalOrders(0);
+            return;
+          }
+          query.in("id", orderIds);
+        }
+
+        const { data, error: fetchError, count } = await query;
+        if (!isMounted) {
           return;
         }
-        query.in("id", orderIds);
+        if (fetchError) {
+          return;
+        }
+        const mapped = (data ?? []).map((row) => ({
+          id: row.id,
+          orderNumber: row.order_number,
+          customerName: row.customer_name,
+          productName: row.product_name ?? undefined,
+          quantity: row.quantity ?? undefined,
+          hierarchy: row.hierarchy ?? undefined,
+          dueDate: row.due_date,
+          priority: row.priority,
+          status: row.status,
+          assignedEngineerId: row.assigned_engineer_id ?? undefined,
+          assignedEngineerName: row.assigned_engineer_name ?? undefined,
+          assignedManagerId: row.assigned_manager_id ?? undefined,
+          assignedManagerName: row.assigned_manager_name ?? undefined,
+          attachments: row.order_attachments?.map((item) => ({
+            id: item.id,
+            name: "Attachment",
+            addedBy: "",
+            createdAt: "",
+          })),
+          comments: row.order_comments?.map((item) => ({
+            id: item.id,
+            message: "",
+            author: "",
+            createdAt: "",
+          })),
+          attachmentCount: row.order_attachments?.length ?? 0,
+          commentCount: row.order_comments?.length ?? 0,
+          externalJobs: row.external_jobs?.map((job, index) => ({
+            id: `${row.id}-ext-${index}`,
+            orderId: row.id,
+            partnerName: "Partner",
+            externalOrderNumber: "",
+            dueDate: job.due_date,
+            status: job.status,
+            createdAt: "",
+            partnerId: job.partner_id ?? undefined,
+          })),
+        })) as Order[];
+        const withProduction = await applyProductionStatus(mapped);
+        const enriched = await resolveOrderAvatars(withProduction);
+        setVisibleOrders((prev) =>
+          append ? [...prev, ...enriched] : enriched,
+        );
+        setTotalOrders(count ?? mapped.length);
+      } finally {
+        if (isMounted) {
+          setIsListLoading(false);
+        }
       }
-
-      const { data, error: fetchError, count } = await query;
-      if (!isMounted) {
-        return;
-      }
-      if (fetchError) {
-        setIsListLoading(false);
-        return;
-      }
-      const mapped = (data ?? []).map((row) => ({
-        id: row.id,
-        orderNumber: row.order_number,
-        customerName: row.customer_name,
-        productName: row.product_name ?? undefined,
-        quantity: row.quantity ?? undefined,
-        hierarchy: row.hierarchy ?? undefined,
-        dueDate: row.due_date,
-        priority: row.priority,
-        status: row.status,
-        assignedEngineerId: row.assigned_engineer_id ?? undefined,
-        assignedEngineerName: row.assigned_engineer_name ?? undefined,
-        assignedManagerId: row.assigned_manager_id ?? undefined,
-        assignedManagerName: row.assigned_manager_name ?? undefined,
-        attachments: row.order_attachments?.map((item) => ({
-          id: item.id,
-          name: "Attachment",
-          addedBy: "",
-          createdAt: "",
-        })),
-        comments: row.order_comments?.map((item) => ({
-          id: item.id,
-          message: "",
-          author: "",
-          createdAt: "",
-        })),
-        attachmentCount: row.order_attachments?.length ?? 0,
-        commentCount: row.order_comments?.length ?? 0,
-        externalJobs: row.external_jobs?.map((job, index) => ({
-          id: `${row.id}-ext-${index}`,
-          orderId: row.id,
-          partnerName: "Partner",
-          externalOrderNumber: "",
-          dueDate: job.due_date,
-          status: job.status,
-          createdAt: "",
-          partnerId: job.partner_id ?? undefined,
-        })),
-      })) as Order[];
-      const withProduction = await applyProductionStatus(mapped);
-      const enriched = await resolveOrderAvatars(withProduction);
-      setVisibleOrders((prev) =>
-        append ? [...prev, ...enriched] : enriched,
-      );
-      setTotalOrders(count ?? mapped.length);
-      setIsListLoading(false);
     };
 
     void fetchOrdersPage(0, false);
@@ -735,108 +744,109 @@ export default function OrdersPage() {
                     const nextOffset = listOffset + pageSize;
                     setListOffset(nextOffset);
                     setIsListLoading(true);
-                    if (!supabase || user.loading || !user.isAuthenticated) {
-                      setIsListLoading(false);
-                      return;
-                    }
-                    const query = supabase
-                      .from("orders")
-                      .select(
-                        `
-                        id,
-                        order_number,
-                        customer_name,
-                        product_name,
-                        quantity,
-                        hierarchy,
-                        due_date,
-                        priority,
-                        status,
-                        assigned_engineer_id,
-                        assigned_engineer_name,
-                        assigned_manager_id,
-                        assigned_manager_name,
-                        order_attachments ( id ),
-                        order_comments ( id ),
-                        external_jobs ( partner_id, due_date, status )
-                      `,
-                        { count: "exact" },
-                      )
-                      .order("created_at", { ascending: false })
-                      .range(nextOffset, nextOffset + pageSize - 1);
-                    if (user.tenantId) {
-                      query.eq("tenant_id", user.tenantId);
-                    }
-                    if (statusFilter !== "all") {
-                      query.eq("status", statusFilter);
-                    }
-                    if (user.role === "Engineering") {
-                      if (assignmentFilter === "queue") {
-                        query.is("assigned_engineer_id", null);
-                      } else {
-                        query.eq("assigned_engineer_id", user.id);
-                      }
-                    }
-                    if (searchQuery.trim().length > 0) {
-                      const q = `%${searchQuery.trim()}%`;
-                      query.or(
-                        `order_number.ilike.${q},customer_name.ilike.${q},product_name.ilike.${q}`,
-                      );
-                    }
-                    if (partnerGroupFilter) {
-                      const orderIds = await getOrderIdsForPartnerGroup(
-                        partnerGroupFilter,
-                      );
-                      if (orderIds.length === 0) {
-                        setIsListLoading(false);
+                    try {
+                      if (!supabase || user.loading || !user.isAuthenticated) {
                         return;
                       }
-                      query.in("id", orderIds);
+                      const query = supabase
+                        .from("orders")
+                        .select(
+                          `
+                          id,
+                          order_number,
+                          customer_name,
+                          product_name,
+                          quantity,
+                          hierarchy,
+                          due_date,
+                          priority,
+                          status,
+                          assigned_engineer_id,
+                          assigned_engineer_name,
+                          assigned_manager_id,
+                          assigned_manager_name,
+                          order_attachments ( id ),
+                          order_comments ( id ),
+                          external_jobs ( partner_id, due_date, status )
+                        `,
+                          { count: "exact" },
+                        )
+                        .order("created_at", { ascending: false })
+                        .range(nextOffset, nextOffset + pageSize - 1);
+                      if (user.tenantId) {
+                        query.eq("tenant_id", user.tenantId);
+                      }
+                      if (statusFilter !== "all") {
+                        query.eq("status", statusFilter);
+                      }
+                      if (user.role === "Engineering") {
+                        if (assignmentFilter === "queue") {
+                          query.is("assigned_engineer_id", null);
+                        } else {
+                          query.eq("assigned_engineer_id", user.id);
+                        }
+                      }
+                      if (searchQuery.trim().length > 0) {
+                        const q = `%${searchQuery.trim()}%`;
+                        query.or(
+                          `order_number.ilike.${q},customer_name.ilike.${q},product_name.ilike.${q}`,
+                        );
+                      }
+                      if (partnerGroupFilter) {
+                        const orderIds = await getOrderIdsForPartnerGroup(
+                          partnerGroupFilter,
+                        );
+                        if (orderIds.length === 0) {
+                          return;
+                        }
+                        query.in("id", orderIds);
+                      }
+                      const { data } = await query;
+                      const mapped = (data ?? []).map((row) => ({
+                        id: row.id,
+                        orderNumber: row.order_number,
+                        customerName: row.customer_name,
+                        productName: row.product_name ?? undefined,
+                        quantity: row.quantity ?? undefined,
+                        hierarchy: row.hierarchy ?? undefined,
+                        dueDate: row.due_date,
+                        priority: row.priority,
+                        status: row.status,
+                        assignedEngineerId: row.assigned_engineer_id ?? undefined,
+                        assignedEngineerName: row.assigned_engineer_name ?? undefined,
+                        assignedManagerId: row.assigned_manager_id ?? undefined,
+                        assignedManagerName: row.assigned_manager_name ?? undefined,
+                        attachments: row.order_attachments?.map((item) => ({
+                          id: item.id,
+                          name: "Attachment",
+                          addedBy: "",
+                          createdAt: "",
+                        })),
+                        comments: row.order_comments?.map((item) => ({
+                          id: item.id,
+                          message: "",
+                          author: "",
+                          createdAt: "",
+                        })),
+                        attachmentCount: row.order_attachments?.length ?? 0,
+                        commentCount: row.order_comments?.length ?? 0,
+                        externalJobs: row.external_jobs?.map((job, index) => ({
+                          id: `${row.id}-ext-${index}`,
+                          orderId: row.id,
+                          partnerName: "Partner",
+                          externalOrderNumber: "",
+                          dueDate: job.due_date,
+                          status: job.status,
+                          createdAt: "",
+                          partnerId: job.partner_id ?? undefined,
+                        })),
+                      })) as Order[];
+                      const withProduction = await applyProductionStatus(mapped);
+                      const enriched = await resolveOrderAvatars(withProduction);
+                      setVisibleOrders((prev) => [...prev, ...enriched]);
+                    } finally {
+                      setIsListLoading(false);
                     }
-                    const { data } = await query;
-                    const mapped = (data ?? []).map((row) => ({
-                      id: row.id,
-                      orderNumber: row.order_number,
-                      customerName: row.customer_name,
-                      productName: row.product_name ?? undefined,
-                      quantity: row.quantity ?? undefined,
-                      hierarchy: row.hierarchy ?? undefined,
-                      dueDate: row.due_date,
-                      priority: row.priority,
-                      status: row.status,
-                      assignedEngineerId: row.assigned_engineer_id ?? undefined,
-                      assignedEngineerName: row.assigned_engineer_name ?? undefined,
-                      assignedManagerId: row.assigned_manager_id ?? undefined,
-                      assignedManagerName: row.assigned_manager_name ?? undefined,
-                      attachments: row.order_attachments?.map((item) => ({
-                        id: item.id,
-                        name: "Attachment",
-                        addedBy: "",
-                        createdAt: "",
-                      })),
-                      comments: row.order_comments?.map((item) => ({
-                        id: item.id,
-                        message: "",
-                        author: "",
-                        createdAt: "",
-                      })),
-                      attachmentCount: row.order_attachments?.length ?? 0,
-                      commentCount: row.order_comments?.length ?? 0,
-                      externalJobs: row.external_jobs?.map((job, index) => ({
-                        id: `${row.id}-ext-${index}`,
-                        orderId: row.id,
-                        partnerName: "Partner",
-                        externalOrderNumber: "",
-                        dueDate: job.due_date,
-                        status: job.status,
-                        createdAt: "",
-                        partnerId: job.partner_id ?? undefined,
-                      })),
-                    })) as Order[];
-                    const withProduction = await applyProductionStatus(mapped);
-                    const enriched = await resolveOrderAvatars(withProduction);
-                    setVisibleOrders((prev) => [...prev, ...enriched]);
-                    setIsListLoading(false);
                   }}
                 >
                   Load more

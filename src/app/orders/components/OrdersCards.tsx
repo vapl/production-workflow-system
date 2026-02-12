@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
+import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 import type { Order } from "@/types/orders";
 import { createPortal } from "react-dom";
 
@@ -114,6 +115,9 @@ function OrderCard({
               : displayStatus === "done"
                 ? "status-done"
                 : "status-ready_for_production";
+  const statusColorClass = getStatusBadgeColorClass(
+    rules.orderStatusConfig[displayStatus]?.color,
+  );
   const today = new Date().toISOString().slice(0, 10);
   const dueDate = order.dueDate ? order.dueDate.slice(0, 10) : "";
   const dueSoonDate = new Date();
@@ -189,7 +193,7 @@ function OrderCard({
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={priorityVariant}>{order.priority}</Badge>
-          <Badge variant={statusVariant}>
+          <Badge variant={statusVariant} className={statusColorClass}>
               {rules.statusLabels[displayStatus] ??
                 formatOrderStatus(displayStatus)}
           </Badge>

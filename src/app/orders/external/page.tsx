@@ -26,6 +26,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatDate } from "@/lib/domain/formatters";
+import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 
 const defaultExternalStatusLabels: Record<ExternalJobStatus, string> = {
   requested: "Requested",
@@ -154,15 +155,22 @@ export default function ExternalJobsPage() {
     }),
     [rules.externalJobStatusLabels],
   );
+  const visibleExternalStatuses = useMemo(
+    () =>
+      externalStatusValues.filter(
+        (status) => rules.externalJobStatusConfig?.[status]?.isActive ?? true,
+      ),
+    [rules.externalJobStatusConfig],
+  );
   const statusOptions = useMemo(
     () => [
       { value: "all" as const, label: "All" },
-      ...externalStatusValues.map((status) => ({
+      ...visibleExternalStatuses.map((status) => ({
         value: status,
         label: externalStatusLabels[status] ?? defaultExternalStatusLabels[status],
       })),
     ],
-    [externalStatusLabels],
+    [externalStatusLabels, visibleExternalStatuses],
   );
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ExternalJobStatus | "all">(
@@ -834,7 +842,12 @@ export default function ExternalJobsPage() {
                             : "--"}
                       </td>
                       <td className="px-4 py-2">
-                        <Badge variant={statusVariant(job.status)}>
+                        <Badge
+                          variant={statusVariant(job.status)}
+                          className={getStatusBadgeColorClass(
+                            rules.externalJobStatusConfig[job.status]?.color,
+                          )}
+                        >
                           {externalStatusLabels[job.status]}
                         </Badge>
                       </td>

@@ -16,6 +16,7 @@ import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 
 interface OrderRowProps {
   order: Order;
@@ -77,6 +78,9 @@ export function OrderRow({
               : displayStatus === "done"
                 ? "status-done"
                 : "status-ready_for_production";
+  const statusColorClass = getStatusBadgeColorClass(
+    rules.orderStatusConfig[displayStatus]?.color,
+  );
   const today = new Date().toISOString().slice(0, 10);
   const dueDate = order.dueDate ? order.dueDate.slice(0, 10) : "";
   const dueSoonDate = new Date();
@@ -253,7 +257,7 @@ export function OrderRow({
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={statusVariant}>
+          <Badge variant={statusVariant} className={statusColorClass}>
             {rules.statusLabels[displayStatus] ??
               formatOrderStatus(displayStatus)}
           </Badge>
