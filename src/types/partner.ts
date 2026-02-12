@@ -2,6 +2,8 @@ export interface Partner {
   id: string;
   name: string;
   groupId?: string;
+  email?: string;
+  phone?: string;
   isActive: boolean;
 }
 

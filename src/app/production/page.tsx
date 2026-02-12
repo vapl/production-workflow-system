@@ -1011,6 +1011,93 @@ export default function ProductionPage() {
     return map;
   }, [productionItems]);
 
+  const rowTimeStats = useMemo(() => {
+    const map = new Map<
+      string,
+      { totalMinutes: number; stationMinutes: Map<string, number> }
+    >();
+    productionItems.forEach((item) => {
+      const rowKey =
+        typeof item.meta?.rowKey === "string"
+          ? item.meta.rowKey
+          : `${item.order_id}:fallback:${
+              typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
+            }`;
+      if (!map.has(rowKey)) {
+        map.set(rowKey, { totalMinutes: 0, stationMinutes: new Map() });
+      }
+      const entry = map.get(rowKey)!;
+      const minutes =
+        typeof item.duration_minutes === "number" ? item.duration_minutes : 0;
+      if (minutes > 0) {
+        entry.totalMinutes += minutes;
+        if (item.station_id) {
+          entry.stationMinutes.set(
+            item.station_id,
+            (entry.stationMinutes.get(item.station_id) ?? 0) + minutes,
+          );
+        }
+      }
+    });
+    return map;
+  }, [productionItems]);
+
+  const batchRunStats = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        startAt?: string;
+        totalMinutes: number;
+        stationMinutes: Map<string, number>;
+      }
+    >();
+    const toMinutes = (run: BatchRunRow) => {
+      if (typeof run.duration_minutes === "number") {
+        return run.duration_minutes;
+      }
+      if (run.started_at && run.done_at) {
+        const start = new Date(run.started_at);
+        const end = new Date(run.done_at);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+          return 0;
+        }
+        if (end <= start) return 0;
+        return Math.floor((end.getTime() - start.getTime()) / 60000);
+      }
+      return 0;
+    };
+    batchRuns.forEach((run) => {
+      if (!run.order_id || !run.batch_code) {
+        return;
+      }
+      const key = `${run.order_id}:${run.batch_code}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          startAt: undefined,
+          totalMinutes: 0,
+          stationMinutes: new Map(),
+        });
+      }
+      const entry = map.get(key)!;
+      if (run.started_at) {
+        if (!entry.startAt || run.started_at < entry.startAt) {
+          entry.startAt = run.started_at;
+        }
+      }
+      const minutes = toMinutes(run);
+      if (minutes > 0) {
+        entry.totalMinutes += minutes;
+        if (run.station_id) {
+          entry.stationMinutes.set(
+            run.station_id,
+            (entry.stationMinutes.get(run.station_id) ?? 0) + minutes,
+          );
+        }
+      }
+    });
+    return map;
+  }, [batchRuns]);
+
   const selectableConstructionRows = useMemo(
     () => orderConstructionRows.filter((row) => row.fieldId !== "fallback"),
     [orderConstructionRows],
@@ -2754,8 +2841,11 @@ export default function ProductionPage() {
                         <th className="px-3 py-2">Order</th>
                         <th className="px-3 py-2">Customer</th>
                         <th className="px-3 py-2">Construction</th>
+                        <th className="px-3 py-2">Due</th>
+                        <th className="px-3 py-2">Started</th>
                         <th className="px-3 py-2">Qty</th>
                         <th className="px-3 py-2">Batch</th>
+                        <th className="px-3 py-2 text-right">Total time</th>
                         {stations.map((station) => (
                           <th
                             key={station.id}
@@ -2772,6 +2862,19 @@ export default function ProductionPage() {
                         const isSelectable = row.fieldId !== "fallback";
                         const rowKey = rowKeyForRow(row);
                         const stationStatuses = stationStatusMap.get(rowKey);
+                        const batchKey = `${row.orderId}:${row.batchCode}`;
+                        const runStats = batchRunStats.get(batchKey);
+                        const timeStats = rowTimeStats.get(rowKey);
+                        const startedAt = runStats?.startAt ?? "";
+                        const startedDate = startedAt
+                          ? formatDateInput(startedAt.slice(0, 10))
+                          : "";
+                        const totalMinutes =
+                          timeStats?.totalMinutes ??
+                          runStats?.totalMinutes ??
+                          0;
+                        const hasTimeData =
+                          Boolean(timeStats) || Boolean(runStats);
                         return (
                           <tr key={row.id} className="border-t border-border">
                             <td className="px-3 py-2">
@@ -2797,30 +2900,50 @@ export default function ProductionPage() {
                             </td>
                             <td className="px-3 py-2">{row.customerName}</td>
                             <td className="px-3 py-2">{row.itemName}</td>
+                            <td className="px-3 py-2">
+                              {row.dueDate ? formatDateInput(row.dueDate) : "-"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {startedDate || "-"}
+                            </td>
                             <td className="px-3 py-2">{row.qty}</td>
                             <td className="px-3 py-2">{row.batchCode}</td>
+                            <td className="px-3 py-2 text-right">
+                              {hasTimeData
+                                ? formatDuration(totalMinutes)
+                                : "-"}
+                            </td>
                             {stations.map((station) => {
                               const entry = stationStatuses?.get(station.id);
+                              const stationMinutes =
+                                timeStats?.stationMinutes.get(station.id) ??
+                                runStats?.stationMinutes.get(station.id) ??
+                                0;
                               return (
                                 <td
                                   key={station.id}
                                   className="px-3 py-2 text-center text-xs"
                                 >
                                   {entry?.status ? (
-                                    <div className="relative flex items-center justify-center gap-2">
-                                      <Badge
-                                        variant={statusBadge(
-                                          entry.status as BatchRunRow["status"],
-                                        )}
-                                      >
-                                        {entry.status.replace("_", " ")}
-                                      </Badge>
-                                      {entry.status === "blocked" &&
-                                      entry.blockedReason ? (
-                                        <Tooltip content={entry.blockedReason}>
-                                          <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
-                                        </Tooltip>
-                                      ) : null}
+                                    <div className="flex flex-col items-center gap-1">
+                                      <div className="relative flex items-center justify-center gap-2">
+                                        <Badge
+                                          variant={statusBadge(
+                                            entry.status as BatchRunRow["status"],
+                                          )}
+                                        >
+                                          {entry.status.replace("_", " ")}
+                                        </Badge>
+                                        {entry.status === "blocked" &&
+                                        entry.blockedReason ? (
+                                          <Tooltip content={entry.blockedReason}>
+                                            <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
+                                          </Tooltip>
+                                        ) : null}
+                                      </div>
+                                      <span className="text-[11px] text-muted-foreground">
+                                        {formatDuration(stationMinutes)}
+                                      </span>
                                     </div>
                                   ) : (
                                     <span className="text-muted-foreground">

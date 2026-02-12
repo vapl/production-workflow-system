@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import type { OrderStatus } from "@/types/orders";
+import type { ExternalJobStatus, OrderStatus } from "@/types/orders";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 
@@ -26,6 +26,7 @@ export interface WorkflowRules {
   dueIndicatorEnabled: boolean;
   dueIndicatorStatuses: OrderStatus[];
   statusLabels: Record<OrderStatus, string>;
+  externalJobStatusLabels: Record<ExternalJobStatus, string>;
   assignmentLabels: {
     engineer: string;
     manager: string;
@@ -39,7 +40,7 @@ export interface WorkflowRules {
 
 export interface ExternalJobRule {
   id: string;
-  status: "requested" | "ordered" | "in_progress" | "delivered" | "approved" | "cancelled";
+  status: ExternalJobStatus;
   minAttachments: number;
 }
 
@@ -83,6 +84,14 @@ const defaultRules: WorkflowRules = {
     engineering_blocked: "Eng. blocked",
     ready_for_production: "Ready for prod.",
     in_production: "In prod.",
+  },
+  externalJobStatusLabels: {
+    requested: "Requested",
+    ordered: "Ordered",
+    in_progress: "In progress",
+    delivered: "In Stock",
+    approved: "Approved",
+    cancelled: "Cancelled",
   },
   assignmentLabels: {
     engineer: "Engineer",
@@ -192,7 +201,32 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       }
       const cached = readCachedRules();
       if (cached) {
-        setRulesState(cached);
+        setRulesState({
+          ...defaultRules,
+          ...cached,
+          statusLabels: {
+            ...defaultRules.statusLabels,
+            ...(cached.statusLabels ?? {}),
+          },
+          externalJobStatusLabels: {
+            ...defaultRules.externalJobStatusLabels,
+            ...(cached.externalJobStatusLabels ?? {}),
+          },
+          assignmentLabels: {
+            ...defaultRules.assignmentLabels,
+            ...(cached.assignmentLabels ?? {}),
+          },
+          attachmentCategories:
+            cached.attachmentCategories ?? defaultRules.attachmentCategories,
+          attachmentCategoryDefaults: {
+            ...defaultRules.attachmentCategoryDefaults,
+            ...(cached.attachmentCategoryDefaults ?? {}),
+          },
+          checklistItems: cached.checklistItems ?? defaultRules.checklistItems,
+          returnReasons: cached.returnReasons ?? defaultRules.returnReasons,
+          externalJobRules:
+            cached.externalJobRules ?? defaultRules.externalJobRules,
+        });
       }
       setHasHydrated(true);
       const [
@@ -204,7 +238,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           supabase
             .from("workflow_rules")
             .select(
-              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, assignment_labels, attachment_categories, attachment_category_defaults",
+              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, external_job_status_labels, assignment_labels, attachment_categories, attachment_category_defaults",
             )
             .eq("tenant_id", user.tenantId)
             .maybeSingle(),
@@ -254,6 +288,10 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           ...prev.statusLabels,
           ...(rulesData?.status_labels ?? {}),
         },
+        externalJobStatusLabels: {
+          ...prev.externalJobStatusLabels,
+          ...(rulesData?.external_job_status_labels ?? {}),
+        },
         assignmentLabels: {
           ...prev.assignmentLabels,
           ...(rulesData?.assignment_labels ?? {}),
@@ -298,6 +336,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           due_indicator_enabled: defaultRules.dueIndicatorEnabled,
           due_indicator_statuses: defaultRules.dueIndicatorStatuses,
           status_labels: defaultRules.statusLabels,
+          external_job_status_labels: defaultRules.externalJobStatusLabels,
           assignment_labels: defaultRules.assignmentLabels,
           attachment_categories: defaultRules.attachmentCategories,
           attachment_category_defaults: defaultRules.attachmentCategoryDefaults,
@@ -339,6 +378,8 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         returnReasons: patch.returnReasons ?? prev.returnReasons,
         externalJobRules: patch.externalJobRules ?? prev.externalJobRules,
         statusLabels: patch.statusLabels ?? prev.statusLabels,
+        externalJobStatusLabels:
+          patch.externalJobStatusLabels ?? prev.externalJobStatusLabels,
         assignmentLabels: patch.assignmentLabels ?? prev.assignmentLabels,
         attachmentCategories:
           patch.attachmentCategories ?? prev.attachmentCategories,
@@ -359,6 +400,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
               due_indicator_enabled: next.dueIndicatorEnabled,
               due_indicator_statuses: next.dueIndicatorStatuses,
               status_labels: next.statusLabels,
+              external_job_status_labels: next.externalJobStatusLabels,
               assignment_labels: next.assignmentLabels,
               attachment_categories: next.attachmentCategories,
               attachment_category_defaults: next.attachmentCategoryDefaults,

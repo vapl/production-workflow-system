@@ -12,11 +12,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isAuthRoute = pathname?.startsWith("/auth");
+  const isExternalJobRespondRoute = pathname?.startsWith("/external-jobs/respond/");
+  const isPublicRoute = isAuthRoute || isExternalJobRespondRoute;
   const hideTabsNav =
+    isExternalJobRespondRoute ||
     pathname?.startsWith("/profile") ||
     pathname?.startsWith("/company") ||
     pathname?.startsWith("/production/operator");
-  const hideHeader = pathname?.startsWith("/production/operator");
+  const hideHeader =
+    isExternalJobRespondRoute || pathname?.startsWith("/production/operator");
 
   useEffect(() => {
     const errorHandler = (event: ErrorEvent) => {
@@ -46,10 +50,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!user.loading && !user.isAuthenticated && !isAuthRoute) {
+    if (!user.loading && !user.isAuthenticated && !isPublicRoute) {
       router.replace("/auth");
     }
-  }, [user.loading, user.isAuthenticated, isAuthRoute, router]);
+  }, [user.loading, user.isAuthenticated, isPublicRoute, router]);
+
+  if (isExternalJobRespondRoute) {
+    return <div className="min-h-screen bg-background">{children}</div>;
+  }
 
   if (user.loading) {
     return (
@@ -59,7 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user.isAuthenticated && !isAuthRoute) {
+  if (!user.isAuthenticated && !isPublicRoute) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <LoadingSpinner label="Redirecting..." />

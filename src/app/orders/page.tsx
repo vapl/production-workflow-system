@@ -176,6 +176,44 @@ export default function OrdersPage() {
     }));
   };
 
+  const applyProductionStatus = async (rows: Order[]) => {
+    if (!supabase) {
+      return rows;
+    }
+    const orderIds = rows.map((row) => row.id).filter(Boolean);
+    if (orderIds.length === 0) {
+      return rows;
+    }
+    const { data, error: prodError } = await supabase
+      .from("production_items")
+      .select("order_id, status")
+      .in("order_id", orderIds);
+    if (prodError || !data) {
+      return rows;
+    }
+    const counts = new Map<string, { total: number; done: number }>();
+    data.forEach((item) => {
+      const entry = counts.get(item.order_id) ?? { total: 0, done: 0 };
+      entry.total += 1;
+      if (item.status === "done") {
+        entry.done += 1;
+      }
+      counts.set(item.order_id, entry);
+    });
+    return rows.map((row) => {
+      const stat = counts.get(row.id);
+      if (!stat || stat.total === 0) {
+        return row;
+      }
+      const displayStatus =
+        stat.done > 0 && stat.done === stat.total ? "done" : "in_production";
+      return {
+        ...row,
+        statusDisplay: displayStatus,
+      };
+    });
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -419,7 +457,8 @@ export default function OrdersPage() {
           partnerId: job.partner_id ?? undefined,
         })),
       })) as Order[];
-      const enriched = await resolveOrderAvatars(mapped);
+      const withProduction = await applyProductionStatus(mapped);
+      const enriched = await resolveOrderAvatars(withProduction);
       setVisibleOrders((prev) =>
         append ? [...prev, ...enriched] : enriched,
       );
@@ -794,7 +833,8 @@ export default function OrdersPage() {
                         partnerId: job.partner_id ?? undefined,
                       })),
                     })) as Order[];
-                    const enriched = await resolveOrderAvatars(mapped);
+                    const withProduction = await applyProductionStatus(mapped);
+                    const enriched = await resolveOrderAvatars(withProduction);
                     setVisibleOrders((prev) => [...prev, ...enriched]);
                     setIsListLoading(false);
                   }}

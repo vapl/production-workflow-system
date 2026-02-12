@@ -9,6 +9,11 @@ import type {
   OrderInputFieldType,
   OrderInputGroupKey,
 } from "@/types/orderInputs";
+import type {
+  ExternalJobField,
+  ExternalJobFieldScope,
+  ExternalJobFieldType,
+} from "@/types/orders";
 import type { Partner, PartnerGroup } from "@/types/partner";
 import { useNotifications } from "@/components/ui/Notifications";
 import { mockPartnerGroups, mockPartners } from "@/lib/data/mockData";
@@ -23,6 +28,7 @@ interface SettingsDataState {
   workStations: WorkStation[];
   stationDependencies: StationDependency[];
   orderInputFields: OrderInputField[];
+  externalJobFields: ExternalJobField[];
   stopReasons: StopReason[];
   partners: Partner[];
   partnerGroups: PartnerGroup[];
@@ -47,10 +53,23 @@ interface SettingsDataState {
   ) => Promise<void>;
   removeOrderInputField: (fieldId: string) => Promise<void>;
   ensureDefaultOrderInputFields: () => Promise<void>;
+  addExternalJobField: (
+    payload: Omit<ExternalJobField, "id">,
+  ) => Promise<void>;
+  updateExternalJobField: (
+    fieldId: string,
+    patch: Partial<Omit<ExternalJobField, "id">>,
+  ) => Promise<void>;
+  removeExternalJobField: (fieldId: string) => Promise<void>;
   addStopReason: (label: string) => Promise<void>;
   updateStopReason: (reasonId: string, patch: Partial<StopReason>) => Promise<void>;
   removeStopReason: (reasonId: string) => Promise<void>;
-  addPartner: (name: string, groupId?: string) => Promise<void>;
+  addPartner: (payload: {
+    name: string;
+    groupId?: string;
+    email?: string;
+    phone?: string;
+  }) => Promise<void>;
   updatePartner: (partnerId: string, patch: Partial<Partner>) => Promise<void>;
   removePartner: (partnerId: string) => Promise<void>;
   addPartnerGroup: (name: string) => Promise<void>;
@@ -118,6 +137,32 @@ function mapOrderInputField(row: {
   };
 }
 
+function mapExternalJobField(row: {
+  id: string;
+  key: string;
+  label: string;
+  field_type: string;
+  scope?: string | null;
+  unit?: string | null;
+  options?: { options?: string[] } | null;
+  is_required?: boolean | null;
+  is_active?: boolean | null;
+  sort_order?: number | null;
+}): ExternalJobField {
+  return {
+    id: row.id,
+    key: row.key,
+    label: row.label,
+    fieldType: row.field_type as ExternalJobFieldType,
+    scope: (row.scope ?? "manual") as ExternalJobFieldScope,
+    unit: row.unit ?? undefined,
+    options: row.options?.options ?? undefined,
+    isRequired: row.is_required ?? false,
+    isActive: row.is_active ?? true,
+    sortOrder: row.sort_order ?? 0,
+  };
+}
+
 function mapStopReason(row: {
   id: string;
   label: string;
@@ -134,12 +179,16 @@ function mapPartner(row: {
   id: string;
   name: string;
   group_id?: string | null;
+  email?: string | null;
+  phone?: string | null;
   is_active: boolean;
 }): Partner {
   return {
     id: row.id,
     name: row.name,
     groupId: row.group_id ?? undefined,
+    email: row.email ?? undefined,
+    phone: row.phone ?? undefined,
     isActive: row.is_active,
   };
 }
@@ -156,6 +205,26 @@ function mapPartnerGroup(row: {
   };
 }
 
+function isMissingExternalJobFieldsSchema(error?: {
+  code?: string | null;
+  message?: string | null;
+} | null) {
+  if (!error) {
+    return false;
+  }
+  const code = (error.code ?? "").toLowerCase();
+  const message = (error.message ?? "").toLowerCase();
+  return (
+    code === "pgrst205" ||
+    code === "42p01" ||
+    code === "42703" ||
+    message.includes("external_job_fields") ||
+    message.includes("external job fields") ||
+    message.includes("scope") ||
+    message.includes("schema cache")
+  );
+}
+
 export function useSettingsData(): SettingsDataState {
   const user = useCurrentUser();
   const { notify } = useNotifications();
@@ -164,6 +233,9 @@ export function useSettingsData(): SettingsDataState {
     StationDependency[]
   >([]);
   const [orderInputFields, setOrderInputFields] = useState<OrderInputField[]>([]);
+  const [externalJobFields, setExternalJobFields] = useState<
+    ExternalJobField[]
+  >([]);
   const [stopReasons, setStopReasons] = useState<StopReason[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [partnerGroups, setPartnerGroups] = useState<PartnerGroup[]>([]);
@@ -337,6 +409,7 @@ export function useSettingsData(): SettingsDataState {
       stationsResult,
       stationDependenciesResult,
       orderInputFieldsResult,
+      externalJobFieldsResult,
       reasonsResult,
       partnersResult,
       partnerGroupsResult,
@@ -359,12 +432,19 @@ export function useSettingsData(): SettingsDataState {
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
       supabase
+        .from("external_job_fields")
+        .select(
+          "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+        )
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+      supabase
         .from("stop_reasons")
         .select("id, label, is_active")
         .order("created_at", { ascending: true }),
       supabase
         .from("partners")
-        .select("id, name, group_id, is_active")
+        .select("id, name, group_id, email, phone, is_active")
         .order("created_at", { ascending: true }),
       supabase
         .from("partner_groups")
@@ -372,9 +452,14 @@ export function useSettingsData(): SettingsDataState {
         .order("created_at", { ascending: true }),
     ]);
 
+    const externalFieldsTableMissing = isMissingExternalJobFieldsSchema(
+      externalJobFieldsResult.error,
+    );
+
     if (
       stationsResult.error ||
       stationDependenciesResult.error ||
+      (!externalFieldsTableMissing && externalJobFieldsResult.error) ||
       reasonsResult.error ||
       partnersResult.error ||
       partnerGroupsResult.error
@@ -382,6 +467,9 @@ export function useSettingsData(): SettingsDataState {
       setError(
         stationsResult.error?.message ||
           stationDependenciesResult.error?.message ||
+          (!externalFieldsTableMissing
+            ? externalJobFieldsResult.error?.message
+            : null) ||
           reasonsResult.error?.message ||
           partnersResult.error?.message ||
           partnerGroupsResult.error?.message ||
@@ -399,6 +487,11 @@ export function useSettingsData(): SettingsDataState {
       (orderInputFieldsResult.data ?? [])
         .filter((field) => !orderInputFieldBlacklist.has(field.key))
         .map(mapOrderInputField),
+    );
+    setExternalJobFields(
+      externalFieldsTableMissing
+        ? []
+        : (externalJobFieldsResult.data ?? []).map(mapExternalJobField),
     );
     setStopReasons((reasonsResult.data ?? []).map(mapStopReason));
     setPartners((partnersResult.data ?? []).map(mapPartner));
@@ -418,6 +511,7 @@ export function useSettingsData(): SettingsDataState {
       setWorkStations([]);
       setStationDependencies([]);
       setOrderInputFields([]);
+      setExternalJobFields([]);
       setStopReasons([]);
       setPartners([]);
       setPartnerGroups([]);
@@ -431,6 +525,7 @@ export function useSettingsData(): SettingsDataState {
       workStations,
       stationDependencies,
       orderInputFields,
+      externalJobFields,
       stopReasons,
       partners,
       partnerGroups,
@@ -680,9 +775,6 @@ export function useSettingsData(): SettingsDataState {
         if (!supabase || !user.tenantId) {
           return;
         }
-        if (orderInputFields.length > 0) {
-          return;
-        }
         const rows = defaultOrderInputFields.map((field) => ({
           tenant_id: user.tenantId,
           key: field.key,
@@ -699,17 +791,34 @@ export function useSettingsData(): SettingsDataState {
           show_in_production: field.showInProduction ?? false,
           sort_order: field.sortOrder ?? 0,
         }));
-        const { data, error: insertError } = await supabase
+        const { error: insertError } = await supabase
           .from("order_input_fields")
-          .insert(rows)
-          .select(
-            "id, key, label, group_key, field_type, unit, options, is_required, is_active, show_in_production, sort_order",
-          );
+          .upsert(rows, {
+            onConflict: "tenant_id,key",
+            ignoreDuplicates: true,
+          });
         if (insertError) {
           setError(insertError.message);
           notify({
             title: "Default fields not added",
             description: insertError.message,
+            variant: "error",
+          });
+          return;
+        }
+        const { data, error: loadError } = await supabase
+          .from("order_input_fields")
+          .select(
+            "id, key, label, group_key, field_type, unit, options, is_required, is_active, show_in_production, sort_order",
+          )
+          .order("group_key", { ascending: true })
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true });
+        if (loadError) {
+          setError(loadError.message);
+          notify({
+            title: "Defaults added but reload failed",
+            description: loadError.message,
             variant: "error",
           });
           return;
@@ -720,6 +829,140 @@ export function useSettingsData(): SettingsDataState {
             .map(mapOrderInputField),
         );
         notify({ title: "Default order fields added", variant: "success" });
+      },
+      addExternalJobField: async (payload) => {
+        if (!supabase || !user.tenantId) {
+          return;
+        }
+        const { data, error: insertError } = await supabase
+          .from("external_job_fields")
+          .insert({
+            tenant_id: user.tenantId,
+            key: payload.key,
+            label: payload.label,
+            field_type: payload.fieldType,
+            scope: payload.scope ?? "manual",
+            unit: payload.unit ?? null,
+            options:
+              payload.fieldType === "select"
+                ? { options: payload.options ?? [] }
+                : null,
+            is_required: payload.isRequired,
+            is_active: payload.isActive,
+            sort_order: payload.sortOrder ?? 0,
+          })
+          .select(
+            "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+          )
+          .single();
+        if (insertError || !data) {
+          if (isMissingExternalJobFieldsSchema(insertError)) {
+            setError("Run external jobs schema migration first.");
+            notify({
+              title: "Missing database migration",
+              description:
+                "Apply migration 20260211_external_job_fields.sql in Supabase.",
+              variant: "error",
+            });
+            return;
+          }
+          setError(insertError?.message ?? "Failed to add external job field.");
+          notify({
+            title: "External job field not added",
+            variant: "error",
+          });
+          return;
+        }
+        setExternalJobFields((prev) => [...prev, mapExternalJobField(data)]);
+        notify({ title: "External job field added", variant: "success" });
+      },
+      updateExternalJobField: async (fieldId, patch) => {
+        if (!supabase) {
+          return;
+        }
+        const updatePayload: Record<string, unknown> = {};
+        if (patch.key !== undefined) updatePayload.key = patch.key;
+        if (patch.label !== undefined) updatePayload.label = patch.label;
+        if (patch.fieldType !== undefined)
+          updatePayload.field_type = patch.fieldType;
+        if (patch.scope !== undefined) updatePayload.scope = patch.scope;
+        if (patch.unit !== undefined) updatePayload.unit = patch.unit ?? null;
+        if (patch.options !== undefined) {
+          const resolvedType =
+            patch.fieldType ??
+            externalJobFields.find((field) => field.id === fieldId)?.fieldType;
+          updatePayload.options =
+            resolvedType === "select" ? { options: patch.options ?? [] } : null;
+        }
+        if (patch.isRequired !== undefined)
+          updatePayload.is_required = patch.isRequired;
+        if (patch.isActive !== undefined)
+          updatePayload.is_active = patch.isActive;
+        if (patch.sortOrder !== undefined)
+          updatePayload.sort_order = patch.sortOrder;
+        const { data, error: updateError } = await supabase
+          .from("external_job_fields")
+          .update(updatePayload)
+          .eq("id", fieldId)
+          .select(
+            "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+          )
+          .single();
+        if (updateError || !data) {
+          if (isMissingExternalJobFieldsSchema(updateError)) {
+            setError("Run external jobs schema migration first.");
+            notify({
+              title: "Missing database migration",
+              description:
+                "Apply migration 20260211_external_job_fields.sql in Supabase.",
+              variant: "error",
+            });
+            return;
+          }
+          setError(updateError?.message ?? "Failed to update external job field.");
+          notify({
+            title: "External job field not updated",
+            variant: "error",
+          });
+          return;
+        }
+        setExternalJobFields((prev) =>
+          prev.map((field) =>
+            field.id === fieldId ? mapExternalJobField(data) : field,
+          ),
+        );
+        notify({ title: "External job field updated", variant: "success" });
+      },
+      removeExternalJobField: async (fieldId) => {
+        if (!supabase) {
+          return;
+        }
+        const { error: deleteError } = await supabase
+          .from("external_job_fields")
+          .delete()
+          .eq("id", fieldId);
+        if (deleteError) {
+          if (isMissingExternalJobFieldsSchema(deleteError)) {
+            setError("Run external jobs schema migration first.");
+            notify({
+              title: "Missing database migration",
+              description:
+                "Apply migration 20260211_external_job_fields.sql in Supabase.",
+              variant: "error",
+            });
+            return;
+          }
+          setError(deleteError.message);
+          notify({
+            title: "External job field not deleted",
+            variant: "error",
+          });
+          return;
+        }
+        setExternalJobFields((prev) =>
+          prev.filter((field) => field.id !== fieldId),
+        );
+        notify({ title: "External job field deleted", variant: "success" });
       },
       addStopReason: async (label) => {
         if (!supabase || !user.tenantId) {
@@ -798,8 +1041,8 @@ export function useSettingsData(): SettingsDataState {
         );
         notify({ title: "Stop reason deleted", variant: "success" });
       },
-      addPartner: async (name, groupId) => {
-        const trimmedName = name.trim();
+      addPartner: async (payload) => {
+        const trimmedName = payload.name.trim();
         if (!supabase || !user.tenantId || !trimmedName) {
           return;
         }
@@ -808,10 +1051,12 @@ export function useSettingsData(): SettingsDataState {
           .insert({
             tenant_id: user.tenantId,
             name: trimmedName,
-            group_id: groupId ?? null,
+            group_id: payload.groupId ?? null,
+            email: payload.email?.trim() || null,
+            phone: payload.phone?.trim() || null,
             is_active: true,
           })
-          .select("id, name, group_id, is_active")
+          .select("id, name, group_id, email, phone, is_active")
           .single();
         if (insertError || !data) {
           setError(insertError?.message ?? "Failed to add partner.");
@@ -833,13 +1078,15 @@ export function useSettingsData(): SettingsDataState {
         if (patch.name !== undefined) updatePayload.name = patch.name;
         if (patch.groupId !== undefined)
           updatePayload.group_id = patch.groupId || null;
+        if (patch.email !== undefined) updatePayload.email = patch.email || null;
+        if (patch.phone !== undefined) updatePayload.phone = patch.phone || null;
         if (patch.isActive !== undefined)
           updatePayload.is_active = patch.isActive;
         const { data, error: updateError } = await supabase
           .from("partners")
           .update(updatePayload)
           .eq("id", partnerId)
-          .select("id, name, group_id, is_active")
+          .select("id, name, group_id, email, phone, is_active")
           .single();
         if (updateError || !data) {
           setError(updateError?.message ?? "Failed to update partner.");
@@ -967,6 +1214,7 @@ export function useSettingsData(): SettingsDataState {
       workStations,
       stationDependencies,
       orderInputFields,
+      externalJobFields,
       stopReasons,
       partners,
       partnerGroups,

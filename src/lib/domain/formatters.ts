@@ -2,10 +2,23 @@ import type { OrderStatus } from "@/types/orders";
 import type { BatchStatus } from "@/types/batch";
 import type { ActivityStatus } from "@/types/activity";
 
-const defaultDateFormatter = new Intl.DateTimeFormat("lv-LV");
+const defaultDateFormatter = new Intl.DateTimeFormat("lv-LV", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
 const defaultTimeFormatter = new Intl.DateTimeFormat("lv-LV", {
   hour: "2-digit",
   minute: "2-digit",
+  hour12: false,
+});
+const defaultDateTimeFormatter = new Intl.DateTimeFormat("lv-LV", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
 });
 
 export function formatDate(value: string | Date): string {
@@ -16,6 +29,11 @@ export function formatDate(value: string | Date): string {
 export function formatTime(value: string | Date): string {
   const date = value instanceof Date ? value : new Date(value);
   return defaultTimeFormatter.format(date);
+}
+
+export function formatDateTime(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  return defaultDateTimeFormatter.format(date);
 }
 
 export function formatOrderStatus(status: OrderStatus): string {
@@ -32,6 +50,8 @@ export function formatOrderStatus(status: OrderStatus): string {
       return "Ready for prod.";
     case "in_production":
       return "In prod.";
+    case "done":
+      return "Done";
     default:
       return status.replace(/_/g, " ");
   }

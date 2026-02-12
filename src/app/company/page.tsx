@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeftIcon } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -9,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
 import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
+import { defaultTenantSubscription, hasTenantCapability, type TenantPlanCode } from "@/lib/subscription";
 
 function getStoragePathFromUrl(url: string, bucket: string) {
   if (!url) {
@@ -52,6 +52,13 @@ export default function CompanyPage() {
     "idle",
   );
   const [companyMessage, setCompanyMessage] = useState("");
+  const [subscriptionPlan, setSubscriptionPlan] = useState<TenantPlanCode>(
+    defaultTenantSubscription.planCode,
+  );
+  const [subscriptionStatus, setSubscriptionStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [subscriptionMessage, setSubscriptionMessage] = useState("");
 
   const maxLogoBytes = 2 * 1024 * 1024;
 
@@ -94,6 +101,28 @@ export default function CompanyPage() {
       }
     };
     fetchCompany();
+  }, [currentUser.tenantId]);
+
+  useEffect(() => {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    const fetchSubscription = async () => {
+      const { data, error } = await supabase
+        .from("tenant_subscriptions")
+        .select("plan_code")
+        .eq("tenant_id", currentUser.tenantId)
+        .maybeSingle();
+      if (error) {
+        setSubscriptionMessage(error.message);
+        setSubscriptionStatus("error");
+        return;
+      }
+      setSubscriptionPlan((data?.plan_code ?? "basic") as TenantPlanCode);
+      setSubscriptionStatus("idle");
+      setSubscriptionMessage("");
+    };
+    void fetchSubscription();
   }, [currentUser.tenantId]);
 
   useEffect(() => {
@@ -211,7 +240,34 @@ export default function CompanyPage() {
     setCompanyLogoMessage("Logo removed.");
   }
 
+  async function handleSaveSubscription() {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    setSubscriptionStatus("saving");
+    setSubscriptionMessage("");
+    const { error } = await supabase.from("tenant_subscriptions").upsert(
+      {
+        tenant_id: currentUser.tenantId,
+        plan_code: subscriptionPlan,
+        status: "active",
+      },
+      { onConflict: "tenant_id" },
+    );
+    if (error) {
+      setSubscriptionStatus("error");
+      setSubscriptionMessage(error.message);
+      return;
+    }
+    setSubscriptionStatus("saved");
+    setSubscriptionMessage("Subscription updated.");
+  }
+
   const companyId = currentUser.tenantId ?? "";
+  const sendToPartnerEnabled = hasTenantCapability(
+    { planCode: subscriptionPlan, status: "active" },
+    "externalJobs.sendToPartner",
+  );
 
   const handleCopyCompanyId = async () => {
     if (!companyId) {
@@ -434,12 +490,78 @@ export default function CompanyPage() {
         <CardHeader>
           <CardTitle>Subscription</CardTitle>
           <CardDescription>
-            Billing is coming soon. Subscription management will appear here.
+            Plan switch for feature gating. Billing integration can be added later.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Plan</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                  subscriptionPlan === "basic"
+                    ? "border-primary bg-primary/5"
+                    : "border-border bg-background"
+                }`}
+                onClick={() => setSubscriptionPlan("basic")}
+                disabled={!currentUser.isAdmin || subscriptionStatus === "saving"}
+              >
+                <div className="font-medium">Basic</div>
+                <div className="text-xs text-muted-foreground">
+                  Manual external jobs only
+                </div>
+              </button>
+              <button
+                type="button"
+                className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                  subscriptionPlan === "pro"
+                    ? "border-primary bg-primary/5"
+                    : "border-border bg-background"
+                }`}
+                onClick={() => setSubscriptionPlan("pro")}
+                disabled={!currentUser.isAdmin || subscriptionStatus === "saving"}
+              >
+                <div className="font-medium">Pro</div>
+                <div className="text-xs text-muted-foreground">
+                  Includes Send to partner
+                </div>
+              </button>
+            </div>
+          </div>
+
           <div className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-            No billing configured yet.
+            <div>
+              externalJobs.manualEntry: <span className="font-medium">enabled</span>
+            </div>
+            <div>
+              externalJobs.sendToPartner:{" "}
+              <span className="font-medium">
+                {sendToPartnerEnabled ? "enabled" : "disabled"}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={handleSaveSubscription}
+              disabled={!currentUser.isAdmin || subscriptionStatus === "saving"}
+            >
+              {subscriptionStatus === "saving"
+                ? "Saving..."
+                : "Save subscription"}
+            </Button>
+            {subscriptionMessage ? (
+              <span
+                className={`text-xs ${
+                  subscriptionStatus === "error"
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {subscriptionMessage}
+              </span>
+            ) : null}
           </div>
         </CardContent>
       </Card>

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { SlidersHorizontalIcon } from "lucide-react";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { usePartners } from "@/hooks/usePartners";
-import type { ExternalJobStatus } from "@/types/orders";
+import type { ExternalJobFieldType, ExternalJobStatus } from "@/types/orders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -15,22 +16,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/Popover";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatDate } from "@/lib/domain/formatters";
 
-const statusOptions: { value: ExternalJobStatus | "all"; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "requested", label: "Requested" },
-  { value: "ordered", label: "Ordered" },
-  { value: "in_progress", label: "In progress" },
-  { value: "delivered", label: "In Stock" },
-  { value: "approved", label: "Approved" },
-  { value: "cancelled", label: "Cancelled" },
-];
-
-const statusLabels: Record<ExternalJobStatus, string> = {
+const defaultExternalStatusLabels: Record<ExternalJobStatus, string> = {
   requested: "Requested",
   ordered: "Ordered",
   in_progress: "In progress",
@@ -38,6 +35,14 @@ const statusLabels: Record<ExternalJobStatus, string> = {
   approved: "Approved",
   cancelled: "Cancelled",
 };
+const externalStatusValues: ExternalJobStatus[] = [
+  "requested",
+  "ordered",
+  "in_progress",
+  "delivered",
+  "approved",
+  "cancelled",
+];
 
 const statusVariant = (status: ExternalJobStatus) => {
   switch (status) {
@@ -57,10 +62,108 @@ const statusVariant = (status: ExternalJobStatus) => {
   }
 };
 
+const externalJobsSelect = `
+          id,
+          order_id,
+          partner_id,
+          partner_name,
+          external_order_number,
+          request_mode,
+          partner_response_order_number,
+          quantity,
+          due_date,
+          partner_response_due_date,
+          status,
+          received_at,
+          partner_request_sender_name,
+          external_job_status_history (
+            id,
+            status,
+            changed_by_name,
+            changed_by_role,
+            changed_at
+          ),
+          orders (
+            order_number,
+            customer_name
+          )
+        `;
+
+type ExternalListField = {
+  id: string;
+  key: string;
+  label: string;
+  fieldType: ExternalJobFieldType;
+  unit?: string;
+  sortOrder: number;
+  semantic: "external_order" | "due_date" | "unit_price" | "other";
+};
+
+function normalizeFieldToken(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getFieldSemantic(field: { key: string; label: string }) {
+  const tokens = new Set([
+    normalizeFieldToken(field.key),
+    normalizeFieldToken(field.label),
+  ]);
+  if (
+    tokens.has("external_order_number") ||
+    tokens.has("external_order_no") ||
+    tokens.has("order_number") ||
+    tokens.has("ext_order")
+  ) {
+    return "external_order" as const;
+  }
+  if (tokens.has("due_date") || tokens.has("due")) {
+    return "due_date" as const;
+  }
+  if (
+    tokens.has("unit_price") ||
+    tokens.has("price") ||
+    tokens.has("sum_without_vat") ||
+    tokens.has("amount_ex_vat")
+  ) {
+    return "unit_price" as const;
+  }
+  return "other" as const;
+}
+
+function isEmptyValue(value: unknown) {
+  return (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim().length === 0)
+  );
+}
+
 export default function ExternalJobsPage() {
   const { orders } = useOrders();
   const { activeGroups, activePartners } = usePartners();
   const user = useCurrentUser();
+  const { rules } = useWorkflowRules();
+  const externalStatusLabels = useMemo(
+    () => ({
+      ...defaultExternalStatusLabels,
+      ...rules.externalJobStatusLabels,
+    }),
+    [rules.externalJobStatusLabels],
+  );
+  const statusOptions = useMemo(
+    () => [
+      { value: "all" as const, label: "All" },
+      ...externalStatusValues.map((status) => ({
+        value: status,
+        label: externalStatusLabels[status] ?? defaultExternalStatusLabels[status],
+      })),
+    ],
+    [externalStatusLabels],
+  );
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ExternalJobStatus | "all">(
     "all",
@@ -76,10 +179,14 @@ export default function ExternalJobsPage() {
       partnerName: string;
       partnerId?: string;
       externalOrderNumber: string;
+      requestMode?: "manual" | "partner_portal";
+      partnerResponseOrderNumber?: string;
       dueDate: string;
+      partnerResponseDueDate?: string;
       quantity?: number;
       status: ExternalJobStatus;
       receivedAt?: string | null;
+      partnerRequestSenderName?: string;
       statusHistory?: Array<{
         id: string;
         status: ExternalJobStatus;
@@ -98,6 +205,122 @@ export default function ExternalJobsPage() {
     overdue: 0,
     dueSoon: 0,
   });
+  const [externalListFields, setExternalListFields] = useState<
+    ExternalListField[]
+  >([]);
+  const [externalFieldValuesByJobId, setExternalFieldValuesByJobId] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
+  const mapExternalJobRow = (row: {
+    id: string;
+    partner_id?: string | null;
+    partner_name?: string | null;
+    external_order_number: string;
+    request_mode?: "manual" | "partner_portal" | null;
+    partner_response_order_number?: string | null;
+    due_date: string;
+    partner_response_due_date?: string | null;
+    quantity?: number | null;
+    status: ExternalJobStatus;
+    received_at?: string | null;
+    partner_request_sender_name?: string | null;
+    external_job_status_history?: Array<{
+      id: string;
+      status: ExternalJobStatus;
+      changed_by_name?: string | null;
+      changed_by_role?: string | null;
+      changed_at: string;
+    }>;
+    orders?: {
+      order_number?: string | null;
+      customer_name?: string | null;
+    } | null;
+  }) => ({
+    id: row.id,
+    orderNumber: row.orders?.order_number ?? "-",
+    customerName: row.orders?.customer_name ?? "-",
+    partnerName: row.partner_name ?? "-",
+    partnerId: row.partner_id ?? undefined,
+    externalOrderNumber: row.external_order_number,
+    requestMode: row.request_mode ?? undefined,
+    partnerResponseOrderNumber: row.partner_response_order_number ?? undefined,
+    dueDate: row.due_date,
+    partnerResponseDueDate: row.partner_response_due_date ?? undefined,
+    quantity: row.quantity ?? undefined,
+    status: row.status,
+    receivedAt: row.received_at ?? null,
+    partnerRequestSenderName: row.partner_request_sender_name ?? undefined,
+    statusHistory: (row.external_job_status_history ?? []).map((entry) => ({
+      id: entry.id,
+      status: entry.status,
+      changedBy: entry.changed_by_name ?? "Unknown",
+      changedByRole: entry.changed_by_role ?? undefined,
+      changedAt: entry.changed_at,
+    })),
+  });
+  const getEffectiveDueDate = useCallback(
+    (job: { dueDate: string; partnerResponseDueDate?: string }) =>
+      job.partnerResponseDueDate || job.dueDate,
+    [],
+  );
+  const getDisplayExternalOrder = useCallback((job: (typeof jobs)[number]) => {
+    if (job.requestMode === "partner_portal") {
+      return (
+        job.partnerResponseOrderNumber || `pending from ${job.partnerName}`
+      );
+    }
+    return job.externalOrderNumber || "--";
+  }, []);
+  const getDisplayDueDate = useCallback(
+    (job: (typeof jobs)[number]) => {
+      if (job.requestMode === "partner_portal" && !job.partnerResponseDueDate) {
+        return `pending from ${job.partnerName}`;
+      }
+      const dateValue = getEffectiveDueDate(job);
+      return dateValue ? formatDate(dateValue) : "--";
+    },
+    [getEffectiveDueDate],
+  );
+  const getFieldDisplayValue = useCallback(
+    (job: (typeof jobs)[number], field: ExternalListField) => {
+      const rawValue = externalFieldValuesByJobId[job.id]?.[field.id];
+      const isPortal = job.requestMode === "partner_portal";
+      const pendingLabel = `pending from ${job.partnerName}`;
+      if (field.semantic === "external_order") {
+        const fallback = isPortal
+          ? job.partnerResponseOrderNumber
+          : job.externalOrderNumber;
+        const value = isEmptyValue(rawValue) ? fallback : rawValue;
+        if (isEmptyValue(value)) {
+          return isPortal ? pendingLabel : "--";
+        }
+        return String(value);
+      }
+      if (field.semantic === "due_date") {
+        const fallback = isPortal ? job.partnerResponseDueDate : job.dueDate;
+        const value = isEmptyValue(rawValue) ? fallback : rawValue;
+        if (isEmptyValue(value)) {
+          return isPortal ? pendingLabel : "--";
+        }
+        return formatDate(String(value));
+      }
+      if (isEmptyValue(rawValue)) {
+        if (isPortal && field.semantic === "unit_price") {
+          return pendingLabel;
+        }
+        return "--";
+      }
+      if (field.fieldType === "toggle") {
+        return rawValue === true ? "Yes" : "No";
+      }
+      if (field.fieldType === "date") {
+        return formatDate(String(rawValue));
+      }
+      const text = String(rawValue);
+      return field.unit ? `${text} ${field.unit}` : text;
+    },
+    [externalFieldValuesByJobId],
+  );
 
   const fallbackJobs = useMemo(() => {
     return orders.flatMap((order) =>
@@ -114,9 +337,94 @@ export default function ExternalJobsPage() {
   const filteredJobs = useMemo(() => jobs, [jobs]);
 
   useEffect(() => {
+    if (!supabase || user.loading || !user.isAuthenticated || !user.tenantId) {
+      queueMicrotask(() => {
+        setExternalListFields([]);
+      });
+      return;
+    }
+    let isMounted = true;
+    const loadFields = async () => {
+      const { data } = await supabase
+        .from("external_job_fields")
+        .select("id, key, label, field_type, unit, sort_order, is_active")
+        .eq("tenant_id", user.tenantId)
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (!isMounted) {
+        return;
+      }
+      const list = (data ?? []).map((field) => ({
+        id: field.id,
+        key: field.key,
+        label: field.label,
+        fieldType: field.field_type as ExternalJobFieldType,
+        unit: field.unit ?? undefined,
+        sortOrder: field.sort_order ?? 0,
+        semantic: getFieldSemantic({ key: field.key, label: field.label }),
+      }));
+      const deduped = list.filter((field, index, all) => {
+        if (field.semantic === "other") {
+          return true;
+        }
+        return (
+          all.findIndex(
+            (candidate) => candidate.semantic === field.semantic,
+          ) === index
+        );
+      });
+      setExternalListFields(deduped);
+    };
+    void loadFields();
+    return () => {
+      isMounted = false;
+    };
+  }, [user.isAuthenticated, user.loading, user.tenantId]);
+
+  const loadFieldValuesForJobs = useCallback(
+    async (jobIds: string[], append: boolean) => {
+      if (!supabase || !user.tenantId || externalListFields.length === 0) {
+        if (!append) {
+          setExternalFieldValuesByJobId({});
+        }
+        return;
+      }
+      if (jobIds.length === 0) {
+        if (!append) {
+          setExternalFieldValuesByJobId({});
+        }
+        return;
+      }
+      const fieldIds = externalListFields.map((field) => field.id);
+      const { data } = await supabase
+        .from("external_job_field_values")
+        .select("external_job_id, field_id, value")
+        .eq("tenant_id", user.tenantId)
+        .in("external_job_id", jobIds)
+        .in("field_id", fieldIds);
+      const grouped = (data ?? []).reduce<
+        Record<string, Record<string, unknown>>
+      >((acc, row) => {
+        if (!acc[row.external_job_id]) {
+          acc[row.external_job_id] = {};
+        }
+        acc[row.external_job_id][row.field_id] = row.value;
+        return acc;
+      }, {});
+      setExternalFieldValuesByJobId((prev) =>
+        append ? { ...prev, ...grouped } : grouped,
+      );
+    },
+    [externalListFields, user.tenantId],
+  );
+
+  useEffect(() => {
     if (!supabase || user.loading || !user.isAuthenticated) {
-      setJobs(fallbackJobs.slice(0, pageSize));
-      setTotalJobs(fallbackJobs.length);
+      queueMicrotask(() => {
+        setJobs(fallbackJobs.slice(0, pageSize));
+        setTotalJobs(fallbackJobs.length);
+      });
       return;
     }
     let isMounted = true;
@@ -125,31 +433,7 @@ export default function ExternalJobsPage() {
       setIsLoading(true);
       const query = supabase
         .from("external_jobs")
-        .select(
-          `
-          id,
-          order_id,
-          partner_id,
-          partner_name,
-          external_order_number,
-          quantity,
-          due_date,
-          status,
-          received_at,
-          external_job_status_history (
-            id,
-            status,
-            changed_by_name,
-            changed_by_role,
-            changed_at
-          ),
-          orders (
-            order_number,
-            customer_name
-          )
-        `,
-          { count: "exact" },
-        )
+        .select(externalJobsSelect, { count: "exact" })
         .order("created_at", { ascending: false })
         .range(nextOffset, nextOffset + pageSize - 1);
       if (user.tenantId) {
@@ -176,15 +460,15 @@ export default function ExternalJobsPage() {
       }
       if (search.trim().length > 0) {
         const q = `%${search.trim()}%`;
-        query.or(`external_order_number.ilike.${q},partner_name.ilike.${q}`);
+        query.or(
+          `external_order_number.ilike.${q},partner_response_order_number.ilike.${q},partner_name.ilike.${q}`,
+        );
       }
       if (overdueOnly) {
-        query.lt("due_date", today);
-        query.not(
-          "status",
-          "in",
-          '("delivered","approved","cancelled")',
+        query.or(
+          `partner_response_due_date.lt.${today},and(partner_response_due_date.is.null,due_date.lt.${today})`,
         );
+        query.not("status", "in", '("delivered","approved","cancelled")');
       }
 
       const { data, count, error } = await query;
@@ -195,39 +479,29 @@ export default function ExternalJobsPage() {
         setIsLoading(false);
         return;
       }
-      const mapped = (data ?? []).map((row) => ({
-        id: row.id,
-        orderNumber: row.orders?.order_number ?? "-",
-        customerName: row.orders?.customer_name ?? "-",
-        partnerName: row.partner_name ?? "-",
-        partnerId: row.partner_id ?? undefined,
-        externalOrderNumber: row.external_order_number,
-        dueDate: row.due_date,
-        quantity: row.quantity ?? undefined,
-        status: row.status,
-        receivedAt: row.received_at ?? null,
-        statusHistory: (row.external_job_status_history ?? []).map((entry) => ({
-          id: entry.id,
-          status: entry.status,
-          changedBy: entry.changed_by_name ?? "Unknown",
-          changedByRole: entry.changed_by_role ?? undefined,
-          changedAt: entry.changed_at,
-        })),
-      }));
+      const mapped = (data ?? []).map(mapExternalJobRow);
+      await loadFieldValuesForJobs(
+        mapped.map((item) => item.id),
+        append,
+      );
       setJobs((prev) => (append ? [...prev, ...mapped] : mapped));
       setTotalJobs(count ?? mapped.length);
       setIsLoading(false);
     };
 
     void fetchPage(0, false);
-    setOffset(0);
+    queueMicrotask(() => {
+      setOffset(0);
+    });
 
     return () => {
       isMounted = false;
     };
   }, [
     activePartners,
+    externalListFields,
     fallbackJobs,
+    loadFieldValuesForJobs,
     overdueOnly,
     partnerFilter,
     partnerGroupFilter,
@@ -244,7 +518,7 @@ export default function ExternalJobsPage() {
       const total = fallbackJobs.length;
       const overdue = fallbackJobs.filter(
         (job) =>
-          job.dueDate < today &&
+          getEffectiveDueDate(job) < today &&
           !["delivered", "approved", "cancelled"].includes(job.status),
       ).length;
       const soon = new Date();
@@ -252,11 +526,13 @@ export default function ExternalJobsPage() {
       const soonStr = soon.toISOString().slice(0, 10);
       const dueSoon = fallbackJobs.filter(
         (job) =>
-          job.dueDate >= today &&
-          job.dueDate <= soonStr &&
+          getEffectiveDueDate(job) >= today &&
+          getEffectiveDueDate(job) <= soonStr &&
           !["delivered", "approved", "cancelled"].includes(job.status),
       ).length;
-      setStats({ total, overdue, dueSoon });
+      queueMicrotask(() => {
+        setStats({ total, overdue, dueSoon });
+      });
       return;
     }
     let isMounted = true;
@@ -272,7 +548,9 @@ export default function ExternalJobsPage() {
       if (user.tenantId) {
         overdueQuery = overdueQuery.eq("tenant_id", user.tenantId);
       }
-      overdueQuery = overdueQuery.lt("due_date", today);
+      overdueQuery = overdueQuery.or(
+        `partner_response_due_date.lt.${today},and(partner_response_due_date.is.null,due_date.lt.${today})`,
+      );
       overdueQuery = overdueQuery.not(
         "status",
         "in",
@@ -287,8 +565,9 @@ export default function ExternalJobsPage() {
       if (user.tenantId) {
         dueSoonQuery = dueSoonQuery.eq("tenant_id", user.tenantId);
       }
-      dueSoonQuery = dueSoonQuery.gte("due_date", today);
-      dueSoonQuery = dueSoonQuery.lte("due_date", soonStr);
+      dueSoonQuery = dueSoonQuery.or(
+        `and(partner_response_due_date.gte.${today},partner_response_due_date.lte.${soonStr}),and(partner_response_due_date.is.null,due_date.gte.${today},due_date.lte.${soonStr})`,
+      );
       dueSoonQuery = dueSoonQuery.not(
         "status",
         "in",
@@ -309,7 +588,14 @@ export default function ExternalJobsPage() {
     return () => {
       isMounted = false;
     };
-  }, [fallbackJobs, today, user.isAuthenticated, user.loading, user.tenantId]);
+  }, [
+    fallbackJobs,
+    getEffectiveDueDate,
+    today,
+    user.isAuthenticated,
+    user.loading,
+    user.tenantId,
+  ]);
 
   return (
     <section className="space-y-4">
@@ -343,83 +629,15 @@ export default function ExternalJobsPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_repeat(4,minmax(140px,0.4fr))_auto] lg:items-end">
-            <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[260px] flex-1 space-y-2">
               <label className="text-sm font-medium">Search</label>
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Order, partner, customer..."
-                className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
               />
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Status</label>
-              <Select
-                value={statusFilter}
-                onValueChange={(value) =>
-                  setStatusFilter(value as ExternalJobStatus | "all")
-                }
-              >
-                <SelectTrigger className="h-10 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {statusOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Partner group</label>
-            <Select
-              value={partnerGroupFilter || "__all__"}
-              onValueChange={(value) =>
-                setPartnerGroupFilter(value === "__all__" ? "" : value)
-              }
-            >
-              <SelectTrigger className="h-10 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All groups</SelectItem>
-                {activeGroups.map((group) => (
-                  <SelectItem key={group.id} value={group.id}>
-                    {group.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Partner</label>
-            <Select
-              value={partnerFilter || "__all__"}
-              onValueChange={(value) =>
-                setPartnerFilter(value === "__all__" ? "" : value)
-              }
-            >
-              <SelectTrigger className="h-10 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All partners</SelectItem>
-                {activePartners
-                  .filter((partner) =>
-                    partnerGroupFilter
-                      ? partner.groupId === partnerGroupFilter
-                        : true,
-                    )
-                    .map((partner) => (
-                      <SelectItem key={partner.id} value={partner.id}>
-                        {partner.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -441,6 +659,99 @@ export default function ExternalJobsPage() {
                 />
                 Overdue only
               </label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline">
+                    <SlidersHorizontalIcon className="h-4 w-4" />
+                    Filters
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[360px] space-y-3">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Status</label>
+                    <Select
+                      value={statusFilter}
+                      onValueChange={(value) =>
+                        setStatusFilter(value as ExternalJobStatus | "all")
+                      }
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {statusOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Partner group</label>
+                    <Select
+                      value={partnerGroupFilter || "__all__"}
+                      onValueChange={(value) =>
+                        setPartnerGroupFilter(value === "__all__" ? "" : value)
+                      }
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All groups</SelectItem>
+                        {activeGroups.map((group) => (
+                          <SelectItem key={group.id} value={group.id}>
+                            {group.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Partner</label>
+                    <Select
+                      value={partnerFilter || "__all__"}
+                      onValueChange={(value) =>
+                        setPartnerFilter(value === "__all__" ? "" : value)
+                      }
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All partners</SelectItem>
+                        {activePartners
+                          .filter((partner) =>
+                            partnerGroupFilter
+                              ? partner.groupId === partnerGroupFilter
+                              : true,
+                          )
+                          .map((partner) => (
+                            <SelectItem key={partner.id} value={partner.id}>
+                              {partner.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setSearch("");
+                        setStatusFilter("all");
+                        setPartnerGroupFilter("");
+                        setPartnerFilter("");
+                        setOverdueOnly(false);
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -451,9 +762,14 @@ export default function ExternalJobsPage() {
                   <th className="px-4 py-2 text-left font-medium">Order #</th>
                   <th className="px-4 py-2 text-left font-medium">Customer</th>
                   <th className="px-4 py-2 text-left font-medium">Partner</th>
-                  <th className="px-4 py-2 text-left font-medium">Ext. Order</th>
-                  <th className="px-4 py-2 text-left font-medium">Due date</th>
-                  <th className="px-4 py-2 text-left font-medium">Qty</th>
+                  {externalListFields.map((field) => (
+                    <th
+                      key={field.id}
+                      className="px-4 py-2 text-left font-medium"
+                    >
+                      {field.label}
+                    </th>
+                  ))}
                   <th className="px-4 py-2 text-left font-medium">Received</th>
                   <th className="px-4 py-2 text-left font-medium">Added by</th>
                   <th className="px-4 py-2 text-left font-medium">Status</th>
@@ -466,60 +782,69 @@ export default function ExternalJobsPage() {
                         a.changedAt.localeCompare(b.changedAt),
                       )[0]
                     : undefined;
+                  const effectiveDueDate = getEffectiveDueDate(job);
+                  const isOverdue =
+                    effectiveDueDate < today &&
+                    !["delivered", "approved", "cancelled"].includes(
+                      job.status,
+                    );
                   return (
                     <tr key={job.id} className="border-t border-border">
-                    <td className="px-4 py-2 font-medium">
-                      <Link
-                        href={`/orders/${job.orderNumber}`}
-                        className="text-primary underline"
-                      >
-                        {job.orderNumber}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-2">{job.customerName}</td>
-                    <td className="px-4 py-2">{job.partnerName}</td>
-                    <td className="px-4 py-2">{job.externalOrderNumber}</td>
-                    <td className="px-4 py-2">
-                      <span
-                        className={
-                          job.dueDate < today &&
-                          !["delivered", "approved", "cancelled"].includes(
-                            job.status,
-                          )
-                            ? "text-rose-600 font-medium"
-                            : ""
-                        }
-                      >
-                        {job.dueDate}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">{job.quantity ?? "--"}</td>
-                    <td className="px-4 py-2">
-                      {job.receivedAt
-                        ? formatDate(job.receivedAt.slice(0, 10))
-                        : "--"}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-muted-foreground">
-                      {createdBy
-                        ? `${createdBy.changedBy}${
-                            createdBy.changedByRole
-                              ? ` (${createdBy.changedByRole})`
-                              : ""
-                          }`
-                        : "--"}
-                    </td>
-                    <td className="px-4 py-2">
-                      <Badge variant={statusVariant(job.status)}>
-                        {statusLabels[job.status]}
-                      </Badge>
-                    </td>
-                  </tr>
-                );
+                      <td className="px-4 py-2 font-medium text-nowrap">
+                        <Link
+                          href={`/orders/${job.orderNumber}`}
+                          className="text-primary underline"
+                        >
+                          {job.orderNumber}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-2">{job.customerName}</td>
+                      <td className="px-4 py-2">{job.partnerName}</td>
+                      {externalListFields.map((field) => (
+                        <td key={`${job.id}-${field.id}`} className="px-4 py-2">
+                          <span
+                            className={
+                              field.semantic === "due_date" && isOverdue
+                                ? "text-rose-600 font-medium"
+                                : ""
+                            }
+                          >
+                            {field.semantic === "external_order"
+                              ? getDisplayExternalOrder(job)
+                              : field.semantic === "due_date"
+                                ? getDisplayDueDate(job)
+                                : getFieldDisplayValue(job, field)}
+                          </span>
+                        </td>
+                      ))}
+                      <td className="px-4 py-2">
+                        {job.receivedAt
+                          ? formatDate(job.receivedAt.slice(0, 10))
+                          : "--"}
+                      </td>
+                      <td className="px-4 py-2 text-sm text-muted-foreground">
+                        {job.partnerRequestSenderName
+                          ? job.partnerRequestSenderName
+                          : createdBy
+                            ? `${createdBy.changedBy}${
+                                createdBy.changedByRole
+                                  ? ` (${createdBy.changedByRole})`
+                                  : ""
+                              }`
+                            : "--"}
+                      </td>
+                      <td className="px-4 py-2">
+                        <Badge variant={statusVariant(job.status)}>
+                          {externalStatusLabels[job.status]}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
                 })}
                 {filteredJobs.length === 0 && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={6 + externalListFields.length}
                       className="px-4 py-6 text-center text-muted-foreground"
                     >
                       No external jobs found.
@@ -542,37 +867,17 @@ export default function ExternalJobsPage() {
                     if (!supabase || user.loading || !user.isAuthenticated) {
                       setJobs((prev) => [
                         ...prev,
-                        ...fallbackJobs.slice(nextOffset, nextOffset + pageSize),
+                        ...fallbackJobs.slice(
+                          nextOffset,
+                          nextOffset + pageSize,
+                        ),
                       ]);
                       return;
                     }
                     setIsLoading(true);
                     const query = supabase
                       .from("external_jobs")
-                      .select(
-                        `
-                        id,
-                        order_id,
-                        partner_id,
-                        partner_name,
-                        external_order_number,
-                        quantity,
-                        due_date,
-                        status,
-                        external_job_status_history (
-                          id,
-                          status,
-                          changed_by_name,
-                          changed_by_role,
-                          changed_at
-                        ),
-                        orders (
-                          order_number,
-                          customer_name
-                        )
-                      `,
-                        { count: "exact" },
-                      )
+                      .select(externalJobsSelect, { count: "exact" })
                       .order("created_at", { ascending: false })
                       .range(nextOffset, nextOffset + pageSize - 1);
                     if (user.tenantId) {
@@ -583,7 +888,9 @@ export default function ExternalJobsPage() {
                     }
                     if (partnerGroupFilter) {
                       const ids = activePartners
-                        .filter((partner) => partner.groupId === partnerGroupFilter)
+                        .filter(
+                          (partner) => partner.groupId === partnerGroupFilter,
+                        )
                         .map((partner) => partner.id);
                       if (ids.length > 0) {
                         query.in("partner_id", ids);
@@ -598,38 +905,25 @@ export default function ExternalJobsPage() {
                     if (search.trim().length > 0) {
                       const q = `%${search.trim()}%`;
                       query.or(
-                        `external_order_number.ilike.${q},partner_name.ilike.${q}`,
+                        `external_order_number.ilike.${q},partner_response_order_number.ilike.${q},partner_name.ilike.${q}`,
                       );
                     }
                     if (overdueOnly) {
-                      query.lt("due_date", today);
+                      query.or(
+                        `partner_response_due_date.lt.${today},and(partner_response_due_date.is.null,due_date.lt.${today})`,
+                      );
                       query.not(
                         "status",
                         "in",
                         '("delivered","approved","cancelled")',
                       );
                     }
-                    query.then(({ data }) => {
-                      const mapped = (data ?? []).map((row) => ({
-                        id: row.id,
-                        orderNumber: row.orders?.order_number ?? "-",
-                        customerName: row.orders?.customer_name ?? "-",
-                        partnerName: row.partner_name ?? "-",
-                        partnerId: row.partner_id ?? undefined,
-                        externalOrderNumber: row.external_order_number,
-                        dueDate: row.due_date,
-                        quantity: row.quantity ?? undefined,
-                        status: row.status,
-                        statusHistory: (row.external_job_status_history ?? []).map(
-                          (entry) => ({
-                            id: entry.id,
-                            status: entry.status,
-                            changedBy: entry.changed_by_name ?? "Unknown",
-                            changedByRole: entry.changed_by_role ?? undefined,
-                            changedAt: entry.changed_at,
-                          }),
-                        ),
-                      }));
+                    query.then(async ({ data }) => {
+                      const mapped = (data ?? []).map(mapExternalJobRow);
+                      await loadFieldValuesForJobs(
+                        mapped.map((item) => item.id),
+                        true,
+                      );
                       setJobs((prev) => [...prev, ...mapped]);
                       setIsLoading(false);
                     });

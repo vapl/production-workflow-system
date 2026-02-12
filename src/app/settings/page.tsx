@@ -35,7 +35,12 @@ import {
   useWorkflowRules,
   type WorkflowTargetStatus,
 } from "@/contexts/WorkflowContext";
-import type { OrderStatus } from "@/types/orders";
+import type {
+  ExternalJobFieldScope,
+  ExternalJobFieldType,
+  ExternalJobStatus,
+  OrderStatus,
+} from "@/types/orders";
 
 function slugify(value: string) {
   return value
@@ -127,6 +132,38 @@ const orderInputFieldTypeOptions: {
   { value: "table", label: "Table (repeatable rows)" },
 ];
 
+const externalJobFieldTypeOptions: {
+  value: ExternalJobFieldType;
+  label: string;
+}[] = [
+  { value: "text", label: "Text" },
+  { value: "textarea", label: "Multiline text" },
+  { value: "number", label: "Number" },
+  { value: "date", label: "Date" },
+  { value: "select", label: "Select" },
+  { value: "toggle", label: "Toggle" },
+];
+
+const externalJobStatusOptions: {
+  value: ExternalJobStatus;
+  label: string;
+}[] = [
+  { value: "requested", label: "Requested" },
+  { value: "ordered", label: "Ordered" },
+  { value: "in_progress", label: "In progress" },
+  { value: "delivered", label: "In Stock" },
+  { value: "approved", label: "Approved" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+const externalJobFieldScopeOptions: {
+  value: ExternalJobFieldScope;
+  label: string;
+}[] = [
+  { value: "manual", label: "Manual entry" },
+  { value: "portal_response", label: "Partner portal response" },
+];
+
 const orderInputColumnTypeOptions: {
   value: OrderInputTableColumnType;
   label: string;
@@ -216,6 +253,7 @@ export default function SettingsPage() {
     workStations,
     stationDependencies,
     orderInputFields,
+    externalJobFields,
     stopReasons,
     partners,
     partnerGroups,
@@ -227,6 +265,9 @@ export default function SettingsPage() {
     updateOrderInputField,
     removeOrderInputField,
     ensureDefaultOrderInputFields,
+    addExternalJobField,
+    updateExternalJobField,
+    removeExternalJobField,
     addStopReason,
     updateStopReason,
     removeStopReason,
@@ -249,6 +290,20 @@ export default function SettingsPage() {
         return a.label.localeCompare(b.label);
       }),
     [orderInputFields],
+  );
+  const sortedExternalJobFields = useMemo(
+    () => {
+      const uniqueById = Array.from(
+        new Map(externalJobFields.map((field) => [field.id, field])).values(),
+      );
+      return uniqueById.sort((a, b) => {
+        if (a.sortOrder !== b.sortOrder) {
+          return a.sortOrder - b.sortOrder;
+        }
+        return a.label.localeCompare(b.label);
+      });
+    },
+    [externalJobFields],
   );
 
   const [stationName, setStationName] = useState("");
@@ -282,6 +337,22 @@ export default function SettingsPage() {
   const [selectedOrderFieldIds, setSelectedOrderFieldIds] = useState<string[]>(
     [],
   );
+  const [externalJobFieldLabel, setExternalJobFieldLabel] = useState("");
+  const [externalJobFieldType, setExternalJobFieldType] =
+    useState<ExternalJobFieldType>("text");
+  const [externalJobFieldScope, setExternalJobFieldScope] =
+    useState<ExternalJobFieldScope>("manual");
+  const [externalJobFieldUnit, setExternalJobFieldUnit] = useState("");
+  const [externalJobFieldOptions, setExternalJobFieldOptions] = useState("");
+  const [externalJobFieldRequired, setExternalJobFieldRequired] =
+    useState(false);
+  const [externalJobFieldActive, setExternalJobFieldActive] = useState(true);
+  const [externalJobFieldSortOrder, setExternalJobFieldSortOrder] = useState(0);
+  const [editingExternalJobFieldId, setEditingExternalJobFieldId] = useState<
+    string | null
+  >(null);
+  const [selectedExternalJobFieldIds, setSelectedExternalJobFieldIds] =
+    useState<string[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [bulkNodeInput, setBulkNodeInput] = useState("");
   const [selectedWorkStationIds, setSelectedWorkStationIds] = useState<
@@ -300,6 +371,8 @@ export default function SettingsPage() {
     null,
   );
   const [partnerName, setPartnerName] = useState("");
+  const [partnerEmail, setPartnerEmail] = useState("");
+  const [partnerPhone, setPartnerPhone] = useState("");
   const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
   const [partnerGroupId, setPartnerGroupId] = useState<string>("");
   const [partnerGroupName, setPartnerGroupName] = useState("");
@@ -439,6 +512,15 @@ export default function SettingsPage() {
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [companyMessage, setCompanyMessage] = useState("");
+  const [outboundFromName, setOutboundFromName] = useState("");
+  const [outboundFromEmail, setOutboundFromEmail] = useState("");
+  const [outboundReplyToEmail, setOutboundReplyToEmail] = useState("");
+  const [outboundUseUserSender, setOutboundUseUserSender] = useState(true);
+  const [outboundSenderVerified, setOutboundSenderVerified] = useState(false);
+  const [outboundState, setOutboundState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [outboundMessage, setOutboundMessage] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteFullName, setInviteFullName] = useState("");
   const [inviteRole, setInviteRole] = useState<UserRole>("Sales");
@@ -465,7 +547,6 @@ export default function SettingsPage() {
     removeChecklistItem,
     addReturnReason,
     removeReturnReason,
-    updateExternalJobRule,
     saveError,
     isLoadedFromDb,
   } = useWorkflowRules();
@@ -477,10 +558,16 @@ export default function SettingsPage() {
   const [statusLabelDrafts, setStatusLabelDrafts] = useState<
     Record<OrderStatus, string>
   >(rules.statusLabels);
+  const [externalJobStatusLabelDrafts, setExternalJobStatusLabelDrafts] =
+    useState<Record<ExternalJobStatus, string>>(rules.externalJobStatusLabels);
   const [statusLabelState, setStatusLabelState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [statusLabelMessage, setStatusLabelMessage] = useState("");
+  const [externalJobStatusLabelState, setExternalJobStatusLabelState] =
+    useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [externalJobStatusLabelMessage, setExternalJobStatusLabelMessage] =
+    useState("");
   const [assignmentLabelDrafts, setAssignmentLabelDrafts] = useState({
     engineer: rules.assignmentLabels?.engineer ?? "Engineer",
     manager: rules.assignmentLabels?.manager ?? "Manager",
@@ -523,6 +610,21 @@ export default function SettingsPage() {
     }
     return false;
   }, [rules.statusLabels, statusLabelDrafts]);
+  const hasExternalJobStatusLabelChanges = useMemo(() => {
+    const keys = new Set([
+      ...Object.keys(rules.externalJobStatusLabels),
+      ...Object.keys(externalJobStatusLabelDrafts),
+    ]);
+    for (const key of keys) {
+      if (
+        (rules.externalJobStatusLabels as Record<string, string>)[key] !==
+        (externalJobStatusLabelDrafts as Record<string, string>)[key]
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [rules.externalJobStatusLabels, externalJobStatusLabelDrafts]);
 
   const maxLogoBytes = 2 * 1024 * 1024;
   const hasAssignmentLabelChanges =
@@ -553,6 +655,9 @@ export default function SettingsPage() {
     setStatusLabelDrafts(rules.statusLabels);
   }, [rules.statusLabels]);
   useEffect(() => {
+    setExternalJobStatusLabelDrafts(rules.externalJobStatusLabels);
+  }, [rules.externalJobStatusLabels]);
+  useEffect(() => {
     setAssignmentLabelDrafts({
       engineer: rules.assignmentLabels?.engineer ?? "Engineer",
       manager: rules.assignmentLabels?.manager ?? "Manager",
@@ -571,7 +676,7 @@ export default function SettingsPage() {
       const { data, error } = await supabase
         .from("tenants")
         .select(
-          "name, legal_name, registration_no, vat_no, billing_email, address, logo_url",
+          "name, legal_name, registration_no, vat_no, billing_email, address, logo_url, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified",
         )
         .eq("id", currentUser.tenantId)
         .maybeSingle();
@@ -585,6 +690,11 @@ export default function SettingsPage() {
       setCompanyBillingEmail(data.billing_email ?? "");
       setCompanyAddress(data.address ?? "");
       setCompanyLogoUrl(data.logo_url ?? "");
+      setOutboundFromName(data.outbound_from_name ?? "");
+      setOutboundFromEmail(data.outbound_from_email ?? "");
+      setOutboundReplyToEmail(data.outbound_reply_to_email ?? "");
+      setOutboundUseUserSender(data.outbound_use_user_sender ?? true);
+      setOutboundSenderVerified(data.outbound_sender_verified ?? false);
     };
     fetchCompany();
   }, [currentUser.tenantId]);
@@ -653,6 +763,36 @@ export default function SettingsPage() {
     }
     setStatusLabelState("saved");
     setStatusLabelMessage("Status labels saved.");
+  }
+
+  async function handleSaveExternalJobStatusLabels() {
+    if (!hasExternalJobStatusLabelChanges) {
+      setExternalJobStatusLabelState("idle");
+      setExternalJobStatusLabelMessage("");
+      return;
+    }
+    setExternalJobStatusLabelState("saving");
+    setExternalJobStatusLabelMessage("");
+    setRules({ externalJobStatusLabels: externalJobStatusLabelDrafts });
+    if (!supabase || !currentUser.tenantId) {
+      setExternalJobStatusLabelState("saved");
+      setExternalJobStatusLabelMessage("Saved locally.");
+      return;
+    }
+    const { error } = await supabase.from("workflow_rules").upsert(
+      {
+        tenant_id: currentUser.tenantId,
+        external_job_status_labels: externalJobStatusLabelDrafts,
+      },
+      { onConflict: "tenant_id" },
+    );
+    if (error) {
+      setExternalJobStatusLabelState("error");
+      setExternalJobStatusLabelMessage(error.message);
+      return;
+    }
+    setExternalJobStatusLabelState("saved");
+    setExternalJobStatusLabelMessage("External job status labels saved.");
   }
 
   async function handleSaveAssignmentLabels() {
@@ -1388,6 +1528,25 @@ export default function SettingsPage() {
     });
   }
 
+  async function handleCopyExternalJobField(fieldId: string) {
+    const target = externalJobFields.find((field) => field.id === fieldId);
+    if (!target) {
+      return;
+    }
+    const label = `${target.label} copy`;
+    await addExternalJobField({
+      key: slugify(label),
+      label,
+      fieldType: target.fieldType,
+      scope: target.scope ?? "manual",
+      unit: target.unit,
+      options: target.options,
+      isRequired: target.isRequired,
+      isActive: target.isActive,
+      sortOrder: target.sortOrder + 1,
+    });
+  }
+
   async function handleCopyWorkStation(stationId: string) {
     const station = workStations.find((item) => item.id === stationId);
     if (!station) {
@@ -1450,7 +1609,37 @@ export default function SettingsPage() {
     if (!partner) {
       return;
     }
-    await addPartner(`${partner.name} copy`, partner.groupId);
+    await addPartner({
+      name: `${partner.name} copy`,
+      groupId: partner.groupId,
+      email: partner.email,
+      phone: partner.phone,
+    });
+  }
+
+  async function handleSaveOutboundEmail() {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    setOutboundState("saving");
+    setOutboundMessage("");
+    const { error } = await supabase
+      .from("tenants")
+      .update({
+        outbound_from_name: outboundFromName.trim() || null,
+        outbound_from_email: outboundFromEmail.trim() || null,
+        outbound_reply_to_email: outboundReplyToEmail.trim() || null,
+        outbound_use_user_sender: outboundUseUserSender,
+        outbound_sender_verified: outboundSenderVerified,
+      })
+      .eq("id", currentUser.tenantId);
+    if (error) {
+      setOutboundState("error");
+      setOutboundMessage(error.message ?? "Failed to save outbound email settings.");
+      return;
+    }
+    setOutboundState("saved");
+    setOutboundMessage("Outbound email settings saved.");
   }
 
   async function handleDeleteSelectedPartners() {
@@ -1599,6 +1788,18 @@ export default function SettingsPage() {
     setEditingOrderFieldId(null);
   }
 
+  function resetExternalJobFieldForm() {
+    setExternalJobFieldLabel("");
+    setExternalJobFieldType("text");
+    setExternalJobFieldScope("manual");
+    setExternalJobFieldUnit("");
+    setExternalJobFieldOptions("");
+    setExternalJobFieldRequired(false);
+    setExternalJobFieldActive(true);
+    setExternalJobFieldSortOrder(0);
+    setEditingExternalJobFieldId(null);
+  }
+
   function updateOrderFieldColumn(
     index: number,
     patch: Partial<OrderInputTableColumn>,
@@ -1647,6 +1848,20 @@ export default function SettingsPage() {
       setSelectedOrderFieldIds(next);
     }
   }, [orderInputFields, selectedOrderFieldIds]);
+
+  useEffect(() => {
+    if (externalJobFields.length === 0) {
+      if (selectedExternalJobFieldIds.length > 0) {
+        setSelectedExternalJobFieldIds([]);
+      }
+      return;
+    }
+    const valid = new Set(externalJobFields.map((field) => field.id));
+    const next = selectedExternalJobFieldIds.filter((id) => valid.has(id));
+    if (next.length !== selectedExternalJobFieldIds.length) {
+      setSelectedExternalJobFieldIds(next);
+    }
+  }, [externalJobFields, selectedExternalJobFieldIds]);
 
   useEffect(() => {
     const valid = new Set(currentLevelNodes.map((node) => node.id));
@@ -1753,6 +1968,47 @@ export default function SettingsPage() {
     resetOrderFieldForm();
   }
 
+  async function handleSaveExternalJobField() {
+    const trimmedLabel = externalJobFieldLabel.trim();
+    if (!trimmedLabel) {
+      return;
+    }
+    const options =
+      externalJobFieldType === "select"
+        ? parseOrderFieldOptions(externalJobFieldOptions)
+        : undefined;
+    if (editingExternalJobFieldId) {
+      await updateExternalJobField(editingExternalJobFieldId, {
+        label: trimmedLabel,
+        fieldType: externalJobFieldType,
+        scope: externalJobFieldScope,
+        unit: externalJobFieldUnit.trim() || undefined,
+        options,
+        isRequired: externalJobFieldRequired,
+        isActive: externalJobFieldActive,
+        sortOrder: Number.isFinite(externalJobFieldSortOrder)
+          ? externalJobFieldSortOrder
+          : 0,
+      });
+      resetExternalJobFieldForm();
+      return;
+    }
+    await addExternalJobField({
+      key: slugify(trimmedLabel),
+      label: trimmedLabel,
+      fieldType: externalJobFieldType,
+      scope: externalJobFieldScope,
+      unit: externalJobFieldUnit.trim() || undefined,
+      options,
+      isRequired: externalJobFieldRequired,
+      isActive: externalJobFieldActive,
+      sortOrder: Number.isFinite(externalJobFieldSortOrder)
+        ? externalJobFieldSortOrder
+        : 0,
+    });
+    resetExternalJobFieldForm();
+  }
+
   function handleEditOrderField(fieldId: string) {
     const target = orderInputFields.find((field) => field.id === fieldId);
     if (!target) {
@@ -1776,6 +2032,22 @@ export default function SettingsPage() {
     setOrderFieldActive(target.isActive);
     setOrderFieldShowInProduction(target.showInProduction ?? false);
     setOrderFieldSortOrder(target.sortOrder);
+  }
+
+  function handleEditExternalJobField(fieldId: string) {
+    const target = externalJobFields.find((field) => field.id === fieldId);
+    if (!target) {
+      return;
+    }
+    setEditingExternalJobFieldId(fieldId);
+    setExternalJobFieldLabel(target.label);
+    setExternalJobFieldType(target.fieldType);
+    setExternalJobFieldScope(target.scope ?? "manual");
+    setExternalJobFieldUnit(target.unit ?? "");
+    setExternalJobFieldOptions((target.options ?? []).join(", "));
+    setExternalJobFieldRequired(target.isRequired);
+    setExternalJobFieldActive(target.isActive);
+    setExternalJobFieldSortOrder(target.sortOrder);
   }
 
   async function handleDeleteOrderField(fieldId: string) {
@@ -1805,6 +2077,36 @@ export default function SettingsPage() {
       await removeOrderInputField(id);
     }
     setSelectedOrderFieldIds([]);
+  }
+
+  async function handleDeleteExternalJobField(fieldId: string) {
+    const target = externalJobFields.find((field) => field.id === fieldId);
+    const label = target?.label ?? "this field";
+    if (!(await confirmRemove(`Remove "${label}"?`))) {
+      return;
+    }
+    await removeExternalJobField(fieldId);
+    setSelectedExternalJobFieldIds((prev) =>
+      prev.filter((id) => id !== fieldId),
+    );
+  }
+
+  async function handleDeleteSelectedExternalJobFields() {
+    if (selectedExternalJobFieldIds.length === 0) {
+      return;
+    }
+    if (
+      !(await confirmRemove(
+        `Remove ${selectedExternalJobFieldIds.length} selected field(s)?`,
+      ))
+    ) {
+      return;
+    }
+    const ids = [...selectedExternalJobFieldIds];
+    for (const id of ids) {
+      await removeExternalJobField(id);
+    }
+    setSelectedExternalJobFieldIds([]);
   }
 
   async function persistStationOrder(nextStations: WorkStation[]) {
@@ -1910,6 +2212,8 @@ export default function SettingsPage() {
 
   function resetPartnerForm() {
     setPartnerName("");
+    setPartnerEmail("");
+    setPartnerPhone("");
     setPartnerGroupId("");
     setEditingPartnerId(null);
   }
@@ -1923,11 +2227,18 @@ export default function SettingsPage() {
       await updatePartner(editingPartnerId, {
         name: trimmedName,
         groupId: partnerGroupId || undefined,
+        email: partnerEmail.trim() || undefined,
+        phone: partnerPhone.trim() || undefined,
       });
       resetPartnerForm();
       return;
     }
-    await addPartner(trimmedName, partnerGroupId || undefined);
+    await addPartner({
+      name: trimmedName,
+      groupId: partnerGroupId || undefined,
+      email: partnerEmail.trim() || undefined,
+      phone: partnerPhone.trim() || undefined,
+    });
     resetPartnerForm();
   }
 
@@ -1938,6 +2249,8 @@ export default function SettingsPage() {
     }
     setEditingPartnerId(partnerId);
     setPartnerName(partner.name);
+    setPartnerEmail(partner.email ?? "");
+    setPartnerPhone(partner.phone ?? "");
     setPartnerGroupId(partner.groupId ?? "");
   }
 
@@ -2612,7 +2925,8 @@ export default function SettingsPage() {
                                   value={column.fieldType}
                                   onValueChange={(value) =>
                                     updateOrderFieldColumn(index, {
-                                      fieldType: value as OrderInputTableColumnType,
+                                      fieldType:
+                                        value as OrderInputTableColumnType,
                                     })
                                   }
                                 >
@@ -2620,14 +2934,16 @@ export default function SettingsPage() {
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {orderInputColumnTypeOptions.map((option) => (
-                                      <SelectItem
-                                        key={option.value}
-                                        value={option.value}
-                                      >
-                                        {option.label}
-                                      </SelectItem>
-                                    ))}
+                                    {orderInputColumnTypeOptions.map(
+                                      (option) => (
+                                        <SelectItem
+                                          key={option.value}
+                                          value={option.value}
+                                        >
+                                          {option.label}
+                                        </SelectItem>
+                                      ),
+                                    )}
                                   </SelectContent>
                                 </Select>
                               </label>
@@ -3184,7 +3500,10 @@ export default function SettingsPage() {
                               qrEnabledSizes.includes(option.value),
                             )
                             .map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
                                 {option.label}
                               </SelectItem>
                             ))}
@@ -3613,44 +3932,223 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="partners">
-          <Card>
-            <CardHeader>
-              <CardTitle>Partners</CardTitle>
-              <CardDescription>
-                Maintain external suppliers for outsourced steps.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="border-t border-border pt-4 pb-8">
-                <div className="text-sm font-medium">Partner groups</div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Partners</CardTitle>
+                <CardDescription>
+                  Maintain external suppliers for outsourced steps.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="border-t border-border pt-4 pb-8">
+                  <div className="text-sm font-medium">Partner groups</div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-medium">Group name</label>
+                      <input
+                        value={partnerGroupName}
+                        onChange={(event) =>
+                          setPartnerGroupName(event.target.value)
+                        }
+                        placeholder="Glass"
+                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={handleSavePartnerGroup}>
+                        {editingPartnerGroupId ? "Save group" : "Add group"}
+                      </Button>
+                      {editingPartnerGroupId && (
+                        <Button
+                          variant="outline"
+                          onClick={resetPartnerGroupForm}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm text-muted-foreground">
+                        {selectedPartnerGroupIds.length > 0
+                          ? `${selectedPartnerGroupIds.length} selected`
+                          : " "}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={
+                              partnerGroups.length > 0 &&
+                              selectedPartnerGroupIds.length ===
+                                partnerGroups.length
+                            }
+                            onChange={(event) => {
+                              if (event.target.checked) {
+                                setSelectedPartnerGroupIds(
+                                  partnerGroups.map((group) => group.id),
+                                );
+                              } else {
+                                setSelectedPartnerGroupIds([]);
+                              }
+                            }}
+                            disabled={partnerGroups.length === 0}
+                          />
+                          Select all
+                        </label>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleDeleteSelectedPartnerGroups}
+                          disabled={selectedPartnerGroupIds.length === 0}
+                        >
+                          Remove selected
+                        </Button>
+                      </div>
+                    </div>
+                    {partnerGroups.map((group) => (
+                      <div
+                        key={group.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                      >
+                        <div className="font-medium">{group.name}</div>
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={group.isActive}
+                              onChange={(event) =>
+                                updatePartnerGroup(group.id, {
+                                  isActive: event.target.checked,
+                                })
+                              }
+                            />
+                            Active
+                          </label>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditPartnerGroup(group.id)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCopyPartnerGroup(group.id)}
+                          >
+                            Copy
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              if (
+                                !(await confirmRemove(
+                                  `Remove group "${group.name}"?`,
+                                ))
+                              ) {
+                                return;
+                              }
+                              removePartnerGroup(group.id);
+                            }}
+                          >
+                            Remove
+                          </Button>
+                          <input
+                            type="checkbox"
+                            checked={selectedPartnerGroupIds.includes(group.id)}
+                            onChange={(event) => {
+                              setSelectedPartnerGroupIds((prev) => {
+                                if (event.target.checked) {
+                                  return [...prev, group.id];
+                                }
+                                return prev.filter((id) => id !== group.id);
+                              });
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    {partnerGroups.length === 0 && (
+                      <div className="text-sm text-muted-foreground">
+                        No partner groups yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-t border-border pt-4 grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(180px,0.8fr)_minmax(180px,0.8fr)_minmax(180px,0.8fr)_auto] lg:items-end">
                   <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Group name</label>
+                    <label className="text-sm font-medium">Partner name</label>
                     <input
-                      value={partnerGroupName}
-                      onChange={(event) =>
-                        setPartnerGroupName(event.target.value)
-                      }
-                      placeholder="Glass"
+                      value={partnerName}
+                      onChange={(event) => setPartnerName(event.target.value)}
+                      placeholder="Baltic Glass"
                       className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
                     />
                   </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Email</label>
+                    <input
+                      type="email"
+                      value={partnerEmail}
+                      onChange={(event) => setPartnerEmail(event.target.value)}
+                      placeholder="partner@company.com"
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Phone</label>
+                    <input
+                      value={partnerPhone}
+                      onChange={(event) => setPartnerPhone(event.target.value)}
+                      placeholder="+371 2xxxxxxx"
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Group</label>
+                    <Select
+                      value={partnerGroupId || "__none__"}
+                      onValueChange={(value) =>
+                        setPartnerGroupId(value === "__none__" ? "" : value)
+                      }
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No group</SelectItem>
+                        {partnerGroups
+                          .filter((group) => group.isActive)
+                          .map((group) => (
+                            <SelectItem key={group.id} value={group.id}>
+                              {group.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="flex gap-2">
-                    <Button onClick={handleSavePartnerGroup}>
-                      {editingPartnerGroupId ? "Save group" : "Add group"}
+                    <Button onClick={handleSavePartner}>
+                      {editingPartnerId ? "Save partner" : "Add partner"}
                     </Button>
-                    {editingPartnerGroupId && (
-                      <Button variant="outline" onClick={resetPartnerGroupForm}>
+                    {editingPartnerId && (
+                      <Button variant="outline" onClick={resetPartnerForm}>
                         Cancel
                       </Button>
                     )}
                   </div>
                 </div>
-                <div className="mt-3 space-y-2">
+
+                <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm text-muted-foreground">
-                      {selectedPartnerGroupIds.length > 0
-                        ? `${selectedPartnerGroupIds.length} selected`
+                      {selectedPartnerIds.length > 0
+                        ? `${selectedPartnerIds.length} selected`
                         : " "}
                     </div>
                     <div className="flex items-center gap-2">
@@ -3658,193 +4156,37 @@ export default function SettingsPage() {
                         <input
                           type="checkbox"
                           checked={
-                            partnerGroups.length > 0 &&
-                            selectedPartnerGroupIds.length ===
-                              partnerGroups.length
+                            partners.length > 0 &&
+                            selectedPartnerIds.length === partners.length
                           }
                           onChange={(event) => {
                             if (event.target.checked) {
-                              setSelectedPartnerGroupIds(
-                                partnerGroups.map((group) => group.id),
+                              setSelectedPartnerIds(
+                                partners.map((partner) => partner.id),
                               );
                             } else {
-                              setSelectedPartnerGroupIds([]);
+                              setSelectedPartnerIds([]);
                             }
                           }}
-                          disabled={partnerGroups.length === 0}
+                          disabled={partners.length === 0}
                         />
                         Select all
                       </label>
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={handleDeleteSelectedPartnerGroups}
-                        disabled={selectedPartnerGroupIds.length === 0}
+                        onClick={handleDeleteSelectedPartners}
+                        disabled={selectedPartnerIds.length === 0}
                       >
                         Remove selected
                       </Button>
                     </div>
                   </div>
-                  {partnerGroups.map((group) => (
+                  {partners.map((partner) => (
                     <div
-                      key={group.id}
+                      key={partner.id}
                       className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
                     >
-                      <div className="font-medium">{group.name}</div>
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={group.isActive}
-                            onChange={(event) =>
-                              updatePartnerGroup(group.id, {
-                                isActive: event.target.checked,
-                              })
-                            }
-                          />
-                          Active
-                        </label>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEditPartnerGroup(group.id)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCopyPartnerGroup(group.id)}
-                        >
-                          Copy
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={async () => {
-                            if (
-                              !(await confirmRemove(
-                                `Remove group "${group.name}"?`,
-                              ))
-                            ) {
-                              return;
-                            }
-                            removePartnerGroup(group.id);
-                          }}
-                        >
-                          Remove
-                        </Button>
-                        <input
-                          type="checkbox"
-                          checked={selectedPartnerGroupIds.includes(group.id)}
-                          onChange={(event) => {
-                            setSelectedPartnerGroupIds((prev) => {
-                              if (event.target.checked) {
-                                return [...prev, group.id];
-                              }
-                              return prev.filter((id) => id !== group.id);
-                            });
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {partnerGroups.length === 0 && (
-                    <div className="text-sm text-muted-foreground">
-                      No partner groups yet.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="border-t border-border pt-4 grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(180px,0.7fr)_auto] lg:items-end">
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium">Partner name</label>
-                  <input
-                    value={partnerName}
-                    onChange={(event) => setPartnerName(event.target.value)}
-                    placeholder="Baltic Glass"
-                    className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium">Group</label>
-                  <Select
-                    value={partnerGroupId || "__none__"}
-                    onValueChange={(value) =>
-                      setPartnerGroupId(value === "__none__" ? "" : value)
-                    }
-                  >
-                    <SelectTrigger className="h-10 w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">No group</SelectItem>
-                      {partnerGroups
-                        .filter((group) => group.isActive)
-                        .map((group) => (
-                          <SelectItem key={group.id} value={group.id}>
-                            {group.name}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={handleSavePartner}>
-                    {editingPartnerId ? "Save partner" : "Add partner"}
-                  </Button>
-                  {editingPartnerId && (
-                    <Button variant="outline" onClick={resetPartnerForm}>
-                      Cancel
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm text-muted-foreground">
-                    {selectedPartnerIds.length > 0
-                      ? `${selectedPartnerIds.length} selected`
-                      : " "}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={
-                          partners.length > 0 &&
-                          selectedPartnerIds.length === partners.length
-                        }
-                        onChange={(event) => {
-                          if (event.target.checked) {
-                            setSelectedPartnerIds(
-                              partners.map((partner) => partner.id),
-                            );
-                          } else {
-                            setSelectedPartnerIds([]);
-                          }
-                        }}
-                        disabled={partners.length === 0}
-                      />
-                      Select all
-                    </label>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleDeleteSelectedPartners}
-                      disabled={selectedPartnerIds.length === 0}
-                    >
-                      Remove selected
-                    </Button>
-                  </div>
-                </div>
-                {partners.map((partner) => (
-                  <div
-                    key={partner.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
-                  >
                     <div>
                       <div className="font-medium">{partner.name}</div>
                       <div className="text-xs text-muted-foreground">
@@ -3854,73 +4196,389 @@ export default function SettingsPage() {
                             )?.name ?? "Group")
                           : "No group"}
                       </div>
+                      {(partner.email || partner.phone) && (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {partner.email ? `Email: ${partner.email}` : ""}
+                          {partner.email && partner.phone ? " • " : ""}
+                          {partner.phone ? `Phone: ${partner.phone}` : ""}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <label className="flex items-center gap-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={partner.isActive}
+                            onChange={(event) =>
+                              updatePartner(partner.id, {
+                                isActive: event.target.checked,
+                              })
+                            }
+                          />
+                          Active
+                        </label>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEditPartner(partner.id)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopyPartner(partner.id)}
+                        >
+                          Copy
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={async () => {
+                            if (
+                              !(await confirmRemove(
+                                `Remove partner "${partner.name}"?`,
+                              ))
+                            ) {
+                              return;
+                            }
+                            removePartner(partner.id);
+                          }}
+                        >
+                          Remove
+                        </Button>
                         <input
                           type="checkbox"
-                          checked={partner.isActive}
-                          onChange={(event) =>
-                            updatePartner(partner.id, {
-                              isActive: event.target.checked,
-                            })
-                          }
+                          checked={selectedPartnerIds.includes(partner.id)}
+                          onChange={(event) => {
+                            setSelectedPartnerIds((prev) => {
+                              if (event.target.checked) {
+                                return [...prev, partner.id];
+                              }
+                              return prev.filter((id) => id !== partner.id);
+                            });
+                          }}
                         />
-                        Active
-                      </label>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEditPartner(partner.id)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleCopyPartner(partner.id)}
-                      >
-                        Copy
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={async () => {
-                          if (
-                            !(await confirmRemove(
-                              `Remove partner "${partner.name}"?`,
-                            ))
-                          ) {
-                            return;
-                          }
-                          removePartner(partner.id);
-                        }}
-                      >
-                        Remove
-                      </Button>
-                      <input
-                        type="checkbox"
-                        checked={selectedPartnerIds.includes(partner.id)}
-                        onChange={(event) => {
-                          setSelectedPartnerIds((prev) => {
-                            if (event.target.checked) {
-                              return [...prev, partner.id];
-                            }
-                            return prev.filter((id) => id !== partner.id);
-                          });
-                        }}
-                      />
+                      </div>
                     </div>
-                  </div>
-                ))}
-                {partners.length === 0 && (
-                  <div className="text-sm text-muted-foreground">
-                    No partners yet.
+                  ))}
+                  {partners.length === 0 && (
+                    <div className="text-sm text-muted-foreground">
+                      No partners yet.
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>External job schema</CardTitle>
+                <CardDescription>
+                  Configure the fields captured for outsourced jobs.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {externalJobFields.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                    No external job fields yet. Add your first field to start.
                   </div>
                 )}
-              </div>
-            </CardContent>
-          </Card>
+
+                <div className="text-sm text-muted-foreground">
+                  Add or edit the fields shown on external job forms.
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(140px,0.6fr)_minmax(190px,0.7fr)_minmax(120px,0.4fr)_auto] lg:items-end">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Label</label>
+                    <input
+                      value={externalJobFieldLabel}
+                      onChange={(event) =>
+                        setExternalJobFieldLabel(event.target.value)
+                      }
+                      placeholder="Unit price"
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Type</label>
+                    <Select
+                      value={externalJobFieldType}
+                      onValueChange={(value) =>
+                        setExternalJobFieldType(value as ExternalJobFieldType)
+                      }
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {externalJobFieldTypeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Scope</label>
+                    <Select
+                      value={externalJobFieldScope}
+                      onValueChange={(value) =>
+                        setExternalJobFieldScope(value as ExternalJobFieldScope)
+                      }
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {externalJobFieldScopeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Order</label>
+                    <input
+                      type="number"
+                      value={externalJobFieldSortOrder}
+                      onChange={(event) =>
+                        setExternalJobFieldSortOrder(
+                          Number(event.target.value) || 0,
+                        )
+                      }
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={handleSaveExternalJobField}>
+                      {editingExternalJobFieldId ? "Save field" : "Add field"}
+                    </Button>
+                    {editingExternalJobFieldId && (
+                      <Button
+                        variant="outline"
+                        onClick={resetExternalJobFieldForm}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-sm font-medium">
+                    Unit (optional)
+                    <input
+                      value={externalJobFieldUnit}
+                      onChange={(event) =>
+                        setExternalJobFieldUnit(event.target.value)
+                      }
+                      placeholder="EUR"
+                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm font-medium">
+                    Select options (comma, newline, or backslash separated)
+                    <textarea
+                      value={externalJobFieldOptions}
+                      onChange={(event) =>
+                        setExternalJobFieldOptions(event.target.value)
+                      }
+                      disabled={externalJobFieldType !== "select"}
+                      placeholder="EUR, USD"
+                      className="min-h-[80px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={externalJobFieldRequired}
+                      onChange={(event) =>
+                        setExternalJobFieldRequired(event.target.checked)
+                      }
+                    />
+                    Required
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={externalJobFieldActive}
+                      onChange={(event) =>
+                        setExternalJobFieldActive(event.target.checked)
+                      }
+                    />
+                    Active
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm text-muted-foreground">
+                    {selectedExternalJobFieldIds.length > 0
+                      ? `${selectedExternalJobFieldIds.length} selected`
+                      : " "}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDeleteSelectedExternalJobFields}
+                    disabled={selectedExternalJobFieldIds.length === 0}
+                  >
+                    Remove selected
+                  </Button>
+                </div>
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Label
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Type
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Scope
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Unit
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Order
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Required
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Active
+                        </th>
+                        <th className="px-4 py-2 text-right font-medium">
+                          <div className="flex items-center justify-end gap-2">
+                            <span>Actions</span>
+                            <input
+                              type="checkbox"
+                              checked={
+                                sortedExternalJobFields.length > 0 &&
+                                selectedExternalJobFieldIds.length ===
+                                  sortedExternalJobFields.length
+                              }
+                              onChange={(event) => {
+                                if (event.target.checked) {
+                                  setSelectedExternalJobFieldIds(
+                                    sortedExternalJobFields.map(
+                                      (field) => field.id,
+                                    ),
+                                  );
+                                } else {
+                                  setSelectedExternalJobFieldIds([]);
+                                }
+                              }}
+                            />
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedExternalJobFields.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={8}
+                            className="px-4 py-6 text-center text-muted-foreground"
+                          >
+                            No external job fields configured.
+                          </td>
+                        </tr>
+                      ) : (
+                        sortedExternalJobFields.map((field) => (
+                          <tr key={field.id} className="border-t border-border">
+                            <td className="px-4 py-2">
+                              <div className="font-medium">{field.label}</div>
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {externalJobFieldTypeOptions.find(
+                                (option) => option.value === field.fieldType,
+                              )?.label ?? field.fieldType}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {externalJobFieldScopeOptions.find(
+                                (option) =>
+                                  option.value === (field.scope ?? "manual"),
+                              )?.label ?? "Manual entry"}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {field.unit || "--"}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {field.sortOrder}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {field.isRequired ? "Yes" : "No"}
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              {field.isActive ? "Yes" : "No"}
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <div className="flex justify-end items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    handleEditExternalJobField(field.id)
+                                  }
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    handleCopyExternalJobField(field.id)
+                                  }
+                                >
+                                  Copy
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    handleDeleteExternalJobField(field.id)
+                                  }
+                                >
+                                  Remove
+                                </Button>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedExternalJobFieldIds.includes(
+                                    field.id,
+                                  )}
+                                  onChange={(event) => {
+                                    setSelectedExternalJobFieldIds((prev) => {
+                                      if (event.target.checked) {
+                                        return [...prev, field.id];
+                                      }
+                                      return prev.filter(
+                                        (id) => id !== field.id,
+                                      );
+                                    });
+                                  }}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="users">
@@ -4060,10 +4718,7 @@ export default function SettingsPage() {
                             <Select
                               value={user.role}
                               onValueChange={(value) =>
-                                handleUpdateUserRole(
-                                  user.id,
-                                  value as UserRole,
-                                )
+                                handleUpdateUserRole(user.id, value as UserRole)
                               }
                               disabled={
                                 !currentUser.isAdmin &&
@@ -4075,7 +4730,10 @@ export default function SettingsPage() {
                               </SelectTrigger>
                               <SelectContent>
                                 {userRoleOptions.map((roleOption) => (
-                                  <SelectItem key={roleOption} value={roleOption}>
+                                  <SelectItem
+                                    key={roleOption}
+                                    value={roleOption}
+                                  >
                                     {roleOption}
                                   </SelectItem>
                                 ))}
@@ -4383,7 +5041,8 @@ export default function SettingsPage() {
                       <Button
                         onClick={handleSaveStatusLabels}
                         disabled={
-                          !hasStatusLabelChanges || statusLabelState === "saving"
+                          !hasStatusLabelChanges ||
+                          statusLabelState === "saving"
                         }
                       >
                         {statusLabelState === "saving"
@@ -4405,7 +5064,74 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                    <div className="text-sm font-semibold">Assignment labels</div>
+                    <div className="text-sm font-semibold">
+                      External job status labels
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {externalJobStatusOptions.map((option) => (
+                        <label
+                          key={option.value}
+                          className="space-y-2 text-sm font-medium"
+                        >
+                          {option.label}
+                          <input
+                            value={
+                              externalJobStatusLabelDrafts[option.value] ??
+                              option.label
+                            }
+                            onChange={(event) =>
+                              setExternalJobStatusLabelDrafts((prev) => ({
+                                ...prev,
+                                [option.value]: event.target.value,
+                              }))
+                            }
+                            className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setExternalJobStatusLabelDrafts(
+                            rules.externalJobStatusLabels,
+                          )
+                        }
+                        disabled={!hasExternalJobStatusLabelChanges}
+                      >
+                        Reset
+                      </Button>
+                      <Button
+                        onClick={handleSaveExternalJobStatusLabels}
+                        disabled={
+                          !hasExternalJobStatusLabelChanges ||
+                          externalJobStatusLabelState === "saving"
+                        }
+                      >
+                        {externalJobStatusLabelState === "saving"
+                          ? "Saving..."
+                          : "Save external status labels"}
+                      </Button>
+                      {externalJobStatusLabelState !== "idle" &&
+                        externalJobStatusLabelMessage && (
+                          <span
+                            className={`text-xs ${
+                              externalJobStatusLabelState === "error"
+                                ? "text-destructive"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            {externalJobStatusLabelMessage}
+                          </span>
+                        )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                    <div className="text-sm font-semibold">
+                      Assignment labels
+                    </div>
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       <label className="space-y-2 text-sm font-medium">
                         Engineer
@@ -4561,7 +5287,10 @@ export default function SettingsPage() {
                               </SelectTrigger>
                               <SelectContent>
                                 {attachmentCategoryDrafts.map((category) => (
-                                  <SelectItem key={category.id} value={category.id}>
+                                  <SelectItem
+                                    key={category.id}
+                                    value={category.id}
+                                  >
                                     {category.label}
                                   </SelectItem>
                                 ))}
@@ -4779,7 +5508,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-6 lg:grid-cols-2">
+                <div className="grid gap-6 lg:grid-cols-1">
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                     <div className="text-sm font-semibold">Return reasons</div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -4832,77 +5561,138 @@ export default function SettingsPage() {
                       )}
                     </div>
                   </div>
-
-                  <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                    <div className="text-sm font-semibold">External job rules</div>
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      {rules.externalJobRules.map((rule) => (
-                        <div
-                          key={rule.id}
-                          className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
-                        >
-                          <div className="text-sm font-medium capitalize">
-                            {rule.status.replace("_", " ")}
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>Min</span>
-                            <input
-                              type="number"
-                              min={0}
-                              value={rule.minAttachments}
-                              onChange={(event) =>
-                                updateExternalJobRule(rule.id, {
-                                  minAttachments:
-                                    Number(event.target.value) || 0,
-                                })
-                              }
-                              className="h-8 w-16 rounded-md border border-border bg-input-background px-2 text-sm text-foreground"
-                            />
-                          </div>
-                        </div>
-                      ))}
-                      {rules.externalJobRules.length === 0 && (
-                        <div className="text-sm text-muted-foreground">
-                          No external job rules yet.
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
-
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="integrations">
-          <Card>
-            <CardHeader>
-              <CardTitle>Integrations</CardTitle>
-              <CardDescription>
-                Orders can sync from accounting tools to PWS - coming soon.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {integrations.map((integration) => (
-                <div
-                  key={integration.id}
-                  className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
-                >
-                  <div className="font-medium">{integration.name}</div>
-                  <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                    {integration.status}
-                  </span>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Outbound Email Sender</CardTitle>
+                <CardDescription>
+                  Configure tenant sender identity for partner emails.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="space-y-2 text-sm font-medium">
+                    From name
+                    <input
+                      value={outboundFromName}
+                      onChange={(event) => setOutboundFromName(event.target.value)}
+                      className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                      placeholder={companyName || "Company"}
+                      disabled={!currentUser.isAdmin}
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    From email (tenant domain)
+                    <input
+                      type="email"
+                      value={outboundFromEmail}
+                      onChange={(event) => setOutboundFromEmail(event.target.value)}
+                      className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                      placeholder="orders@your-company.com"
+                      disabled={!currentUser.isAdmin}
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium">
+                    Default reply-to
+                    <input
+                      type="email"
+                      value={outboundReplyToEmail}
+                      onChange={(event) =>
+                        setOutboundReplyToEmail(event.target.value)
+                      }
+                      className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                      placeholder="engineering@your-company.com"
+                      disabled={!currentUser.isAdmin}
+                    />
+                  </label>
+                  <div className="space-y-2 text-sm font-medium">
+                    Sender mode
+                    <label className="flex items-center gap-2 text-sm font-normal">
+                      <input
+                        type="checkbox"
+                        checked={outboundUseUserSender}
+                        onChange={(event) =>
+                          setOutboundUseUserSender(event.target.checked)
+                        }
+                        disabled={!currentUser.isAdmin}
+                      />
+                      Use engineer email as sender when domain matches
+                    </label>
+                    <label className="flex items-center gap-2 text-sm font-normal">
+                      <input
+                        type="checkbox"
+                        checked={outboundSenderVerified}
+                        onChange={(event) =>
+                          setOutboundSenderVerified(event.target.checked)
+                        }
+                        disabled={!currentUser.isAdmin}
+                      />
+                      Domain is verified in Resend
+                    </label>
+                  </div>
                 </div>
-              ))}
-              <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-                Expected flow: accounting order to PWS to production stations.
-              </div>
-              <Button variant="outline" className="w-full">
-                Request integration
-              </Button>
-            </CardContent>
-          </Card>
+                <p className="text-xs text-muted-foreground">
+                  Until tenant domain is verified, emails fallback to global
+                  sender. Reply-to still points to engineer when available.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    onClick={handleSaveOutboundEmail}
+                    disabled={!currentUser.isAdmin || outboundState === "saving"}
+                  >
+                    {outboundState === "saving"
+                      ? "Saving..."
+                      : "Save outbound email"}
+                  </Button>
+                  {outboundMessage ? (
+                    <span
+                      className={`text-xs ${
+                        outboundState === "error"
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {outboundMessage}
+                    </span>
+                  ) : null}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Integrations</CardTitle>
+                <CardDescription>
+                  Orders can sync from accounting tools to PWS - coming soon.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {integrations.map((integration) => (
+                  <div
+                    key={integration.id}
+                    className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
+                  >
+                    <div className="font-medium">{integration.name}</div>
+                    <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                      {integration.status}
+                    </span>
+                  </div>
+                ))}
+                <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  Expected flow: accounting order to PWS to production stations.
+                </div>
+                <Button variant="outline" className="w-full">
+                  Request integration
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
       {dialog}

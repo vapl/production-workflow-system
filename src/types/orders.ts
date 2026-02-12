@@ -4,7 +4,8 @@ export type OrderStatus =
   | "in_engineering"
   | "engineering_blocked"
   | "ready_for_production"
-  | "in_production";
+  | "in_production"
+  | "done";
 
 export type ExternalJobStatus =
   | "requested"
@@ -13,6 +14,34 @@ export type ExternalJobStatus =
   | "delivered"
   | "approved"
   | "cancelled";
+
+export type ExternalJobFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "date"
+  | "select"
+  | "toggle";
+
+export type ExternalJobFieldScope = "manual" | "portal_response";
+
+export interface ExternalJobField {
+  id: string;
+  key: string;
+  label: string;
+  fieldType: ExternalJobFieldType;
+  scope?: ExternalJobFieldScope;
+  unit?: string;
+  options?: string[];
+  isRequired: boolean;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export interface ExternalJobFieldValue {
+  fieldId: string;
+  value: unknown;
+}
 
 export interface OrderAttachment {
   id: string;
@@ -67,10 +96,19 @@ export interface ExternalJob {
   orderId: string;
   partnerId?: string;
   partnerName: string;
+  partnerEmail?: string;
   externalOrderNumber: string;
   quantity?: number;
   dueDate: string;
   status: ExternalJobStatus;
+  requestMode?: "manual" | "partner_portal";
+  partnerRequestComment?: string;
+  partnerRequestSentAt?: string;
+  partnerRequestViewedAt?: string;
+  partnerResponseSubmittedAt?: string;
+  partnerResponseOrderNumber?: string;
+  partnerResponseDueDate?: string;
+  partnerResponseNote?: string;
   deliveryNoteNo?: string;
   receivedAt?: string;
   receivedBy?: string;
@@ -90,6 +128,7 @@ export interface Order {
   dueDate: string; // ISO date string
   priority: "low" | "normal" | "high" | "urgent";
   status: OrderStatus;
+  statusDisplay?: OrderStatus;
   assignedEngineerId?: string;
   assignedEngineerName?: string;
   assignedEngineerAt?: string;

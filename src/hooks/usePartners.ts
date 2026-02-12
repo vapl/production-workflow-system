@@ -35,7 +35,7 @@ export function usePartners() {
         .order("created_at", { ascending: true });
       const partnersQuery = supabase
         .from("partners")
-        .select("id, name, group_id, is_active")
+        .select("id, name, group_id, email, phone, is_active")
         .order("created_at", { ascending: true });
       if (user.tenantId) {
         groupsQuery.eq("tenant_id", user.tenantId);
@@ -59,6 +59,8 @@ export function usePartners() {
           id: row.id,
           name: row.name,
           groupId: row.group_id ?? undefined,
+          email: row.email ?? undefined,
+          phone: row.phone ?? undefined,
           isActive: row.is_active,
         })),
       );

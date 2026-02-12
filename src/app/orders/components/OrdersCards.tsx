@@ -99,17 +99,20 @@ function OrderCard({
         : order.priority === "urgent"
           ? "priority-urgent"
           : "priority-normal";
-    const statusVariant =
-      order.status === "draft"
-        ? "status-draft"
-        : order.status === "ready_for_engineering"
-          ? "status-ready_for_engineering"
-          : order.status === "in_engineering"
-            ? "status-in_engineering"
-            : order.status === "engineering_blocked"
-              ? "status-engineering_blocked"
-              : order.status === "in_production"
-                ? "status-in_production"
+  const displayStatus = order.statusDisplay ?? order.status;
+  const statusVariant =
+    displayStatus === "draft"
+      ? "status-draft"
+      : displayStatus === "ready_for_engineering"
+        ? "status-ready_for_engineering"
+        : displayStatus === "in_engineering"
+          ? "status-in_engineering"
+          : displayStatus === "engineering_blocked"
+            ? "status-engineering_blocked"
+            : displayStatus === "in_production"
+              ? "status-in_production"
+              : displayStatus === "done"
+                ? "status-done"
                 : "status-ready_for_production";
   const today = new Date().toISOString().slice(0, 10);
   const dueDate = order.dueDate ? order.dueDate.slice(0, 10) : "";
@@ -187,7 +190,8 @@ function OrderCard({
         <div className="flex items-center gap-2">
           <Badge variant={priorityVariant}>{order.priority}</Badge>
           <Badge variant={statusVariant}>
-            {rules.statusLabels[order.status] ?? formatOrderStatus(order.status)}
+              {rules.statusLabels[displayStatus] ??
+                formatOrderStatus(displayStatus)}
           </Badge>
           {hasOverdueExternal && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">

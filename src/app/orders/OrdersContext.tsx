@@ -85,6 +85,9 @@ interface OrdersContextValue {
     payload: {
       partnerId?: string;
       partnerName: string;
+      partnerEmail?: string;
+      requestMode?: "manual" | "partner_portal";
+      partnerRequestComment?: string;
       externalOrderNumber: string;
       quantity?: number;
       dueDate: string;
@@ -96,6 +99,8 @@ interface OrdersContextValue {
     patch: Partial<{
       partnerId?: string;
       partnerName: string;
+      partnerEmail?: string;
+      partnerRequestComment?: string;
       externalOrderNumber: string;
       quantity?: number;
       dueDate: string;
@@ -254,10 +259,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     order_id: string;
     partner_id?: string | null;
     partner_name?: string | null;
+    partner_email?: string | null;
     external_order_number: string;
     quantity?: number | null;
     due_date: string;
     status: ExternalJobStatus;
+    request_mode?: "manual" | "partner_portal" | null;
+    partner_request_comment?: string | null;
+    partner_request_sent_at?: string | null;
+    partner_request_viewed_at?: string | null;
+    partner_response_submitted_at?: string | null;
+    partner_response_order_number?: string | null;
+    partner_response_due_date?: string | null;
+    partner_response_note?: string | null;
     delivery_note_no?: string | null;
     received_at?: string | null;
     received_by?: string | null;
@@ -285,10 +299,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     orderId: row.order_id,
     partnerId: row.partner_id ?? undefined,
     partnerName: row.partner_name ?? "Partner",
+    partnerEmail: row.partner_email ?? undefined,
     externalOrderNumber: row.external_order_number,
     quantity: row.quantity ?? undefined,
     dueDate: row.due_date,
     status: row.status,
+    requestMode: row.request_mode ?? undefined,
+    partnerRequestComment: row.partner_request_comment ?? undefined,
+    partnerRequestSentAt: row.partner_request_sent_at ?? undefined,
+    partnerRequestViewedAt: row.partner_request_viewed_at ?? undefined,
+    partnerResponseSubmittedAt: row.partner_response_submitted_at ?? undefined,
+    partnerResponseOrderNumber: row.partner_response_order_number ?? undefined,
+    partnerResponseDueDate: row.partner_response_due_date ?? undefined,
+    partnerResponseNote: row.partner_response_note ?? undefined,
     deliveryNoteNo: row.delivery_note_no ?? undefined,
     receivedAt: row.received_at ?? undefined,
     receivedBy: row.received_by ?? undefined,
@@ -354,10 +377,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       order_id: string;
       partner_id?: string | null;
       partner_name?: string | null;
+      partner_email?: string | null;
       external_order_number: string;
       quantity?: number | null;
       due_date: string;
       status: ExternalJobStatus;
+      request_mode?: "manual" | "partner_portal" | null;
+      partner_request_comment?: string | null;
+      partner_request_sent_at?: string | null;
+      partner_request_viewed_at?: string | null;
+      partner_response_submitted_at?: string | null;
+      partner_response_order_number?: string | null;
+      partner_response_due_date?: string | null;
+      partner_response_note?: string | null;
       created_at: string;
       external_job_attachments?: Array<{
         id: string;
@@ -467,10 +499,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           order_id,
           partner_id,
           partner_name,
+          partner_email,
           external_order_number,
           quantity,
           due_date,
           status,
+          request_mode,
+          partner_request_comment,
+          partner_request_sent_at,
+          partner_request_viewed_at,
+          partner_response_submitted_at,
+          partner_response_order_number,
+          partner_response_due_date,
+          partner_response_note,
           delivery_note_no,
           received_at,
           received_by,
@@ -923,10 +964,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           order_id,
           partner_id,
           partner_name,
+          partner_email,
           external_order_number,
           quantity,
           due_date,
           status,
+          request_mode,
+          partner_request_comment,
+          partner_request_sent_at,
+          partner_request_viewed_at,
+          partner_response_submitted_at,
+          partner_response_order_number,
+          partner_response_due_date,
+          partner_response_note,
           delivery_note_no,
           received_at,
           received_by,
@@ -1147,10 +1197,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           order_id,
           partner_id,
           partner_name,
+          partner_email,
           external_order_number,
           quantity,
           due_date,
           status,
+          request_mode,
+          partner_request_comment,
+          partner_request_sent_at,
+          partner_request_viewed_at,
+          partner_response_submitted_at,
+          partner_response_order_number,
+          partner_response_due_date,
+          partner_response_note,
           delivery_note_no,
           received_at,
           received_by,
@@ -1442,6 +1501,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             orderId,
             partnerId: payload.partnerId,
             partnerName: payload.partnerName,
+            partnerEmail: payload.partnerEmail,
+            requestMode: payload.requestMode ?? "manual",
+            partnerRequestComment: payload.partnerRequestComment,
             externalOrderNumber: payload.externalOrderNumber,
             quantity: payload.quantity,
             dueDate: payload.dueDate,
@@ -1478,6 +1540,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             order_id: orderId,
             partner_id: payload.partnerId ?? null,
             partner_name: payload.partnerName,
+            partner_email: payload.partnerEmail ?? null,
+            request_mode: payload.requestMode ?? "manual",
+            partner_request_comment: payload.partnerRequestComment ?? null,
             external_order_number: payload.externalOrderNumber,
             quantity: payload.quantity ?? null,
             due_date: payload.dueDate,
@@ -1489,6 +1554,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             order_id,
             partner_id,
             partner_name,
+            partner_email,
+            request_mode,
+            partner_request_comment,
             external_order_number,
             quantity,
             due_date,
@@ -1572,6 +1640,11 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           updatePayload.partner_id = patch.partnerId || null;
         if (patch.partnerName !== undefined)
           updatePayload.partner_name = patch.partnerName;
+        if (patch.partnerEmail !== undefined)
+          updatePayload.partner_email = patch.partnerEmail || null;
+        if (patch.partnerRequestComment !== undefined)
+          updatePayload.partner_request_comment =
+            patch.partnerRequestComment || null;
         if (patch.externalOrderNumber !== undefined)
           updatePayload.external_order_number = patch.externalOrderNumber;
         if (patch.quantity !== undefined) updatePayload.quantity = patch.quantity;
@@ -1594,10 +1667,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             order_id,
             partner_id,
             partner_name,
+            partner_email,
             external_order_number,
             quantity,
             due_date,
             status,
+            request_mode,
+            partner_request_comment,
+            partner_request_sent_at,
+            partner_request_viewed_at,
+            partner_response_submitted_at,
+            partner_response_order_number,
+            partner_response_due_date,
+            partner_response_note,
             delivery_note_no,
             received_at,
             received_by,

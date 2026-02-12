@@ -21,9 +21,15 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
-import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
+import {
+  formatDate,
+  formatDateTime,
+  formatOrderStatus,
+} from "@/lib/domain/formatters";
 import type {
+  ExternalJob,
   ExternalJobAttachment,
+  ExternalJobField,
   ExternalJobStatus,
   OrderAttachment,
   OrderComment,
@@ -48,6 +54,8 @@ import { uploadExternalJobAttachment } from "@/lib/uploadExternalJobAttachment";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { usePartners } from "@/hooks/usePartners";
+import { useNotifications } from "@/components/ui/Notifications";
+import { useTenantSubscription } from "@/hooks/useTenantSubscription";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -64,6 +72,71 @@ function formatDuration(totalMinutes?: number | null) {
   const minutes = totalMinutes % 60;
   if (hours === 0) return `${minutes}m`;
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+}
+
+function isEmptyExternalFieldValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (typeof value === "string") {
+    return value.trim().length === 0;
+  }
+  return false;
+}
+
+function parseExternalJobStatus(value: unknown): ExternalJobStatus | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  switch (value) {
+    case "requested":
+    case "ordered":
+    case "in_progress":
+    case "delivered":
+    case "approved":
+    case "cancelled":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function uniqueExternalJobsById(items: ExternalJob[]) {
+  return Array.from(new Map(items.map((item) => [item.id, item])).values());
+}
+
+function normalizeExternalFieldToken(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getExternalFieldSemantic(field: ExternalJobField) {
+  const key = normalizeExternalFieldToken(field.key);
+  const label = normalizeExternalFieldToken(field.label);
+  const tokens = new Set([key, label]);
+  if (
+    tokens.has("external_order_number") ||
+    tokens.has("external_order_no") ||
+    tokens.has("order_number") ||
+    tokens.has("ext_order")
+  ) {
+    return "external_order";
+  }
+  if (tokens.has("due_date") || tokens.has("due")) {
+    return "due_date";
+  }
+  if (
+    tokens.has("unit_price") ||
+    tokens.has("price") ||
+    tokens.has("sum_without_vat") ||
+    tokens.has("amount_ex_vat")
+  ) {
+    return "unit_price";
+  }
+  return "other";
 }
 
 export default function OrderDetailPage() {
@@ -96,6 +169,8 @@ export default function OrderDetailPage() {
   const { confirm, dialog } = useConfirmDialog();
   const { rules } = useWorkflowRules();
   const { activePartners, activeGroups } = usePartners();
+  const { notify } = useNotifications();
+  const { subscription, hasCapability } = useTenantSubscription();
 
   async function confirmRemove(title: string, description?: string) {
     return confirm({
@@ -168,6 +243,8 @@ export default function OrderDetailPage() {
   );
 
   const [orderState, setOrderState] = useState(order);
+  const [productionDisplayStatus, setProductionDisplayStatus] =
+    useState<OrderStatus | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
@@ -196,11 +273,11 @@ export default function OrderDetailPage() {
   const [returnNote, setReturnNote] = useState("");
   const [externalPartnerId, setExternalPartnerId] = useState("");
   const [externalPartnerGroupId, setExternalPartnerGroupId] = useState("");
-  const [externalOrderNumber, setExternalOrderNumber] = useState("");
-  const [externalQuantity, setExternalQuantity] = useState("");
-  const [externalDueDate, setExternalDueDate] = useState("");
-  const [externalStatus, setExternalStatus] =
-    useState<ExternalJobStatus>("requested");
+  const [externalRequestMode, setExternalRequestMode] = useState<
+    "manual" | "partner_portal"
+  >("manual");
+  const [externalPortalComment, setExternalPortalComment] = useState("");
+  const [externalPortalFiles, setExternalPortalFiles] = useState<File[]>([]);
   const [externalError, setExternalError] = useState("");
   const [externalJobFiles, setExternalJobFiles] = useState<
     Record<string, File[]>
@@ -208,9 +285,21 @@ export default function OrderDetailPage() {
   const [externalJobUpload, setExternalJobUpload] = useState<
     Record<string, { isUploading: boolean; error?: string }>
   >({});
+  const [sendingToPartnerJobId, setSendingToPartnerJobId] = useState<
+    string | null
+  >(null);
   const [orderInputFields, setOrderInputFields] = useState<OrderInputField[]>(
     [],
   );
+  const [externalJobFields, setExternalJobFields] = useState<
+    ExternalJobField[]
+  >([]);
+  const [externalJobFieldValues, setExternalJobFieldValues] = useState<
+    Record<string, unknown>
+  >({});
+  const [externalJobValuesByJobId, setExternalJobValuesByJobId] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
   const [orderInputValues, setOrderInputValues] = useState<
     Record<string, unknown>
   >({});
@@ -250,7 +339,8 @@ export default function OrderDetailPage() {
   const canSendToProduction =
     role === "Engineering" && orderState?.status === "in_engineering";
   const canAssignEngineer = role === "Sales" || isAdmin;
-  const canAssignManager = role === "Sales" || isAdmin;
+  const canAssignManager =
+    (role === "Sales" || isAdmin) && role !== "Engineering";
   const canSendBack =
     (role === "Sales" &&
       (orderState?.status === "ready_for_engineering" ||
@@ -269,6 +359,9 @@ export default function OrderDetailPage() {
           ? "ready_for_engineering"
           : "draft"
       : "draft";
+  const canSendExternalJobToPartner = hasCapability(
+    "externalJobs.sendToPartner",
+  );
 
   const activeChecklistItems = rules.checklistItems.filter(
     (item) => item.isActive,
@@ -286,6 +379,10 @@ export default function OrderDetailPage() {
   const visibleStatusHistory = showAllHistory
     ? statusHistory
     : statusHistory.slice(0, 5);
+  const visibleExternalJobs = useMemo(
+    () => uniqueExternalJobsById(orderState?.externalJobs ?? []),
+    [orderState?.externalJobs],
+  );
 
   useEffect(() => {
     if (!orderState?.assignedEngineerId) {
@@ -432,6 +529,99 @@ export default function OrderDetailPage() {
   }, [supabase, tenantId]);
 
   useEffect(() => {
+    if (!supabase || !tenantId) {
+      setExternalJobFields([]);
+      setExternalJobFieldValues({});
+      setExternalJobValuesByJobId({});
+      return;
+    }
+    let isMounted = true;
+    const loadExternalJobFields = async () => {
+      const { data, error } = await supabase
+        .from("external_job_fields")
+        .select(
+          "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+        )
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        return;
+      }
+      const mapped = (data ?? []).map((row) => ({
+        id: row.id,
+        key: row.key,
+        label: row.label,
+        fieldType: row.field_type as ExternalJobField["fieldType"],
+        scope: (row.scope ?? "manual") as ExternalJobField["scope"],
+        unit: row.unit ?? undefined,
+        options: row.options?.options ?? undefined,
+        isRequired: row.is_required ?? false,
+        isActive: row.is_active ?? true,
+        sortOrder: row.sort_order ?? 0,
+      }));
+      setExternalJobFields(mapped);
+      setExternalJobFieldValues((prev) => {
+        const next: Record<string, unknown> = { ...prev };
+        mapped.forEach((field) => {
+          if (field.fieldType === "toggle" && next[field.id] === undefined) {
+            next[field.id] = false;
+          }
+          if (
+            field.key.trim().toLowerCase() === "status" &&
+            next[field.id] === undefined
+          ) {
+            next[field.id] = "requested";
+          }
+        });
+        return next;
+      });
+    };
+    void loadExternalJobFields();
+    return () => {
+      isMounted = false;
+    };
+  }, [supabase, tenantId]);
+
+  useEffect(() => {
+    if (!supabase || !tenantId) {
+      setExternalJobValuesByJobId({});
+      return;
+    }
+    const ids = (orderState?.externalJobs ?? []).map((job) => job.id);
+    if (ids.length === 0) {
+      setExternalJobValuesByJobId({});
+      return;
+    }
+    let isMounted = true;
+    const loadExternalJobValues = async () => {
+      const { data, error } = await supabase
+        .from("external_job_field_values")
+        .select("external_job_id, field_id, value")
+        .eq("tenant_id", tenantId)
+        .in("external_job_id", ids);
+      if (!isMounted || error) {
+        return;
+      }
+      const next: Record<string, Record<string, unknown>> = {};
+      (data ?? []).forEach((row) => {
+        if (!next[row.external_job_id]) {
+          next[row.external_job_id] = {};
+        }
+        next[row.external_job_id][row.field_id] = row.value;
+      });
+      setExternalJobValuesByJobId(next);
+    };
+    void loadExternalJobValues();
+    return () => {
+      isMounted = false;
+    };
+  }, [orderState?.externalJobs, supabase, tenantId]);
+
+  useEffect(() => {
     if (!supabase || !orderState?.id) {
       setOrderInputValues({});
       setOrderInputInitialValues({});
@@ -459,6 +649,34 @@ export default function OrderDetailPage() {
       setOrderInputInitialValues(nextValues);
     };
     void loadOrderInputValues();
+    return () => {
+      isMounted = false;
+    };
+  }, [orderState?.id, supabase]);
+
+  useEffect(() => {
+    if (!supabase || !orderState?.id) {
+      setProductionDisplayStatus(null);
+      return;
+    }
+    let isMounted = true;
+    const loadProductionStatus = async () => {
+      const { data, error } = await supabase
+        .from("production_items")
+        .select("status")
+        .eq("order_id", orderState.id);
+      if (!isMounted) {
+        return;
+      }
+      if (error || !data || data.length === 0) {
+        setProductionDisplayStatus(null);
+        return;
+      }
+      const total = data.length;
+      const done = data.filter((item) => item.status === "done").length;
+      setProductionDisplayStatus(done === total ? "done" : "in_production");
+    };
+    void loadProductionStatus();
     return () => {
       isMounted = false;
     };
@@ -623,6 +841,88 @@ export default function OrderDetailPage() {
         }),
     [orderInputFields],
   );
+  const manualExternalJobFields = useMemo(
+    () =>
+      externalJobFields
+        .filter(
+          (field) => field.isActive && (field.scope ?? "manual") === "manual",
+        )
+        .sort((a, b) => {
+          if (a.sortOrder !== b.sortOrder) {
+            return a.sortOrder - b.sortOrder;
+          }
+          return a.label.localeCompare(b.label);
+        }),
+    [externalJobFields],
+  );
+  const portalResponseExternalJobFields = useMemo(
+    () =>
+      externalJobFields
+        .filter(
+          (field) =>
+            field.isActive && (field.scope ?? "manual") === "portal_response",
+        )
+        .sort((a, b) => {
+          if (a.sortOrder !== b.sortOrder) {
+            return a.sortOrder - b.sortOrder;
+          }
+          return a.label.localeCompare(b.label);
+        }),
+    [externalJobFields],
+  );
+  const externalFieldsByKey = useMemo(() => {
+    const map = new Map<string, ExternalJobField>();
+    manualExternalJobFields.forEach((field) => {
+      map.set(field.key.trim().toLowerCase(), field);
+    });
+    return map;
+  }, [manualExternalJobFields]);
+
+  const getExternalFieldValueByKeys = (...keys: string[]) => {
+    for (const key of keys) {
+      const field = externalFieldsByKey.get(key.trim().toLowerCase());
+      if (!field) {
+        continue;
+      }
+      return externalJobFieldValues[field.id];
+    }
+    return undefined;
+  };
+
+  const formatExternalFieldValue = (
+    field: ExternalJobField,
+    value: unknown,
+    mode?: ExternalJob["requestMode"],
+    partnerName?: string,
+  ): string => {
+    const semantic = getExternalFieldSemantic(field);
+    const isPortal = mode === "partner_portal";
+    const showPending =
+      isPortal &&
+      (semantic === "external_order" ||
+        semantic === "due_date" ||
+        semantic === "unit_price");
+    if (value === null || value === undefined) {
+      if (showPending) {
+        return `pending from ${partnerName ?? "partner"}`;
+      }
+      return "--";
+    }
+    if (field.fieldType === "toggle") {
+      return value === true ? "Yes" : "No";
+    }
+    if (field.fieldType === "date" && typeof value === "string" && value) {
+      return formatDate(value);
+    }
+    const text = String(value);
+    if (!text) {
+      if (showPending) {
+        return `pending from ${partnerName ?? "partner"}`;
+      }
+      return "--";
+    }
+    return field.unit ? `${text} ${field.unit}` : text;
+  };
   const orderInputGroups = useMemo(() => {
     const groups = new Map<string, OrderInputField[]>();
     activeOrderInputFields.forEach((field) => {
@@ -639,7 +939,9 @@ export default function OrderDetailPage() {
     }
     if (field.fieldType === "toggle_number") {
       const raw =
-        typeof value === "object" && value !== null ? (value as any) : {};
+        typeof value === "object" && value !== null
+          ? (value as { enabled?: boolean; amount?: number | string | null })
+          : {};
       const enabled = Boolean(raw.enabled);
       const amount =
         raw.amount === "" || raw.amount === null || raw.amount === undefined
@@ -731,16 +1033,21 @@ export default function OrderDetailPage() {
         : orderState.priority === "urgent"
           ? "priority-urgent"
           : "priority-normal";
+  const displayStatus = productionDisplayStatus ?? orderState.status;
   const statusVariant =
-    orderState.status === "draft"
+    displayStatus === "draft"
       ? "status-draft"
-      : orderState.status === "ready_for_engineering"
+      : displayStatus === "ready_for_engineering"
         ? "status-ready_for_engineering"
-        : orderState.status === "in_engineering"
+        : displayStatus === "in_engineering"
           ? "status-in_engineering"
-          : orderState.status === "engineering_blocked"
+          : displayStatus === "engineering_blocked"
             ? "status-engineering_blocked"
-            : "status-ready_for_production";
+            : displayStatus === "in_production"
+              ? "status-in_production"
+              : displayStatus === "done"
+                ? "status-done"
+                : "status-ready_for_production";
   const externalJobStatusLabels: Record<ExternalJobStatus, string> = {
     requested: "Requested",
     ordered: "Ordered",
@@ -748,6 +1055,7 @@ export default function OrderDetailPage() {
     delivered: "In Stock",
     approved: "Approved",
     cancelled: "Cancelled",
+    ...rules.externalJobStatusLabels,
   };
   const externalJobStatusVariant = (status: ExternalJobStatus) => {
     switch (status) {
@@ -769,6 +1077,33 @@ export default function OrderDetailPage() {
   const externalMinAttachmentsForStatus = (status: ExternalJobStatus) => {
     const rule = rules.externalJobRules.find((item) => item.status === status);
     return rule?.minAttachments ?? 0;
+  };
+  const buildExternalTimeline = (job: ExternalJob) => {
+    const events: Array<{ label: string; at: string }> = [
+      { label: "Created", at: job.createdAt },
+    ];
+    if (job.partnerRequestSentAt) {
+      events.push({ label: "Sent", at: job.partnerRequestSentAt });
+    }
+    if (job.partnerRequestViewedAt) {
+      events.push({ label: "Viewed", at: job.partnerRequestViewedAt });
+    }
+    if (job.partnerResponseSubmittedAt) {
+      events.push({ label: "Responded", at: job.partnerResponseSubmittedAt });
+    }
+    const confirmed = (job.statusHistory ?? []).find(
+      (entry) => entry.status === "approved" || entry.status === "delivered",
+    );
+    if (confirmed) {
+      events.push({ label: "Confirmed manually", at: confirmed.changedAt });
+    }
+    return events
+      .slice()
+      .sort((a, b) => a.at.localeCompare(b.at))
+      .map((item) => ({
+        ...item,
+        at: formatDateTime(item.at),
+      }));
   };
   function handleFilesAdded(files: FileList | File[]) {
     const next = Array.from(files);
@@ -1017,7 +1352,9 @@ export default function OrderDetailPage() {
           {label}
           <Select
             value={
-              normalized === undefined || normalized === null || normalized === ""
+              normalized === undefined ||
+              normalized === null ||
+              normalized === ""
                 ? "__none__"
                 : String(normalized)
             }
@@ -1516,9 +1853,13 @@ export default function OrderDetailPage() {
   }
 
   async function handleAddExternalJob() {
-    const trimmedOrderNumber = externalOrderNumber.trim();
-    if (!externalPartnerId || !trimmedOrderNumber || !externalDueDate) {
-      setExternalError("Partner, order number, and due date are required.");
+    const isPortalMode = externalRequestMode === "partner_portal";
+    if (isPortalMode && !canSendExternalJobToPartner) {
+      setExternalError("Send to partner is available on Pro plan.");
+      return;
+    }
+    if (!externalPartnerId) {
+      setExternalError("Partner is required.");
       return;
     }
     const partner = activePartners.find(
@@ -1528,31 +1869,252 @@ export default function OrderDetailPage() {
       setExternalError("Select a valid partner.");
       return;
     }
+    if (!isPortalMode) {
+      const missingRequired = manualExternalJobFields.find((field) => {
+        if (!field.isRequired) {
+          return false;
+        }
+        const value = externalJobFieldValues[field.id];
+        if (field.fieldType === "toggle") {
+          return value === undefined;
+        }
+        return isEmptyExternalFieldValue(value);
+      });
+      if (missingRequired) {
+        setExternalError(`"${missingRequired.label}" is required.`);
+        return;
+      }
+    }
+    const externalOrderNumberRaw = isPortalMode
+      ? undefined
+      : getExternalFieldValueByKeys(
+          "external_order_number",
+          "external_order_no",
+          "order_number",
+        );
+    const dueDateRaw = isPortalMode
+      ? undefined
+      : getExternalFieldValueByKeys("due_date", "due");
+    const statusRaw = isPortalMode
+      ? "requested"
+      : getExternalFieldValueByKeys("status");
+    const quantityRaw = isPortalMode
+      ? undefined
+      : getExternalFieldValueByKeys("quantity", "qty");
+    const resolvedExternalOrderNumber =
+      isPortalMode
+        ? `REQ-${Date.now().toString().slice(-6)}`
+        : typeof externalOrderNumberRaw === "string" &&
+            externalOrderNumberRaw.trim().length > 0
+          ? externalOrderNumberRaw.trim()
+          : `EXT-${Date.now().toString().slice(-6)}`;
+    const resolvedDueDate =
+      isPortalMode
+        ? orderState.dueDate
+        : typeof dueDateRaw === "string" && dueDateRaw.trim().length > 0
+          ? dueDateRaw
+          : new Date().toISOString().slice(0, 10);
+    const resolvedStatus = parseExternalJobStatus(statusRaw) ?? "requested";
+    const resolvedQuantity =
+      typeof quantityRaw === "number"
+        ? quantityRaw
+        : typeof quantityRaw === "string" && quantityRaw.trim()
+          ? Number(quantityRaw)
+          : undefined;
     setExternalError("");
     const created = await addExternalJob(orderState.id, {
       partnerId: partner.id,
       partnerName: partner.name,
-      externalOrderNumber: trimmedOrderNumber,
-      quantity: externalQuantity ? Number(externalQuantity) : undefined,
-      dueDate: externalDueDate,
-      status: externalStatus,
+      partnerEmail: partner.email,
+      requestMode: externalRequestMode,
+      partnerRequestComment: isPortalMode
+        ? externalPortalComment.trim() || undefined
+        : undefined,
+      externalOrderNumber: resolvedExternalOrderNumber,
+      quantity:
+        resolvedQuantity !== undefined && !Number.isNaN(resolvedQuantity)
+          ? resolvedQuantity
+          : undefined,
+      dueDate: resolvedDueDate,
+      status: resolvedStatus,
     });
     if (created) {
+      let createdWithAttachments = created;
+      if (!isPortalMode && supabase && tenantId && manualExternalJobFields.length > 0) {
+        const rows = manualExternalJobFields
+          .map((field) => {
+            const raw = externalJobFieldValues[field.id];
+            if (
+              field.fieldType !== "toggle" &&
+              isEmptyExternalFieldValue(raw)
+            ) {
+              return null;
+            }
+            let value: unknown = raw;
+            if (field.fieldType === "number") {
+              if (typeof raw === "string") {
+                value = raw.trim() ? Number(raw) : null;
+              }
+              if (value === null || Number.isNaN(value)) {
+                return null;
+              }
+            }
+            return {
+              tenant_id: tenantId,
+              external_job_id: created.id,
+              field_id: field.id,
+              value,
+            };
+          })
+          .filter((row): row is NonNullable<typeof row> => Boolean(row));
+        if (rows.length > 0) {
+          await supabase.from("external_job_field_values").insert(rows);
+          setExternalJobValuesByJobId((prev) => ({
+            ...prev,
+            [created.id]: rows.reduce<Record<string, unknown>>((acc, row) => {
+              acc[row.field_id] = row.value;
+              return acc;
+            }, {}),
+          }));
+        }
+      }
+
+      if (isPortalMode && externalPortalFiles.length > 0) {
+        const uploadedAttachments: ExternalJobAttachment[] = [];
+        for (const file of externalPortalFiles) {
+          const upload = await uploadExternalJobAttachment(file, created.id);
+          if (upload.error || !upload.attachment) {
+            setExternalError(upload.error ?? "Failed to upload partner request files.");
+            continue;
+          }
+          const attached = await addExternalJobAttachment(created.id, {
+            name: upload.attachment.name,
+            url: upload.attachment.url,
+            size: upload.attachment.size,
+            mimeType: upload.attachment.mimeType,
+            addedBy: name,
+            addedByRole: role,
+            category: "partner_request",
+          });
+          if (attached) {
+            uploadedAttachments.push(attached);
+          }
+        }
+        if (uploadedAttachments.length > 0) {
+          createdWithAttachments = {
+            ...createdWithAttachments,
+            attachments: [
+              ...uploadedAttachments,
+              ...(createdWithAttachments.attachments ?? []),
+            ],
+          };
+        }
+      }
+
       setOrderState((prev) =>
         prev
           ? {
               ...prev,
-              externalJobs: [created, ...(prev.externalJobs ?? [])],
+              externalJobs: uniqueExternalJobsById([
+                createdWithAttachments,
+                ...(prev.externalJobs ?? []),
+              ]),
             }
           : prev,
       );
       setExternalPartnerId("");
       setExternalPartnerGroupId("");
-      setExternalOrderNumber("");
-      setExternalQuantity("");
-      setExternalDueDate("");
-      setExternalStatus("requested");
+      if (isPortalMode) {
+        await handleSendToPartner(created.id);
+        setExternalPortalComment("");
+        setExternalPortalFiles([]);
+      } else {
+        setExternalJobFieldValues((prev) => {
+          const next: Record<string, unknown> = {};
+          manualExternalJobFields.forEach((field) => {
+            if (field.fieldType === "toggle") {
+              next[field.id] = false;
+            } else if (field.key.trim().toLowerCase() === "status") {
+              next[field.id] = "requested";
+            } else if (prev[field.id] !== undefined) {
+              next[field.id] = "";
+            }
+          });
+          return { ...prev, ...next };
+        });
+      }
     }
+  }
+
+  async function handleSendToPartner(externalJobId: string) {
+    if (!supabase) {
+      setExternalError("Supabase is not configured.");
+      return;
+    }
+    if (!canSendExternalJobToPartner) {
+      setExternalError("Send to partner is available on Pro plan.");
+      return;
+    }
+    setExternalError("");
+    setSendingToPartnerJobId(externalJobId);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      setSendingToPartnerJobId(null);
+      setExternalError("Please sign in again.");
+      return;
+    }
+
+    const response = await fetch("/api/external-jobs/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ externalJobId }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      expiresAt?: string;
+    };
+
+    if (!response.ok) {
+      if (payload.error === "feature_not_available") {
+        setExternalError("This feature is available on Pro plan.");
+      } else {
+        setExternalError(payload.error ?? "Failed to send to partner.");
+      }
+      setSendingToPartnerJobId(null);
+      return;
+    }
+
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            externalJobs: (prev.externalJobs ?? []).map((job) =>
+              job.id === externalJobId
+                ? {
+                    ...job,
+                    requestMode: "partner_portal",
+                    partnerRequestSentAt: new Date().toISOString(),
+                    status: job.status === "requested" ? "ordered" : job.status,
+                  }
+                : job,
+            ),
+          }
+        : prev,
+    );
+    notify({
+      title: "Request sent to partner",
+      description: payload.expiresAt
+        ? `Secure link expires ${formatDateTime(payload.expiresAt)}`
+        : undefined,
+      variant: "success",
+    });
+    setSendingToPartnerJobId(null);
   }
 
   async function handleExternalStatusChange(
@@ -1603,6 +2165,11 @@ export default function OrderDetailPage() {
     }
     const removed = await removeExternalJob(externalJobId);
     if (removed) {
+      setExternalJobValuesByJobId((prev) => {
+        const next = { ...prev };
+        delete next[externalJobId];
+        return next;
+      });
       setOrderState((prev) =>
         prev
           ? {
@@ -2075,7 +2642,7 @@ export default function OrderDetailPage() {
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Badge variant={priorityVariant}>{orderState.priority}</Badge>
               <Badge variant={statusVariant}>
-                {statusLabel(orderState.status)}
+                {statusLabel(displayStatus)}
               </Badge>
               <Button
                 variant="ghost"
@@ -2177,9 +2744,26 @@ export default function OrderDetailPage() {
                   </div>
                 )}
                 {activeOrderInputFields.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No order inputs configured yet.
-                  </p>
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
+                    <p className="text-sm font-medium">
+                      No order inputs configured
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Order inputs are used to capture sales details and
+                      production scope for each order.
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Configure fields in Settings -&gt; Structure -&gt; Order
+                      inputs, then return here.
+                    </p>
+                    <div className="mt-3">
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href="/settings?tab=structure">
+                          Open settings
+                        </Link>
+                      </Button>
+                    </div>
+                  </div>
                 ) : (
                   <div className="space-y-6">
                     {Array.from(orderInputGroups.entries()).map(
@@ -2276,7 +2860,13 @@ export default function OrderDetailPage() {
                 </div>
               </CardContent>
             </Card>
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div
+              className={`grid gap-6 ${
+                activeChecklistItems.length > 0
+                  ? "lg:grid-cols-[minmax(0,1fr)_360px]"
+                  : "lg:grid-cols-1"
+              }`}
+            >
               <Card className="lg:sticky lg:top-6">
                 <CardHeader>
                   <CardTitle>Workflow</CardTitle>
@@ -2287,7 +2877,7 @@ export default function OrderDetailPage() {
                       {orderState.priority}
                     </Badge>
                     <Badge variant={statusVariant}>
-                      {statusLabel(orderState.status)}
+                      {statusLabel(displayStatus)}
                     </Badge>
                   </div>
 
@@ -2376,8 +2966,12 @@ export default function OrderDetailPage() {
                     {canAssignManager && (
                       <div className="flex flex-wrap items-center gap-2">
                         <Select
-                          value={selectedManagerId}
-                          onValueChange={setSelectedManagerId}
+                          value={selectedManagerId || "__none__"}
+                          onValueChange={(value) =>
+                            setSelectedManagerId(
+                              value === "__none__" ? "" : value,
+                            )
+                          }
                         >
                           <SelectTrigger className="h-8 w-[220px] rounded-md text-xs">
                             <SelectValue
@@ -2385,14 +2979,16 @@ export default function OrderDetailPage() {
                             />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">
+                            <SelectItem value="__none__">
                               Assign {managerLabel.toLowerCase()}...
                             </SelectItem>
-                            {managers.map((manager) => (
-                              <SelectItem key={manager.id} value={manager.id}>
-                                {manager.name}
-                              </SelectItem>
-                            ))}
+                            {managers
+                              .filter((manager) => manager.id)
+                              .map((manager) => (
+                                <SelectItem key={manager.id} value={manager.id}>
+                                  {manager.name}
+                                </SelectItem>
+                              ))}
                           </SelectContent>
                         </Select>
                         <Button
@@ -2427,8 +3023,12 @@ export default function OrderDetailPage() {
                     {canAssignEngineer && (
                       <div className="flex flex-wrap items-center gap-2">
                         <Select
-                          value={selectedEngineerId}
-                          onValueChange={setSelectedEngineerId}
+                          value={selectedEngineerId || "__none__"}
+                          onValueChange={(value) =>
+                            setSelectedEngineerId(
+                              value === "__none__" ? "" : value,
+                            )
+                          }
                         >
                           <SelectTrigger className="h-8 w-[220px] rounded-md text-xs">
                             <SelectValue
@@ -2436,14 +3036,19 @@ export default function OrderDetailPage() {
                             />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">
+                            <SelectItem value="__none__">
                               Assign {engineerLabel.toLowerCase()}...
                             </SelectItem>
-                            {engineers.map((engineer) => (
-                              <SelectItem key={engineer.id} value={engineer.id}>
-                                {engineer.name}
-                              </SelectItem>
-                            ))}
+                            {engineers
+                              .filter((engineer) => engineer.id)
+                              .map((engineer) => (
+                                <SelectItem
+                                  key={engineer.id}
+                                  value={engineer.id}
+                                >
+                                  {engineer.name}
+                                </SelectItem>
+                              ))}
                           </SelectContent>
                         </Select>
                         <Button
@@ -2480,52 +3085,56 @@ export default function OrderDetailPage() {
                   </div>
                 </CardContent>
               </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Preparation Checklist</CardTitle>
-                    <div className="text-xs text-muted-foreground">
-                      {checklistDoneCount}/{activeChecklistItems.length}
+              {activeChecklistItems.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Preparation Checklist</CardTitle>
+                      <div className="text-xs text-muted-foreground">
+                        {checklistDoneCount}/{activeChecklistItems.length}
+                      </div>
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  {activeChecklistItems.length === 0 ? (
-                    <p className="text-muted-foreground">
-                      No checklist items configured.
-                    </p>
-                  ) : (
-                    activeChecklistItems.map((item) => (
-                      <label
-                        key={item.id}
-                        className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                      >
-                        <span className="font-medium">{item.label}</span>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(checklistState[item.id])}
-                          onChange={(event) =>
-                            handleChecklistToggle(item.id, event.target.checked)
-                          }
-                        />
-                      </label>
-                    ))
-                  )}
-                  {canSendToEngineering && !canAdvanceToEngineering && (
-                    <p className="text-xs text-muted-foreground">
-                      Complete required attachments, comments, and checklist
-                      items before sending to engineering.
-                    </p>
-                  )}
-                  {canSendToProduction && !canAdvanceToProduction && (
-                    <p className="text-xs text-muted-foreground">
-                      Complete required attachments, comments, and checklist
-                      items before sending to production.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    {activeChecklistItems.length === 0 ? (
+                      <p className="text-muted-foreground">
+                        No checklist items configured.
+                      </p>
+                    ) : (
+                      activeChecklistItems.map((item) => (
+                        <label
+                          key={item.id}
+                          className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                        >
+                          <span className="font-medium">{item.label}</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(checklistState[item.id])}
+                            onChange={(event) =>
+                              handleChecklistToggle(
+                                item.id,
+                                event.target.checked,
+                              )
+                            }
+                          />
+                        </label>
+                      ))
+                    )}
+                    {canSendToEngineering && !canAdvanceToEngineering && (
+                      <p className="text-xs text-muted-foreground">
+                        Complete required attachments, comments, and checklist
+                        items before sending to engineering.
+                      </p>
+                    )}
+                    {canSendToProduction && !canAdvanceToProduction && (
+                      <p className="text-xs text-muted-foreground">
+                        Complete required attachments, comments, and checklist
+                        items before sending to production.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
             </div>
             <Card>
               <CardHeader>
@@ -2826,7 +3435,52 @@ export default function OrderDetailPage() {
                 <CardTitle>External Jobs</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
-                <div className="grid gap-3 lg:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Request mode</div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setExternalRequestMode("manual")}
+                      className={`rounded-lg border px-3 py-2 text-left ${
+                        externalRequestMode === "manual"
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-background"
+                      }`}
+                    >
+                      <div className="font-medium">Manual entry</div>
+                      <div className="text-xs text-muted-foreground">
+                        Partner replies by email, data is entered manually.
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (canSendExternalJobToPartner) {
+                          setExternalRequestMode("partner_portal");
+                        }
+                      }}
+                      className={`rounded-lg border px-3 py-2 text-left ${
+                        externalRequestMode === "partner_portal"
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-background"
+                      } ${!canSendExternalJobToPartner ? "opacity-60" : ""}`}
+                    >
+                      <div className="font-medium">Send via partner portal</div>
+                      <div className="text-xs text-muted-foreground">
+                        Secure link + structured response form.
+                      </div>
+                      {!canSendExternalJobToPartner ? (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Available on Pro.
+                        </div>
+                      ) : null}
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  className="grid gap-3 lg:grid-cols-2"
+                >
                   <label className="space-y-2 text-sm font-medium">
                     Partner group
                     <Select
@@ -2877,76 +3531,276 @@ export default function OrderDetailPage() {
                       </SelectContent>
                     </Select>
                   </label>
-                  <label className="space-y-2 text-sm font-medium">
-                    External order #
-                    <input
-                      value={externalOrderNumber}
-                      onChange={(event) =>
-                        setExternalOrderNumber(event.target.value)
-                      }
-                      placeholder="BG-5512"
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </label>
-                  <label className="space-y-2 text-sm font-medium">
-                    Quantity
-                    <input
-                      type="number"
-                      min={0}
-                      value={externalQuantity}
-                      onChange={(event) =>
-                        setExternalQuantity(event.target.value)
-                      }
-                      placeholder="1"
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </label>
-                  <DatePicker
-                    label="Due date"
-                    value={externalDueDate}
-                    onChange={setExternalDueDate}
-                    className="space-y-2 text-sm font-medium"
-                    triggerClassName="h-10"
-                  />
-                  <label className="space-y-2 text-sm font-medium">
-                    Status
-                    <Select
-                      value={externalStatus}
-                      onValueChange={(value) =>
-                        setExternalStatus(value as ExternalJobStatus)
-                      }
-                    >
-                      <SelectTrigger className="h-10 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(externalJobStatusLabels).map(
-                          ([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
-                            </SelectItem>
-                          ),
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </label>
                 </div>
+                {externalRequestMode === "manual" ? (
+                  manualExternalJobFields.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        {manualExternalJobFields.map((field) => {
+                          const rawValue = externalJobFieldValues[field.id];
+                          if (field.fieldType === "toggle") {
+                            return (
+                              <label
+                                key={field.id}
+                                className="flex h-10 items-center gap-2 rounded-lg border border-border bg-input-background px-3 text-sm"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={rawValue === true}
+                                  onChange={(event) =>
+                                    setExternalJobFieldValues((prev) => ({
+                                      ...prev,
+                                      [field.id]: event.target.checked,
+                                    }))
+                                  }
+                                />
+                                <span>
+                                  {field.label}
+                                  {field.isRequired ? " *" : ""}
+                                </span>
+                              </label>
+                            );
+                          }
+                          if (field.fieldType === "select") {
+                            const isStatusField =
+                              field.key.trim().toLowerCase() === "status";
+                            const selectOptions = isStatusField
+                              ? Object.entries(externalJobStatusLabels).map(
+                                  ([value, label]) => ({
+                                    value,
+                                    label,
+                                  }),
+                                )
+                              : (field.options ?? []).map((option) => ({
+                                  value: option,
+                                  label: option,
+                                }));
+                            return (
+                              <label
+                                key={field.id}
+                                className="space-y-2 text-sm font-medium"
+                              >
+                                {field.label}
+                                <Select
+                                  value={
+                                    typeof rawValue === "string" && rawValue
+                                      ? rawValue
+                                      : "__none__"
+                                  }
+                                  onValueChange={(value) =>
+                                    setExternalJobFieldValues((prev) => ({
+                                      ...prev,
+                                      [field.id]:
+                                        value === "__none__" ? "" : value,
+                                    }))
+                                  }
+                                >
+                                  <SelectTrigger className="h-10 w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">
+                                      Select value
+                                    </SelectItem>
+                                    {selectOptions.map((option) => (
+                                      <SelectItem
+                                        key={option.value}
+                                        value={option.value}
+                                      >
+                                        {option.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </label>
+                            );
+                          }
+                          if (field.fieldType === "date") {
+                            return (
+                              <DatePicker
+                                key={field.id}
+                                label={field.label}
+                                value={
+                                  typeof rawValue === "string" ? rawValue : ""
+                                }
+                                onChange={(value) =>
+                                  setExternalJobFieldValues((prev) => ({
+                                    ...prev,
+                                    [field.id]: value,
+                                  }))
+                                }
+                                className="space-y-2 text-sm font-medium"
+                                triggerClassName="h-10"
+                              />
+                            );
+                          }
+                          if (field.fieldType === "textarea") {
+                            return (
+                              <label
+                                key={field.id}
+                                className="space-y-2 text-sm font-medium"
+                              >
+                                {field.label}
+                                <textarea
+                                  value={
+                                    typeof rawValue === "string" ? rawValue : ""
+                                  }
+                                  onChange={(event) =>
+                                    setExternalJobFieldValues((prev) => ({
+                                      ...prev,
+                                      [field.id]: event.target.value,
+                                    }))
+                                  }
+                                  className="min-h-[80px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                                />
+                              </label>
+                            );
+                          }
+                          return (
+                            <label
+                              key={field.id}
+                              className="space-y-2 text-sm font-medium"
+                            >
+                              {field.label}
+                              <input
+                                type={
+                                  field.fieldType === "number"
+                                    ? "number"
+                                    : "text"
+                                }
+                                value={
+                                  typeof rawValue === "string" ||
+                                  typeof rawValue === "number"
+                                    ? String(rawValue)
+                                    : ""
+                                }
+                                onChange={(event) =>
+                                  setExternalJobFieldValues((prev) => ({
+                                    ...prev,
+                                    [field.id]: event.target.value,
+                                  }))
+                                }
+                                className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
+                      <p className="text-sm font-medium">
+                        No external job fields configured
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        External Jobs is used to track outsourced work with
+                        partners: order details, deadlines, pricing, and delivery
+                        notes.
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Configure fields in Settings -&gt; Partners -&gt; External
+                        job schema, then return here.
+                      </p>
+                      <div className="mt-3">
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href="/settings?tab=partners">Open settings</Link>
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="space-y-3 rounded-lg border border-border bg-muted/10 px-4 py-3">
+                    <label className="space-y-2 text-sm font-medium">
+                      Comment for partner (optional)
+                      <textarea
+                        value={externalPortalComment}
+                        onChange={(event) =>
+                          setExternalPortalComment(event.target.value)
+                        }
+                        placeholder="Add request note for partner..."
+                        className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">
+                        Files for partner (optional)
+                      </div>
+                      <input
+                        type="file"
+                        multiple
+                        onChange={(event) => {
+                          const files = Array.from(event.target.files ?? []);
+                          if (files.length === 0) {
+                            return;
+                          }
+                          const oversized = files.find(
+                            (file) => file.size > MAX_FILE_SIZE_BYTES,
+                          );
+                          if (oversized) {
+                            setExternalError(
+                              `${oversized.name} exceeds ${MAX_FILE_SIZE_MB}MB limit.`,
+                            );
+                            return;
+                          }
+                          setExternalPortalFiles((prev) => [...prev, ...files]);
+                          event.target.value = "";
+                        }}
+                        className="text-sm"
+                      />
+                      {externalPortalFiles.length > 0 ? (
+                        <div className="space-y-2">
+                          {externalPortalFiles.map((file, index) => (
+                            <div
+                              key={`${file.name}-${index}`}
+                              className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-xs"
+                            >
+                              <span>{file.name}</span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  setExternalPortalFiles((prev) =>
+                                    prev.filter((_, idx) => idx !== index),
+                                  )
+                                }
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          No files selected.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {externalError && (
                   <p className="text-xs text-destructive">{externalError}</p>
                 )}
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Plan: <span className="font-medium">{subscription.planCode}</span>{" "}
+                  {canSendExternalJobToPartner
+                    ? "includes Send to partner."
+                    : "supports manual entry only. Send to partner is available on Pro."}
+                </div>
                 <div className="flex justify-end">
                   <Button onClick={handleAddExternalJob}>
-                    Add external job
+                    {externalRequestMode === "partner_portal"
+                      ? "Create portal request"
+                      : "Add external job"}
                   </Button>
                 </div>
 
-                {(orderState.externalJobs ?? []).length === 0 ? (
+                {visibleExternalJobs.length === 0 ? (
                   <p className="text-muted-foreground">
                     No external jobs added yet.
                   </p>
                 ) : (
                   <div className="space-y-3">
-                    {(orderState.externalJobs ?? []).map((job) => {
+                    {visibleExternalJobs.map((job) => {
                       const pendingFiles = externalJobFiles[job.id] ?? [];
                       const uploadState = externalJobUpload[job.id];
                       const partnerGroupName =
@@ -2974,13 +3828,99 @@ export default function OrderDetailPage() {
                                   </span>
                                 ) : null}
                               </div>
-                              <div className="text-xs text-muted-foreground">
-                                {job.externalOrderNumber} • Due{" "}
-                                {formatDate(job.dueDate)}
-                              </div>
                               {job.quantity !== undefined && (
                                 <div className="text-xs text-muted-foreground">
                                   Qty: {job.quantity}
+                                </div>
+                              )}
+                              <div className="mt-2 rounded-md border border-border bg-muted/20 px-2 py-2">
+                                <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                                  Timeline
+                                </div>
+                                <div className="space-y-1">
+                                  {buildExternalTimeline(job).map((item) => (
+                                    <div
+                                      key={`${job.id}-${item.label}-${item.at}`}
+                                      className="flex items-center justify-between gap-2 text-xs"
+                                    >
+                                      <span className="text-muted-foreground">
+                                        {item.label}
+                                      </span>
+                                      <span>{item.at}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              {job.partnerRequestComment ? (
+                                <div className="text-xs text-muted-foreground">
+                                  Request note: {job.partnerRequestComment}
+                                </div>
+                              ) : null}
+                              {job.partnerResponseNote ? (
+                                <div className="text-xs text-muted-foreground">
+                                  Note: {job.partnerResponseNote}
+                                </div>
+                              ) : null}
+                              {(job.requestMode === "partner_portal"
+                                ? portalResponseExternalJobFields.length > 0
+                                  ? portalResponseExternalJobFields
+                                  : manualExternalJobFields
+                                : manualExternalJobFields
+                              ).length > 0 && (
+                                <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                                  {(job.requestMode === "partner_portal"
+                                    ? portalResponseExternalJobFields.length > 0
+                                      ? portalResponseExternalJobFields
+                                      : manualExternalJobFields
+                                    : manualExternalJobFields
+                                  ).map((field, index, fields) => {
+                                    const semantic = getExternalFieldSemantic(field);
+                                    if (
+                                      semantic !== "other" &&
+                                      fields
+                                        .slice(0, index)
+                                        .some(
+                                          (candidate) =>
+                                            getExternalFieldSemantic(candidate) ===
+                                            semantic,
+                                        )
+                                    ) {
+                                      return null;
+                                    }
+                                    const value =
+                                      externalJobValuesByJobId[job.id]?.[
+                                        field.id
+                                      ];
+                                    const fallbackValue =
+                                      semantic === "external_order"
+                                        ? job.requestMode === "partner_portal"
+                                          ? job.partnerResponseOrderNumber
+                                          : job.externalOrderNumber
+                                        : semantic === "due_date"
+                                          ? job.requestMode === "partner_portal"
+                                            ? job.partnerResponseDueDate
+                                            : job.dueDate
+                                          : semantic === "unit_price" &&
+                                              job.requestMode !== "partner_portal"
+                                            ? job.unitPrice
+                                            : undefined;
+                                    const resolvedValue = isEmptyExternalFieldValue(
+                                      value,
+                                    )
+                                      ? fallbackValue
+                                      : value;
+                                    return (
+                                      <div key={field.id}>
+                                        {field.label}:{" "}
+                                        {formatExternalFieldValue(
+                                          field,
+                                          resolvedValue,
+                                          job.requestMode,
+                                          job.partnerName,
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
@@ -2990,6 +3930,26 @@ export default function OrderDetailPage() {
                               >
                                 {externalJobStatusLabels[job.status]}
                               </Badge>
+                              {canSendExternalJobToPartner ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleSendToPartner(job.id)}
+                                  disabled={sendingToPartnerJobId === job.id}
+                                >
+                                  {sendingToPartnerJobId === job.id
+                                    ? "Sending..."
+                                    : job.requestMode === "partner_portal"
+                                      ? "Resend request"
+                                      : job.partnerRequestSentAt
+                                        ? "Resend request"
+                                        : "Send to partner"}
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Manual entry (Basic)
+                                </span>
+                              )}
                               <Select
                                 value={job.status}
                                 onValueChange={(value) =>
@@ -3289,11 +4249,13 @@ export default function OrderDetailPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Select reason</SelectItem>
-                    {rules.returnReasons.map((reason) => (
-                      <SelectItem key={reason} value={reason}>
-                        {reason}
-                      </SelectItem>
-                    ))}
+                    {rules.returnReasons
+                      .filter((reason) => reason.trim() !== "")
+                      .map((reason) => (
+                        <SelectItem key={reason} value={reason}>
+                          {reason}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </label>
@@ -3351,3 +4313,4 @@ export default function OrderDetailPage() {
     </section>
   );
 }
+
