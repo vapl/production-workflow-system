@@ -8,7 +8,8 @@ export interface TenantSubscription {
 
 export type TenantCapability =
   | "externalJobs.manualEntry"
-  | "externalJobs.sendToPartner";
+  | "externalJobs.sendToPartner"
+  | "orderInputs.aiPdfImport";
 
 export const defaultTenantSubscription: TenantSubscription = {
   planCode: "basic",
@@ -29,8 +30,13 @@ export function hasTenantCapability(
           (effective.status === "active" || effective.status === "trial")) ??
         false
       );
+    case "orderInputs.aiPdfImport":
+      return (
+        (effective.planCode === "pro" &&
+          (effective.status === "active" || effective.status === "trial")) ??
+        false
+      );
     default:
       return false;
   }
 }
-

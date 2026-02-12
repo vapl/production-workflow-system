@@ -13,6 +13,7 @@ export type OrderInputTableColumnType = "text" | "number" | "select";
 export interface OrderInputTableColumn {
   key: string;
   label: string;
+  aiKey?: string;
   fieldType: OrderInputTableColumnType;
   unit?: string;
   options?: string[];

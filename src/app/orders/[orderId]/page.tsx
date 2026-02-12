@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import {
   Select,
   SelectContent,
@@ -21,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { Tooltip } from "@/components/ui/Tooltip";
 import {
   formatDate,
   formatDateTime,
@@ -35,7 +37,7 @@ import type {
   OrderComment,
   OrderStatus,
 } from "@/types/orders";
-import type { OrderInputField } from "@/types/orderInputs";
+import type { OrderInputField, OrderInputTableColumn } from "@/types/orderInputs";
 import Link from "next/link";
 import {
   ArrowLeftIcon,
@@ -43,6 +45,7 @@ import {
   FileTextIcon,
   ImageIcon,
   PencilIcon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import { OrderModal } from "@/app/orders/components/OrderModal";
@@ -194,9 +197,14 @@ export default function OrderDetailPage() {
       }, {}),
     [attachmentCategories],
   );
-  const defaultAttachmentRole = isAdmin ? "Admin" : role;
+  const roleDefaultAttachmentCategory =
+    rules.attachmentCategoryDefaults?.[role];
+  const adminDefaultAttachmentCategory = isAdmin
+    ? rules.attachmentCategoryDefaults?.Admin
+    : undefined;
   const defaultAttachmentCategory =
-    rules.attachmentCategoryDefaults?.[defaultAttachmentRole] ??
+    roleDefaultAttachmentCategory ??
+    adminDefaultAttachmentCategory ??
     attachmentCategories[0]?.id ??
     "order_documents";
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -311,6 +319,15 @@ export default function OrderDetailPage() {
   >({});
   const [orderInputError, setOrderInputError] = useState("");
   const [isSavingOrderInputs, setIsSavingOrderInputs] = useState(false);
+  const [tableImportAttachmentIds, setTableImportAttachmentIds] = useState<
+    Record<string, string>
+  >({});
+  const [tableImportNotices, setTableImportNotices] = useState<
+    Record<string, string>
+  >({});
+  const [isParsingTableFieldId, setIsParsingTableFieldId] = useState<
+    string | null
+  >(null);
   const [expandedExternalHistory, setExpandedExternalHistory] = useState<
     Record<string, boolean>
   >({});
@@ -362,6 +379,7 @@ export default function OrderDetailPage() {
   const canSendExternalJobToPartner = hasCapability(
     "externalJobs.sendToPartner",
   );
+  const canUseAiOrderInputImport = hasCapability("orderInputs.aiPdfImport");
 
   const activeChecklistItems = rules.checklistItems.filter(
     (item) => item.isActive,
@@ -699,6 +717,28 @@ export default function OrderDetailPage() {
   ]);
 
   const attachments = orderState?.attachments ?? [];
+  const productionDocumentationParseAttachments = useMemo(
+    () =>
+      attachments.filter((attachment) => {
+        const categoryLabel = attachment.category
+          ? (attachmentCategoryLabels[attachment.category] ?? attachment.category)
+          : "";
+        const normalizedCategory = categoryLabel.trim().toLowerCase();
+        const isProductionDocumentation =
+          normalizedCategory === "production documentation";
+        const nameLower = attachment.name.toLowerCase();
+        const mimeLower = (attachment.mimeType ?? "").toLowerCase();
+        const isSupported =
+          nameLower.endsWith(".pdf") ||
+          nameLower.endsWith(".xlsx") ||
+          nameLower.endsWith(".xls") ||
+          mimeLower.includes("application/pdf") ||
+          mimeLower.includes("excel") ||
+          mimeLower.includes("spreadsheet");
+        return isProductionDocumentation && isSupported;
+      }),
+    [attachments, attachmentCategoryLabels],
+  );
   const comments = orderState?.comments ?? [];
   useEffect(() => {
     if (!supabase) {
@@ -817,15 +857,6 @@ export default function OrderDetailPage() {
       items,
     }));
   }, [attachments]);
-  const canAdvanceToEngineering =
-    meetsEngineeringChecklist &&
-    meetsEngineeringAttachments &&
-    meetsEngineeringComment;
-  const canAdvanceToProduction =
-    meetsProductionChecklist &&
-    meetsProductionAttachments &&
-    meetsProductionComment;
-
   const activeOrderInputFields = useMemo(
     () =>
       orderInputFields
@@ -841,6 +872,24 @@ export default function OrderDetailPage() {
         }),
     [orderInputFields],
   );
+  const hasRequiredOrderInputs = activeOrderInputFields
+    .filter((field) => field.isRequired)
+    .every((field) =>
+      shouldPersistOrderInputValue(
+        field,
+        normalizeOrderInputValue(field, orderInputValues[field.id]),
+      ),
+    );
+  const canAdvanceToEngineering =
+    meetsEngineeringChecklist &&
+    meetsEngineeringAttachments &&
+    meetsEngineeringComment &&
+    (!rules.requireOrderInputsForEngineering || hasRequiredOrderInputs);
+  const canAdvanceToProduction =
+    meetsProductionChecklist &&
+    meetsProductionAttachments &&
+    meetsProductionComment &&
+    (!rules.requireOrderInputsForProduction || hasRequiredOrderInputs);
   const manualExternalJobFields = useMemo(
     () =>
       externalJobFields
@@ -989,6 +1038,87 @@ export default function OrderDetailPage() {
       return Boolean(normalized);
     }
     return Boolean(String(normalized ?? "").trim());
+  };
+  const normalizeAiCellValue = (
+    value: unknown,
+    column: OrderInputTableColumn,
+  ): unknown => {
+    if (column.fieldType === "number") {
+      if (typeof value === "number") {
+        return String(value);
+      }
+      return typeof value === "string" ? value.trim() : "";
+    }
+    if (column.fieldType === "select") {
+      const maxSelect = Math.max(1, Math.min(3, column.maxSelect ?? 1));
+      const options = (column.options ?? []).map((item) => item.trim());
+      const optionMap = new Map(
+        options.map((item) => [
+          item.trim().toLowerCase(),
+          item,
+        ]),
+      );
+      const values = Array.isArray(value)
+        ? value
+            .map((item) =>
+              typeof item === "string" ? item.trim() : String(item ?? ""),
+            )
+            .filter(Boolean)
+        : typeof value === "string"
+          ? value
+              .split(/[\/;,\n]+/)
+              .map((item) => item.trim())
+              .filter(Boolean)
+          : [];
+      const normalizedValues = values.map((item) => {
+        const mapped = optionMap.get(item.toLowerCase());
+        return mapped ?? item;
+      });
+      if (maxSelect === 1) {
+        return normalizedValues[0] ?? "";
+      }
+      return normalizedValues.slice(0, maxSelect);
+    }
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    return value === null || value === undefined ? "" : String(value);
+  };
+  const normalizeAiTableRows = (
+    rows: unknown[],
+    columns: OrderInputTableColumn[],
+  ) => {
+    return rows
+      .map((row) => {
+        if (!row || typeof row !== "object") {
+          return null;
+        }
+        const source = row as Record<string, unknown>;
+        const next: Record<string, unknown> = {};
+        columns.forEach((column) => {
+          const fromKey = source[column.key];
+          const fromLabel = source[column.label];
+          const fromAiKey = column.aiKey ? source[column.aiKey] : undefined;
+          const rawValue =
+            fromKey !== undefined
+              ? fromKey
+              : fromLabel !== undefined
+                ? fromLabel
+                : fromAiKey !== undefined
+                  ? fromAiKey
+                  : "";
+          next[column.key] = normalizeAiCellValue(rawValue, column);
+        });
+        const hasAnyValue = columns.some((column) => {
+          const value = next[column.key];
+          if (Array.isArray(value)) {
+            return value.length > 0;
+          }
+          return String(value ?? "").trim().length > 0;
+        });
+        return hasAnyValue ? next : null;
+      })
+      .filter((row): row is Record<string, unknown> => Boolean(row));
   };
   const isOrderInputsDirty = useMemo(
     () =>
@@ -1261,6 +1391,148 @@ export default function OrderDetailPage() {
     setIsSavingOrderInputs(false);
   }
 
+  async function handleParseTableFieldWithAi(field: OrderInputField) {
+    if (field.fieldType !== "table") {
+      return;
+    }
+    const attachmentId = tableImportAttachmentIds[field.id];
+    if (!attachmentId) {
+      setTableImportNotices((prev) => ({
+        ...prev,
+        [field.id]:
+          "Choose a file from Files & Comments (Production documentation).",
+      }));
+      return;
+    }
+    if (!supabase) {
+      setTableImportNotices((prev) => ({
+        ...prev,
+        [field.id]: "Supabase is not configured.",
+      }));
+      return;
+    }
+    if (!canUseAiOrderInputImport) {
+      setTableImportNotices((prev) => ({
+        ...prev,
+        [field.id]: "AI import is available on Pro plan.",
+      }));
+      return;
+    }
+    const columns = field.columns ?? [];
+    if (columns.length === 0) {
+      setTableImportNotices((prev) => ({
+        ...prev,
+        [field.id]: "Add table columns in settings before AI import.",
+      }));
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      setTableImportNotices((prev) => ({
+        ...prev,
+        [field.id]: "Please sign in again.",
+      }));
+      return;
+    }
+
+    setIsParsingTableFieldId(field.id);
+    setTableImportNotices((prev) => ({ ...prev, [field.id]: "" }));
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 95000);
+      let response: Response;
+      try {
+        response = await fetch("/api/order-inputs/ai-parse", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            orderId: orderState.id,
+            attachmentId,
+            columns: columns.map((column) => ({
+              key: column.key,
+              label: column.label,
+              aiKey: column.aiKey,
+              fieldType: column.fieldType,
+              options: column.options ?? [],
+              maxSelect: column.maxSelect ?? 1,
+            })),
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        rows?: unknown[];
+        parserModel?: string;
+      };
+      if (!response.ok) {
+        const message =
+          payload.error === "feature_not_available"
+            ? "AI import is available on Pro plan."
+            : payload.error ?? "Failed to parse PDF.";
+        setTableImportNotices((prev) => ({ ...prev, [field.id]: message }));
+        return;
+      }
+      const normalizedRows = normalizeAiTableRows(payload.rows ?? [], columns);
+      let totalRowsCount = normalizedRows.length;
+      setOrderInputValues((prev) => {
+        const existingRows = Array.isArray(prev[field.id])
+          ? (prev[field.id] as Array<Record<string, unknown>>)
+          : [];
+        const nextRows = [...existingRows, ...normalizedRows];
+        totalRowsCount = nextRows.length;
+        return {
+          ...prev,
+          [field.id]: nextRows,
+        };
+      });
+      setTableImportNotices((prev) => ({
+        ...prev,
+        [field.id]:
+          normalizedRows.length > 0
+            ? `AI added ${normalizedRows.length} row(s). Total rows: ${totalRowsCount}. AI-generated results may contain errors, so review and verify all values before saving.`
+            : `No rows detected in PDF.${payload.parserModel ? ` Model: ${payload.parserModel}.` : ""}`,
+      }));
+      notify({
+        title:
+          normalizedRows.length > 0
+            ? "PDF parsed"
+            : "No rows detected",
+        description:
+          normalizedRows.length > 0
+            ? `Detected ${normalizedRows.length} row(s) for ${field.label}.`
+            : "Check the selected PDF and table columns.",
+        variant: normalizedRows.length > 0 ? "success" : "warning",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error && error.name === "AbortError"
+          ? "Parsing timed out. Try a smaller PDF or fewer columns."
+          : "Failed to parse PDF.";
+      setTableImportNotices((prev) => ({
+        ...prev,
+        [field.id]: message,
+      }));
+      notify({
+        title: "PDF parse failed",
+        description: message,
+        variant: "error",
+      });
+    } finally {
+      setIsParsingTableFieldId(null);
+    }
+  }
+
   function renderOrderInputField(field: OrderInputField) {
     const value = orderInputValues[field.id];
     const normalized = normalizeOrderInputValue(field, value);
@@ -1390,6 +1662,15 @@ export default function OrderDetailPage() {
           .split(/[\/;]+/)
           .map((item) => item.trim())
           .filter(Boolean);
+      const selectedAttachmentId = tableImportAttachmentIds[field.id] ?? "";
+      const availableParseAttachments = productionDocumentationParseAttachments;
+      const selectedAttachment = availableParseAttachments.find(
+        (item) => item.id === selectedAttachmentId,
+      );
+      const aiButtonTooltipBasic =
+        "Add with AI reads the selected Production documentation file and appends detected rows into this table. Available on Pro subscription.";
+      const importNotice = tableImportNotices[field.id] ?? "";
+      const isParsingThisField = isParsingTableFieldId === field.id;
       const selectedRows = tableRowSelections[field.id] ?? [];
       const allSelected =
         rows.length > 0 && selectedRows.length === rows.length;
@@ -1459,9 +1740,82 @@ export default function OrderDetailPage() {
       };
       return (
         <div key={field.id} className="md:col-span-2 space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-medium">{label}</div>
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {canUseAiOrderInputImport && (
+                <Select
+                  value={selectedAttachmentId || "__none__"}
+                  onValueChange={(value) => {
+                    const nextId = value === "__none__" ? "" : value;
+                    setTableImportAttachmentIds((prev) => ({
+                      ...prev,
+                      [field.id]: nextId,
+                    }));
+                    setTableImportNotices((prev) => ({
+                      ...prev,
+                      [field.id]: nextId ? "" : "Choose a PDF first.",
+                    }));
+                  }}
+                  disabled={!canEditOrderInputs || isParsingThisField}
+                >
+                  <SelectTrigger className="h-9 w-[260px] max-w-full min-w-0">
+                    <SelectValue
+                      placeholder="Choose PDF/XLSX from Production documentation"
+                      className="block max-w-[200px] truncate text-left"
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Choose file</SelectItem>
+                    {availableParseAttachments.map((attachment) => (
+                      <SelectItem
+                        key={attachment.id}
+                        value={attachment.id}
+                        className="max-w-[420px]"
+                      >
+                        {attachment.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {canUseAiOrderInputImport ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleParseTableFieldWithAi(field)}
+                  disabled={!canEditOrderInputs || isParsingThisField}
+                >
+                  {isParsingThisField ? (
+                    <>
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <SparklesIcon className="h-4 w-4 text-sky-500" />
+                      Add with AI
+                    </>
+                  )}
+                </Button>
+              ) : (
+                <Tooltip
+                  content={aiButtonTooltipBasic}
+                  className="max-w-[320px] text-xs"
+                >
+                  <span className="inline-flex">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleParseTableFieldWithAi(field)}
+                      disabled
+                    >
+                      <SparklesIcon className="h-4 w-4 text-sky-500" />
+                      Add with AI
+                    </Button>
+                  </span>
+                </Tooltip>
+              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -1480,12 +1834,42 @@ export default function OrderDetailPage() {
               </Button>
             </div>
           </div>
+          {importNotice && (
+            <div className="text-xs text-muted-foreground">{importNotice}</div>
+          )}
+          {canUseAiOrderInputImport && selectedAttachment && (
+            <div className="text-xs text-muted-foreground">
+              Source: {selectedAttachment.name}
+            </div>
+          )}
+          {canUseAiOrderInputImport && availableParseAttachments.length === 0 && (
+            <div className="text-xs text-muted-foreground">
+              No supported files (PDF/XLSX/XLS) found in Files & Comments category &quot;Production documentation&quot;.
+            </div>
+          )}
+          {!canUseAiOrderInputImport && (
+            <div className="text-xs text-muted-foreground">
+              AI PDF import is available on Pro plan.
+            </div>
+          )}
+          {canUseAiOrderInputImport && (
+            <div className="text-xs text-amber-700">
+              AI-generated results may contain errors. Always review and verify
+              values before saving inputs.
+            </div>
+          )}
           {columns.length === 0 ? (
             <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
               No columns configured for this table field.
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-border">
+              {isParsingThisField && (
+                <LoadingSpinner
+                  className="justify-start border-b border-border px-3 py-2"
+                  label="Adding rows with AI..."
+                />
+              )}
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
@@ -2581,35 +2965,6 @@ export default function OrderDetailPage() {
     );
   }
 
-  const nextGate =
-    orderState.status === "draft"
-      ? "engineering"
-      : orderState.status === "in_engineering"
-        ? "production"
-        : null;
-  const nextChecklistItems =
-    nextGate === "engineering"
-      ? requiredForEngineering
-      : nextGate === "production"
-        ? requiredForProduction
-        : [];
-  const nextChecklistDone = nextChecklistItems.filter(
-    (item) => checklistState[item.id],
-  ).length;
-  const nextChecklistTotal = nextChecklistItems.length;
-  const nextMinAttachments =
-    nextGate === "engineering"
-      ? rules.minAttachmentsForEngineering
-      : nextGate === "production"
-        ? rules.minAttachmentsForProduction
-        : 0;
-  const nextRequireComment =
-    nextGate === "engineering"
-      ? rules.requireCommentForEngineering
-      : nextGate === "production"
-        ? rules.requireCommentForProduction
-        : false;
-
   return (
     <section className="space-y-6">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-4">
@@ -2633,9 +2988,9 @@ export default function OrderDetailPage() {
               </Link>
               <TabsList className="min-w-max h-9 shadow-sm **:data-[slot=tabs-trigger]:h-7 **:data-[slot=tabs-trigger]:py-1">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="files">Files & Comments</TabsTrigger>
                 <TabsTrigger value="details">Order details</TabsTrigger>
                 <TabsTrigger value="workflow">Workflow</TabsTrigger>
-                <TabsTrigger value="files">Files & Comments</TabsTrigger>
                 <TabsTrigger value="external">External Jobs</TabsTrigger>
               </TabsList>
             </div>
@@ -2807,60 +3162,7 @@ export default function OrderDetailPage() {
         </TabsContent>
 
         <TabsContent value="workflow">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Workflow summary</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                <div className="rounded-md border border-border px-3 py-2">
-                  <div className="text-xs text-muted-foreground">Next step</div>
-                  <div className="mt-1 font-medium">
-                    {nextGate === "engineering"
-                      ? "Engineering"
-                      : nextGate === "production"
-                        ? "Production"
-                        : "—"}
-                  </div>
-                  {nextGate && (
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      Checklist {nextChecklistDone}/{nextChecklistTotal || 0}
-                    </div>
-                  )}
-                </div>
-                <div className="rounded-md border border-border px-3 py-2">
-                  <div className="text-xs text-muted-foreground">
-                    Attachments
-                  </div>
-                  <div className="mt-1 font-medium">
-                    {attachments.length}/{nextMinAttachments}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {nextGate ? "Required for next step" : "—"}
-                  </div>
-                </div>
-                <div className="rounded-md border border-border px-3 py-2">
-                  <div className="text-xs text-muted-foreground">Comment</div>
-                  <div className="mt-1 font-medium">
-                    {nextGate
-                      ? nextRequireComment
-                        ? comments.length > 0
-                          ? "Added"
-                          : "Required"
-                        : "Optional"
-                      : "—"}
-                  </div>
-                  {orderState.statusChangedAt && (
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {`Updated ${formatDate(
-                        orderState.statusChangedAt.slice(0, 10),
-                      )}`}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-            <div
+          <div className="space-y-6"><div
               className={`grid gap-6 ${
                 activeChecklistItems.length > 0
                   ? "lg:grid-cols-[minmax(0,1fr)_360px]"
@@ -3123,13 +3425,21 @@ export default function OrderDetailPage() {
                     {canSendToEngineering && !canAdvanceToEngineering && (
                       <p className="text-xs text-muted-foreground">
                         Complete required attachments, comments, and checklist
-                        items before sending to engineering.
+                        items
+                        {rules.requireOrderInputsForEngineering
+                          ? ", and required order inputs"
+                          : ""}
+                        {" "}before sending to engineering.
                       </p>
                     )}
                     {canSendToProduction && !canAdvanceToProduction && (
                       <p className="text-xs text-muted-foreground">
                         Complete required attachments, comments, and checklist
-                        items before sending to production.
+                        items
+                        {rules.requireOrderInputsForProduction
+                          ? ", and required order inputs"
+                          : ""}
+                        {" "}before sending to production.
                       </p>
                     )}
                   </CardContent>
@@ -4313,4 +4623,5 @@ export default function OrderDetailPage() {
     </section>
   );
 }
+
 

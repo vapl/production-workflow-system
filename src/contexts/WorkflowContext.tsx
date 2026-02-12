@@ -22,6 +22,8 @@ export interface WorkflowRules {
   minAttachmentsForProduction: number;
   requireCommentForEngineering: boolean;
   requireCommentForProduction: boolean;
+  requireOrderInputsForEngineering: boolean;
+  requireOrderInputsForProduction: boolean;
   dueSoonDays: number;
   dueIndicatorEnabled: boolean;
   dueIndicatorStatuses: OrderStatus[];
@@ -109,6 +111,8 @@ const defaultRules: WorkflowRules = {
   minAttachmentsForProduction: 1,
   requireCommentForEngineering: true,
   requireCommentForProduction: true,
+  requireOrderInputsForEngineering: true,
+  requireOrderInputsForProduction: true,
   dueSoonDays: 5,
   dueIndicatorEnabled: true,
   dueIndicatorStatuses: [
@@ -440,7 +444,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           supabase
             .from("workflow_rules")
             .select(
-              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, external_job_status_labels, order_status_config, external_job_status_config, assignment_labels, attachment_categories, attachment_category_defaults",
+              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, require_order_inputs_engineering, require_order_inputs_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, external_job_status_labels, order_status_config, external_job_status_config, assignment_labels, attachment_categories, attachment_category_defaults",
             )
             .eq("tenant_id", user.tenantId)
             .maybeSingle(),
@@ -505,6 +509,12 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         requireCommentForProduction:
           rulesData?.require_comment_production ??
           prev.requireCommentForProduction,
+        requireOrderInputsForEngineering:
+          rulesData?.require_order_inputs_engineering ??
+          prev.requireOrderInputsForEngineering,
+        requireOrderInputsForProduction:
+          rulesData?.require_order_inputs_production ??
+          prev.requireOrderInputsForProduction,
         dueSoonDays: rulesData?.due_soon_days ?? prev.dueSoonDays,
         dueIndicatorEnabled:
           rulesData?.due_indicator_enabled ?? prev.dueIndicatorEnabled,
@@ -554,6 +564,10 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           min_attachments_production: defaultRules.minAttachmentsForProduction,
           require_comment_engineering: defaultRules.requireCommentForEngineering,
           require_comment_production: defaultRules.requireCommentForProduction,
+          require_order_inputs_engineering:
+            defaultRules.requireOrderInputsForEngineering,
+          require_order_inputs_production:
+            defaultRules.requireOrderInputsForProduction,
           due_soon_days: defaultRules.dueSoonDays,
           due_indicator_enabled: defaultRules.dueIndicatorEnabled,
           due_indicator_statuses: defaultRules.dueIndicatorStatuses,
@@ -637,6 +651,10 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
               min_attachments_production: next.minAttachmentsForProduction,
               require_comment_engineering: next.requireCommentForEngineering,
               require_comment_production: next.requireCommentForProduction,
+              require_order_inputs_engineering:
+                next.requireOrderInputsForEngineering,
+              require_order_inputs_production:
+                next.requireOrderInputsForProduction,
               due_soon_days: next.dueSoonDays,
               due_indicator_enabled: next.dueIndicatorEnabled,
               due_indicator_statuses: next.dueIndicatorStatuses,

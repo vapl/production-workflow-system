@@ -359,6 +359,10 @@ export default function SettingsPage() {
   const [orderFieldColumns, setOrderFieldColumns] = useState<
     OrderInputTableColumn[]
   >([]);
+  const [dragColumnIndex, setDragColumnIndex] = useState<number | null>(null);
+  const [dragOverColumnIndex, setDragOverColumnIndex] = useState<number | null>(
+    null,
+  );
   const [orderFieldRequired, setOrderFieldRequired] = useState(false);
   const [orderFieldActive, setOrderFieldActive] = useState(true);
   const [orderFieldShowInProduction, setOrderFieldShowInProduction] =
@@ -1887,12 +1891,32 @@ export default function SettingsPage() {
   function addOrderFieldColumn() {
     setOrderFieldColumns((prev) => [
       ...prev,
-      { key: "", label: "", fieldType: "text", maxSelect: 1 },
+      { key: "", label: "", aiKey: "", fieldType: "text", maxSelect: 1 },
     ]);
   }
 
   function removeOrderFieldColumn(index: number) {
     setOrderFieldColumns((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
+  function reorderOrderFieldColumns(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) {
+      return;
+    }
+    setOrderFieldColumns((prev) => {
+      if (
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= prev.length ||
+        toIndex >= prev.length
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
   }
 
   function parseOrderFieldOptions(value: string) {
@@ -2005,6 +2029,7 @@ export default function SettingsPage() {
               return {
                 key: columnKey,
                 label: trimmedColumnLabel,
+                aiKey: column.aiKey?.trim() || undefined,
                 fieldType: column.fieldType,
                 unit: column.unit?.trim() || undefined,
                 options: columnOptions,
@@ -2097,6 +2122,7 @@ export default function SettingsPage() {
     setOrderFieldColumns(
       target.columns?.map((column) => ({
         ...column,
+        aiKey: column.aiKey ?? "",
         options: column.options ?? [],
         maxSelect: column.maxSelect ?? 1,
       })) ?? [],
@@ -2694,7 +2720,7 @@ export default function SettingsPage() {
                       className="min-h-[120px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
                     />
                     <div className="text-xs text-muted-foreground">
-                      Optional code: use "Label | Code" or "Label;Code".
+                      Optional code: use &quot;Label | Code&quot; or &quot;Label;Code&quot;.
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -2945,7 +2971,7 @@ export default function SettingsPage() {
                     />
                   </label>
                   <label className="flex flex-col gap-2 text-sm font-medium">
-                    Select options (comma, newline, or "\" separated)
+                    Select options (comma, newline, or &quot;\&quot; separated)
                     <textarea
                       value={orderFieldOptions}
                       onChange={(event) =>
@@ -2962,6 +2988,9 @@ export default function SettingsPage() {
                   <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="text-sm font-medium">Table columns</div>
+                      <div className="text-xs text-muted-foreground">
+                        Drag rows to reorder columns
+                      </div>
                       <Button
                         size="sm"
                         variant="outline"
@@ -2977,8 +3006,43 @@ export default function SettingsPage() {
                     ) : (
                       <div className="space-y-3">
                         {orderFieldColumns.map((column, index) => (
-                          <div key={index} className="space-y-2">
-                            <div className="grid gap-2 md:grid-cols-[1.4fr_0.9fr_0.7fr_0.5fr_auto] md:items-end">
+                          <div
+                            key={index}
+                            className={`group space-y-2 rounded-md border px-2 py-2 transition-colors ${
+                              dragOverColumnIndex === index
+                                ? "border-primary/50 bg-primary/5"
+                                : "border-border hover:border-primary/40"
+                            }`}
+                            draggable
+                            onDragStart={() => {
+                              setDragColumnIndex(index);
+                              setDragOverColumnIndex(index);
+                            }}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              setDragOverColumnIndex(index);
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              if (dragColumnIndex === null) {
+                                return;
+                              }
+                              reorderOrderFieldColumns(dragColumnIndex, index);
+                              setDragColumnIndex(null);
+                              setDragOverColumnIndex(null);
+                            }}
+                            onDragEnd={() => {
+                              setDragColumnIndex(null);
+                              setDragOverColumnIndex(null);
+                            }}
+                          >
+                            <div className="grid gap-2 md:grid-cols-[24px_1.4fr_1fr_0.9fr_0.7fr_0.5fr_auto] md:items-end">
+                              <div
+                                className="mb-2 select-none text-center text-xs text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100 md:mb-0 md:cursor-grab"
+                                title="Drag to reorder"
+                              >
+                                ||
+                              </div>
                               <label className="flex flex-col gap-1 text-xs font-medium">
                                 Label
                                 <input
@@ -2989,6 +3053,19 @@ export default function SettingsPage() {
                                     })
                                   }
                                   placeholder="Position"
+                                  className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                AI key (optional)
+                                <input
+                                  value={column.aiKey ?? ""}
+                                  onChange={(event) =>
+                                    updateOrderFieldColumn(index, {
+                                      aiKey: event.target.value,
+                                    })
+                                  }
+                                  placeholder="construction"
                                   className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
                                 />
                               </label>
@@ -3046,27 +3123,29 @@ export default function SettingsPage() {
                                   className="h-4 w-4"
                                 />
                               </label>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={async () => {
-                                  if (
-                                    !(await confirmRemove(
-                                      "Remove this column?",
-                                    ))
-                                  ) {
-                                    return;
-                                  }
-                                  removeOrderFieldColumn(index);
-                                }}
-                              >
-                                Remove
-                              </Button>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={async () => {
+                                    if (
+                                      !(await confirmRemove(
+                                        "Remove this column?",
+                                      ))
+                                    ) {
+                                      return;
+                                    }
+                                    removeOrderFieldColumn(index);
+                                  }}
+                                >
+                                  Remove
+                                </Button>
+                              </div>
                             </div>
                             {column.fieldType === "select" && (
                               <div className="grid gap-2 md:grid-cols-[1fr_160px] md:items-end">
                                 <label className="flex flex-col gap-1 text-xs font-medium">
-                                  Options (comma, newline, or \"\\\" separated)
+                                  Options (comma, newline, or &quot;\\&quot; separated)
                                   <textarea
                                     value={(column.options ?? []).join("\n")}
                                     onChange={(event) =>
@@ -5029,6 +5108,32 @@ export default function SettingsPage() {
                         }
                       />
                       Require comment before production
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={rules.requireOrderInputsForEngineering}
+                        onChange={(event) =>
+                          setRules({
+                            requireOrderInputsForEngineering:
+                              event.target.checked,
+                          })
+                        }
+                      />
+                      Require order inputs before engineering
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={rules.requireOrderInputsForProduction}
+                        onChange={(event) =>
+                          setRules({
+                            requireOrderInputsForProduction:
+                              event.target.checked,
+                          })
+                        }
+                      />
+                      Require order inputs before production
                     </label>
                   </div>
                   <div className="mt-4 rounded-lg border border-border bg-background/60 p-3">
