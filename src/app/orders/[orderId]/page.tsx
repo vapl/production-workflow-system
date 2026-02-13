@@ -59,6 +59,7 @@ import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { usePartners } from "@/hooks/usePartners";
 import { useNotifications } from "@/components/ui/Notifications";
 import { useTenantSubscription } from "@/hooks/useTenantSubscription";
+import { useRbac } from "@/contexts/RbacContext";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -169,6 +170,7 @@ export default function OrderDetailPage() {
   } = useOrders();
   const { levels, nodes } = useHierarchy();
   const { role, isAdmin, name, id: userId, tenantId } = useCurrentUser();
+  const { hasPermission } = useRbac();
   const { confirm, dialog } = useConfirmDialog();
   const { rules } = useWorkflowRules();
   const { activePartners, activeGroups } = usePartners();
@@ -380,6 +382,7 @@ export default function OrderDetailPage() {
     "externalJobs.sendToPartner",
   );
   const canUseAiOrderInputImport = hasCapability("orderInputs.aiPdfImport");
+  const canEditOrderRecord = hasPermission("orders.manage");
 
   const activeChecklistItems = rules.checklistItems.filter(
     (item) => item.isActive,
@@ -981,7 +984,7 @@ export default function OrderDetailPage() {
     });
     return groups;
   }, [activeOrderInputFields]);
-  const canEditOrderInputs = role === "Sales" || isAdmin;
+  const canEditOrderInputs = hasPermission("orders.manage");
   const normalizeOrderInputValue = (field: OrderInputField, value: unknown) => {
     if (field.fieldType === "table") {
       return Array.isArray(value) ? value : [];
@@ -3004,6 +3007,7 @@ export default function OrderDetailPage() {
                 size="sm"
                 className="gap-2"
                 onClick={() => setIsEditOpen(true)}
+                disabled={!canEditOrderRecord}
               >
                 <PencilIcon className="h-4 w-4" />
                 Edit
@@ -4498,9 +4502,12 @@ export default function OrderDetailPage() {
       </Tabs>
 
       <OrderModal
-        open={isEditOpen}
+        open={isEditOpen && canEditOrderRecord}
         onClose={() => setIsEditOpen(false)}
         onSubmit={async (values) => {
+          if (!canEditOrderRecord) {
+            return;
+          }
           setOrderState((prev) =>
             prev
               ? {

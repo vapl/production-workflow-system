@@ -21,7 +21,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useHierarchy } from "./HierarchyContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
-import { useCurrentUser, type UserRole } from "@/contexts/UserContext";
+import {
+  normalizeUserRole,
+  useCurrentUser,
+  type UserRole,
+  userRoleOptions,
+} from "@/contexts/UserContext";
+import { useRbac } from "@/contexts/RbacContext";
+import {
+  defaultPermissionRoles,
+  permissionDefinitions,
+  type PermissionKey,
+} from "@/lib/auth/permissions";
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
 import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
@@ -70,14 +81,6 @@ function getStoragePathFromUrl(url: string, bucket: string) {
   } catch {
     return null;
   }
-}
-
-const userRoleOptions: UserRole[] = ["Sales", "Engineering", "Production"];
-
-function normalizeUserRole(value?: string | null): UserRole {
-  return userRoleOptions.includes(value as UserRole)
-    ? (value as UserRole)
-    : "Sales";
 }
 
 const integrations = [
@@ -225,6 +228,8 @@ const qrContentFieldOptions = [
   { value: "due_date", label: "Due date" },
 ];
 
+const inactiveRoleOptions = new Set<UserRole>(["Dealer"]);
+
 const defaultQrEnabledSizes = [
   "A4",
   "A5",
@@ -245,6 +250,13 @@ const defaultQrContentFields = [
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
+  const {
+    permissions: rolePermissions,
+    loading: rolePermissionsLoading,
+    error: rolePermissionsError,
+    hasPermission,
+    savePermissionRoles,
+  } = useRbac();
   const { confirm, dialog } = useConfirmDialog();
   const {
     levels,
@@ -565,6 +577,11 @@ export default function SettingsPage() {
     "idle" | "sending" | "sent" | "error"
   >("idle");
   const [inviteMessage, setInviteMessage] = useState("");
+  const [permissionDrafts, setPermissionDrafts] = useState(rolePermissions);
+  const [permissionState, setPermissionState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [permissionMessage, setPermissionMessage] = useState("");
   const [invites, setInvites] = useState<
     {
       id: string;
@@ -576,6 +593,7 @@ export default function SettingsPage() {
     }[]
   >([]);
   const [isInvitesLoading, setIsInvitesLoading] = useState(false);
+  const canManageRolePermissions = hasPermission("settings.manage");
   const {
     rules,
     setRules,
@@ -627,10 +645,14 @@ export default function SettingsPage() {
   const [newAttachmentCategoryLabel, setNewAttachmentCategoryLabel] =
     useState("");
   const attachmentRoles: AttachmentRole[] = [
+    "Owner",
+    "Admin",
     "Sales",
     "Engineering",
+    "Production manager",
+    "Production worker",
+    "Dealer",
     "Production",
-    "Admin",
   ];
   const hasStatusLabelChanges = useMemo(
     () =>
@@ -669,6 +691,17 @@ export default function SettingsPage() {
     rules.attachmentCategories,
     rules.attachmentCategoryDefaults,
   ]);
+  const hasPermissionChanges = useMemo(
+    () => JSON.stringify(permissionDrafts) !== JSON.stringify(rolePermissions),
+    [permissionDrafts, rolePermissions],
+  );
+  const editablePermissionRoles = useMemo(
+    () =>
+      userRoleOptions.filter(
+        (role) => !inactiveRoleOptions.has(role) && role !== "Production worker",
+      ),
+    [],
+  );
 
   useEffect(() => {
     setOrderStatusConfigDrafts(rules.orderStatusConfig);
@@ -682,6 +715,9 @@ export default function SettingsPage() {
       manager: rules.assignmentLabels?.manager ?? "Manager",
     });
   }, [rules.assignmentLabels]);
+  useEffect(() => {
+    setPermissionDrafts(rolePermissions);
+  }, [rolePermissions]);
   useEffect(() => {
     setAttachmentCategoryDrafts(rules.attachmentCategories);
     setAttachmentDefaultDrafts(rules.attachmentCategoryDefaults);
@@ -1408,6 +1444,45 @@ export default function SettingsPage() {
       prev.map((user) => (user.id === userId ? { ...user, isAdmin } : user)),
     );
     setUpdatingUserId(null);
+  }
+
+  function togglePermissionRole(permission: PermissionKey, role: UserRole) {
+    setPermissionDrafts((prev) => {
+      const current = prev[permission] ?? defaultPermissionRoles[permission];
+      const hasRole = current.includes(role);
+      return {
+        ...prev,
+        [permission]: hasRole
+          ? current.filter((value) => value !== role)
+          : [...current, role],
+      };
+    });
+  }
+
+  async function handleSaveRolePermissions() {
+    if (!canManageRolePermissions) {
+      return;
+    }
+    setPermissionState("saving");
+    setPermissionMessage("");
+    for (const def of permissionDefinitions) {
+      const nextRoles = permissionDrafts[def.key] ?? defaultPermissionRoles[def.key];
+      const currentRoles = rolePermissions[def.key] ?? defaultPermissionRoles[def.key];
+      const unchanged =
+        JSON.stringify([...nextRoles].sort()) ===
+        JSON.stringify([...currentRoles].sort());
+      if (unchanged) {
+        continue;
+      }
+      const result = await savePermissionRoles(def.key, nextRoles);
+      if (result.error) {
+        setPermissionState("error");
+        setPermissionMessage(result.error);
+        return;
+      }
+    }
+    setPermissionState("saved");
+    setPermissionMessage("Role permissions saved.");
   }
 
   const selectedLevel = levels.find((level) => level.id === selectedLevelId);
@@ -4754,7 +4829,7 @@ export default function SettingsPage() {
                       onChange={(event) => setInviteEmail(event.target.value)}
                       placeholder="user@company.com"
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={!currentUser.isAdmin}
+                      disabled={!canManageRolePermissions}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
@@ -4766,7 +4841,7 @@ export default function SettingsPage() {
                       }
                       placeholder="Full name"
                       className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={!currentUser.isAdmin}
+                      disabled={!canManageRolePermissions}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
@@ -4776,15 +4851,21 @@ export default function SettingsPage() {
                       onValueChange={(value) =>
                         setInviteRole(value as UserRole)
                       }
-                      disabled={!currentUser.isAdmin}
+                      disabled={!canManageRolePermissions}
                     >
                       <SelectTrigger className="h-10 w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {userRoleOptions.map((roleOption) => (
-                          <SelectItem key={roleOption} value={roleOption}>
-                            {roleOption}
+                          <SelectItem
+                            key={roleOption}
+                            value={roleOption}
+                            disabled={inactiveRoleOptions.has(roleOption)}
+                          >
+                            {inactiveRoleOptions.has(roleOption)
+                              ? `${roleOption} (inactive)`
+                              : roleOption}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -4792,7 +4873,9 @@ export default function SettingsPage() {
                   </label>
                   <Button
                     onClick={handleInviteUser}
-                    disabled={!currentUser.isAdmin || inviteState === "sending"}
+                    disabled={
+                      !canManageRolePermissions || inviteState === "sending"
+                    }
                   >
                     {inviteState === "sending" ? "Sending..." : "Send invite"}
                   </Button>
@@ -4809,13 +4892,13 @@ export default function SettingsPage() {
                   </p>
                 )}
               </div>
-              {!currentUser.isAdmin && (
+              {!canManageRolePermissions && (
                 <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                  Only admins can update user roles or admin access.
+                  Only Admin and Owner can update user roles or admin access.
                 </div>
               )}
               {process.env.NODE_ENV !== "production" &&
-                !currentUser.isAdmin && (
+                !canManageRolePermissions && (
                   <label className="flex items-center gap-2 text-sm text-muted-foreground">
                     <input
                       type="checkbox"
@@ -4874,7 +4957,7 @@ export default function SettingsPage() {
                                 handleUpdateUserRole(user.id, value as UserRole)
                               }
                               disabled={
-                                !currentUser.isAdmin &&
+                                !canManageRolePermissions &&
                                 !(devRoleOverride && user.id === currentUser.id)
                               }
                             >
@@ -4886,8 +4969,11 @@ export default function SettingsPage() {
                                   <SelectItem
                                     key={roleOption}
                                     value={roleOption}
+                                    disabled={inactiveRoleOptions.has(roleOption)}
                                   >
-                                    {roleOption}
+                                    {inactiveRoleOptions.has(roleOption)
+                                      ? `${roleOption} (inactive)`
+                                      : roleOption}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -4904,7 +4990,7 @@ export default function SettingsPage() {
                                     event.target.checked,
                                   )
                                 }
-                                disabled={!currentUser.isAdmin}
+                                disabled={!canManageRolePermissions}
                               />
                               Admin
                             </label>
@@ -4917,6 +5003,102 @@ export default function SettingsPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+              <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">Role permissions</div>
+                    <div className="text-xs text-muted-foreground">
+                      RBAC rules saved in database and used across UI + server.
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveRolePermissions}
+                    disabled={
+                      !canManageRolePermissions ||
+                      permissionState === "saving" ||
+                      !hasPermissionChanges
+                    }
+                  >
+                    {permissionState === "saving" ? "Saving..." : "Save RBAC"}
+                  </Button>
+                </div>
+                {rolePermissionsLoading ? (
+                  <div className="text-xs text-muted-foreground">
+                    Loading RBAC...
+                  </div>
+                ) : null}
+                {rolePermissionsError ? (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    {rolePermissionsError}
+                  </div>
+                ) : null}
+                {permissionMessage ? (
+                  <div
+                    className={`rounded-md border px-3 py-2 text-xs ${
+                      permissionState === "error"
+                        ? "border-destructive/30 bg-destructive/10 text-destructive"
+                        : "border-emerald-300/40 bg-emerald-500/10 text-emerald-700"
+                    }`}
+                  >
+                    {permissionMessage}
+                  </div>
+                ) : null}
+                <div className="overflow-x-auto rounded-md border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">
+                          Permission
+                        </th>
+                        {editablePermissionRoles.map((role) => (
+                          <th
+                            key={`perm-head-${role}`}
+                            className="px-3 py-2 text-center font-medium whitespace-nowrap"
+                          >
+                            {role}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {permissionDefinitions.map((definition) => (
+                        <tr
+                          key={definition.key}
+                          className="border-t border-border align-top"
+                        >
+                          <td className="px-3 py-2">
+                            <div className="font-medium">{definition.label}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {definition.description}
+                            </div>
+                          </td>
+                          {editablePermissionRoles.map((role) => {
+                            const allowed =
+                              permissionDrafts[definition.key]?.includes(role) ??
+                              defaultPermissionRoles[definition.key].includes(role);
+                            return (
+                              <td
+                                key={`${definition.key}-${role}`}
+                                className="px-3 py-2 text-center"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={allowed}
+                                  onChange={() =>
+                                    togglePermissionRole(definition.key, role)
+                                  }
+                                  disabled={!canManageRolePermissions}
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               <div className="space-y-2">
                 <div className="text-sm font-medium">Invites</div>
@@ -4984,7 +5166,7 @@ export default function SettingsPage() {
                                   }
                                   disabled={
                                     invite.acceptedAt !== null ||
-                                    !currentUser.isAdmin
+                                    !canManageRolePermissions
                                   }
                                 >
                                   Resend
@@ -4995,7 +5177,7 @@ export default function SettingsPage() {
                                   onClick={() => handleCancelInvite(invite.id)}
                                   disabled={
                                     invite.acceptedAt !== null ||
-                                    !currentUser.isAdmin
+                                    !canManageRolePermissions
                                   }
                                 >
                                   Cancel

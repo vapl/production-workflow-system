@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import {
+  actorHasPermission,
+  resolveAllowedRolesForPermission,
+} from "@/lib/server/rbac";
 
 type TableColumnType = "text" | "number" | "select";
 
@@ -1461,12 +1465,23 @@ export async function POST(request: Request) {
 
   const { data: actorProfile } = await admin
     .from("profiles")
-    .select("id, tenant_id")
+    .select("id, tenant_id, role, is_admin")
     .eq("id", authData.user.id)
     .maybeSingle();
   if (!actorProfile?.tenant_id) {
     return NextResponse.json(
       { error: "User tenant is not configured." },
+      { status: 403 },
+    );
+  }
+  const orderManageRoles = await resolveAllowedRolesForPermission(
+    admin,
+    actorProfile.tenant_id,
+    "orders.manage",
+  );
+  if (!actorHasPermission(actorProfile, orderManageRoles)) {
+    return NextResponse.json(
+      { error: "Missing permission: orders.manage" },
       { status: 403 },
     );
   }

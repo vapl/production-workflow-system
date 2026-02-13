@@ -14,6 +14,8 @@ import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { useNotifications } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
+import { isProductionRole } from "@/lib/auth/permissions";
+import { useRbac } from "@/contexts/RbacContext";
 
 type NotificationItem = {
   id: string;
@@ -25,6 +27,7 @@ type NotificationItem = {
 
 export function Header() {
   const user = useCurrentUser();
+  const { permissions } = useRbac();
   const { signOut } = useAuthActions();
   const { notify } = useNotifications();
   const [currentDate, setCurrentDate] = useState<string | null>(null);
@@ -138,7 +141,13 @@ export function Header() {
           if (next.user_id && next.user_id !== user.id) {
             return;
           }
-          if (!user.isAdmin && user.role !== "Production") {
+          if (
+            !user.isAdmin &&
+            !isProductionRole(
+              { role: user.role, isAdmin: user.isAdmin },
+              permissions,
+            )
+          ) {
             return;
           }
           setUnreadCount((prev) => prev + 1);
@@ -164,7 +173,15 @@ export function Header() {
       isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, [user.isAuthenticated, user.tenantId, user.id, user.isAdmin, user.role, notify]);
+  }, [
+    notify,
+    permissions,
+    user.id,
+    user.isAdmin,
+    user.isAuthenticated,
+    user.role,
+    user.tenantId,
+  ]);
 
   useEffect(() => {
     if (!supabase || !user.isAuthenticated || !user.tenantId) {
@@ -410,7 +427,7 @@ export function Header() {
                     )}
                     <span className="text-foreground">
                       {user.name} ({user.role}
-                      {user.isAdmin ? " / Admin" : ""})
+                      {user.isAdmin && user.role !== "Owner" ? " / Admin" : ""})
                     </span>
                     <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
                   </button>

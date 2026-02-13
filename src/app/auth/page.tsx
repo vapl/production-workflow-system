@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { useCurrentUser } from "@/contexts/UserContext";
+import { normalizeUserRole, useCurrentUser } from "@/contexts/UserContext";
 import { supabase } from "@/lib/supabaseClient";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -672,12 +672,7 @@ export default function AuthPage() {
         setStatus("error");
         return;
       }
-      const normalizedRole =
-        metadata?.role === "Engineering" ||
-        metadata?.role === "Production" ||
-        metadata?.role === "Sales"
-          ? metadata.role
-          : "Production";
+      const normalizedRole = normalizeUserRole(metadata?.role);
       const finalName =
         inviteFullName.trim() ||
         metadata?.full_name?.trim() ||

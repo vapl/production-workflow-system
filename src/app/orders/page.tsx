@@ -20,6 +20,7 @@ import { usePartners } from "@/hooks/usePartners";
 import { supabase, supabaseAvatarBucket } from "@/lib/supabaseClient";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatOrderStatus } from "@/lib/domain/formatters";
+import { useRbac } from "@/contexts/RbacContext";
 
 export default function OrdersPage() {
   const {
@@ -32,8 +33,10 @@ export default function OrdersPage() {
   } = useOrders();
   const { nodes, levels } = useHierarchy();
   const user = useCurrentUser();
+  const { hasPermission } = useRbac();
   const { rules } = useWorkflowRules();
   const { activeGroups, partners } = usePartners();
+  const canEditOrDeleteOrders = hasPermission("orders.manage");
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
   const [searchQuery, setSearchQuery] = useState("");
@@ -580,7 +583,7 @@ export default function OrdersPage() {
     notes?: string;
     hierarchy?: Record<string, string>;
   }) {
-    if (!editingOrder) {
+    if (!editingOrder || !canEditOrDeleteOrders) {
       return;
     }
     await updateOrder(editingOrder.id, {
@@ -659,7 +662,7 @@ export default function OrdersPage() {
                 setEditingOrder(null);
                 setIsModalOpen(true);
               }}
-              disabled={!(user.role === "Sales" || user.isAdmin)}
+              disabled={!canEditOrDeleteOrders}
             >
               <PlusIcon className="h-4 w-4" />
               New Order
@@ -707,13 +710,21 @@ export default function OrdersPage() {
               dueIndicatorStatuses={rules.dueIndicatorStatuses}
               engineerLabel={engineerLabel}
               managerLabel={managerLabel}
-              onEdit={(order) => {
-                setEditingOrder(order);
-                setIsModalOpen(true);
-              }}
-              onDelete={(order) => {
-                setPendingDelete(order);
-              }}
+              onEdit={
+                canEditOrDeleteOrders
+                  ? (order) => {
+                      setEditingOrder(order);
+                      setIsModalOpen(true);
+                    }
+                  : undefined
+              }
+              onDelete={
+                canEditOrDeleteOrders
+                  ? (order) => {
+                      setPendingDelete(order);
+                    }
+                  : undefined
+              }
             />
           ) : (
             <OrdersTable
@@ -724,13 +735,21 @@ export default function OrdersPage() {
               dueIndicatorStatuses={rules.dueIndicatorStatuses}
               engineerLabel={engineerLabel}
               managerLabel={managerLabel}
-              onEdit={(order) => {
-                setEditingOrder(order);
-                setIsModalOpen(true);
-              }}
-              onDelete={(order) => {
-                setPendingDelete(order);
-              }}
+              onEdit={
+                canEditOrDeleteOrders
+                  ? (order) => {
+                      setEditingOrder(order);
+                      setIsModalOpen(true);
+                    }
+                  : undefined
+              }
+              onDelete={
+                canEditOrDeleteOrders
+                  ? (order) => {
+                      setPendingDelete(order);
+                    }
+                  : undefined
+              }
             />
           )}
           {isListLoading ? (
@@ -896,15 +915,17 @@ export default function OrdersPage() {
               <Button variant="outline" onClick={() => setPendingDelete(null)}>
                 Cancel
               </Button>
-              <Button
-                variant="destructive"
-                onClick={async () => {
-                  await removeOrder(pendingDelete.id);
-                  setPendingDelete(null);
-                }}
-              >
-                Delete
-              </Button>
+              {canEditOrDeleteOrders ? (
+                <Button
+                  variant="destructive"
+                  onClick={async () => {
+                    await removeOrder(pendingDelete.id);
+                    setPendingDelete(null);
+                  }}
+                >
+                  Delete
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>

@@ -6,13 +6,18 @@ import { Header } from "@/components/layout/Header";
 import { TabsNav } from "@/components/layout/TabsNav";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { canAccessRoute, isProductionWorker } from "@/lib/auth/permissions";
+import { useRbac } from "@/contexts/RbacContext";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
+  const { permissions } = useRbac();
   const pathname = usePathname();
   const router = useRouter();
   const isAuthRoute = pathname?.startsWith("/auth");
-  const isExternalJobRespondRoute = pathname?.startsWith("/external-jobs/respond/");
+  const isExternalJobRespondRoute = pathname?.startsWith(
+    "/external-jobs/respond/",
+  );
   const isPublicRoute = isAuthRoute || isExternalJobRespondRoute;
   const hideTabsNav =
     isExternalJobRespondRoute ||
@@ -54,6 +59,47 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       router.replace("/auth");
     }
   }, [user.loading, user.isAuthenticated, isPublicRoute, router]);
+
+  useEffect(() => {
+    if (user.loading || !user.isAuthenticated || isPublicRoute || !pathname) {
+      return;
+    }
+    const authUser = { role: user.role, isAdmin: user.isAdmin };
+    const route =
+      pathname === "/"
+        ? "/"
+        : pathname.startsWith("/settings")
+          ? "/settings"
+          : pathname.startsWith("/production/operator")
+            ? "/production/operator"
+          : pathname.startsWith("/production")
+            ? "/production"
+            : pathname.startsWith("/company")
+              ? "/company"
+              : pathname.startsWith("/orders")
+                ? "/orders"
+                : null;
+    if (!route) {
+      return;
+    }
+    if (!canAccessRoute(route, authUser, permissions)) {
+      const fallbackRoute = isProductionWorker(authUser)
+        ? "/production/operator"
+        : "/orders";
+      if (pathname !== fallbackRoute) {
+        router.replace(fallbackRoute);
+      }
+    }
+  }, [
+    isPublicRoute,
+    pathname,
+    permissions,
+    router,
+    user.isAuthenticated,
+    user.isAdmin,
+    user.loading,
+    user.role,
+  ]);
 
   if (isExternalJobRespondRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;
@@ -97,8 +143,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       {hideHeader ? null : <Header />}
       {!hideTabsNav ? (
-        <div className="sticky top-0 z-30 bg-background/90 backdrop-blur">
-          <div className="container mx-auto px-4 py-3">
+        <div className="sticky top-0 w-full z-30 bg-background/90 backdrop-blur">
+          <div className="container w-full mx-auto px-4 py-3">
             <TabsNav />
           </div>
         </div>

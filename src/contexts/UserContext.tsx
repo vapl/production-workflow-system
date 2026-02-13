@@ -7,14 +7,45 @@ import {
   supabaseTenantLogoBucket,
 } from "@/lib/supabaseClient";
 
-export type UserRole = "Sales" | "Engineering" | "Production";
+export type UserRole =
+  | "Owner"
+  | "Admin"
+  | "Sales"
+  | "Engineering"
+  | "Production manager"
+  | "Production worker"
+  | "Dealer"
+  | "Production";
 
-const userRoleOptions: UserRole[] = ["Sales", "Engineering", "Production"];
+export const userRoleOptions: UserRole[] = [
+  "Owner",
+  "Admin",
+  "Sales",
+  "Engineering",
+  "Production manager",
+  "Production worker",
+  "Dealer",
+  "Production",
+];
 
-function normalizeUserRole(value?: string | null): UserRole {
-  return userRoleOptions.includes(value as UserRole)
-    ? (value as UserRole)
-    : "Sales";
+export function normalizeUserRole(value?: string | null): UserRole {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return "Sales";
+  }
+  if (userRoleOptions.includes(trimmed as UserRole)) {
+    return trimmed as UserRole;
+  }
+  const normalized = trimmed.toLowerCase().replace(/_/g, " ");
+  if (normalized === "owner") return "Owner";
+  if (normalized === "admin") return "Admin";
+  if (normalized === "sales") return "Sales";
+  if (normalized === "engineering") return "Engineering";
+  if (normalized === "production manager") return "Production manager";
+  if (normalized === "production worker") return "Production worker";
+  if (normalized === "dealer") return "Dealer";
+  if (normalized === "production") return "Production";
+  return "Sales";
 }
 
 export interface CurrentUser {
@@ -123,6 +154,7 @@ async function fetchUserRole(userId: string) {
   }
 
   const role = normalizeUserRole(data.role);
+  const isAdmin = (data.is_admin ?? false) || role === "Owner" || role === "Admin";
   const resolvedAvatarUrl = await resolveSignedUrl(
     data.avatar_url ?? null,
     supabaseAvatarBucket,
@@ -141,7 +173,7 @@ async function fetchUserRole(userId: string) {
     );
     return {
       role,
-      isAdmin: data.is_admin ?? false,
+      isAdmin,
       fullName: data.full_name ?? "User",
       tenantId: data.tenant_id ?? null,
       avatarUrl: resolvedAvatarUrl,
@@ -153,7 +185,7 @@ async function fetchUserRole(userId: string) {
 
   return {
     role,
-    isAdmin: data.is_admin ?? false,
+    isAdmin,
     fullName: data.full_name ?? "User",
     tenantId: data.tenant_id ?? null,
     avatarUrl: resolvedAvatarUrl,
@@ -305,7 +337,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           await supabase.from("profiles").upsert({
             id: sessionUser.id,
             full_name: fullName,
-            role: "Sales",
+            role: "Owner",
             is_admin: true,
             tenant_id: tenant.id,
             email: sessionUser.email ?? null,
@@ -313,7 +345,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           nextProfile = {
             ...nextProfile,
             fullName,
-            role: "Sales",
+            role: "Owner",
             isAdmin: true,
             tenantId: tenant.id,
             tenantName: tenant.name ?? null,

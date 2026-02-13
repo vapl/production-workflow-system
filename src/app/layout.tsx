@@ -12,6 +12,7 @@ import {
 import { WorkflowProvider } from "@/contexts/WorkflowContext";
 import { AppShell } from "@/components/layout/AppShell";
 import { ServiceWorker } from "@/components/pwa/ServiceWorker";
+import { RbacProvider } from "@/contexts/RbacContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -55,16 +56,18 @@ export default function RootLayout({
         <ServiceWorker />
         <UserProvider>
           <NotificationsProvider>
-            <WorkflowProvider>
-              <HierarchyProvider>
-                <OrdersProvider>
-                  <BatchesProvider>
-                    <AppShell>{children}</AppShell>
-                    <NotificationsViewport />
-                  </BatchesProvider>
-                </OrdersProvider>
-              </HierarchyProvider>
-            </WorkflowProvider>
+            <RbacProvider>
+              <WorkflowProvider>
+                <HierarchyProvider>
+                  <OrdersProvider>
+                    <BatchesProvider>
+                      <AppShell>{children}</AppShell>
+                      <NotificationsViewport />
+                    </BatchesProvider>
+                  </OrdersProvider>
+                </HierarchyProvider>
+              </WorkflowProvider>
+            </RbacProvider>
           </NotificationsProvider>
         </UserProvider>
       </body>

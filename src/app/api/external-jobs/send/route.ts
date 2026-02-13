@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 import { sendResendEmail } from "@/lib/server/externalJobEmails";
+import {
+  actorHasPermission,
+  resolveAllowedRolesForPermission,
+} from "@/lib/server/rbac";
 
 function getOrigin(request: Request) {
   const origin = request.headers.get("origin");
@@ -85,12 +89,23 @@ export async function POST(request: Request) {
 
   const { data: actorProfile } = await admin
     .from("profiles")
-    .select("id, tenant_id, full_name, role, phone")
+    .select("id, tenant_id, full_name, role, phone, is_admin")
     .eq("id", authData.user.id)
     .maybeSingle();
   if (!actorProfile?.tenant_id) {
     return NextResponse.json(
       { error: "User tenant is not configured." },
+      { status: 403 },
+    );
+  }
+  const orderManageRoles = await resolveAllowedRolesForPermission(
+    admin,
+    actorProfile.tenant_id,
+    "orders.manage",
+  );
+  if (!actorHasPermission(actorProfile, orderManageRoles)) {
+    return NextResponse.json(
+      { error: "Missing permission: orders.manage" },
       { status: 403 },
     );
   }
