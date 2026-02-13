@@ -18,6 +18,11 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
+import {
+  computeWorkingMinutes,
+  parseWorkingCalendar,
+  type WorkingCalendar,
+} from "@/lib/domain/workingCalendar";
 import type { OrderInputField } from "@/types/orderInputs";
 import {
   ChevronDownIcon,
@@ -203,67 +208,6 @@ function statusBadge(status: BatchRunRow["status"]) {
   return "status-draft";
 }
 
-function parseTime(value: string) {
-  const [hours, minutes] = value.split(":").map(Number);
-  return {
-    hours: Number.isFinite(hours) ? hours : 8,
-    minutes: Number.isFinite(minutes) ? minutes : 0,
-  };
-}
-
-function buildDayTime(date: Date, timeValue: string) {
-  const { hours, minutes } = parseTime(timeValue);
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    hours,
-    minutes,
-    0,
-    0,
-  );
-}
-
-function computeWorkingMinutes(
-  startIso: string | null | undefined,
-  endIso: string | null | undefined,
-  workStart: string,
-  workEnd: string,
-) {
-  if (!startIso) return 0;
-  const start = new Date(startIso);
-  const end = endIso ? new Date(endIso) : new Date();
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return 0;
-  }
-  if (end <= start) {
-    return 0;
-  }
-  const startDay = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate(),
-  );
-  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  let totalMinutes = 0;
-  for (
-    let day = new Date(startDay);
-    day <= endDay;
-    day.setDate(day.getDate() + 1)
-  ) {
-    const dayStart = buildDayTime(day, workStart);
-    const dayEnd = buildDayTime(day, workEnd);
-    const rangeStart = dayStart > start ? dayStart : start;
-    const rangeEnd = dayEnd < end ? dayEnd : end;
-    if (rangeEnd > rangeStart) {
-      totalMinutes += Math.floor(
-        (rangeEnd.getTime() - rangeStart.getTime()) / 60000,
-      );
-    }
-  }
-  return totalMinutes;
-}
-
 function formatDuration(totalMinutes: number) {
   if (!totalMinutes || totalMinutes <= 0) return "0m";
   const hours = Math.floor(totalMinutes / 60);
@@ -300,8 +244,10 @@ export default function ProductionPage() {
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
   const [readySearch, setReadySearch] = useState("");
   const [readyPriority, setReadyPriority] = useState<Priority | "all">("all");
-  const [workdayStart, setWorkdayStart] = useState("08:00");
-  const [workdayEnd, setWorkdayEnd] = useState("17:00");
+  const [workingCalendar, setWorkingCalendar] = useState<WorkingCalendar>({
+    workdays: [1, 2, 3, 4, 5],
+    shifts: [{ start: "08:00", end: "17:00" }],
+  });
   const [removeHintId, setRemoveHintId] = useState<string | null>(null);
   const removeHintTimer = useRef<number | null>(null);
   const [dataError, setDataError] = useState("");
@@ -786,7 +732,7 @@ export default function ProductionPage() {
       const { data, error } = await supabase
         .from("tenant_settings")
         .select(
-          "workday_start, workday_end, qr_enabled_sizes, qr_default_size, qr_content_fields",
+          "workday_start, workday_end, workdays, work_shifts, qr_enabled_sizes, qr_default_size, qr_content_fields",
         )
         .eq("tenant_id", user.tenantId)
         .maybeSingle();
@@ -796,12 +742,7 @@ export default function ProductionPage() {
       if (error || !data) {
         return;
       }
-      if (data.workday_start) {
-        setWorkdayStart(data.workday_start);
-      }
-      if (data.workday_end) {
-        setWorkdayEnd(data.workday_end);
-      }
+      setWorkingCalendar(parseWorkingCalendar(data));
       if (Array.isArray(data.qr_enabled_sizes)) {
         const nextSizes = data.qr_enabled_sizes.filter(
           (value: unknown) => typeof value === "string",
@@ -2368,8 +2309,7 @@ export default function ProductionPage() {
                                   ? computeWorkingMinutes(
                                       item.startedAt,
                                       item.doneAt ?? null,
-                                      workdayStart,
-                                      workdayEnd,
+                                      workingCalendar,
                                     )
                                   : 0;
                                 const elapsedLabel = item.startedAt

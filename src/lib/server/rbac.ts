@@ -9,18 +9,17 @@ type ActorProfile = {
   tenant_id?: string | null;
 };
 
+type QueryBuilder = {
+  eq: (column: string, value: string) => QueryBuilder;
+  maybeSingle: () => Promise<{
+    data: { allowed_roles?: string[] | null } | null;
+    error: unknown;
+  }>;
+};
+
 type AdminLikeClient = {
   from: (table: string) => {
-    select: (query: string) => {
-      eq: (column: string, value: string) => {
-        eq: (column: string, value: string) => {
-          maybeSingle: () => Promise<{
-            data: { allowed_roles?: string[] | null } | null;
-            error: { message?: string } | null;
-          }>;
-        };
-      };
-    };
+    select: (query: string) => QueryBuilder;
   };
 };
 

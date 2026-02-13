@@ -554,6 +554,8 @@ create table if not exists public.tenant_settings (
   tenant_id uuid primary key references public.tenants(id) on delete cascade,
   workday_start time not null default '08:00',
   workday_end time not null default '17:00',
+  workdays integer[] not null default array[1, 2, 3, 4, 5],
+  work_shifts jsonb not null default '[{"start":"08:00","end":"17:00"}]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

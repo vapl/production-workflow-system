@@ -14,6 +14,11 @@ import {
 } from "@/components/ui/Select";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { formatDate } from "@/lib/domain/formatters";
+import {
+  computeWorkingMinutes,
+  parseWorkingCalendar,
+  type WorkingCalendar,
+} from "@/lib/domain/workingCalendar";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import {
   FileIcon,
@@ -120,67 +125,6 @@ function statusBadge(status: BatchRunRow["status"]) {
   if (status === "in_progress") return "status-in_engineering";
   if (status === "done") return "status-ready_for_production";
   return "status-draft";
-}
-
-function parseTime(value: string) {
-  const [hours, minutes] = value.split(":").map(Number);
-  return {
-    hours: Number.isFinite(hours) ? hours : 8,
-    minutes: Number.isFinite(minutes) ? minutes : 0,
-  };
-}
-
-function buildDayTime(date: Date, timeValue: string) {
-  const { hours, minutes } = parseTime(timeValue);
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    hours,
-    minutes,
-    0,
-    0,
-  );
-}
-
-function computeWorkingMinutes(
-  startIso: string | null | undefined,
-  endIso: string | null | undefined,
-  workStart: string,
-  workEnd: string,
-) {
-  if (!startIso) return 0;
-  const start = new Date(startIso);
-  const end = endIso ? new Date(endIso) : new Date();
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return 0;
-  }
-  if (end <= start) {
-    return 0;
-  }
-  const startDay = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate(),
-  );
-  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  let totalMinutes = 0;
-  for (
-    let day = new Date(startDay);
-    day <= endDay;
-    day.setDate(day.getDate() + 1)
-  ) {
-    const dayStart = buildDayTime(day, workStart);
-    const dayEnd = buildDayTime(day, workEnd);
-    const rangeStart = dayStart > start ? dayStart : start;
-    const rangeEnd = dayEnd < end ? dayEnd : end;
-    if (rangeEnd > rangeStart) {
-      totalMinutes += Math.floor(
-        (rangeEnd.getTime() - rangeStart.getTime()) / 60000,
-      );
-    }
-  }
-  return totalMinutes;
 }
 
 function getItemGroupKey(item: ProductionItemRow) {
@@ -293,8 +237,10 @@ export default function OperatorProductionPage() {
   const [expandedOrderItems, setExpandedOrderItems] = useState<Set<string>>(
     new Set(),
   );
-  const [workdayStart, setWorkdayStart] = useState("08:00");
-  const [workdayEnd, setWorkdayEnd] = useState("17:00");
+  const [workingCalendar, setWorkingCalendar] = useState<WorkingCalendar>({
+    workdays: [1, 2, 3, 4, 5],
+    shifts: [{ start: "08:00", end: "17:00" }],
+  });
   const [stopReasons, setStopReasons] = useState<
     Array<{ id: string; label: string }>
   >([]);
@@ -623,7 +569,7 @@ export default function OperatorProductionPage() {
     const loadWorkHours = async () => {
       const { data, error } = await supabase
         .from("tenant_settings")
-        .select("workday_start, workday_end")
+        .select("workday_start, workday_end, workdays, work_shifts")
         .eq("tenant_id", currentUser.tenantId)
         .maybeSingle();
       if (!isMounted) {
@@ -632,12 +578,7 @@ export default function OperatorProductionPage() {
       if (error || !data) {
         return;
       }
-      if (data.workday_start) {
-        setWorkdayStart(data.workday_start);
-      }
-      if (data.workday_end) {
-        setWorkdayEnd(data.workday_end);
-      }
+      setWorkingCalendar(parseWorkingCalendar(data));
     };
     void loadWorkHours();
     return () => {
@@ -848,8 +789,7 @@ export default function OperatorProductionPage() {
         ? computeWorkingMinutes(
             nextStartedAt ?? now,
             now,
-            workdayStart,
-            workdayEnd,
+            workingCalendar,
           )
         : targetItem.duration_minutes ?? null;
     const nextMeta = {
@@ -1198,8 +1138,7 @@ export default function OperatorProductionPage() {
                           ? computeWorkingMinutes(
                               item.startedAt,
                               item.doneAt ?? null,
-                              workdayStart,
-                              workdayEnd,
+                              workingCalendar,
                             )
                           : 0;
                         const elapsedLabel = item.startedAt
@@ -1322,8 +1261,7 @@ export default function OperatorProductionPage() {
                                   ? computeWorkingMinutes(
                                       prodItem.started_at,
                                       prodItem.done_at ?? null,
-                                      workdayStart,
-                                      workdayEnd,
+                                      workingCalendar,
                                     )
                                   : 0;
                                 const itemElapsedLabel = prodItem.started_at

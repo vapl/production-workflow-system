@@ -7,9 +7,7 @@ import type { PermissionKey } from "@/lib/auth/permissions";
 
 type AdminClient = {
   auth: {
-    getUser: (
-      jwt: string,
-    ) => Promise<{
+    getUser: (jwt: string) => Promise<{
       data: {
         user: {
           id: string;
@@ -20,22 +18,24 @@ type AdminClient = {
     }>;
   };
   from: (table: string) => {
-    select: (query: string) => {
-      eq: (column: string, value: string) => {
-        maybeSingle: () => Promise<{
-          data: {
-            id?: string;
-            tenant_id?: string | null;
-            role?: string | null;
-            is_admin?: boolean | null;
-            full_name?: string | null;
-            phone?: string | null;
-          } | null;
-          error: unknown;
-        }>;
-      };
-    };
+    select: (query: string) => QueryBuilder;
   };
+};
+
+type QueryBuilder = {
+  eq: (column: string, value: string) => QueryBuilder;
+  maybeSingle: () => Promise<{
+    data: {
+      id?: string;
+      tenant_id?: string | null;
+      role?: string | null;
+      is_admin?: boolean | null;
+      full_name?: string | null;
+      phone?: string | null;
+      allowed_roles?: string[] | null;
+    } | null;
+    error: unknown;
+  }>;
 };
 
 export interface AuthorizedActorContext {

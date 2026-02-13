@@ -48,6 +48,15 @@ import {
   type WorkflowTargetStatus,
   type WorkflowStatusColor,
 } from "@/contexts/WorkflowContext";
+import {
+  DEFAULT_WORKDAYS,
+  DEFAULT_WORK_SHIFTS,
+  isValidWorkTime,
+  normalizeWorkTime,
+  parseWorkingCalendar,
+  validateWorkingCalendar,
+  type WorkShift,
+} from "@/lib/domain/workingCalendar";
 import type {
   ExternalJobFieldScope,
   ExternalJobFieldType,
@@ -118,6 +127,16 @@ const defaultLevelDescriptions: Record<string, string> = {
   manager: "Sales/lead owner responsible for the order.",
   engineer: "Assigned engineer or designer handling the order.",
 };
+
+const weekdayOptions: Array<{ value: number; label: string }> = [
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+  { value: 0, label: "Sun" },
+];
 
 const orderInputGroupOptions: { value: OrderInputGroupKey; label: string }[] = [
   { value: "order_info", label: "Order info" },
@@ -356,8 +375,10 @@ export default function SettingsPage() {
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
   const [dragStationId, setDragStationId] = useState<string | null>(null);
   const [isStationOrderSaving, setIsStationOrderSaving] = useState(false);
-  const [workdayStart, setWorkdayStart] = useState("08:00");
-  const [workdayEnd, setWorkdayEnd] = useState("17:00");
+  const [workdays, setWorkdays] = useState<number[]>([...DEFAULT_WORKDAYS]);
+  const [workShifts, setWorkShifts] = useState<WorkShift[]>([
+    ...DEFAULT_WORK_SHIFTS,
+  ]);
   const [workdayError, setWorkdayError] = useState<string | null>(null);
   const [isWorkdaySaving, setIsWorkdaySaving] = useState(false);
   const [orderFieldLabel, setOrderFieldLabel] = useState("");
@@ -496,7 +517,7 @@ export default function SettingsPage() {
       const { data, error } = await supabase
         .from("tenant_settings")
         .select(
-          "workday_start, workday_end, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles",
+          "workday_start, workday_end, workdays, work_shifts, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles",
         )
         .eq("tenant_id", currentUser.tenantId)
         .maybeSingle();
@@ -506,12 +527,9 @@ export default function SettingsPage() {
       if (error || !data) {
         return;
       }
-      if (data.workday_start) {
-        setWorkdayStart(data.workday_start);
-      }
-      if (data.workday_end) {
-        setWorkdayEnd(data.workday_end);
-      }
+      const calendar = parseWorkingCalendar(data);
+      setWorkdays(calendar.workdays);
+      setWorkShifts(calendar.shifts);
       if (Array.isArray(data.qr_enabled_sizes)) {
         setQrEnabledSizes(
           data.qr_enabled_sizes.filter(
@@ -1848,27 +1866,64 @@ export default function SettingsPage() {
     if (!supabase || !currentUser.tenantId) {
       return;
     }
-    const isValidTime = (value: string) =>
-      /^([01]\d|2[0-3]):[0-5]\d$/.test(value.trim());
-    if (!isValidTime(workdayStart) || !isValidTime(workdayEnd)) {
-      setWorkdayError("Use 24h format HH:MM (e.g., 08:00).");
+    const normalizedShifts = workShifts.map((shift) => ({
+      start: normalizeWorkTime(shift.start, ""),
+      end: normalizeWorkTime(shift.end, ""),
+    }));
+    const validationError = validateWorkingCalendar(workdays, normalizedShifts);
+    if (validationError) {
+      setWorkdayError(validationError);
       return;
     }
-    if (workdayStart >= workdayEnd) {
-      setWorkdayError("Workday start must be earlier than end.");
-      return;
-    }
+    setWorkShifts(normalizedShifts);
+    const primaryShift = normalizedShifts[0] ?? DEFAULT_WORK_SHIFTS[0];
     setWorkdayError(null);
     setIsWorkdaySaving(true);
     const { error } = await supabase.from("tenant_settings").upsert({
       tenant_id: currentUser.tenantId,
-      workday_start: workdayStart,
-      workday_end: workdayEnd,
+      workday_start: primaryShift.start,
+      workday_end: primaryShift.end,
+      workdays,
+      work_shifts: normalizedShifts,
     });
     if (error) {
       setWorkdayError(error.message);
     }
     setIsWorkdaySaving(false);
+  }
+
+  function toggleWorkday(day: number) {
+    setWorkdays((prev) => {
+      if (prev.includes(day)) {
+        return prev.filter((value) => value !== day);
+      }
+      return [...prev, day].sort((a, b) => a - b);
+    });
+  }
+
+  function handleWorkShiftChange(
+    index: number,
+    field: keyof WorkShift,
+    value: string,
+  ) {
+    setWorkShifts((prev) =>
+      prev.map((shift, shiftIndex) =>
+        shiftIndex === index ? { ...shift, [field]: value } : shift,
+      ),
+    );
+  }
+
+  function handleAddShift() {
+    setWorkShifts((prev) => [...prev, { start: "17:00", end: "21:00" }]);
+  }
+
+  function handleRemoveShift(index: number) {
+    setWorkShifts((prev) => {
+      if (prev.length <= 1) {
+        return prev;
+      }
+      return prev.filter((_, shiftIndex) => shiftIndex !== index);
+    });
   }
 
   async function handleSaveQrSettings() {
@@ -3457,38 +3512,104 @@ export default function SettingsPage() {
                 <CardHeader>
                   <CardTitle>Working hours</CardTitle>
                   <CardDescription>
-                    Define the daily work window used for production timing.
+                    Define workdays and shifts used for production timing and
+                    start/stop duration calculations.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium">
-                        Workday start
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="^([01]\\d|2[0-3]):[0-5]\\d$"
-                        value={workdayStart}
-                        onChange={(event) =>
-                          setWorkdayStart(event.target.value)
-                        }
-                        placeholder="08:00"
-                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Workdays</label>
+                    <div className="flex flex-wrap gap-2">
+                      {weekdayOptions.map((option) => (
+                        <button
+                          type="button"
+                          key={option.value}
+                          onClick={() => toggleWorkday(option.value)}
+                          className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                            workdays.includes(option.value)
+                              ? "border-primary bg-primary/10 text-foreground"
+                              : "border-border bg-background text-muted-foreground"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
                     </div>
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium">Workday end</label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="^([01]\\d|2[0-3]):[0-5]\\d$"
-                        value={workdayEnd}
-                        onChange={(event) => setWorkdayEnd(event.target.value)}
-                        placeholder="17:00"
-                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium">Shifts</label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleAddShift}
+                      >
+                        Add shift
+                      </Button>
+                    </div>
+                    {workShifts.map((shift, index) => (
+                      <div
+                        key={`${index}-${shift.start}-${shift.end}`}
+                        className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+                      >
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Shift {index + 1} start
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                            value={shift.start}
+                            onChange={(event) =>
+                              handleWorkShiftChange(
+                                index,
+                                "start",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="08:00"
+                            className={`h-10 rounded-lg border bg-input-background px-3 text-sm ${
+                              isValidWorkTime(shift.start)
+                                ? "border-border"
+                                : "border-destructive"
+                            }`}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Shift {index + 1} end
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                            value={shift.end}
+                            onChange={(event) =>
+                              handleWorkShiftChange(index, "end", event.target.value)
+                            }
+                            placeholder="17:00"
+                            className={`h-10 rounded-lg border bg-input-background px-3 text-sm ${
+                              isValidWorkTime(shift.end)
+                                ? "border-border"
+                                : "border-destructive"
+                            }`}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveShift(index)}
+                          disabled={workShifts.length <= 1}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                    <div className="text-xs text-muted-foreground">
+                      Overnight shift is supported, for example 22:00 to 06:00.
                     </div>
                   </div>
                   {workdayError ? (
