@@ -49,14 +49,16 @@ export function TabsNav() {
     return true;
   });
   const showSettings = hasPermission("settings.view");
-  const tabs = showSettings ? [...visibleMainTabs, settingsTab] : visibleMainTabs;
+  const tabs = showSettings
+    ? [...visibleMainTabs, settingsTab]
+    : visibleMainTabs;
 
   const activeTab =
     tabs.find((t) =>
-      t.href === "/"
-        ? pathname === "/"
-        : pathname.startsWith(t.href),
-    )?.value ?? visibleMainTabs[0]?.value ?? settingsTab.value;
+      t.href === "/" ? pathname === "/" : pathname.startsWith(t.href),
+    )?.value ??
+    visibleMainTabs[0]?.value ??
+    settingsTab.value;
 
   return (
     <Tabs
@@ -67,7 +69,7 @@ export function TabsNav() {
       }}
       className="w-full"
     >
-      <div className="flex items-center gap-2 overflow-x-auto">
+      <div className="flex items-center gap-2 pb-1 overflow-x-auto">
         <TabsList>
           {visibleMainTabs.map(({ value, label, icon: Icon }) => (
             <TabsTrigger key={value} value={value} className="gap-2">

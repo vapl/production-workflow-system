@@ -1803,7 +1803,7 @@ export default function ProductionPage() {
   return (
     <>
       <Tabs defaultValue="planning" className="space-y-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="sticky top-16 z-10 flex flex-wrap items-end justify-between gap-4 bg-background/95 px-4 py-3">
           <div>
             <h2 className="text-2xl font-semibold">Production</h2>
             <p className="text-sm text-muted-foreground">
@@ -2144,25 +2144,25 @@ export default function ProductionPage() {
                     onChange={setViewDate}
                     className="flex items-center gap-2 text-xs"
                   />
-                <label className="flex items-center gap-2">
-                  Range
-                  <Select
-                    value={String(plannedRangeDays)}
-                    onValueChange={(value) =>
-                      setPlannedRangeDays(Number(value))
-                    }
-                  >
-                    <SelectTrigger className="h-9 w-[120px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">Today</SelectItem>
-                      <SelectItem value="3">3 days</SelectItem>
-                      <SelectItem value="7">7 days</SelectItem>
-                      <SelectItem value="14">14 days</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
+                  <label className="flex items-center gap-2">
+                    Range
+                    <Select
+                      value={String(plannedRangeDays)}
+                      onValueChange={(value) =>
+                        setPlannedRangeDays(Number(value))
+                      }
+                    >
+                      <SelectTrigger className="h-9 w-[120px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">Today</SelectItem>
+                        <SelectItem value="3">3 days</SelectItem>
+                        <SelectItem value="7">7 days</SelectItem>
+                        <SelectItem value="14">14 days</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
                 </div>
               </div>
               {isQueuesLoading ? (
@@ -2903,15 +2903,11 @@ export default function ProductionPage() {
                             <td className="px-3 py-2">
                               {row.dueDate ? formatDateInput(row.dueDate) : "-"}
                             </td>
-                            <td className="px-3 py-2">
-                              {startedDate || "-"}
-                            </td>
+                            <td className="px-3 py-2">{startedDate || "-"}</td>
                             <td className="px-3 py-2">{row.qty}</td>
                             <td className="px-3 py-2">{row.batchCode}</td>
                             <td className="px-3 py-2 text-right">
-                              {hasTimeData
-                                ? formatDuration(totalMinutes)
-                                : "-"}
+                              {hasTimeData ? formatDuration(totalMinutes) : "-"}
                             </td>
                             {stations.map((station) => {
                               const entry = stationStatuses?.get(station.id);
@@ -2936,7 +2932,9 @@ export default function ProductionPage() {
                                         </Badge>
                                         {entry.status === "blocked" &&
                                         entry.blockedReason ? (
-                                          <Tooltip content={entry.blockedReason}>
+                                          <Tooltip
+                                            content={entry.blockedReason}
+                                          >
                                             <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
                                           </Tooltip>
                                         ) : null}

@@ -2,10 +2,7 @@ import { NextResponse } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 import { sendResendEmail } from "@/lib/server/externalJobEmails";
-import {
-  actorHasPermission,
-  resolveAllowedRolesForPermission,
-} from "@/lib/server/rbac";
+import { requirePermissionForRequest } from "@/lib/server/apiPermission";
 
 function getOrigin(request: Request) {
   const origin = request.headers.get("origin");
@@ -16,14 +13,6 @@ function getOrigin(request: Request) {
     request.headers.get("x-forwarded-host") ?? request.headers.get("host");
   const proto = request.headers.get("x-forwarded-proto") ?? "https";
   return host ? `${proto}://${host}` : undefined;
-}
-
-function getBearerToken(request: Request) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  if (!authHeader.toLowerCase().startsWith("bearer ")) {
-    return null;
-  }
-  return authHeader.slice(7).trim();
 }
 
 function hashToken(value: string) {
@@ -67,15 +56,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const bearer = getBearerToken(request);
-  if (!bearer) {
-    return NextResponse.json({ error: "Missing auth token." }, { status: 401 });
+  const authCheck = await requirePermissionForRequest(
+    request,
+    admin,
+    "orders.manage",
+  );
+  if (authCheck.response) {
+    return authCheck.response;
   }
-
-  const { data: authData, error: authError } = await admin.auth.getUser(bearer);
-  if (authError || !authData.user) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
+  const { authUser, actorProfile, tenantId } = authCheck.actor;
 
   const body = await request.json().catch(() => ({}));
   const externalJobId =
@@ -87,33 +76,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: actorProfile } = await admin
-    .from("profiles")
-    .select("id, tenant_id, full_name, role, phone, is_admin")
-    .eq("id", authData.user.id)
-    .maybeSingle();
-  if (!actorProfile?.tenant_id) {
-    return NextResponse.json(
-      { error: "User tenant is not configured." },
-      { status: 403 },
-    );
-  }
-  const orderManageRoles = await resolveAllowedRolesForPermission(
-    admin,
-    actorProfile.tenant_id,
-    "orders.manage",
-  );
-  if (!actorHasPermission(actorProfile, orderManageRoles)) {
-    return NextResponse.json(
-      { error: "Missing permission: orders.manage" },
-      { status: 403 },
-    );
-  }
-
   const { data: subscription } = await admin
     .from("tenant_subscriptions")
     .select("plan_code, status")
-    .eq("tenant_id", actorProfile.tenant_id)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   const canSendToPartner =
     (subscription?.plan_code ?? "basic") === "pro" &&
@@ -130,7 +96,7 @@ export async function POST(request: Request) {
     .select(
       "name, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified",
     )
-    .eq("id", actorProfile.tenant_id)
+    .eq("id", tenantId)
     .maybeSingle();
 
   const { data: job, error: jobError } = await admin
@@ -154,7 +120,7 @@ export async function POST(request: Request) {
     `,
     )
     .eq("id", externalJobId)
-    .eq("tenant_id", actorProfile.tenant_id)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   if (jobError || !job) {
     return NextResponse.json(
@@ -169,7 +135,7 @@ export async function POST(request: Request) {
       .from("partners")
       .select("email")
       .eq("id", job.partner_id)
-      .eq("tenant_id", actorProfile.tenant_id)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     partnerEmail = partner?.email ?? "";
   }
@@ -192,8 +158,8 @@ export async function POST(request: Request) {
       request_mode: "partner_portal",
       partner_email: partnerEmail,
       partner_request_sender_name:
-        actorProfile.full_name ?? authData.user.email ?? "User",
-      partner_request_sender_email: authData.user.email ?? null,
+        actorProfile.full_name ?? authUser.email ?? "User",
+      partner_request_sender_email: authUser.email ?? null,
       partner_request_sender_phone: actorProfile.phone ?? null,
       partner_request_sent_at: new Date().toISOString(),
       partner_request_token_hash: tokenHash,
@@ -211,10 +177,10 @@ export async function POST(request: Request) {
 
   if (shouldSetOrdered) {
     await admin.from("external_job_status_history").insert({
-      tenant_id: actorProfile.tenant_id,
+      tenant_id: tenantId,
       external_job_id: job.id,
       status: "ordered",
-      changed_by_name: actorProfile.full_name ?? authData.user.email ?? "User",
+      changed_by_name: actorProfile.full_name ?? authUser.email ?? "User",
       changed_by_role: actorProfile.role ?? "Sales",
     });
   }
@@ -258,7 +224,7 @@ export async function POST(request: Request) {
     })
     .join("");
   const subject = `PWS request ${orderNumber} - action required`;
-  const actorEmail = authData.user.email ?? "";
+  const actorEmail = authUser.email ?? "";
   const actorName = actorProfile.full_name ?? actorEmail ?? "User";
   const tenantName = tenantSettings?.name?.trim() || "PWS";
   const tenantFromName = tenantSettings?.outbound_from_name?.trim() || tenantName;

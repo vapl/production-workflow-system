@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
-import {
-  actorHasPermission,
-  resolveAllowedRolesForPermission,
-} from "@/lib/server/rbac";
+import { requirePermissionForRequest } from "@/lib/server/apiPermission";
 
 type TableColumnType = "text" | "number" | "select";
 
@@ -483,14 +480,6 @@ async function extractPdfText(bytes: Buffer) {
     console.error("PDF parse failed:", err);
     return "";
   }
-}
-
-function getBearerToken(request: Request) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  if (!authHeader.toLowerCase().startsWith("bearer ")) {
-    return null;
-  }
-  return authHeader.slice(7).trim();
 }
 
 function normalizeToken(value: string) {
@@ -1454,42 +1443,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const bearer = getBearerToken(request);
-  if (!bearer) {
-    return NextResponse.json({ error: "Missing auth token." }, { status: 401 });
-  }
-  const { data: authData, error: authError } = await admin.auth.getUser(bearer);
-  if (authError || !authData.user) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
-  const { data: actorProfile } = await admin
-    .from("profiles")
-    .select("id, tenant_id, role, is_admin")
-    .eq("id", authData.user.id)
-    .maybeSingle();
-  if (!actorProfile?.tenant_id) {
-    return NextResponse.json(
-      { error: "User tenant is not configured." },
-      { status: 403 },
-    );
-  }
-  const orderManageRoles = await resolveAllowedRolesForPermission(
+  const authCheck = await requirePermissionForRequest(
+    request,
     admin,
-    actorProfile.tenant_id,
     "orders.manage",
   );
-  if (!actorHasPermission(actorProfile, orderManageRoles)) {
-    return NextResponse.json(
-      { error: "Missing permission: orders.manage" },
-      { status: 403 },
-    );
+  if (authCheck.response) {
+    return authCheck.response;
   }
+  const { tenantId } = authCheck.actor;
 
   const { data: subscription } = await admin
     .from("tenant_subscriptions")
     .select("plan_code, status")
-    .eq("tenant_id", actorProfile.tenant_id)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   const canUseAiImport =
     (subscription?.plan_code ?? "basic") === "pro" &&
@@ -1548,7 +1515,7 @@ export async function POST(request: Request) {
     .select("id, order_id, tenant_id, name, url, mime_type, size")
     .eq("id", attachmentId)
     .eq("order_id", orderId)
-    .eq("tenant_id", actorProfile.tenant_id)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   if (!attachment?.url) {
     return NextResponse.json(
