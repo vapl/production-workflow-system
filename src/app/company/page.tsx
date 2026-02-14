@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { InputField } from "@/components/ui/InputField";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
 import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
@@ -350,63 +351,50 @@ export default function CompanyPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 text-sm font-medium">
-              Company name
-              <input
-                value={companyName}
-                onChange={(event) => setCompanyName(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                disabled={!currentUser.isAdmin}
-              />
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              Legal name
-              <input
-                value={companyLegalName}
-                onChange={(event) => setCompanyLegalName(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                disabled={!currentUser.isAdmin}
-              />
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              Registration no.
-              <input
-                value={companyRegistrationNo}
-                onChange={(event) =>
-                  setCompanyRegistrationNo(event.target.value)
-                }
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                disabled={!currentUser.isAdmin}
-              />
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              VAT no.
-              <input
-                value={companyVatNo}
-                onChange={(event) => setCompanyVatNo(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                disabled={!currentUser.isAdmin}
-              />
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              Billing email
-              <input
-                type="email"
-                value={companyBillingEmail}
-                onChange={(event) => setCompanyBillingEmail(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                disabled={!currentUser.isAdmin}
-              />
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              Address
-              <input
-                value={companyAddress}
-                onChange={(event) => setCompanyAddress(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                disabled={!currentUser.isAdmin}
-              />
-            </label>
+            <InputField
+              label="Company name"
+              value={companyName}
+              onChange={(event) => setCompanyName(event.target.value)}
+              className="h-11 text-sm"
+              disabled={!currentUser.isAdmin}
+            />
+            <InputField
+              label="Legal name"
+              value={companyLegalName}
+              onChange={(event) => setCompanyLegalName(event.target.value)}
+              className="h-11 text-sm"
+              disabled={!currentUser.isAdmin}
+            />
+            <InputField
+              label="Registration no."
+              value={companyRegistrationNo}
+              onChange={(event) => setCompanyRegistrationNo(event.target.value)}
+              className="h-11 text-sm"
+              disabled={!currentUser.isAdmin}
+            />
+            <InputField
+              label="VAT no."
+              value={companyVatNo}
+              onChange={(event) => setCompanyVatNo(event.target.value)}
+              className="h-11 text-sm"
+              disabled={!currentUser.isAdmin}
+            />
+            <InputField
+              label="Billing email"
+              type="email"
+              icon="email"
+              value={companyBillingEmail}
+              onChange={(event) => setCompanyBillingEmail(event.target.value)}
+              className="h-11 text-sm"
+              disabled={!currentUser.isAdmin}
+            />
+            <InputField
+              label="Address"
+              value={companyAddress}
+              onChange={(event) => setCompanyAddress(event.target.value)}
+              className="h-11 text-sm"
+              disabled={!currentUser.isAdmin}
+            />
             <div className="space-y-3 text-sm font-medium">
               Upload logo
               <div className="flex flex-wrap items-center gap-4 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">

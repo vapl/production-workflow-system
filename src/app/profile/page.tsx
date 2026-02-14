@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { InputField } from "@/components/ui/InputField";
 import {
   supabase,
   supabaseAvatarBucket,
@@ -257,30 +258,28 @@ export default function ProfilePage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            <label className="space-y-2 text-sm font-medium">
-              Full name
-              <input
-                value={fullName}
-                onChange={(event) => setFullName(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm autofill:bg-input-background autofill:text-foreground"
-              />
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              Email
-              <input
-                value={user.email ?? ""}
-                readOnly
-                className="h-11 w-full rounded-lg border border-border bg-muted px-3 text-sm text-muted-foreground"
-              />
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              Phone
-              <input
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm autofill:bg-input-background autofill:text-foreground"
-              />
-            </label>
+            <InputField
+              label="Full name"
+              icon="user"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              className="h-11 text-sm"
+            />
+            <InputField
+              label="Email"
+              icon="email"
+              value={user.email ?? ""}
+              readOnly
+              className="h-11 text-sm text-muted-foreground"
+              wrapperClassName="h-11 bg-muted"
+            />
+            <InputField
+              label="Phone"
+              icon="phone"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              className="h-11 text-sm"
+            />
           </div>
 
           <div className="flex items-center gap-3">

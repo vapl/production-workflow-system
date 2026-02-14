@@ -19,6 +19,9 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { InputField } from "@/components/ui/InputField";
+import { Checkbox } from "@/components/ui/Checkbox";
 import {
   Select,
   SelectContent,
@@ -2915,7 +2918,6 @@ export default function SettingsPage() {
               closeButtonLabel="Close settings sections"
               title="Settings sections"
               enableSwipeToClose
-              panelClassName="flex max-h-[78dvh] flex-col pb-[max(4rem,env(safe-area-inset-bottom))]"
             >
               <div className="flex-1 overflow-y-auto p-3">
                 <div className="space-y-1">
@@ -2970,60 +2972,43 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(120px,0.5fr)_minmax(240px,1fr)_auto] lg:items-end">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Level name</label>
-                    <input
-                      value={levelName}
-                      onChange={(event) => {
-                        setLevelName(event.target.value);
-                      }}
-                      placeholder="Contract"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Order</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={levelOrder}
-                      onChange={(event) =>
-                        setLevelOrder(Number(event.target.value) || 1)
-                      }
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
+                  <InputField
+                    label="Level name"
+                    value={levelName}
+                    onChange={(event) => {
+                      setLevelName(event.target.value);
+                    }}
+                    placeholder="Contract"
+                    className="h-10 text-sm"
+                  />
+                  <InputField
+                    label="Order"
+                    type="number"
+                    min={1}
+                    value={levelOrder}
+                    onChange={(event) =>
+                      setLevelOrder(Number(event.target.value) || 1)
+                    }
+                    className="h-10 text-sm"
+                  />
                   <div className="flex flex-wrap items-center gap-4 pt-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={levelRequired}
-                        onChange={(event) =>
-                          setLevelRequired(event.target.checked)
-                        }
-                      />
-                      Required
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={levelActive}
-                        onChange={(event) =>
-                          setLevelActive(event.target.checked)
-                        }
-                      />
-                      Active
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={levelShowInTable}
-                        onChange={(event) =>
-                          setLevelShowInTable(event.target.checked)
-                        }
-                      />
-                      Show in table
-                    </label>
+                    <Checkbox
+                      checked={levelRequired}
+                      onChange={(event) => setLevelRequired(event.target.checked)}
+                      label="Required"
+                    />
+                    <Checkbox
+                      checked={levelActive}
+                      onChange={(event) => setLevelActive(event.target.checked)}
+                      label="Active"
+                    />
+                    <Checkbox
+                      checked={levelShowInTable}
+                      onChange={(event) =>
+                        setLevelShowInTable(event.target.checked)
+                      }
+                      label="Show in table"
+                    />
                   </div>
                   <div className="flex gap-2">
                     <Button onClick={handleSaveLevel}>
@@ -3087,46 +3072,37 @@ export default function SettingsPage() {
                           </td>
                           <td className="px-4 py-2">{level.order}</td>
                           <td className="px-4 py-2">
-                            <label className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={level.isRequired}
-                                onChange={(event) =>
-                                  updateLevel(level.id, {
-                                    isRequired: event.target.checked,
-                                  })
-                                }
-                              />
-                              {level.isRequired ? "Yes" : "No"}
-                            </label>
+                            <Checkbox
+                              checked={level.isRequired}
+                              onChange={(event) =>
+                                updateLevel(level.id, {
+                                  isRequired: event.target.checked,
+                                })
+                              }
+                              label={level.isRequired ? "Yes" : "No"}
+                            />
                           </td>
                           <td className="px-4 py-2">
-                            <label className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={level.isActive}
-                                onChange={(event) =>
-                                  updateLevel(level.id, {
-                                    isActive: event.target.checked,
-                                  })
-                                }
-                              />
-                              {level.isActive ? "Active" : "Hidden"}
-                            </label>
+                            <Checkbox
+                              checked={level.isActive}
+                              onChange={(event) =>
+                                updateLevel(level.id, {
+                                  isActive: event.target.checked,
+                                })
+                              }
+                              label={level.isActive ? "Active" : "Hidden"}
+                            />
                           </td>
                           <td className="px-4 py-2">
-                            <label className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={level.showInTable}
-                                onChange={(event) =>
-                                  updateLevel(level.id, {
-                                    showInTable: event.target.checked,
-                                  })
-                                }
-                              />
-                              {level.showInTable ? "Shown" : "Hidden"}
-                            </label>
+                            <Checkbox
+                              checked={level.showInTable}
+                              onChange={(event) =>
+                                updateLevel(level.id, {
+                                  showInTable: event.target.checked,
+                                })
+                              }
+                              label={level.showInTable ? "Shown" : "Hidden"}
+                            />
                           </td>
                           <td className="px-4 py-2 text-right">
                             <div className="flex justify-end gap-2">
@@ -3226,26 +3202,20 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,0.6fr)_auto] lg:items-end">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Label</label>
-                    <input
-                      value={nodeLabel}
-                      onChange={(event) => setNodeLabel(event.target.value)}
-                      placeholder="Enter label"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">
-                      Code (optional)
-                    </label>
-                    <input
-                      value={nodeCode}
-                      onChange={(event) => setNodeCode(event.target.value)}
-                      placeholder="Optional code"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
+                  <InputField
+                    label="Label"
+                    value={nodeLabel}
+                    onChange={(event) => setNodeLabel(event.target.value)}
+                    placeholder="Enter label"
+                    className="h-10 text-sm"
+                  />
+                  <InputField
+                    label="Code (optional)"
+                    value={nodeCode}
+                    onChange={(event) => setNodeCode(event.target.value)}
+                    placeholder="Optional code"
+                    className="h-10 text-sm"
+                  />
                   <div className="flex gap-2">
                     <Button onClick={handleSaveNode}>
                       {editingNodeId ? "Save item" : "Add item"}
@@ -3310,12 +3280,11 @@ export default function SettingsPage() {
                         <th className="px-4 py-2 text-right font-medium">
                           <div className="flex items-center justify-end gap-2">
                             <span>Actions</span>
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              variant="box"
                               checked={
                                 currentLevelNodes.length > 0 &&
-                                selectedNodeIds.length ===
-                                  currentLevelNodes.length
+                                selectedNodeIds.length === currentLevelNodes.length
                               }
                               onChange={(event) => {
                                 if (event.target.checked) {
@@ -3379,8 +3348,8 @@ export default function SettingsPage() {
                               >
                                 Remove
                               </Button>
-                              <input
-                                type="checkbox"
+                              <Checkbox
+                                variant="box"
                                 checked={selectedNodeIds.includes(node.id)}
                                 onChange={(event) => {
                                   setSelectedNodeIds((prev) => {
@@ -3434,17 +3403,13 @@ export default function SettingsPage() {
                 )}
 
                 <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(160px,0.6fr)_minmax(160px,0.6fr)_minmax(120px,0.4fr)_auto] lg:items-end">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Label</label>
-                    <input
-                      value={orderFieldLabel}
-                      onChange={(event) =>
-                        setOrderFieldLabel(event.target.value)
-                      }
-                      placeholder="Construction count"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
+                  <InputField
+                    label="Label"
+                    value={orderFieldLabel}
+                    onChange={(event) => setOrderFieldLabel(event.target.value)}
+                    placeholder="Construction count"
+                    className="h-10 text-sm"
+                  />
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Group</label>
                     <Select
@@ -3485,17 +3450,15 @@ export default function SettingsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Order</label>
-                    <input
-                      type="number"
-                      value={orderFieldSortOrder}
-                      onChange={(event) =>
-                        setOrderFieldSortOrder(Number(event.target.value) || 0)
-                      }
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
+                  <InputField
+                    label="Order"
+                    type="number"
+                    value={orderFieldSortOrder}
+                    onChange={(event) =>
+                      setOrderFieldSortOrder(Number(event.target.value) || 0)
+                    }
+                    className="h-10 text-sm"
+                  />
                   <div className="flex gap-2">
                     <Button onClick={handleSaveOrderField}>
                       {editingOrderFieldId ? "Save field" : "Add field"}
@@ -3509,17 +3472,13 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    Unit (optional)
-                    <input
-                      value={orderFieldUnit}
-                      onChange={(event) =>
-                        setOrderFieldUnit(event.target.value)
-                      }
-                      placeholder="pcs"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </label>
+                  <InputField
+                    label="Unit (optional)"
+                    value={orderFieldUnit}
+                    onChange={(event) => setOrderFieldUnit(event.target.value)}
+                    placeholder="pcs"
+                    className="h-10 text-sm"
+                  />
                   <label className="flex flex-col gap-2 text-sm font-medium">
                     Select options (comma, newline, or &quot;\&quot; separated)
                     <textarea
@@ -3593,32 +3552,30 @@ export default function SettingsPage() {
                               >
                                 ||
                               </div>
-                              <label className="flex flex-col gap-1 text-xs font-medium">
-                                Label
-                                <input
-                                  value={column.label}
-                                  onChange={(event) =>
-                                    updateOrderFieldColumn(index, {
-                                      label: event.target.value,
-                                    })
-                                  }
-                                  placeholder="Position"
-                                  className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
-                                />
-                              </label>
-                              <label className="flex flex-col gap-1 text-xs font-medium">
-                                AI key (optional)
-                                <input
-                                  value={column.aiKey ?? ""}
-                                  onChange={(event) =>
-                                    updateOrderFieldColumn(index, {
-                                      aiKey: event.target.value,
-                                    })
-                                  }
-                                  placeholder="construction"
-                                  className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
-                                />
-                              </label>
+                              <InputField
+                                label="Label"
+                                value={column.label}
+                                onChange={(event) =>
+                                  updateOrderFieldColumn(index, {
+                                    label: event.target.value,
+                                  })
+                                }
+                                placeholder="Position"
+                                className="h-9 text-sm"
+                                labelClassName="text-xs font-medium"
+                              />
+                              <InputField
+                                label="AI key (optional)"
+                                value={column.aiKey ?? ""}
+                                onChange={(event) =>
+                                  updateOrderFieldColumn(index, {
+                                    aiKey: event.target.value,
+                                  })
+                                }
+                                placeholder="construction"
+                                className="h-9 text-sm"
+                                labelClassName="text-xs font-medium"
+                              />
                               <label className="flex flex-col gap-1 text-xs font-medium">
                                 Type
                                 <Select
@@ -3647,32 +3604,29 @@ export default function SettingsPage() {
                                   </SelectContent>
                                 </Select>
                               </label>
-                              <label className="flex flex-col gap-1 text-xs font-medium">
-                                Unit
-                                <input
-                                  value={column.unit ?? ""}
-                                  onChange={(event) =>
-                                    updateOrderFieldColumn(index, {
-                                      unit: event.target.value,
-                                    })
-                                  }
-                                  placeholder="mm"
-                                  className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
-                                />
-                              </label>
-                              <label className="flex flex-col gap-1 text-xs font-medium">
-                                Required
-                                <input
-                                  type="checkbox"
+                              <InputField
+                                label="Unit"
+                                value={column.unit ?? ""}
+                                onChange={(event) =>
+                                  updateOrderFieldColumn(index, {
+                                    unit: event.target.value,
+                                  })
+                                }
+                                placeholder="mm"
+                                className="h-9 text-sm"
+                                labelClassName="text-xs font-medium"
+                              />
+                              <div className="space-y-1">
+                                <div className="text-xs font-medium">Required</div>
+                                <Checkbox
                                   checked={column.isRequired ?? false}
                                   onChange={(event) =>
                                     updateOrderFieldColumn(index, {
                                       isRequired: event.target.checked,
                                     })
                                   }
-                                  className="h-4 w-4"
                                 />
-                              </label>
+                              </div>
                               <div className="flex items-center gap-1">
                                 <Button
                                   size="sm"
@@ -3712,7 +3666,7 @@ export default function SettingsPage() {
                                 </label>
                                 <label className="flex flex-col gap-1 text-xs font-medium">
                                   Max selects (1-3)
-                                  <input
+                                  <Input
                                     type="number"
                                     min={1}
                                     max={3}
@@ -3736,36 +3690,27 @@ export default function SettingsPage() {
                 )}
 
                 <div className="flex flex-wrap items-center gap-4 text-sm">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={orderFieldRequired}
-                      onChange={(event) =>
-                        setOrderFieldRequired(event.target.checked)
-                      }
-                    />
-                    Required
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={orderFieldActive}
-                      onChange={(event) =>
-                        setOrderFieldActive(event.target.checked)
-                      }
-                    />
-                    Active
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={orderFieldShowInProduction}
-                      onChange={(event) =>
-                        setOrderFieldShowInProduction(event.target.checked)
-                      }
-                    />
-                    Show in production
-                  </label>
+                  <Checkbox
+                    checked={orderFieldRequired}
+                    onChange={(event) =>
+                      setOrderFieldRequired(event.target.checked)
+                    }
+                    label="Required"
+                  />
+                  <Checkbox
+                    checked={orderFieldActive}
+                    onChange={(event) =>
+                      setOrderFieldActive(event.target.checked)
+                    }
+                    label="Active"
+                  />
+                  <Checkbox
+                    checked={orderFieldShowInProduction}
+                    onChange={(event) =>
+                      setOrderFieldShowInProduction(event.target.checked)
+                    }
+                    label="Show in production"
+                  />
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
@@ -3811,8 +3756,8 @@ export default function SettingsPage() {
                         <th className="px-4 py-2 text-right font-medium">
                           <div className="flex items-center justify-end gap-2">
                             <span>Actions</span>
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              variant="box"
                               checked={
                                 sortedOrderInputFields.length > 0 &&
                                 selectedOrderFieldIds.length ===
@@ -3897,8 +3842,8 @@ export default function SettingsPage() {
                                 >
                                   Remove
                                 </Button>
-                                <input
-                                  type="checkbox"
+                                <Checkbox
+                                  variant="box"
                                   checked={selectedOrderFieldIds.includes(
                                     field.id,
                                   )}
@@ -3981,54 +3926,46 @@ export default function SettingsPage() {
                         key={`${index}-${shift.start}-${shift.end}`}
                         className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
                       >
-                        <div className="flex flex-col gap-2">
-                          <label className="text-xs font-medium text-muted-foreground">
-                            Shift {index + 1} start
-                          </label>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
-                            value={shift.start}
-                            onChange={(event) =>
-                              handleWorkShiftChange(
-                                index,
-                                "start",
-                                event.target.value,
-                              )
-                            }
-                            placeholder="08:00"
-                            className={`h-10 w-full rounded-lg border bg-input-background px-3 text-sm ${
-                              isValidWorkTime(shift.start)
-                                ? "border-border"
-                                : "border-destructive"
-                            }`}
-                          />
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-xs font-medium text-muted-foreground">
-                            Shift {index + 1} end
-                          </label>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
-                            value={shift.end}
-                            onChange={(event) =>
-                              handleWorkShiftChange(
-                                index,
-                                "end",
-                                event.target.value,
-                              )
-                            }
-                            placeholder="17:00"
-                            className={`h-10 w-full rounded-lg border bg-input-background px-3 text-sm ${
-                              isValidWorkTime(shift.end)
-                                ? "border-border"
-                                : "border-destructive"
-                            }`}
-                          />
-                        </div>
+                        <InputField
+                          label={`Shift ${index + 1} start`}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                          value={shift.start}
+                          onChange={(event) =>
+                            handleWorkShiftChange(
+                              index,
+                              "start",
+                              event.target.value,
+                            )
+                          }
+                          placeholder="08:00"
+                          className={`h-10 w-full text-sm ${
+                            isValidWorkTime(shift.start)
+                              ? ""
+                              : "border-destructive"
+                          }`}
+                          labelClassName="text-xs font-medium text-muted-foreground"
+                        />
+                        <InputField
+                          label={`Shift ${index + 1} end`}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                          value={shift.end}
+                          onChange={(event) =>
+                            handleWorkShiftChange(
+                              index,
+                              "end",
+                              event.target.value,
+                            )
+                          }
+                          placeholder="17:00"
+                          className={`h-10 w-full text-sm ${
+                            isValidWorkTime(shift.end) ? "" : "border-destructive"
+                          }`}
+                          labelClassName="text-xs font-medium text-muted-foreground"
+                        />
                         <Button
                           type="button"
                           variant="ghost"
@@ -4069,28 +4006,22 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(240px,1.2fr)_auto] lg:items-end">
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium">
-                        Station name
-                      </label>
-                      <input
-                        value={stationName}
-                        onChange={(event) => setStationName(event.target.value)}
-                        placeholder="Cutting"
-                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium">Description</label>
-                      <input
-                        value={stationDescription}
-                        onChange={(event) =>
-                          setStationDescription(event.target.value)
-                        }
-                        placeholder="Sawing and prep"
-                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
-                    </div>
+                    <InputField
+                      label="Station name"
+                      value={stationName}
+                      onChange={(event) => setStationName(event.target.value)}
+                      placeholder="Cutting"
+                      className="h-10 text-sm"
+                    />
+                    <InputField
+                      label="Description"
+                      value={stationDescription}
+                      onChange={(event) =>
+                        setStationDescription(event.target.value)
+                      }
+                      placeholder="Sawing and prep"
+                      className="h-10 text-sm"
+                    />
                     <div className="flex gap-2">
                       <Button onClick={handleSaveStation}>
                         {editingStationId ? "Save station" : "Add station"}
@@ -4111,8 +4042,9 @@ export default function SettingsPage() {
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <input
-                          type="checkbox"
+                        <Checkbox
+                          variant="box"
+                          
                           checked={
                             displayStations.length > 0 &&
                             selectedWorkStationIds.length ===
@@ -4128,7 +4060,7 @@ export default function SettingsPage() {
                             }
                           }}
                           disabled={displayStations.length === 0}
-                        />
+                         />
                         Select all
                       </label>
                       <Button
@@ -4167,15 +4099,15 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
                           <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              
                               checked={station.isActive}
                               onChange={(event) =>
                                 updateWorkStation(station.id, {
                                   isActive: event.target.checked,
                                 })
                               }
-                            />
+                             />
                             Active
                           </label>
                           <Button
@@ -4208,8 +4140,9 @@ export default function SettingsPage() {
                           >
                             Remove
                           </Button>
-                          <input
-                            type="checkbox"
+                          <Checkbox
+                            variant="box"
+                            
                             checked={selectedWorkStationIds.includes(
                               station.id,
                             )}
@@ -4221,7 +4154,7 @@ export default function SettingsPage() {
                                 return prev.filter((id) => id !== station.id);
                               });
                             }}
-                          />
+                           />
                         </div>
                       </div>
                     ))}
@@ -4248,8 +4181,8 @@ export default function SettingsPage() {
                               key={option.value}
                               className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
                             >
-                              <input
-                                type="checkbox"
+                              <Checkbox
+                                
                                 checked={checked}
                                 onChange={(event) => {
                                   setQrEnabledSizes((prev) => {
@@ -4261,7 +4194,7 @@ export default function SettingsPage() {
                                     );
                                   });
                                 }}
-                              />
+                               />
                               {option.label}
                             </label>
                           );
@@ -4308,8 +4241,8 @@ export default function SettingsPage() {
                             key={option.value}
                             className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
                           >
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              
                               checked={checked}
                               onChange={(event) => {
                                 setQrContentFields((prev) => {
@@ -4321,7 +4254,7 @@ export default function SettingsPage() {
                                   );
                                 });
                               }}
-                            />
+                             />
                             {(
                               rules.orderStatusConfig as Record<
                                 string,
@@ -4375,28 +4308,26 @@ export default function SettingsPage() {
                       "Production",
                       "Engineering",
                       "Sales",
-                    ].map(
-                      (role) => (
-                        <label
-                          key={role}
-                          className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={notificationRoles.includes(role)}
-                            onChange={(event) => {
-                              setNotificationRoles((prev) => {
-                                if (event.target.checked) {
-                                  return [...new Set([...prev, role])];
-                                }
-                                return prev.filter((item) => item !== role);
-                              });
-                            }}
-                          />
-                          {role}
-                        </label>
-                      ),
-                    )}
+                    ].map((role) => (
+                      <label
+                        key={role}
+                        className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
+                      >
+                        <Checkbox
+                          
+                          checked={notificationRoles.includes(role)}
+                          onChange={(event) => {
+                            setNotificationRoles((prev) => {
+                              if (event.target.checked) {
+                                return [...new Set([...prev, role])];
+                              }
+                              return prev.filter((item) => item !== role);
+                            });
+                          }}
+                         />
+                        {role}
+                      </label>
+                    ))}
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -4464,8 +4395,8 @@ export default function SettingsPage() {
                                       key={dep.id}
                                       className="flex items-center gap-2 rounded-md border border-border px-2 py-1"
                                     >
-                                      <input
-                                        type="checkbox"
+                                      <Checkbox
+                                        
                                         checked={checked}
                                         onChange={(event) => {
                                           const next = new Set(selected);
@@ -4479,7 +4410,7 @@ export default function SettingsPage() {
                                             Array.from(next),
                                           );
                                         }}
-                                      />
+                                       />
                                       {dep.name}
                                     </label>
                                   );
@@ -4563,8 +4494,8 @@ export default function SettingsPage() {
                                 return (
                                   <td key={station.id} className="px-4 py-2">
                                     <label className="flex items-center gap-2">
-                                      <input
-                                        type="checkbox"
+                                      <Checkbox
+                                        
                                         checked={isAssigned}
                                         onChange={() =>
                                           handleToggleOperatorAssignment(
@@ -4572,7 +4503,7 @@ export default function SettingsPage() {
                                             station.id,
                                           )
                                         }
-                                      />
+                                       />
                                       <span className="text-xs text-muted-foreground">
                                         Assigned
                                       </span>
@@ -4599,17 +4530,13 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto] lg:items-end">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Reason</label>
-                    <input
-                      value={stopReasonLabel}
-                      onChange={(event) =>
-                        setStopReasonLabel(event.target.value)
-                      }
-                      placeholder="Missing material"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
+                  <InputField
+                    label="Reason"
+                    value={stopReasonLabel}
+                    onChange={(event) => setStopReasonLabel(event.target.value)}
+                    placeholder="Missing material"
+                    className="h-10 text-sm"
+                  />
                   <div className="flex gap-2">
                     <Button onClick={handleSaveStopReason}>
                       {editingStopReasonId ? "Save reason" : "Add reason"}
@@ -4631,8 +4558,9 @@ export default function SettingsPage() {
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <input
-                          type="checkbox"
+                        <Checkbox
+                          variant="box"
+                          
                           checked={
                             stopReasons.length > 0 &&
                             selectedStopReasonIds.length === stopReasons.length
@@ -4647,7 +4575,7 @@ export default function SettingsPage() {
                             }
                           }}
                           disabled={stopReasons.length === 0}
-                        />
+                         />
                         Select all
                       </label>
                       <Button
@@ -4668,15 +4596,15 @@ export default function SettingsPage() {
                       <div className="font-medium">{reason.label}</div>
                       <div className="flex items-center gap-2">
                         <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
+                          <Checkbox
+                            
                             checked={reason.isActive}
                             onChange={(event) =>
                               updateStopReason(reason.id, {
                                 isActive: event.target.checked,
                               })
                             }
-                          />
+                           />
                           Active
                         </label>
                         <Button
@@ -4709,8 +4637,9 @@ export default function SettingsPage() {
                         >
                           Remove
                         </Button>
-                        <input
-                          type="checkbox"
+                          <Checkbox
+                            variant="box"
+                          
                           checked={selectedStopReasonIds.includes(reason.id)}
                           onChange={(event) => {
                             setSelectedStopReasonIds((prev) => {
@@ -4720,7 +4649,7 @@ export default function SettingsPage() {
                               return prev.filter((id) => id !== reason.id);
                             });
                           }}
-                        />
+                         />
                       </div>
                     </div>
                   ))}
@@ -4750,17 +4679,15 @@ export default function SettingsPage() {
                 <div className="border-t border-border pt-4 pb-8">
                   <div className="text-sm font-medium">Partner groups</div>
                   <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium">Group name</label>
-                      <input
-                        value={partnerGroupName}
-                        onChange={(event) =>
-                          setPartnerGroupName(event.target.value)
-                        }
-                        placeholder="Glass"
-                        className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
-                    </div>
+                    <InputField
+                      label="Group name"
+                      value={partnerGroupName}
+                      onChange={(event) =>
+                        setPartnerGroupName(event.target.value)
+                      }
+                      placeholder="Glass"
+                      className="h-10 text-sm"
+                    />
                     <div className="flex gap-2">
                       <Button onClick={handleSavePartnerGroup}>
                         {editingPartnerGroupId ? "Save group" : "Add group"}
@@ -4784,8 +4711,9 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <input
-                            type="checkbox"
+                            <Checkbox
+                              variant="box"
+                            
                             checked={
                               partnerGroups.length > 0 &&
                               selectedPartnerGroupIds.length ===
@@ -4801,7 +4729,7 @@ export default function SettingsPage() {
                               }
                             }}
                             disabled={partnerGroups.length === 0}
-                          />
+                           />
                           Select all
                         </label>
                         <Button
@@ -4822,15 +4750,15 @@ export default function SettingsPage() {
                         <div className="font-medium">{group.name}</div>
                         <div className="flex items-center gap-2">
                           <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              
                               checked={group.isActive}
                               onChange={(event) =>
                                 updatePartnerGroup(group.id, {
                                   isActive: event.target.checked,
                                 })
                               }
-                            />
+                             />
                             Active
                           </label>
                           <Button
@@ -4863,8 +4791,9 @@ export default function SettingsPage() {
                           >
                             Remove
                           </Button>
-                          <input
-                            type="checkbox"
+                          <Checkbox
+                            variant="box"
+                            
                             checked={selectedPartnerGroupIds.includes(group.id)}
                             onChange={(event) => {
                               setSelectedPartnerGroupIds((prev) => {
@@ -4874,7 +4803,7 @@ export default function SettingsPage() {
                                 return prev.filter((id) => id !== group.id);
                               });
                             }}
-                          />
+                           />
                         </div>
                       </div>
                     ))}
@@ -4887,34 +4816,28 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="border-t border-border pt-4 grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(180px,0.8fr)_minmax(180px,0.8fr)_minmax(180px,0.8fr)_auto] lg:items-end">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Partner name</label>
-                    <input
-                      value={partnerName}
-                      onChange={(event) => setPartnerName(event.target.value)}
-                      placeholder="Baltic Glass"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Email</label>
-                    <input
-                      type="email"
-                      value={partnerEmail}
-                      onChange={(event) => setPartnerEmail(event.target.value)}
-                      placeholder="partner@company.com"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Phone</label>
-                    <input
-                      value={partnerPhone}
-                      onChange={(event) => setPartnerPhone(event.target.value)}
-                      placeholder="+371 2xxxxxxx"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
+                  <InputField
+                    label="Partner name"
+                    value={partnerName}
+                    onChange={(event) => setPartnerName(event.target.value)}
+                    placeholder="Baltic Glass"
+                    className="h-10 text-sm"
+                  />
+                  <InputField
+                    label="Email"
+                    type="email"
+                    value={partnerEmail}
+                    onChange={(event) => setPartnerEmail(event.target.value)}
+                    placeholder="partner@company.com"
+                    className="h-10 text-sm"
+                  />
+                  <InputField
+                    label="Phone"
+                    value={partnerPhone}
+                    onChange={(event) => setPartnerPhone(event.target.value)}
+                    placeholder="+371 2xxxxxxx"
+                    className="h-10 text-sm"
+                  />
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Group</label>
                     <Select
@@ -4959,8 +4882,9 @@ export default function SettingsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <input
-                          type="checkbox"
+                        <Checkbox
+                          variant="box"
+                          
                           checked={
                             partners.length > 0 &&
                             selectedPartnerIds.length === partners.length
@@ -4975,7 +4899,7 @@ export default function SettingsPage() {
                             }
                           }}
                           disabled={partners.length === 0}
-                        />
+                         />
                         Select all
                       </label>
                       <Button
@@ -5012,15 +4936,15 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
+                          <Checkbox
+                            
                             checked={partner.isActive}
                             onChange={(event) =>
                               updatePartner(partner.id, {
                                 isActive: event.target.checked,
                               })
                             }
-                          />
+                           />
                           Active
                         </label>
                         <Button
@@ -5053,8 +4977,9 @@ export default function SettingsPage() {
                         >
                           Remove
                         </Button>
-                        <input
-                          type="checkbox"
+                          <Checkbox
+                            variant="box"
+                          
                           checked={selectedPartnerIds.includes(partner.id)}
                           onChange={(event) => {
                             setSelectedPartnerIds((prev) => {
@@ -5064,7 +4989,7 @@ export default function SettingsPage() {
                               return prev.filter((id) => id !== partner.id);
                             });
                           }}
-                        />
+                         />
                       </div>
                     </div>
                   ))}
@@ -5096,17 +5021,15 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(140px,0.6fr)_minmax(190px,0.7fr)_minmax(120px,0.4fr)_auto] lg:items-end">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Label</label>
-                    <input
-                      value={externalJobFieldLabel}
-                      onChange={(event) =>
-                        setExternalJobFieldLabel(event.target.value)
-                      }
-                      placeholder="Unit price"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
+                  <InputField
+                    label="Label"
+                    value={externalJobFieldLabel}
+                    onChange={(event) =>
+                      setExternalJobFieldLabel(event.target.value)
+                    }
+                    placeholder="Unit price"
+                    className="h-10 text-sm"
+                  />
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Type</label>
                     <Select
@@ -5147,19 +5070,17 @@ export default function SettingsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Order</label>
-                    <input
-                      type="number"
-                      value={externalJobFieldSortOrder}
-                      onChange={(event) =>
-                        setExternalJobFieldSortOrder(
-                          Number(event.target.value) || 0,
-                        )
-                      }
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </div>
+                  <InputField
+                    label="Order"
+                    type="number"
+                    value={externalJobFieldSortOrder}
+                    onChange={(event) =>
+                      setExternalJobFieldSortOrder(
+                        Number(event.target.value) || 0,
+                      )
+                    }
+                    className="h-10 text-sm"
+                  />
                   <div className="flex gap-2">
                     <Button onClick={handleSaveExternalJobField}>
                       {editingExternalJobFieldId ? "Save field" : "Add field"}
@@ -5178,7 +5099,7 @@ export default function SettingsPage() {
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="flex flex-col gap-2 text-sm font-medium">
                     Unit (optional)
-                    <input
+                    <Input
                       value={externalJobFieldUnit}
                       onChange={(event) =>
                         setExternalJobFieldUnit(event.target.value)
@@ -5203,23 +5124,23 @@ export default function SettingsPage() {
 
                 <div className="flex flex-wrap items-center gap-4 text-sm">
                   <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      
                       checked={externalJobFieldRequired}
                       onChange={(event) =>
                         setExternalJobFieldRequired(event.target.checked)
                       }
-                    />
+                     />
                     Required
                   </label>
                   <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      
                       checked={externalJobFieldActive}
                       onChange={(event) =>
                         setExternalJobFieldActive(event.target.checked)
                       }
-                    />
+                     />
                     Active
                   </label>
                 </div>
@@ -5267,8 +5188,9 @@ export default function SettingsPage() {
                         <th className="px-4 py-2 text-right font-medium">
                           <div className="flex items-center justify-end gap-2">
                             <span>Actions</span>
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              variant="box"
+                              
                               checked={
                                 sortedExternalJobFields.length > 0 &&
                                 selectedExternalJobFieldIds.length ===
@@ -5285,7 +5207,7 @@ export default function SettingsPage() {
                                   setSelectedExternalJobFieldIds([]);
                                 }
                               }}
-                            />
+                             />
                           </div>
                         </th>
                       </tr>
@@ -5358,8 +5280,9 @@ export default function SettingsPage() {
                                 >
                                   Remove
                                 </Button>
-                                <input
-                                  type="checkbox"
+                                <Checkbox
+                                  variant="box"
+                                  
                                   checked={selectedExternalJobFieldIds.includes(
                                     field.id,
                                   )}
@@ -5373,7 +5296,7 @@ export default function SettingsPage() {
                                       );
                                     });
                                   }}
-                                />
+                                 />
                               </div>
                             </td>
                           </tr>
@@ -5406,7 +5329,7 @@ export default function SettingsPage() {
                 <div className="mt-3 grid gap-3 items-center md:grid-cols-[minmax(220px,1.2fr)_minmax(200px,1fr)_minmax(140px,0.5fr)_auto] md:items-end">
                   <label className="space-y-2 text-sm font-medium">
                     Email
-                    <input
+                    <Input
                       type="email"
                       value={inviteEmail}
                       onChange={(event) => setInviteEmail(event.target.value)}
@@ -5417,7 +5340,7 @@ export default function SettingsPage() {
                   </label>
                   <label className="space-y-2 text-sm font-medium">
                     Full name
-                    <input
+                    <Input
                       value={inviteFullName}
                       onChange={(event) =>
                         setInviteFullName(event.target.value)
@@ -5477,13 +5400,13 @@ export default function SettingsPage() {
               {process.env.NODE_ENV !== "production" &&
                 !canManageRolePermissions && (
                   <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      
                       checked={devRoleOverride}
                       onChange={(event) =>
                         setDevRoleOverride(event.target.checked)
                       }
-                    />
+                     />
                     Dev override: allow changing your own role
                   </label>
                 )}
@@ -5566,8 +5489,8 @@ export default function SettingsPage() {
                           </td>
                           <td className="px-4 py-2">
                             <label className="flex items-center gap-2 text-xs text-foreground">
-                              <input
-                                type="checkbox"
+                              <Checkbox
+                                
                                 checked={user.isOwner}
                                 onChange={(event) =>
                                   handleUpdateUserOwner(
@@ -5578,14 +5501,14 @@ export default function SettingsPage() {
                                 disabled={
                                   user.isOwner || !canManageRolePermissions
                                 }
-                              />
+                               />
                               Owner
                             </label>
                           </td>
                           <td className="px-4 py-2">
                             <label className="flex items-center gap-2 text-xs text-foreground">
-                              <input
-                                type="checkbox"
+                              <Checkbox
+                                
                                 checked={user.isOwner || user.isAdmin}
                                 onChange={(event) =>
                                   handleUpdateUserAdmin(
@@ -5596,7 +5519,7 @@ export default function SettingsPage() {
                                 disabled={
                                   user.isOwner || !canManageRolePermissions
                                 }
-                              />
+                               />
                               Admin
                             </label>
                           </td>
@@ -5694,14 +5617,14 @@ export default function SettingsPage() {
                                 key={`${definition.key}-${role}`}
                                 className="px-3 py-2 text-center"
                               >
-                                <input
-                                  type="checkbox"
+                                <Checkbox
+                                  
                                   checked={allowed}
                                   onChange={() =>
                                     togglePermissionRole(definition.key, role)
                                   }
                                   disabled={!canManageRolePermissions}
-                                />
+                                 />
                               </td>
                             );
                           })}
@@ -5834,7 +5757,7 @@ export default function SettingsPage() {
                   <div className="mt-3 grid gap-4 lg:grid-cols-3">
                     <label className="space-y-2 text-sm font-medium">
                       Min attachments for engineering
-                      <input
+                      <Input
                         type="number"
                         min={0}
                         value={rules.minAttachmentsForEngineering}
@@ -5849,7 +5772,7 @@ export default function SettingsPage() {
                     </label>
                     <label className="space-y-2 text-sm font-medium">
                       Min attachments for production
-                      <input
+                      <Input
                         type="number"
                         min={0}
                         value={rules.minAttachmentsForProduction}
@@ -5864,7 +5787,7 @@ export default function SettingsPage() {
                     </label>
                     <label className="space-y-2 text-sm font-medium">
                       Due soon threshold (days)
-                      <input
+                      <Input
                         type="number"
                         min={0}
                         value={rules.dueSoonDays}
@@ -5882,32 +5805,32 @@ export default function SettingsPage() {
                   </div>
                   <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
                     <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        
                         checked={rules.requireCommentForEngineering}
                         onChange={(event) =>
                           setRules({
                             requireCommentForEngineering: event.target.checked,
                           })
                         }
-                      />
+                       />
                       Require comment before engineering
                     </label>
                     <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        
                         checked={rules.requireCommentForProduction}
                         onChange={(event) =>
                           setRules({
                             requireCommentForProduction: event.target.checked,
                           })
                         }
-                      />
+                       />
                       Require comment before production
                     </label>
                     <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        
                         checked={rules.requireOrderInputsForEngineering}
                         onChange={(event) =>
                           setRules({
@@ -5915,12 +5838,12 @@ export default function SettingsPage() {
                               event.target.checked,
                           })
                         }
-                      />
+                       />
                       Require order inputs before engineering
                     </label>
                     <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        
                         checked={rules.requireOrderInputsForProduction}
                         onChange={(event) =>
                           setRules({
@@ -5928,21 +5851,21 @@ export default function SettingsPage() {
                               event.target.checked,
                           })
                         }
-                      />
+                       />
                       Require order inputs before production
                     </label>
                   </div>
                   <div className="mt-4 rounded-lg border border-border bg-background/60 p-3">
                     <label className="flex items-center gap-2 text-sm font-medium">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        
                         checked={rules.dueIndicatorEnabled}
                         onChange={(event) =>
                           setRules({
                             dueIndicatorEnabled: event.target.checked,
                           })
                         }
-                      />
+                       />
                       Enable due date indicators
                     </label>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -5955,8 +5878,8 @@ export default function SettingsPage() {
                             key={option.value}
                             className="flex items-center gap-2"
                           >
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              
                               checked={isChecked}
                               disabled={!rules.dueIndicatorEnabled}
                               onChange={(event) => {
@@ -5971,7 +5894,7 @@ export default function SettingsPage() {
                                       ),
                                 });
                               }}
-                            />
+                             />
                             {option.label}
                           </label>
                         );
@@ -6006,7 +5929,7 @@ export default function SettingsPage() {
                               </span>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
-                              <input
+                              <Input
                                 value={config?.label ?? option.label}
                                 onChange={(event) =>
                                   setOrderStatusConfigDrafts((prev) => ({
@@ -6061,8 +5984,8 @@ export default function SettingsPage() {
                                     Required
                                   </span>
                                 ) : null}
-                                <input
-                                  type="checkbox"
+                                <Checkbox
+                                  
                                   checked={config?.isActive ?? true}
                                   disabled={requiredActiveOrderStatuses.includes(
                                     option.value,
@@ -6076,7 +5999,7 @@ export default function SettingsPage() {
                                       },
                                     }))
                                   }
-                                />
+                                 />
                                 <span>Active</span>
                               </label>
                             </div>
@@ -6145,7 +6068,7 @@ export default function SettingsPage() {
                               </span>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
-                              <input
+                              <Input
                                 value={config?.label ?? option.label}
                                 onChange={(event) =>
                                   setExternalJobStatusConfigDrafts((prev) => ({
@@ -6200,8 +6123,8 @@ export default function SettingsPage() {
                                     Required
                                   </span>
                                 ) : null}
-                                <input
-                                  type="checkbox"
+                                <Checkbox
+                                  
                                   checked={config?.isActive ?? true}
                                   disabled={requiredActiveExternalStatuses.includes(
                                     option.value,
@@ -6217,7 +6140,7 @@ export default function SettingsPage() {
                                       }),
                                     )
                                   }
-                                />
+                                 />
                                 <span>Active</span>
                               </label>
                             </div>
@@ -6270,7 +6193,7 @@ export default function SettingsPage() {
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       <label className="space-y-2 text-sm font-medium">
                         Engineer
-                        <input
+                        <Input
                           value={assignmentLabelDrafts.engineer}
                           onChange={(event) =>
                             setAssignmentLabelDrafts((prev) => ({
@@ -6283,7 +6206,7 @@ export default function SettingsPage() {
                       </label>
                       <label className="space-y-2 text-sm font-medium">
                         Manager
-                        <input
+                        <Input
                           value={assignmentLabelDrafts.manager}
                           onChange={(event) =>
                             setAssignmentLabelDrafts((prev) => ({
@@ -6350,7 +6273,7 @@ export default function SettingsPage() {
                             key={category.id}
                             className="flex items-center gap-2"
                           >
-                            <input
+                            <Input
                               value={category.label}
                               onChange={(event) =>
                                 setAttachmentCategoryDrafts((prev) =>
@@ -6380,7 +6303,7 @@ export default function SettingsPage() {
                         ))}
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <input
+                        <Input
                           value={newAttachmentCategoryLabel}
                           onChange={(event) =>
                             setNewAttachmentCategoryLabel(event.target.value)
@@ -6489,7 +6412,7 @@ export default function SettingsPage() {
                   <div className="text-sm font-semibold">Checklist items</div>
                   <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
                     <div className="space-y-2">
-                      <input
+                      <Input
                         value={newChecklistLabel}
                         onChange={(event) =>
                           setNewChecklistLabel(event.target.value)
@@ -6510,8 +6433,8 @@ export default function SettingsPage() {
                       </Button>
                       <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                         <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
+                          <Checkbox
+                            
                             checked={newChecklistRequired.includes(
                               "ready_for_engineering",
                             )}
@@ -6526,12 +6449,12 @@ export default function SettingsPage() {
                                 return Array.from(next);
                               });
                             }}
-                          />
+                           />
                           Required for engineering
                         </label>
                         <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
+                          <Checkbox
+                            
                             checked={
                               newChecklistRequired.includes(
                                 "ready_for_production",
@@ -6549,7 +6472,7 @@ export default function SettingsPage() {
                                 return Array.from(next);
                               });
                             }}
-                          />
+                           />
                           Required for production
                         </label>
                       </div>
@@ -6564,8 +6487,8 @@ export default function SettingsPage() {
                         <div className="font-medium">{item.label}</div>
                         <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                           <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              
                               checked={item.requiredFor.includes(
                                 "ready_for_engineering",
                               )}
@@ -6580,12 +6503,12 @@ export default function SettingsPage() {
                                   requiredFor: Array.from(next),
                                 });
                               }}
-                            />
+                             />
                             Eng.
                           </label>
                           <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              
                               checked={
                                 item.requiredFor.includes(
                                   "ready_for_production",
@@ -6602,19 +6525,19 @@ export default function SettingsPage() {
                                   requiredFor: Array.from(next),
                                 });
                               }}
-                            />
+                             />
                             Prod.
                           </label>
                           <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              
                               checked={item.isActive}
                               onChange={(event) =>
                                 updateChecklistItem(item.id, {
                                   isActive: event.target.checked,
                                 })
                               }
-                            />
+                             />
                             Active
                           </label>
                         </div>
@@ -6650,7 +6573,7 @@ export default function SettingsPage() {
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                     <div className="text-sm font-semibold">Return reasons</div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <input
+                      <Input
                         value={newReturnReason}
                         onChange={(event) =>
                           setNewReturnReason(event.target.value)
@@ -6725,7 +6648,7 @@ export default function SettingsPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2 text-sm font-medium">
                     From name
-                    <input
+                    <Input
                       value={outboundFromName}
                       onChange={(event) =>
                         setOutboundFromName(event.target.value)
@@ -6737,7 +6660,7 @@ export default function SettingsPage() {
                   </label>
                   <label className="space-y-2 text-sm font-medium">
                     From email (tenant domain)
-                    <input
+                    <Input
                       type="email"
                       value={outboundFromEmail}
                       onChange={(event) =>
@@ -6750,7 +6673,7 @@ export default function SettingsPage() {
                   </label>
                   <label className="space-y-2 text-sm font-medium">
                     Default reply-to
-                    <input
+                    <Input
                       type="email"
                       value={outboundReplyToEmail}
                       onChange={(event) =>
@@ -6764,25 +6687,25 @@ export default function SettingsPage() {
                   <div className="space-y-2 text-sm font-medium">
                     Sender mode
                     <label className="flex items-center gap-2 text-sm font-normal">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        
                         checked={outboundUseUserSender}
                         onChange={(event) =>
                           setOutboundUseUserSender(event.target.checked)
                         }
                         disabled={!currentUser.isAdmin}
-                      />
+                       />
                       Use engineer email as sender when domain matches
                     </label>
                     <label className="flex items-center gap-2 text-sm font-normal">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        
                         checked={outboundSenderVerified}
                         onChange={(event) =>
                           setOutboundSenderVerified(event.target.checked)
                         }
                         disabled={!currentUser.isAdmin}
-                      />
+                       />
                       Domain is verified in Resend
                     </label>
                   </div>
@@ -6853,7 +6776,6 @@ export default function SettingsPage() {
         title="Confirm your password"
         closeButtonLabel="Close verification"
         enableSwipeToClose
-        panelClassName="pb-[max(1rem,env(safe-area-inset-bottom))]"
       >
         <div className="space-y-3 p-4">
           <p className="text-sm text-muted-foreground">
@@ -6861,7 +6783,7 @@ export default function SettingsPage() {
           </p>
           <label className="space-y-2 text-sm font-medium">
             Password
-            <input
+            <Input
               type="password"
               value={securityPassword}
               onChange={(event) => {
@@ -6900,7 +6822,7 @@ export default function SettingsPage() {
             </p>
             <label className="mt-4 block space-y-2 text-sm font-medium">
               Password
-              <input
+              <Input
                 type="password"
                 value={securityPassword}
                 onChange={(event) => {

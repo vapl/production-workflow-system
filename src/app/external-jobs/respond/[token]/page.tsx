@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Image from "next/image";
 import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
+import { InputField } from "@/components/ui/InputField";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { DatePicker } from "@/components/ui/DatePicker";
 
@@ -378,17 +380,15 @@ export default function ExternalJobRespondPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {!externalOrderField ? (
-              <label className="flex flex-col gap-2 text-sm font-medium">
-                Your order number
-                <input
-                  value={fallbackPartnerOrderNumber}
-                  onChange={(event) =>
-                    setFallbackPartnerOrderNumber(event.target.value)
-                  }
-                  className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                  required
-                />
-              </label>
+              <InputField
+                label="Your order number"
+                value={fallbackPartnerOrderNumber}
+                onChange={(event) =>
+                  setFallbackPartnerOrderNumber(event.target.value)
+                }
+                className="h-10 text-sm"
+                required
+              />
             ) : null}
             {!completionDateField ? (
               <DatePicker
@@ -404,12 +404,11 @@ export default function ExternalJobRespondPage() {
               const label = `${field.label}${field.isRequired ? " *" : ""}`;
               if (field.fieldType === "toggle") {
                 return (
-                  <label
+                  <div
                     key={field.id}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-input-background px-3 py-2 text-sm font-medium"
+                    className="rounded-lg border border-border bg-input-background px-3 py-2"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={value === true}
                       onChange={(event) =>
                         setPortalFieldValues((prev) => ({
@@ -417,9 +416,10 @@ export default function ExternalJobRespondPage() {
                           [field.id]: event.target.checked,
                         }))
                       }
+                      label={label}
+                      containerClassName="text-sm font-medium"
                     />
-                    <span>{label}</span>
-                  </label>
+                  </div>
                 );
               }
               if (field.fieldType === "textarea") {
@@ -489,24 +489,20 @@ export default function ExternalJobRespondPage() {
                 );
               }
               return (
-                <label
+                <InputField
                   key={field.id}
-                  className="flex flex-col gap-2 text-sm font-medium"
-                >
-                  {label}
-                  <input
-                    type={field.fieldType === "number" ? "number" : "text"}
-                    value={typeof value === "string" ? value : ""}
-                    onChange={(event) =>
-                      setPortalFieldValues((prev) => ({
-                        ...prev,
-                        [field.id]: event.target.value,
-                      }))
-                    }
-                    className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    required={field.isRequired}
-                  />
-                </label>
+                  label={label}
+                  type={field.fieldType === "number" ? "number" : "text"}
+                  value={typeof value === "string" ? value : ""}
+                  onChange={(event) =>
+                    setPortalFieldValues((prev) => ({
+                      ...prev,
+                      [field.id]: event.target.value,
+                    }))
+                  }
+                  className="h-10 text-sm"
+                  required={field.isRequired}
+                />
               );
             })}
             <label className="flex flex-col gap-2 text-sm font-medium">

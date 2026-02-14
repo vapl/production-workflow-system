@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { InputField } from "@/components/ui/InputField";
 import { normalizeUserRole, useCurrentUser } from "@/contexts/UserContext";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -752,30 +753,28 @@ export default function AuthPage() {
                 <p className="text-sm text-muted-foreground">
                   Set a new password to continue.
                 </p>
-                <label className="space-y-2 text-sm font-medium">
-                  New password
-                  <input
-                    type="password"
-                    value={newPassword}
-                    onChange={(event) => setNewPassword(event.target.value)}
-                    placeholder="Create a new password"
-                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    required
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Confirm password
-                  <input
-                    type="password"
-                    value={confirmNewPassword}
-                    onChange={(event) =>
-                      setConfirmNewPassword(event.target.value)
-                    }
-                    placeholder="Repeat new password"
-                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    required
-                  />
-                </label>
+                <InputField
+                  label="New password"
+                  type="password"
+                  icon="lock"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="Create a new password"
+                  className="h-11 text-sm"
+                  required
+                />
+                <InputField
+                  label="Confirm password"
+                  type="password"
+                  icon="lock"
+                  value={confirmNewPassword}
+                  onChange={(event) =>
+                    setConfirmNewPassword(event.target.value)
+                  }
+                  placeholder="Repeat new password"
+                  className="h-11 text-sm"
+                  required
+                />
                 <Button
                   className="mt-2"
                   type="submit"
@@ -789,50 +788,44 @@ export default function AuthPage() {
                 <p className="text-sm text-muted-foreground">
                   Finish setting up your account to join the workspace.
                 </p>
-                <label className="space-y-2 text-sm font-medium">
-                  Full name
-                  <input
-                    value={inviteFullName}
-                    onChange={(event) => setInviteFullName(event.target.value)}
-                    placeholder="Your name"
-                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Phone (optional)
-                  <input
-                    value={invitePhone}
-                    onChange={(event) => setInvitePhone(event.target.value)}
-                    placeholder="e.g. +371 20000000"
-                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Password
-                  <input
-                    type="password"
-                    value={invitePassword}
-                    onChange={(event) =>
-                      setInvitePassword(event.target.value)
-                    }
-                    placeholder="Create a password"
-                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    required
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium">
-                  Confirm password
-                  <input
-                    type="password"
-                    value={inviteConfirmPassword}
-                    onChange={(event) =>
-                      setInviteConfirmPassword(event.target.value)
-                    }
-                    placeholder="Repeat password"
-                    className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                    required
-                  />
-                </label>
+                <InputField
+                  label="Full name"
+                  icon="user"
+                  value={inviteFullName}
+                  onChange={(event) => setInviteFullName(event.target.value)}
+                  placeholder="Your name"
+                  className="h-11 text-sm"
+                />
+                <InputField
+                  label="Phone (optional)"
+                  icon="phone"
+                  value={invitePhone}
+                  onChange={(event) => setInvitePhone(event.target.value)}
+                  placeholder="e.g. +371 20000000"
+                  className="h-11 text-sm"
+                />
+                <InputField
+                  label="Password"
+                  type="password"
+                  icon="lock"
+                  value={invitePassword}
+                  onChange={(event) => setInvitePassword(event.target.value)}
+                  placeholder="Create a password"
+                  className="h-11 text-sm"
+                  required
+                />
+                <InputField
+                  label="Confirm password"
+                  type="password"
+                  icon="lock"
+                  value={inviteConfirmPassword}
+                  onChange={(event) =>
+                    setInviteConfirmPassword(event.target.value)
+                  }
+                  placeholder="Repeat password"
+                  className="h-11 text-sm"
+                  required
+                />
                 {inviteError ? (
                   <p className="text-sm text-destructive">{inviteError}</p>
                 ) : null}
@@ -848,28 +841,26 @@ export default function AuthPage() {
                 </TabsList>
                 <TabsContent value="signin" className="mt-6 space-y-4">
                   <form onSubmit={handleSubmit} className="space-y-4">
-                    <label className="space-y-2 text-sm font-medium">
-                      Work email
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                        placeholder="you@company.com"
-                        className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                        required
-                      />
-                    </label>
-                    <label className="space-y-2 text-sm font-medium">
-                      Password
-                      <input
-                        type="password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        placeholder="Your password"
-                        className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                        required
-                      />
-                    </label>
+                    <InputField
+                      label="Work email"
+                      type="email"
+                      icon="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="you@company.com"
+                      className="h-11 text-sm"
+                      required
+                    />
+                    <InputField
+                      label="Password"
+                      type="password"
+                      icon="lock"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="Your password"
+                      className="h-11 text-sm"
+                      required
+                    />
                     <div className="flex flex-wrap items-center gap-3">
                       <Button
                         type="submit"
@@ -900,59 +891,51 @@ export default function AuthPage() {
                     members will be invited by the admin.
                   </div>
                   <form onSubmit={handleSubmit} className="space-y-4">
-                    <label className="space-y-2 text-sm font-medium">
-                      Full name
-                      <input
-                        value={fullName}
-                        onChange={(event) => setFullName(event.target.value)}
-                        placeholder="Jane Owner"
-                        className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
-                    </label>
-                    <label className="space-y-2 text-sm font-medium">
-                      Company name
-                      <input
-                        value={companyName}
-                        onChange={(event) => setCompanyName(event.target.value)}
-                        placeholder="Demo Manufacturing Co."
-                        className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
-                    </label>
-                    <label className="space-y-2 text-sm font-medium">
-                      Work email
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                        placeholder="owner@company.com"
-                        className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                        required
-                      />
-                    </label>
-                    <label className="space-y-2 text-sm font-medium">
-                      Password
-                      <input
-                        type="password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        placeholder="Create a password"
-                        className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                        required
-                      />
-                    </label>
-                    <label className="space-y-2 text-sm font-medium">
-                      Confirm password
-                      <input
-                        type="password"
-                        value={confirmPassword}
-                        onChange={(event) =>
-                          setConfirmPassword(event.target.value)
-                        }
-                        placeholder="Repeat password"
-                        className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                        required
-                      />
-                    </label>
+                    <InputField
+                      label="Full name"
+                      icon="user"
+                      value={fullName}
+                      onChange={(event) => setFullName(event.target.value)}
+                      placeholder="Jane Owner"
+                      className="h-11 text-sm"
+                    />
+                    <InputField
+                      label="Company name"
+                      value={companyName}
+                      onChange={(event) => setCompanyName(event.target.value)}
+                      placeholder="Demo Manufacturing Co."
+                      className="h-11 text-sm"
+                    />
+                    <InputField
+                      label="Work email"
+                      type="email"
+                      icon="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="owner@company.com"
+                      className="h-11 text-sm"
+                      required
+                    />
+                    <InputField
+                      label="Password"
+                      type="password"
+                      icon="lock"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="Create a password"
+                      className="h-11 text-sm"
+                      required
+                    />
+                    <InputField
+                      label="Confirm password"
+                      type="password"
+                      icon="lock"
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      placeholder="Repeat password"
+                      className="h-11 text-sm"
+                      required
+                    />
                     <div className="rounded-lg border border-border bg-background px-4 py-3 text-xs text-muted-foreground">
                       Billing is coming soon. You can create an account now and
                       enable subscription later.

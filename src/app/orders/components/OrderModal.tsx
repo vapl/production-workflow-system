@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { InputField } from "@/components/ui/InputField";
 import {
   Select,
   SelectContent,
@@ -422,128 +423,115 @@ export function OrderModal({
           }}
         >
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 text-sm font-medium">
-              Order # *
-              <input
-                value={formState.orderNumber}
-                onChange={(event) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    orderNumber: event.target.value,
-                  }))
+            <InputField
+              label="Order #"
+              value={formState.orderNumber}
+              onChange={(event) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  orderNumber: event.target.value,
+                }))
+              }
+              onBlur={(event) => {
+                if (isCategoryProductOnly || isEditingOrderNumber) {
+                  return;
                 }
-                onBlur={(event) => {
-                  if (isCategoryProductOnly || isEditingOrderNumber) {
-                    return;
-                  }
-                  const message = validateField(
-                    "orderNumber",
-                    event.target.value,
-                  );
-                  setErrors((prev) => ({
-                    ...prev,
-                    orderNumber: message,
-                  }));
-                  setTouched((prev) => ({ ...prev, orderNumber: true }));
-                }}
-                className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
-                  touched.orderNumber && errors.orderNumber
-                    ? "border-destructive"
-                    : "border-border"
-                } bg-input-background`}
-                placeholder="Accounting Order #"
-                required
-                disabled={isCategoryProductOnly || isEditingOrderNumber}
-              />
-              {touched.orderNumber && errors.orderNumber && (
-                <span className="text-xs text-destructive">
-                  {errors.orderNumber}
-                </span>
-              )}
-              {!touched.orderNumber && isDuplicateOrderNumber && (
-                <span className="text-xs text-destructive">
-                  Order number already exists.
-                </span>
-              )}
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              Customer Name *
-              <input
-                value={formState.customerName}
-                onChange={(event) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    customerName: event.target.value,
-                  }))
+                const message = validateField("orderNumber", event.target.value);
+                setErrors((prev) => ({
+                  ...prev,
+                  orderNumber: message,
+                }));
+                setTouched((prev) => ({ ...prev, orderNumber: true }));
+              }}
+              className="h-10 text-sm text-foreground"
+              wrapperClassName={`h-10 ${
+                touched.orderNumber && errors.orderNumber
+                  ? "border-destructive"
+                  : "border-border"
+              }`}
+              placeholder="Accounting Order #"
+              required
+              disabled={isCategoryProductOnly || isEditingOrderNumber}
+              error={
+                touched.orderNumber && errors.orderNumber
+                  ? errors.orderNumber
+                  : !touched.orderNumber && isDuplicateOrderNumber
+                    ? "Order number already exists."
+                    : undefined
+              }
+            />
+            <InputField
+              label="Customer Name"
+              icon="user"
+              value={formState.customerName}
+              onChange={(event) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  customerName: event.target.value,
+                }))
+              }
+              onBlur={(event) => {
+                if (isCategoryProductOnly) {
+                  return;
                 }
-                onBlur={(event) => {
-                  if (isCategoryProductOnly) {
-                    return;
-                  }
-                  const message = validateField(
-                    "customerName",
-                    event.target.value,
-                  );
-                  setErrors((prev) => ({
-                    ...prev,
-                    customerName: message,
-                  }));
-                  setTouched((prev) => ({ ...prev, customerName: true }));
-                }}
-                className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
-                  touched.customerName && errors.customerName
-                    ? "border-destructive"
-                    : "border-border"
-                } bg-input-background`}
-                placeholder="Acme Manufacturing"
-                required
-                disabled={isCategoryProductOnly}
-              />
-              {touched.customerName && errors.customerName && (
-                <span className="text-xs text-destructive">
-                  {errors.customerName}
-                </span>
-              )}
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              Customer Email
-              <input
-                value={formState.customerEmail}
-                onChange={(event) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    customerEmail: event.target.value,
-                  }))
+                const message = validateField("customerName", event.target.value);
+                setErrors((prev) => ({
+                  ...prev,
+                  customerName: message,
+                }));
+                setTouched((prev) => ({ ...prev, customerName: true }));
+              }}
+              className="h-10 text-sm text-foreground"
+              wrapperClassName={`h-10 ${
+                touched.customerName && errors.customerName
+                  ? "border-destructive"
+                  : "border-border"
+              }`}
+              placeholder="Acme Manufacturing"
+              required
+              disabled={isCategoryProductOnly}
+              error={
+                touched.customerName && errors.customerName
+                  ? errors.customerName
+                  : undefined
+              }
+            />
+            <InputField
+              label="Customer Email"
+              icon="email"
+              value={formState.customerEmail}
+              onChange={(event) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  customerEmail: event.target.value,
+                }))
+              }
+              onBlur={(event) => {
+                if (isCategoryProductOnly) {
+                  return;
                 }
-                onBlur={(event) => {
-                  if (isCategoryProductOnly) {
-                    return;
-                  }
-                  const message = validateField(
-                    "customerEmail",
-                    event.target.value,
-                  );
-                  setErrors((prev) => ({
-                    ...prev,
-                    customerEmail: message,
-                  }));
-                  setTouched((prev) => ({ ...prev, customerEmail: true }));
-                }}
-                className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
-                  touched.customerEmail && errors.customerEmail
-                    ? "border-destructive"
-                    : "border-border"
-                } bg-input-background`}
-                placeholder="contact@acme.com"
-                type="email"
-                disabled={isCategoryProductOnly}
-              />
-              {touched.customerEmail && errors.customerEmail && (
-                <span className="text-xs text-destructive">
-                  {errors.customerEmail}
-                </span>
-              )}
-            </label>
+                const message = validateField("customerEmail", event.target.value);
+                setErrors((prev) => ({
+                  ...prev,
+                  customerEmail: message,
+                }));
+                setTouched((prev) => ({ ...prev, customerEmail: true }));
+              }}
+              className="h-10 text-sm text-foreground"
+              wrapperClassName={`h-10 ${
+                touched.customerEmail && errors.customerEmail
+                  ? "border-destructive"
+                  : "border-border"
+              }`}
+              placeholder="contact@acme.com"
+              type="email"
+              disabled={isCategoryProductOnly}
+              error={
+                touched.customerEmail && errors.customerEmail
+                  ? errors.customerEmail
+                  : undefined
+              }
+            />
           </div>
 
           {activeLevels.length > 0 && (
@@ -562,13 +550,10 @@ export function OrderModal({
                 );
                 const errorKey = `hierarchy.${level.id}`;
                 return (
-                  <label
-                    key={level.id}
-                    className="space-y-2 text-sm font-medium"
-                  >
-                    {level.name}
-                    {level.isRequired ? " *" : ""}
-                    <input
+                  <div key={level.id} className="space-y-2">
+                    <InputField
+                      label={level.name}
+                      required={level.isRequired}
                       list={`level-options-${level.id}`}
                       value={hierarchyInput[level.id] ?? ""}
                       onChange={(event) => {
@@ -626,68 +611,66 @@ export function OrderModal({
                           [errorKey]: "",
                         }));
                       }}
-                      className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
+                      className="h-10 text-sm text-foreground"
+                      wrapperClassName={`h-10 ${
                         touched[errorKey] && errors[errorKey]
                           ? "border-destructive"
                           : "border-border"
-                      } bg-input-background`}
+                      }`}
                       placeholder={`Search or enter ${level.name}`}
                       disabled={!editableLevelIds.has(level.id)}
+                      error={
+                        touched[errorKey] && errors[errorKey]
+                          ? errors[errorKey]
+                          : undefined
+                      }
                     />
                     <datalist id={`level-options-${level.id}`}>
                       {options.map((node) => (
                         <option key={node.id} value={node.label} />
                       ))}
                     </datalist>
-                    {touched[errorKey] && errors[errorKey] && (
-                      <span className="text-xs text-destructive">
-                        {errors[errorKey]}
-                      </span>
-                    )}
-                  </label>
+                  </div>
                 );
               })}
             </div>
           )}
 
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 text-sm font-medium">
-              Quantity *
-              <input
-                value={formState.quantity}
-                onChange={(event) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    quantity: event.target.value,
-                  }))
+            <InputField
+              label="Quantity"
+              value={formState.quantity}
+              onChange={(event) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  quantity: event.target.value,
+                }))
+              }
+              onBlur={(event) => {
+                if (isCategoryProductOnly) {
+                  return;
                 }
-                onBlur={(event) => {
-                  if (isCategoryProductOnly) {
-                    return;
-                  }
-                  const message = validateField("quantity", event.target.value);
-                  setErrors((prev) => ({
-                    ...prev,
-                    quantity: message,
-                  }));
-                  setTouched((prev) => ({ ...prev, quantity: true }));
-                }}
-                className={`h-10 w-full rounded-lg border px-3 text-sm text-foreground ${
-                  touched.quantity && errors.quantity
-                    ? "border-destructive"
-                    : "border-border"
-                } bg-input-background`}
-                type="number"
-                min={1}
-                required
-                disabled={isCategoryProductOnly}
-              />
-              {touched.quantity && errors.quantity && (
-                <span className="text-xs text-destructive">
-                  {errors.quantity}
-                </span>
-              )}
-            </label>
+                const message = validateField("quantity", event.target.value);
+                setErrors((prev) => ({
+                  ...prev,
+                  quantity: message,
+                }));
+                setTouched((prev) => ({ ...prev, quantity: true }));
+              }}
+              className="h-10 text-sm text-foreground"
+              wrapperClassName={`h-10 ${
+                touched.quantity && errors.quantity
+                  ? "border-destructive"
+                  : "border-border"
+              }`}
+              type="number"
+              min={1}
+              required
+              disabled={isCategoryProductOnly}
+              error={
+                touched.quantity && errors.quantity ? errors.quantity : undefined
+              }
+            />
             <div className="space-y-2 text-sm font-medium">
               <DatePicker
                 label="Due Date *"

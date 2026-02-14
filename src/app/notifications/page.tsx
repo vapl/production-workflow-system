@@ -8,6 +8,7 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
 import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { supabase } from "@/lib/supabaseClient";
@@ -210,14 +211,19 @@ export default function NotificationsPage() {
     });
     return {
       all: base.length,
-      blocked: base.filter((item) => (item.type ?? "").toLowerCase() === "blocked")
+      blocked: base.filter(
+        (item) => (item.type ?? "").toLowerCase() === "blocked",
+      ).length,
+      resumed: base.filter(
+        (item) => (item.type ?? "").toLowerCase() === "resumed",
+      ).length,
+      done: base.filter((item) => (item.type ?? "").toLowerCase() === "done")
         .length,
-      resumed: base.filter((item) => (item.type ?? "").toLowerCase() === "resumed")
-        .length,
-      done: base.filter((item) => (item.type ?? "").toLowerCase() === "done").length,
       info: base.filter(
         (item) =>
-          !["blocked", "resumed", "done"].includes((item.type ?? "").toLowerCase()),
+          !["blocked", "resumed", "done"].includes(
+            (item.type ?? "").toLowerCase(),
+          ),
       ).length,
     };
   }, [items, showUnreadOnly, dateFrom, dateTo]);
@@ -333,14 +339,12 @@ export default function NotificationsPage() {
 
   const renderFilterControls = (isDesktop = false) => (
     <div className={isDesktop ? "space-y-3" : "space-y-3"}>
-      <label className="flex items-center gap-2 text-xs text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={showUnreadOnly}
-          onChange={(event) => setShowUnreadOnly(event.target.checked)}
-        />
-        Unread only
-      </label>
+      <Checkbox
+        checked={showUnreadOnly}
+        onChange={(event) => setShowUnreadOnly(event.target.checked)}
+        label="Unread only"
+        containerClassName="text-xs text-muted-foreground"
+      />
       <div className="h-px bg-border/70" />
       <FilterOptionSelector
         title="Status"
@@ -388,7 +392,9 @@ export default function NotificationsPage() {
   );
 
   const renderActionControls = (isDesktop = false) => (
-    <div className={isDesktop ? "flex items-center gap-2" : "flex flex-col gap-2"}>
+    <div
+      className={isDesktop ? "flex items-center gap-2" : "flex flex-col gap-2"}
+    >
       <Button
         variant="outline"
         size="sm"
@@ -435,7 +441,6 @@ export default function NotificationsPage() {
         title="Filters and actions"
         showHandle
         enableSwipeToClose
-        panelClassName="pb-[max(6rem,env(safe-area-inset-bottom))]"
       >
         <div className="space-y-4 p-4">
           {renderFilterControls(false)}
@@ -528,7 +533,7 @@ export default function NotificationsPage() {
                         className="flex gap-1.5"
                       >
                         {row.label ? (
-                          <span className="min-w-[3.25rem] text-muted-foreground">
+                          <span className="min-w-13 text-muted-foreground">
                             {row.label}:
                           </span>
                         ) : null}

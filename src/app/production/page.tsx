@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type TouchEvent } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
+import { Input } from "@/components/ui/Input";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 import {
   Select,
@@ -39,6 +41,7 @@ import {
   ListIcon,
   PanelRightIcon,
   PaperclipIcon,
+  SlidersHorizontalIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -354,7 +357,19 @@ export default function ProductionPage() {
   const [activeProductionTab, setActiveProductionTab] = useState<
     "planning" | "list" | "calendar"
   >("planning");
+  const [mobilePlanningView, setMobilePlanningView] = useState<
+    "ready" | "queues"
+  >("ready");
+  const [mobilePlanningSlide, setMobilePlanningSlide] = useState<
+    "none" | "left" | "right"
+  >("none");
   const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
+  const [isMobilePlanningRouteOpen, setIsMobilePlanningRouteOpen] =
+    useState(false);
+  const [isMobilePlanningDateOpen, setIsMobilePlanningDateOpen] =
+    useState(false);
+  const [isMobileQueueFiltersOpen, setIsMobileQueueFiltersOpen] =
+    useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const [removingQueueId, setRemovingQueueId] = useState<string | null>(null);
   const [splitRows, setSplitRows] = useState<
@@ -376,6 +391,15 @@ export default function ProductionPage() {
   const [splitSelections, setSplitSelections] = useState<
     Record<string, string[]>
   >({});
+  const planningSwipeStartXRef = useRef<number | null>(null);
+  const planningSwipeStartYRef = useRef<number | null>(null);
+  const planningSwipeLastXRef = useRef(0);
+  const planningSwipeContainerRef = useRef<HTMLDivElement | null>(null);
+  const mobileSlideTimeoutRef = useRef<number | null>(null);
+  const [planningDragX, setPlanningDragX] = useState(0);
+  const [planningIsDragging, setPlanningIsDragging] = useState(false);
+  const [planningSwipeWidth, setPlanningSwipeWidth] = useState(0);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
     : "";
@@ -1775,6 +1799,14 @@ export default function ProductionPage() {
     });
     return map;
   }, [batchRuns, productionItems, stations, viewDate, plannedRangeDays]);
+  const queueItemsCount = useMemo(
+    () =>
+      Array.from(queueByStation.values()).reduce(
+        (sum, queue) => sum + queue.length,
+        0,
+      ),
+    [queueByStation],
+  );
 
   const removeFromQueue = async (id: string) => {
     if (!supabase) {
@@ -1889,6 +1921,110 @@ export default function ProductionPage() {
 
   const isReadyLoading = isLoading;
   const isQueuesLoading = isLoading;
+  const isPlanningTab = activeProductionTab === "planning";
+  const selectedBatchesCount = selectedBatchKeys.length;
+  const releaseButtonLabel =
+    selectedBatchesCount > 0
+      ? `Release selected (${selectedBatchesCount})`
+      : "Release selected";
+  const showMobilePlanningActions =
+    isPlanningTab && mobilePlanningView === "ready";
+  const showMobileQueueActions =
+    isPlanningTab && mobilePlanningView === "queues";
+  const showBothPlanningPanels =
+    planningIsDragging || mobilePlanningSlide !== "none";
+  const planningPanelGap = 20;
+  const effectiveSwipeWidth = planningSwipeWidth || 360;
+  const readyBaseX =
+    mobilePlanningView === "ready"
+      ? 0
+      : -(effectiveSwipeWidth + planningPanelGap);
+  const queueBaseX =
+    mobilePlanningView === "ready" ? effectiveSwipeWidth + planningPanelGap : 0;
+  const readyX = readyBaseX + planningDragX;
+  const queueX = queueBaseX + planningDragX;
+
+  const switchMobilePlanningView = (next: "ready" | "queues") => {
+    if (next === mobilePlanningView) {
+      return;
+    }
+    if (mobileSlideTimeoutRef.current) {
+      window.clearTimeout(mobileSlideTimeoutRef.current);
+      mobileSlideTimeoutRef.current = null;
+    }
+    setMobilePlanningSlide(next === "queues" ? "left" : "right");
+    setMobilePlanningView(next);
+    mobileSlideTimeoutRef.current = window.setTimeout(() => {
+      setMobilePlanningSlide("none");
+      mobileSlideTimeoutRef.current = null;
+    }, 220);
+  };
+
+  const handlePlanningSwipeStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (window.innerWidth >= 768) {
+      return;
+    }
+    const touch = event.touches[0];
+    if (!touch) {
+      return;
+    }
+    planningSwipeStartXRef.current = touch.clientX;
+    planningSwipeStartYRef.current = touch.clientY;
+    planningSwipeLastXRef.current = touch.clientX;
+    setPlanningIsDragging(true);
+  };
+
+  const handlePlanningSwipeMove = (event: TouchEvent<HTMLDivElement>) => {
+    if (window.innerWidth >= 768 || !planningIsDragging) {
+      return;
+    }
+    const startX = planningSwipeStartXRef.current;
+    const startY = planningSwipeStartYRef.current;
+    const touch = event.touches[0];
+    if (!touch || startX === null || startY === null) {
+      return;
+    }
+    const deltaX = touch.clientX - startX;
+    const deltaY = Math.abs(touch.clientY - startY);
+    if (deltaY > Math.abs(deltaX) * 1.2) {
+      return;
+    }
+    planningSwipeLastXRef.current = touch.clientX;
+    const clamped = Math.max(-140, Math.min(140, deltaX));
+    setPlanningDragX(clamped);
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+  };
+
+  const handlePlanningSwipeEnd = (event: TouchEvent<HTMLDivElement>) => {
+    if (window.innerWidth >= 768) {
+      return;
+    }
+    const startX = planningSwipeStartXRef.current;
+    const startY = planningSwipeStartYRef.current;
+    planningSwipeStartXRef.current = null;
+    planningSwipeStartYRef.current = null;
+    const touch = event.changedTouches[0];
+    if (!touch || startX === null || startY === null) {
+      setPlanningIsDragging(false);
+      setPlanningDragX(0);
+      return;
+    }
+    const deltaX = planningSwipeLastXRef.current - startX;
+    const deltaY = Math.abs(touch.clientY - startY);
+    setPlanningIsDragging(false);
+    if (deltaY > 64 || Math.abs(deltaX) < 56) {
+      setPlanningDragX(0);
+      return;
+    }
+    setPlanningDragX(0);
+    if (deltaX < 0) {
+      switchMobilePlanningView("queues");
+    } else {
+      switchMobilePlanningView("ready");
+    }
+  };
 
   useEffect(() => {
     if (!isMobileSectionsOpen) {
@@ -1907,6 +2043,40 @@ export default function ProductionPage() {
       window.removeEventListener("keydown", handleEscape);
     };
   }, [isMobileSectionsOpen]);
+
+  useEffect(() => {
+    if (activeProductionTab === "planning") {
+      setMobilePlanningView("ready");
+    }
+  }, [activeProductionTab]);
+
+  useEffect(() => {
+    return () => {
+      if (mobileSlideTimeoutRef.current) {
+        window.clearTimeout(mobileSlideTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const updateWidth = () => {
+      const width = planningSwipeContainerRef.current?.clientWidth ?? 0;
+      setPlanningSwipeWidth(width);
+    };
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    return () => {
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const handle = () => setIsMobileViewport(media.matches);
+    handle();
+    media.addEventListener("change", handle);
+    return () => media.removeEventListener("change", handle);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -1937,7 +2107,13 @@ export default function ProductionPage() {
 
   return (
     <>
-      <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] right-4 z-40 md:hidden">
+      <div
+        className={`fixed right-4 z-40 md:hidden ${
+          showMobilePlanningActions || showMobileQueueActions
+            ? "bottom-[calc(11.5rem+env(safe-area-inset-bottom))]"
+            : "bottom-[calc(6.75rem+env(safe-area-inset-bottom))]"
+        }`}
+      >
         <Button
           type="button"
           variant="outline"
@@ -1952,6 +2128,52 @@ export default function ProductionPage() {
           <PanelRightIcon className="h-4 w-4" />
         </Button>
       </div>
+      {showMobilePlanningActions ? (
+        <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-40 md:hidden">
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full px-3 text-xs"
+              onClick={() => setIsMobilePlanningDateOpen(true)}
+            >
+              <CalendarIcon className="h-4 w-4" />
+              {plannedDate ? formatDateInput(plannedDate) : "Planned date"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full px-3 text-xs"
+              onClick={() => setIsMobilePlanningRouteOpen(true)}
+            >
+              Route
+            </Button>
+            <Button
+              type="button"
+              className="h-11 rounded-full px-4 text-sm"
+              onClick={handleOpenSplit}
+              disabled={!canRelease}
+            >
+              {releaseButtonLabel}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {showMobileQueueActions ? (
+        <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-40 md:hidden">
+          <div className="flex items-center justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full px-4 text-sm"
+              onClick={() => setIsMobileQueueFiltersOpen(true)}
+            >
+              <SlidersHorizontalIcon className="h-4 w-4" />
+              Queue filters
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <>
         <BottomSheet
           id="production-sections-drawer"
@@ -1961,7 +2183,6 @@ export default function ProductionPage() {
           closeButtonLabel="Close production sections"
           title="Production sections"
           enableSwipeToClose
-          panelClassName="flex max-h-[78dvh] flex-col pb-[max(4rem,env(safe-area-inset-bottom))]"
         >
           <div className="flex-1 overflow-y-auto p-3">
             <div className="space-y-1">
@@ -2004,6 +2225,130 @@ export default function ProductionPage() {
             </div>
           </div>
         </BottomSheet>
+        <BottomSheet
+          open={isMobilePlanningRouteOpen}
+          onClose={() => setIsMobilePlanningRouteOpen(false)}
+          ariaLabel="Route options"
+          closeButtonLabel="Close route options"
+          title="Route"
+          enableSwipeToClose
+        >
+          <div className="space-y-3 px-4 pt-3">
+            {routes.length > 1 ? (
+              <Select
+                value={selectedRouteKey}
+                onValueChange={(value) => {
+                  setSelectedRouteKey(value);
+                }}
+              >
+                <SelectTrigger className="h-10 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {routes.map((route) => (
+                    <SelectItem key={route.key} value={route.key}>
+                      {route.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
+                {routes[0]?.label ?? "Default route"}
+              </div>
+            )}
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+              {routeStations.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {routeStations.map((station, index) => (
+                    <span
+                      key={station.id}
+                      className="rounded-full border border-border bg-background px-2 py-0.5 text-xs"
+                    >
+                      {index + 1}. {station.name}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                "No matching stations for default route."
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <Button
+                variant="ghost"
+                onClick={() => setSelectedBatchKeys([])}
+                disabled={selectedBatchKeys.length === 0}
+              >
+                Clear
+              </Button>
+              <Button onClick={() => setIsMobilePlanningRouteOpen(false)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        </BottomSheet>
+        <BottomSheet
+          open={isMobilePlanningDateOpen}
+          onClose={() => setIsMobilePlanningDateOpen(false)}
+          ariaLabel="Planned date"
+          closeButtonLabel="Close planned date"
+          title="Planned date"
+          enableSwipeToClose
+        >
+          <div className="space-y-3 px-4 pt-3">
+            <DatePicker
+              value={plannedDate}
+              onChange={(value) => {
+                setPlannedDate(value);
+                setIsMobilePlanningDateOpen(false);
+              }}
+              min={todayIso}
+              className="space-y-1 text-xs text-muted-foreground"
+            />
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              Planning date affects new work orders only.
+            </div>
+          </div>
+        </BottomSheet>
+        <BottomSheet
+          open={isMobileQueueFiltersOpen}
+          onClose={() => setIsMobileQueueFiltersOpen(false)}
+          ariaLabel="Queue filters"
+          closeButtonLabel="Close queue filters"
+          title="Queue filters"
+          enableSwipeToClose
+        >
+          <div className="space-y-3 px-4 pt-3">
+            <DatePicker
+              label="View date"
+              value={viewDate}
+              onChange={setViewDate}
+              className="space-y-1 text-xs text-muted-foreground"
+            />
+            <label className="space-y-1 text-xs text-muted-foreground block">
+              Range
+              <Select
+                value={String(plannedRangeDays)}
+                onValueChange={(value) => setPlannedRangeDays(Number(value))}
+              >
+                <SelectTrigger className="h-10 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Today</SelectItem>
+                  <SelectItem value="3">3 days</SelectItem>
+                  <SelectItem value="7">7 days</SelectItem>
+                  <SelectItem value="14">14 days</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <div className="flex justify-end">
+              <Button onClick={() => setIsMobileQueueFiltersOpen(false)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        </BottomSheet>
       </>
 
       <Tabs
@@ -2043,691 +2388,795 @@ export default function ProductionPage() {
         />
 
         <TabsContent value="planning" className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
-            <Card className="h-fit">
-              <CardHeader>
-                <CardTitle>Ready for production</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {dataError ? (
-                  <div className="rounded-lg border border-dashed border-destructive/40 bg-destructive/5 px-3 py-3 text-xs text-destructive">
-                    {dataError}
-                  </div>
-                ) : null}
-                {isReadyLoading ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                    Loading ready batches...
-                  </div>
-                ) : null}
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-start gap-2">
-                    <label className="flex-1 space-y-1 text-xs text-muted-foreground">
-                      Search
-                      <input
-                        value={readySearch}
-                        onChange={(event) => setReadySearch(event.target.value)}
-                        placeholder="Order, customer, batch..."
-                        className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
-                      />
-                    </label>
-                    <label className="space-y-1 text-xs text-muted-foreground">
-                      Priority
-                      <Select
-                        value={readyPriority}
-                        onValueChange={(value) =>
-                          setReadyPriority(value as Priority | "all")
-                        }
-                      >
-                        <SelectTrigger className="h-9 w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="urgent">Urgent</SelectItem>
-                          <SelectItem value="high">High</SelectItem>
-                          <SelectItem value="normal">Normal</SelectItem>
-                          <SelectItem value="low">Low</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </label>
-                  </div>
-                  {filteredReadyGroups.map((group) => {
-                    const isSelected = selectedBatchKeys.includes(group.key);
-                    const fieldValues = productionValues[group.orderId] ?? {};
-                    const productionDetails = productionFields
-                      .map((field) => {
-                        const raw = fieldValues[field.id];
-                        const formatted = formatProductionValue(field, raw);
-                        return formatted.length > 0
-                          ? {
-                              label: field.label,
-                              values: formatted,
-                              unit:
-                                field.fieldType === "table"
-                                  ? undefined
-                                  : field.unit,
-                            }
-                          : null;
-                      })
-                      .filter(Boolean) as Array<{
-                      label: string;
-                      values: string[];
-                      unit?: string;
-                    }>;
-                    const constructionDetails = productionDetails.filter(
-                      (detail) =>
-                        detail.label.toLowerCase() === "konstrukcijas",
-                    );
-                    const otherDetails = productionDetails.filter(
-                      (detail) =>
-                        detail.label.toLowerCase() !== "konstrukcijas",
-                    );
-                    const productionFiles =
-                      productionAttachments[group.orderId] ?? [];
-                    return (
-                      <label
-                        key={group.key}
-                        className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm transition ${
-                          isSelected
-                            ? "border-primary/40 bg-primary/5"
-                            : "border-border bg-background hover:bg-muted/40"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() =>
-                            setSelectedBatchKeys((prev) =>
-                              isSelected
-                                ? prev.filter((id) => id !== group.key)
-                                : [...prev, group.key],
-                            )
-                          }
-                          className="mt-1"
-                        />
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-medium">
-                              {group.orderNumber} / {group.batchCode}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <Link
-                                href={`/orders/${group.orderId}`}
-                                onClick={(event) => event.stopPropagation()}
-                                className="inline-flex"
-                                aria-label="Open order"
-                              >
-                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground">
-                                  <ExternalLinkIcon className="h-4 w-4" />
-                                </span>
-                              </Link>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  if (productionFiles.length === 0) {
-                                    return;
-                                  }
-                                  setFilesPreview({
-                                    orderId: group.orderId,
-                                    orderNumber: group.orderNumber,
-                                    files: productionFiles,
-                                  });
-                                }}
-                                aria-label="View production files"
-                                disabled={productionFiles.length === 0}
-                              >
-                                <PaperclipIcon className="h-4 w-4" />
-                              </Button>
-                              <Badge variant={priorityBadge(group.priority)}>
-                                {group.priority}
-                              </Badge>
-                            </div>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {group.customerName}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {group.totalQty} pcs - Due {group.dueDate}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {group.material}
-                          </div>
-                          {otherDetails.length > 0 && (
-                            <div className="mt-2 space-y-2 text-xs text-muted-foreground">
-                              {otherDetails.flatMap((detail) =>
-                                detail.values.map((value, index) => (
-                                  <div
-                                    key={`${detail.label}-${index}`}
-                                    className="rounded-md border border-border bg-muted/20 px-2 py-2"
-                                  >
-                                    <div className="flex items-start justify-between gap-2">
-                                      <div className="text-[11px] text-muted-foreground">
-                                        {detail.label}
-                                      </div>
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-foreground">
-                                      {value}
-                                      {detail.unit ? ` ${detail.unit}` : ""}
-                                    </div>
-                                  </div>
-                                )),
-                              )}
-                            </div>
-                          )}
-                          {constructionDetails.length > 0 && (
-                            <div className="mt-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 gap-2 px-2 text-[11px]"
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  setExpandedReadyItems((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(group.key)) {
-                                      next.delete(group.key);
-                                    } else {
-                                      next.add(group.key);
-                                    }
-                                    return next;
-                                  });
-                                }}
-                              >
-                                {expandedReadyItems.has(group.key) ? (
-                                  <ChevronUpIcon className="h-3.5 w-3.5" />
-                                ) : (
-                                  <ChevronDownIcon className="h-3.5 w-3.5" />
-                                )}
-                                Konstrukcijas
-                              </Button>
-                              {expandedReadyItems.has(group.key) ? (
-                                <div className="mt-2 space-y-2 text-xs text-muted-foreground">
-                                  {constructionDetails.flatMap((detail) =>
-                                    detail.values.map((value, index) => (
-                                      <div
-                                        key={`${detail.label}-${index}`}
-                                        className="rounded-md border border-border bg-muted/20 px-2 py-2"
-                                      >
-                                        <div className="mt-1 text-[11px] text-foreground">
-                                          {value}
-                                          {detail.unit ? ` ${detail.unit}` : ""}
-                                        </div>
-                                      </div>
-                                    )),
-                                  )}
-                                </div>
-                              ) : null}
-                            </div>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                  {filteredReadyGroups.length === 0 && !isLoading ? (
-                    <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                      No batches ready for release.
+          <div className="sticky top-[calc(env(safe-area-inset-top)+3.15rem)] z-30 -mx-4 flex justify-center px-4 py-2 md:hidden">
+            <div className="inline-flex rounded-full border border-border bg-muted/40 p-1 shadow-sm">
+              <button
+                type="button"
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  mobilePlanningView === "ready"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground"
+                }`}
+                onClick={() => switchMobilePlanningView("ready")}
+              >
+                Ready
+                <span className="ml-1 text-[11px] text-muted-foreground">
+                  {filteredReadyGroups.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  mobilePlanningView === "queues"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground"
+                }`}
+                onClick={() => switchMobilePlanningView("queues")}
+              >
+                Queues
+                <span className="ml-1 text-[11px] text-muted-foreground">
+                  {queueItemsCount}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            ref={planningSwipeContainerRef}
+            className="overflow-hidden md:overflow-visible"
+            onTouchStart={handlePlanningSwipeStart}
+            onTouchMove={handlePlanningSwipeMove}
+            onTouchEnd={handlePlanningSwipeEnd}
+            onTouchCancel={handlePlanningSwipeEnd}
+          >
+            <div className="relative md:grid md:w-auto md:gap-6 lg:grid-cols-[380px_1fr]">
+              <Card
+                className={`h-fit transition-transform duration-200 ease-out md:block ${
+                  mobilePlanningView === "ready"
+                    ? "relative block"
+                    : showBothPlanningPanels
+                      ? "absolute inset-x-0 top-0 z-10 block"
+                      : "hidden"
+                }`}
+                style={
+                  isMobileViewport
+                    ? {
+                        transform: `translateX(${readyX}px)`,
+                        transitionDuration: planningIsDragging
+                          ? "0ms"
+                          : undefined,
+                      }
+                    : undefined
+                }
+              >
+                <CardHeader>
+                  <CardTitle>Ready for production</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {dataError ? (
+                    <div className="rounded-lg border border-dashed border-destructive/40 bg-destructive/5 px-3 py-3 text-xs text-destructive">
+                      {dataError}
                     </div>
                   ) : null}
-                </div>
+                  {isReadyLoading ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                      Loading ready batches...
+                    </div>
+                  ) : null}
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-start gap-2">
+                      <label className="flex-1 space-y-1 text-xs text-muted-foreground">
+                        Search
+                        <Input
+                          icon="search"
+                          value={readySearch}
+                          onChange={(event) =>
+                            setReadySearch(event.target.value)
+                          }
+                          placeholder="Order, customer, batch..."
+                          className="h-9 text-sm text-foreground"
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-muted-foreground">
+                        Priority
+                        <Select
+                          value={readyPriority}
+                          onValueChange={(value) =>
+                            setReadyPriority(value as Priority | "all")
+                          }
+                        >
+                          <SelectTrigger className="h-9 w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All</SelectItem>
+                            <SelectItem value="urgent">Urgent</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                            <SelectItem value="normal">Normal</SelectItem>
+                            <SelectItem value="low">Low</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </label>
+                    </div>
+                    {filteredReadyGroups.map((group) => {
+                      const isSelected = selectedBatchKeys.includes(group.key);
+                      const fieldValues = productionValues[group.orderId] ?? {};
+                      const productionDetails = productionFields
+                        .map((field) => {
+                          const raw = fieldValues[field.id];
+                          const formatted = formatProductionValue(field, raw);
+                          return formatted.length > 0
+                            ? {
+                                label: field.label,
+                                values: formatted,
+                                unit:
+                                  field.fieldType === "table"
+                                    ? undefined
+                                    : field.unit,
+                              }
+                            : null;
+                        })
+                        .filter(Boolean) as Array<{
+                        label: string;
+                        values: string[];
+                        unit?: string;
+                      }>;
+                      const constructionDetails = productionDetails.filter(
+                        (detail) =>
+                          detail.label.toLowerCase() === "konstrukcijas",
+                      );
+                      const otherDetails = productionDetails.filter(
+                        (detail) =>
+                          detail.label.toLowerCase() !== "konstrukcijas",
+                      );
+                      const productionFiles =
+                        productionAttachments[group.orderId] ?? [];
+                      return (
+                        <label
+                          key={group.key}
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm transition ${
+                            isSelected
+                              ? "border-primary/40 bg-primary/5"
+                              : "border-border bg-background hover:bg-muted/40"
+                          }`}
+                        >
+                          <Checkbox
+                            variant="box"
+                            checked={isSelected}
+                            onChange={() =>
+                              setSelectedBatchKeys((prev) =>
+                                isSelected
+                                  ? prev.filter((id) => id !== group.key)
+                                  : [...prev, group.key],
+                              )
+                            }
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium">
+                                {group.orderNumber} / {group.batchCode}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <Link
+                                  href={`/orders/${group.orderId}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                  className="inline-flex"
+                                  aria-label="Open order"
+                                >
+                                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+                                    <ExternalLinkIcon className="h-4 w-4" />
+                                  </span>
+                                </Link>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    if (productionFiles.length === 0) {
+                                      return;
+                                    }
+                                    setFilesPreview({
+                                      orderId: group.orderId,
+                                      orderNumber: group.orderNumber,
+                                      files: productionFiles,
+                                    });
+                                  }}
+                                  aria-label="View production files"
+                                  disabled={productionFiles.length === 0}
+                                >
+                                  <PaperclipIcon className="h-4 w-4" />
+                                </Button>
+                                <Badge variant={priorityBadge(group.priority)}>
+                                  {group.priority}
+                                </Badge>
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {group.customerName}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {group.totalQty} pcs - Due {group.dueDate}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {group.material}
+                            </div>
+                            {otherDetails.length > 0 && (
+                              <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+                                {otherDetails.flatMap((detail) =>
+                                  detail.values.map((value, index) => (
+                                    <div
+                                      key={`${detail.label}-${index}`}
+                                      className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                                    >
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="text-[11px] text-muted-foreground">
+                                          {detail.label}
+                                        </div>
+                                      </div>
+                                      <div className="mt-1 text-[11px] text-foreground">
+                                        {value}
+                                        {detail.unit ? ` ${detail.unit}` : ""}
+                                      </div>
+                                    </div>
+                                  )),
+                                )}
+                              </div>
+                            )}
+                            {constructionDetails.length > 0 && (
+                              <div className="mt-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 gap-2 px-2 text-[11px]"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setExpandedReadyItems((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(group.key)) {
+                                        next.delete(group.key);
+                                      } else {
+                                        next.add(group.key);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  {expandedReadyItems.has(group.key) ? (
+                                    <ChevronUpIcon className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <ChevronDownIcon className="h-3.5 w-3.5" />
+                                  )}
+                                  Konstrukcijas
+                                </Button>
+                                {expandedReadyItems.has(group.key) ? (
+                                  <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+                                    {constructionDetails.flatMap((detail) =>
+                                      detail.values.map((value, index) => (
+                                        <div
+                                          key={`${detail.label}-${index}`}
+                                          className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                                        >
+                                          <div className="mt-1 text-[11px] text-foreground">
+                                            {value}
+                                            {detail.unit
+                                              ? ` ${detail.unit}`
+                                              : ""}
+                                          </div>
+                                        </div>
+                                      )),
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                    {filteredReadyGroups.length === 0 && !isLoading ? (
+                      <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+                        No batches ready for release.
+                      </div>
+                    ) : null}
+                  </div>
 
-                <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-medium">
-                        Release to production
+                  <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">
+                          Release to production
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Unit of work: Batch (e.g. AL-1042 / B1)
+                        </div>
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        Unit of work: Batch (e.g. AL-1042 / B1)
+                        {selectedBatchKeys.length > 0
+                          ? `${selectedBatchKeys.length} selected`
+                          : "No selection"}
                       </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {selectedBatchKeys.length > 0
-                        ? `${selectedBatchKeys.length} selected`
-                        : "No selection"}
-                    </div>
-                  </div>
-                  <label className="space-y-1 text-xs text-muted-foreground">
-                    Route
-                    {routes.length > 1 ? (
-                      <Select
-                        value={selectedRouteKey}
-                        onValueChange={setSelectedRouteKey}
-                      >
-                        <SelectTrigger className="h-9 w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {routes.map((route) => (
-                            <SelectItem key={route.key} value={route.key}>
-                              {route.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <div className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
-                        {routes[0]?.label ?? "Default route"}
-                      </div>
-                    )}
-                    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
-                      {routeStations.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {routeStations.map((station, index) => (
-                            <span
-                              key={station.id}
-                              className="rounded-full border border-border bg-background px-2 py-0.5 text-xs"
-                            >
-                              {index + 1}. {station.name}
-                            </span>
-                          ))}
-                        </div>
+                    <label className="hidden space-y-1 text-xs text-muted-foreground md:block">
+                      Route
+                      {routes.length > 1 ? (
+                        <Select
+                          value={selectedRouteKey}
+                          onValueChange={setSelectedRouteKey}
+                        >
+                          <SelectTrigger className="h-9 w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {routes.map((route) => (
+                              <SelectItem key={route.key} value={route.key}>
+                                {route.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       ) : (
-                        "No matching stations for default route."
+                        <div className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
+                          {routes[0]?.label ?? "Default route"}
+                        </div>
                       )}
+                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+                        {routeStations.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {routeStations.map((station, index) => (
+                              <span
+                                key={station.id}
+                                className="rounded-full border border-border bg-background px-2 py-0.5 text-xs"
+                              >
+                                {index + 1}. {station.name}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          "No matching stations for default route."
+                        )}
+                      </div>
+                    </label>
+                    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground md:hidden">
+                      <div className="font-medium text-foreground">
+                        Route: {activeRoute?.label ?? "Default route"}
+                      </div>
+                      <div className="mt-1">
+                        Planned date:{" "}
+                        {plannedDate ? formatDateInput(plannedDate) : "-"}
+                      </div>
                     </div>
-                  </label>
-                  <DatePicker
-                    label="Planned date"
-                    value={plannedDate}
-                    onChange={setPlannedDate}
-                    className="space-y-1 text-xs text-muted-foreground"
-                    min={todayIso}
-                  />
-                  <div className="rounded-lg border border-border bg-muted/30 mt-2 px-3 py-2 text-xs text-muted-foreground">
-                    Planning date affects new work orders only. Use the queue
-                    view controls to switch days.
+                    <div className="hidden md:block">
+                      <DatePicker
+                        label="Planned date"
+                        value={plannedDate}
+                        onChange={setPlannedDate}
+                        className="space-y-1 text-xs text-muted-foreground"
+                        min={todayIso}
+                      />
+                    </div>
+                    <div className="rounded-lg border border-border bg-muted/30 mt-2 px-3 py-2 text-xs text-muted-foreground">
+                      Planning date affects new work orders only. Use the queue
+                      view controls to switch days.
+                    </div>
+                    <div className="hidden items-center justify-between gap-2 md:flex">
+                      <Button onClick={handleOpenSplit} disabled={!canRelease}>
+                        {releaseButtonLabel}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => setSelectedBatchKeys([])}
+                        disabled={selectedBatchKeys.length === 0}
+                      >
+                        Clear
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <Button onClick={handleOpenSplit} disabled={!canRelease}>
-                      Create work order
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => setSelectedBatchKeys([])}
-                      disabled={selectedBatchKeys.length === 0}
-                    >
-                      Clear
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
 
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
-                <span>Station queues</span>
-                <div className="flex flex-wrap items-center gap-2 text-xs font-normal text-muted-foreground">
+              <div
+                className={`space-y-4 transition-transform duration-200 ease-out md:block ${
+                  mobilePlanningView === "queues"
+                    ? "relative z-20 block"
+                    : showBothPlanningPanels
+                      ? "absolute inset-x-0 top-0 z-10 block"
+                      : "hidden"
+                }`}
+                style={
+                  isMobileViewport
+                    ? {
+                        transform: `translateX(${queueX}px)`,
+                        transitionDuration: planningIsDragging
+                          ? "0ms"
+                          : undefined,
+                      }
+                    : undefined
+                }
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
+                  <span>Station queues</span>
+                <div className="hidden flex-wrap items-center gap-2 text-sm font-normal text-muted-foreground md:flex">
                   <DatePicker
                     label="View date"
                     value={viewDate}
                     onChange={setViewDate}
-                    className="flex items-center gap-2 text-xs"
+                    className="flex items-center gap-2 whitespace-nowrap text-sm"
                   />
-                  <label className="flex items-center gap-2">
-                    Range
-                    <Select
-                      value={String(plannedRangeDays)}
-                      onValueChange={(value) =>
-                        setPlannedRangeDays(Number(value))
-                      }
-                    >
-                      <SelectTrigger className="h-9 w-30">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">Today</SelectItem>
-                        <SelectItem value="3">3 days</SelectItem>
-                        <SelectItem value="7">7 days</SelectItem>
-                        <SelectItem value="14">14 days</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </label>
+                    <label className="flex items-center gap-2 whitespace-nowrap text-sm">
+                      Range
+                      <Select
+                        value={String(plannedRangeDays)}
+                        onValueChange={(value) =>
+                          setPlannedRangeDays(Number(value))
+                        }
+                      >
+                        <SelectTrigger className="h-9 w-30">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">Today</SelectItem>
+                          <SelectItem value="3">3 days</SelectItem>
+                          <SelectItem value="7">7 days</SelectItem>
+                          <SelectItem value="14">14 days</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </label>
+                  </div>
+                  <div className="text-xs font-normal text-muted-foreground md:hidden">
+                    {formatDateInput(viewDate)} - {plannedRangeDays} day
+                    {plannedRangeDays === 1 ? "" : "s"}
+                  </div>
                 </div>
-              </div>
-              {isQueuesLoading ? (
-                <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                  Loading station queues...
-                </div>
-              ) : null}
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {stations.map((station) => {
-                  const queue = queueByStation.get(station.id) ?? [];
-                  const stationTotalMinutes = queue.reduce((sum, item) => {
-                    const itemMinutes =
-                      item.durationMinutes ??
-                      item.items.reduce(
-                        (rowSum, row) =>
-                          rowSum + Number(row.duration_minutes ?? 0),
-                        0,
-                      );
-                    return sum + Number(itemMinutes ?? 0);
-                  }, 0);
-                  return (
-                    <Card key={station.id} className="min-h-60">
-                      <CardHeader className="pb-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CardTitle className="text-base">
-                              {station.name}
-                            </CardTitle>
-                            <Link
-                              href={`/production/operator?station=${station.id}`}
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                              aria-label={`Open ${station.name} in operator view`}
-                            >
-                              <ExternalLinkIcon className="h-4 w-4" />
-                            </Link>
+                {isQueuesLoading ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                    Loading station queues...
+                  </div>
+                ) : null}
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {stations.map((station) => {
+                    const queue = queueByStation.get(station.id) ?? [];
+                    const stationTotalMinutes = queue.reduce((sum, item) => {
+                      const itemMinutes =
+                        item.durationMinutes ??
+                        item.items.reduce(
+                          (rowSum, row) =>
+                            rowSum + Number(row.duration_minutes ?? 0),
+                          0,
+                        );
+                      return sum + Number(itemMinutes ?? 0);
+                    }, 0);
+                    return (
+                      <Card key={station.id} className="min-h-60">
+                        <CardHeader className="pb-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <CardTitle className="text-base">
+                                {station.name}
+                              </CardTitle>
+                              <Link
+                                href={`/production/operator?station=${station.id}`}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                                aria-label={`Open ${station.name} in operator view`}
+                              >
+                                <ExternalLinkIcon className="h-4 w-4" />
+                              </Link>
+                            </div>
+                            <div className="text-right text-xs text-muted-foreground">
+                              <div>{queue.length} items</div>
+                              {stationTotalMinutes > 0 ? (
+                                <div>{formatDuration(stationTotalMinutes)}</div>
+                              ) : null}
+                            </div>
                           </div>
-                          <div className="text-right text-xs text-muted-foreground">
-                            <div>{queue.length} items</div>
-                            {stationTotalMinutes > 0 ? (
-                              <div>{formatDuration(stationTotalMinutes)}</div>
-                            ) : null}
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        {queue.length === 0 ? (
-                          <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                            No work queued
-                          </div>
-                        ) : (
-                          queue.map((item) => (
-                            <div
-                              key={item.id}
-                              className="group relative rounded-lg border border-border bg-background px-3 py-2 text-xs shadow-sm"
-                              onMouseEnter={() => setRemoveHintId(item.id)}
-                              onMouseLeave={() => setRemoveHintId(null)}
-                              onTouchStart={() =>
-                                handleRemoveHintStart(item.id)
-                              }
-                              onTouchEnd={handleRemoveHintEnd}
-                              onTouchCancel={handleRemoveHintEnd}
-                            >
-                              {" "}
-                              {(() => {
-                                const canRemove = !item.items.some(
-                                  (row) =>
-                                    row.started_at ||
-                                    row.status === "in_progress" ||
-                                    row.status === "done",
-                                );
-                                return (
-                                  <button
-                                    type="button"
-                                    aria-label="Remove from queue"
-                                    className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full border border-border bg-foreground text-[16px] text-background shadow-sm transition ${
-                                      canRemove && removeHintId === item.id
-                                        ? "flex"
-                                        : canRemove
-                                          ? "hidden group-hover:flex"
-                                          : "hidden"
-                                    }`}
-                                    onClick={() =>
-                                      canRemove
-                                        ? handleRemoveFromQueue(
-                                            item.id,
-                                            `${item.orderNumber} / ${item.batchCode}`,
-                                            station.name,
-                                          )
-                                        : undefined
-                                    }
-                                  >
-                                    {removingQueueId === item.id ? (
-                                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-background/60 border-t-background" />
-                                    ) : (
-                                      "×"
-                                    )}
-                                  </button>
-                                );
-                              })()}
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="space-y-2">
-                                  <div>
-                                    <span className="font-semibold">
-                                      {item.orderNumber} / {item.batchCode}
-                                    </span>
-                                    <div className="mt-1 text-[11px] text-muted-foreground">
-                                      {item.customerName}
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          {queue.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+                              No work queued
+                            </div>
+                          ) : (
+                            queue.map((item) => (
+                              <div
+                                key={item.id}
+                                className="group relative rounded-lg border border-border bg-background px-3 py-2 text-xs shadow-sm"
+                                onMouseEnter={() => setRemoveHintId(item.id)}
+                                onMouseLeave={() => setRemoveHintId(null)}
+                                onTouchStart={() =>
+                                  handleRemoveHintStart(item.id)
+                                }
+                                onTouchEnd={handleRemoveHintEnd}
+                                onTouchCancel={handleRemoveHintEnd}
+                              >
+                                {" "}
+                                {(() => {
+                                  const canRemove = !item.items.some(
+                                    (row) =>
+                                      row.started_at ||
+                                      row.status === "in_progress" ||
+                                      row.status === "done",
+                                  );
+                                  return (
+                                    <button
+                                      type="button"
+                                      aria-label="Remove from queue"
+                                      className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full border border-border bg-foreground text-[16px] text-background shadow-sm transition ${
+                                        canRemove && removeHintId === item.id
+                                          ? "flex"
+                                          : canRemove
+                                            ? "hidden group-hover:flex"
+                                            : "hidden"
+                                      }`}
+                                      onClick={() =>
+                                        canRemove
+                                          ? handleRemoveFromQueue(
+                                              item.id,
+                                              `${item.orderNumber} / ${item.batchCode}`,
+                                              station.name,
+                                            )
+                                          : undefined
+                                      }
+                                    >
+                                      {removingQueueId === item.id ? (
+                                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-background/60 border-t-background" />
+                                      ) : (
+                                        "×"
+                                      )}
+                                    </button>
+                                  );
+                                })()}
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="space-y-2">
+                                    <div>
+                                      <span className="font-semibold">
+                                        {item.orderNumber} / {item.batchCode}
+                                      </span>
+                                      <div className="mt-1 text-[11px] text-muted-foreground">
+                                        {item.customerName}
+                                      </div>
                                     </div>
+                                    {(() => {
+                                      const productionFiles =
+                                        productionAttachments[item.orderId] ??
+                                        [];
+                                      return (
+                                        <div className="flex items-center gap-2">
+                                          <Link
+                                            href={`/orders/${item.orderId}`}
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                                            aria-label="Open order"
+                                          >
+                                            <ExternalLinkIcon className="h-4 w-4" />
+                                          </Link>
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-7 w-7"
+                                            onClick={() => {
+                                              if (
+                                                productionFiles.length === 0
+                                              ) {
+                                                return;
+                                              }
+                                              setFilesPreview({
+                                                orderId: item.orderId,
+                                                orderNumber: item.orderNumber,
+                                                files: productionFiles,
+                                              });
+                                            }}
+                                            aria-label="View production files"
+                                            disabled={
+                                              productionFiles.length === 0
+                                            }
+                                          >
+                                            <PaperclipIcon className="h-4 w-4" />
+                                          </Button>
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                   {(() => {
-                                    const productionFiles =
-                                      productionAttachments[item.orderId] ?? [];
+                                    const hasBlocked = item.items.some(
+                                      (row) => row.status === "blocked",
+                                    );
+                                    const hasActive = item.items.some((row) =>
+                                      [
+                                        "queued",
+                                        "pending",
+                                        "in_progress",
+                                      ].includes(row.status),
+                                    );
+                                    const isPartiallyBlocked =
+                                      hasBlocked && hasActive;
+                                    const showBlockedStyle =
+                                      isPartiallyBlocked &&
+                                      item.status === "in_progress";
                                     return (
-                                      <div className="flex items-center gap-2">
-                                        <Link
-                                          href={`/orders/${item.orderId}`}
-                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                                          aria-label="Open order"
+                                      <div className="flex flex-col items-end gap-2">
+                                        <Badge
+                                          variant={priorityBadge(item.priority)}
                                         >
-                                          <ExternalLinkIcon className="h-4 w-4" />
-                                        </Link>
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-7 w-7"
-                                          onClick={() => {
-                                            if (productionFiles.length === 0) {
-                                              return;
-                                            }
-                                            setFilesPreview({
-                                              orderId: item.orderId,
-                                              orderNumber: item.orderNumber,
-                                              files: productionFiles,
-                                            });
-                                          }}
-                                          aria-label="View production files"
-                                          disabled={
-                                            productionFiles.length === 0
+                                          {item.priority}
+                                        </Badge>
+                                        <Badge
+                                          variant={
+                                            showBlockedStyle
+                                              ? "status-blocked"
+                                              : statusBadge(item.status)
                                           }
                                         >
-                                          <PaperclipIcon className="h-4 w-4" />
-                                        </Button>
+                                          {String(
+                                            item.status ?? "queued",
+                                          ).replace("_", " ")}
+                                        </Badge>
                                       </div>
                                     );
                                   })()}
                                 </div>
                                 {(() => {
-                                  const hasBlocked = item.items.some(
-                                    (row) => row.status === "blocked",
-                                  );
-                                  const hasActive = item.items.some((row) =>
-                                    [
-                                      "queued",
-                                      "pending",
-                                      "in_progress",
-                                    ].includes(row.status),
-                                  );
-                                  const isPartiallyBlocked =
-                                    hasBlocked && hasActive;
-                                  const showBlockedStyle =
-                                    isPartiallyBlocked &&
-                                    item.status === "in_progress";
+                                  const metaParts: string[] = [];
+                                  if (item.totalQty > 0) {
+                                    metaParts.push(`${item.totalQty} pcs`);
+                                  }
+                                  if (item.dueDate) {
+                                    metaParts.push(`Due ${item.dueDate}`);
+                                  }
+                                  const metaLine = metaParts.join(" - ");
+                                  const stationDurationMinutes =
+                                    item.durationMinutes ??
+                                    item.items.reduce(
+                                      (sum, row) =>
+                                        sum + Number(row.duration_minutes ?? 0),
+                                      0,
+                                    );
+                                  const elapsedMinutes = item.startedAt
+                                    ? computeWorkingMinutes(
+                                        item.startedAt,
+                                        item.doneAt ?? null,
+                                        workingCalendar,
+                                      )
+                                    : 0;
+                                  const elapsedLabel = item.startedAt
+                                    ? formatDuration(elapsedMinutes)
+                                    : null;
                                   return (
-                                    <div className="flex flex-col items-end gap-2">
-                                      <Badge
-                                        variant={priorityBadge(item.priority)}
-                                      >
-                                        {item.priority}
-                                      </Badge>
-                                      <Badge
-                                        variant={
-                                          showBlockedStyle
-                                            ? "status-blocked"
-                                            : statusBadge(item.status)
-                                        }
-                                      >
-                                        {String(
-                                          item.status ?? "queued",
-                                        ).replace("_", " ")}
-                                      </Badge>
-                                    </div>
+                                    <>
+                                      {metaLine ? (
+                                        <div className="mt-1 text-muted-foreground">
+                                          {metaLine}
+                                        </div>
+                                      ) : null}
+                                      {stationDurationMinutes > 0 ? (
+                                        <div className="mt-1 text-[11px] text-muted-foreground">
+                                          Station time:{" "}
+                                          {formatDuration(
+                                            stationDurationMinutes,
+                                          )}
+                                        </div>
+                                      ) : null}
+                                      {elapsedLabel ? (
+                                        <div className="mt-1 text-[11px] text-muted-foreground">
+                                          Time: {elapsedLabel}
+                                        </div>
+                                      ) : null}
+                                    </>
                                   );
                                 })()}
-                              </div>
-                              {(() => {
-                                const metaParts: string[] = [];
-                                if (item.totalQty > 0) {
-                                  metaParts.push(`${item.totalQty} pcs`);
-                                }
-                                if (item.dueDate) {
-                                  metaParts.push(`Due ${item.dueDate}`);
-                                }
-                                const metaLine = metaParts.join(" - ");
-                                const stationDurationMinutes =
-                                  item.durationMinutes ??
-                                  item.items.reduce(
-                                    (sum, row) =>
-                                      sum + Number(row.duration_minutes ?? 0),
-                                    0,
-                                  );
-                                const elapsedMinutes = item.startedAt
-                                  ? computeWorkingMinutes(
-                                      item.startedAt,
-                                      item.doneAt ?? null,
-                                      workingCalendar,
-                                    )
-                                  : 0;
-                                const elapsedLabel = item.startedAt
-                                  ? formatDuration(elapsedMinutes)
-                                  : null;
-                                return (
-                                  <>
-                                    {metaLine ? (
-                                      <div className="mt-1 text-muted-foreground">
-                                        {metaLine}
-                                      </div>
-                                    ) : null}
-                                    {stationDurationMinutes > 0 ? (
-                                      <div className="mt-1 text-[11px] text-muted-foreground">
-                                        Station time:{" "}
-                                        {formatDuration(stationDurationMinutes)}
-                                      </div>
-                                    ) : null}
-                                    {elapsedLabel ? (
-                                      <div className="mt-1 text-[11px] text-muted-foreground">
-                                        Time: {elapsedLabel}
-                                      </div>
-                                    ) : null}
-                                  </>
-                                );
-                              })()}
-                              <div className="mt-1 text-muted-foreground">
-                                {item.material}
-                              </div>
-                              <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-                                <span>{item.batchCode}</span>
-                                {item.items.length > 0 ? (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-7 gap-2 px-2 text-[11px]"
-                                    onClick={() =>
-                                      setExpandedQueueItems((prev) => {
-                                        const next = new Set(prev);
-                                        if (next.has(item.id)) {
-                                          next.delete(item.id);
-                                        } else {
-                                          next.add(item.id);
-                                        }
-                                        return next;
-                                      })
-                                    }
-                                  >
-                                    {expandedQueueItems.has(item.id) ? (
-                                      <ChevronUpIcon className="h-3.5 w-3.5" />
-                                    ) : (
-                                      <ChevronDownIcon className="h-3.5 w-3.5" />
-                                    )}
-                                    {expandedQueueItems.has(item.id)
-                                      ? "Hide constructions"
-                                      : "Show constructions"}
-                                  </Button>
-                                ) : null}
-                              </div>
-                              {expandedQueueItems.has(item.id) &&
-                                item.items.length > 0 && (
-                                  <div className="mt-2 space-y-2">
-                                    {item.items.map((row) => {
-                                      const rowKey =
-                                        typeof row.meta?.rowKey === "string"
-                                          ? row.meta.rowKey
-                                          : `${row.order_id}:fallback:${
-                                              typeof row.meta?.rowIndex ===
-                                              "number"
-                                                ? row.meta.rowIndex
-                                                : 0
-                                            }`;
-                                      const stationStatuses =
-                                        stationStatusMap.get(rowKey);
-                                      const entry = stationStatuses?.get(
-                                        station.id,
-                                      );
-                                      return (
-                                        <div
-                                          key={row.id}
-                                          className="rounded-md border border-border bg-muted/20 px-2 py-2"
-                                        >
-                                          <div className="flex items-start justify-between gap-2">
-                                            <div className="text-[11px] text-muted-foreground">
-                                              {row.item_name}
-                                            </div>
-                                            {entry?.status ? (
-                                              <div className="relative flex items-center justify-center gap-2">
-                                                <Badge
-                                                  variant={statusBadge(
-                                                    row.status,
-                                                  )}
-                                                >
-                                                  {String(
-                                                    row.status ?? "queued",
-                                                  ).replace("_", " ")}
-                                                </Badge>
-                                                {entry.status === "blocked" &&
-                                                entry.blockedReason ? (
-                                                  <Tooltip
-                                                    content={
-                                                      entry.blockedReason
-                                                    }
-                                                  >
-                                                    <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
-                                                  </Tooltip>
-                                                ) : null}
+                                <div className="mt-1 text-muted-foreground">
+                                  {item.material}
+                                </div>
+                                <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                                  <span>{item.batchCode}</span>
+                                  {item.items.length > 0 ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 gap-2 px-2 text-[11px]"
+                                      onClick={() =>
+                                        setExpandedQueueItems((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(item.id)) {
+                                            next.delete(item.id);
+                                          } else {
+                                            next.add(item.id);
+                                          }
+                                          return next;
+                                        })
+                                      }
+                                    >
+                                      {expandedQueueItems.has(item.id) ? (
+                                        <ChevronUpIcon className="h-3.5 w-3.5" />
+                                      ) : (
+                                        <ChevronDownIcon className="h-3.5 w-3.5" />
+                                      )}
+                                      {expandedQueueItems.has(item.id)
+                                        ? "Hide constructions"
+                                        : "Show constructions"}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                                {expandedQueueItems.has(item.id) &&
+                                  item.items.length > 0 && (
+                                    <div className="mt-2 space-y-2">
+                                      {item.items.map((row) => {
+                                        const rowKey =
+                                          typeof row.meta?.rowKey === "string"
+                                            ? row.meta.rowKey
+                                            : `${row.order_id}:fallback:${
+                                                typeof row.meta?.rowIndex ===
+                                                "number"
+                                                  ? row.meta.rowIndex
+                                                  : 0
+                                              }`;
+                                        const stationStatuses =
+                                          stationStatusMap.get(rowKey);
+                                        const entry = stationStatuses?.get(
+                                          station.id,
+                                        );
+                                        return (
+                                          <div
+                                            key={row.id}
+                                            className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                                          >
+                                            <div className="flex items-start justify-between gap-2">
+                                              <div className="text-[11px] text-muted-foreground">
+                                                {row.item_name}
                                               </div>
-                                            ) : (
-                                              <span className="text-muted-foreground">
-                                                -
-                                              </span>
-                                            )}
-                                          </div>
+                                              {entry?.status ? (
+                                                <div className="relative flex items-center justify-center gap-2">
+                                                  <Badge
+                                                    variant={statusBadge(
+                                                      row.status,
+                                                    )}
+                                                  >
+                                                    {String(
+                                                      row.status ?? "queued",
+                                                    ).replace("_", " ")}
+                                                  </Badge>
+                                                  {entry.status === "blocked" &&
+                                                  entry.blockedReason ? (
+                                                    <Tooltip
+                                                      content={
+                                                        entry.blockedReason
+                                                      }
+                                                      interaction="hover"
+                                                    >
+                                                      <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
+                                                    </Tooltip>
+                                                  ) : null}
+                                                </div>
+                                              ) : (
+                                                <span className="text-muted-foreground">
+                                                  -
+                                                </span>
+                                              )}
+                                            </div>
 
-                                          <div className="mt-1 text-[11px] text-muted-foreground">
-                                            Qty: {row.qty}
-                                            {row.material
-                                              ? ` - ${row.material}`
-                                              : ""}
+                                            <div className="mt-1 text-[11px] text-muted-foreground">
+                                              Qty: {row.qty}
+                                              {row.material
+                                                ? ` - ${row.material}`
+                                                : ""}
+                                            </div>
                                           </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                            </div>
-                          ))
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                              </div>
+                            ))
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -2834,8 +3283,8 @@ export default function ProductionPage() {
                                           : "border-border text-muted-foreground"
                                       }`}
                                     >
-                                      <input
-                                        type="checkbox"
+                                      <Checkbox
+                                        variant="box"
                                         checked={selected}
                                         onChange={(event) => {
                                           setSplitSelections((prev) => {
@@ -2881,7 +3330,7 @@ export default function ProductionPage() {
                     {isCreatingWorkOrders && (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                     )}
-                    Create work order
+                    Create work orders
                   </Button>
                 </div>
               </div>
@@ -2906,11 +3355,12 @@ export default function ProductionPage() {
               <div className="space-y-3">
                 <label className="block w-full space-y-1 text-xs text-muted-foreground">
                   Search
-                  <input
+                  <Input
+                    icon="search"
                     value={qrSearch}
                     onChange={(event) => setQrSearch(event.target.value)}
                     placeholder="Order, customer, batch, construction..."
-                    className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
+                    className="h-9 text-sm text-foreground"
                   />
                 </label>
                 <div className="grid gap-3 md:flex md:flex-wrap md:items-end md:justify-between">
@@ -3037,26 +3487,24 @@ export default function ProductionPage() {
               </div>
 
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={
-                      filteredSelectableRows.length > 0 &&
-                      qrSelectedRowIds.length === filteredSelectableRows.length
+                <Checkbox
+                  variant="box"
+                  checked={
+                    filteredSelectableRows.length > 0 &&
+                    qrSelectedRowIds.length === filteredSelectableRows.length
+                  }
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setQrSelectedRowIds(
+                        filteredSelectableRows.map((row) => row.id),
+                      );
+                    } else {
+                      setQrSelectedRowIds([]);
                     }
-                    onChange={(event) => {
-                      if (event.target.checked) {
-                        setQrSelectedRowIds(
-                          filteredSelectableRows.map((row) => row.id),
-                        );
-                      } else {
-                        setQrSelectedRowIds([]);
-                      }
-                    }}
-                    disabled={filteredSelectableRows.length === 0}
-                  />
-                  Select all
-                </label>
+                  }}
+                  disabled={filteredSelectableRows.length === 0}
+                  label="Select all"
+                />
                 <span>
                   {qrSelectedRowIds.length > 0
                     ? `${qrSelectedRowIds.length} selected`
@@ -3106,8 +3554,8 @@ export default function ProductionPage() {
                         >
                           <div className="flex items-start justify-between gap-3">
                             <label className="flex items-start gap-3">
-                              <input
-                                type="checkbox"
+                              <Checkbox
+                                variant="box"
                                 checked={isChecked}
                                 disabled={!isSelectable}
                                 onChange={(event) => {
@@ -3206,7 +3654,10 @@ export default function ProductionPage() {
                                         </Badge>
                                         {entry.status === "blocked" &&
                                         entry.blockedReason ? (
-                                          <Tooltip content={entry.blockedReason}>
+                                          <Tooltip
+                                            content={entry.blockedReason}
+                                            interaction="hover"
+                                          >
                                             <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
                                           </Tooltip>
                                         ) : null}
@@ -3274,8 +3725,8 @@ export default function ProductionPage() {
                           return (
                             <tr key={row.id} className="border-t border-border">
                               <td className="px-3 py-2">
-                                <input
-                                  type="checkbox"
+                                <Checkbox
+                                  variant="box"
                                   checked={isChecked}
                                   disabled={!isSelectable}
                                   onChange={(event) => {
@@ -3336,6 +3787,7 @@ export default function ProductionPage() {
                                           entry.blockedReason ? (
                                             <Tooltip
                                               content={entry.blockedReason}
+                                              interaction="hover"
                                             >
                                               <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
                                             </Tooltip>
@@ -3635,8 +4087,8 @@ export default function ProductionPage() {
                           <span className="text-xs text-muted-foreground">
                             ↕
                           </span>
-                          <input
-                            type="checkbox"
+                          <Checkbox
+                            variant="box"
                             checked={checked}
                             onChange={(event) => {
                               setQrFieldSelection((prev) => {

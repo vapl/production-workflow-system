@@ -47,7 +47,7 @@ export function DatePicker({
   const formatted = selectedDate ? format(selectedDate, "dd.MM.yyyy") : "";
 
   return (
-    <label className={cn("space-y-1 text-xs text-muted-foreground", className)}>
+    <label className={cn("ui-field", className)}>
       {label ? <span>{label}</span> : null}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -55,7 +55,7 @@ export function DatePicker({
             type="button"
             disabled={disabled}
             className={cn(
-              "relative flex h-9 w-full items-center justify-between rounded-lg border border-border bg-input-background px-3 pr-9 text-sm text-foreground",
+              "ui-control relative flex w-full items-center justify-between rounded-lg border border-border bg-input-background px-3 pr-9 text-sm text-foreground",
               "text-left disabled:cursor-not-allowed disabled:opacity-50",
               triggerClassName,
             )}

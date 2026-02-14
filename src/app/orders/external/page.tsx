@@ -9,6 +9,8 @@ import type { ExternalJobFieldType, ExternalJobStatus } from "@/types/orders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { InputField } from "@/components/ui/InputField";
+import { Checkbox } from "@/components/ui/Checkbox";
 import {
   Select,
   SelectContent,
@@ -658,13 +660,13 @@ export default function ExternalJobsPage() {
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-65 flex-1 space-y-2">
-              <label className="text-sm font-medium">Search</label>
-              <input
+            <div className="min-w-65 flex-1">
+              <InputField
+                label="Search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Order, partner, customer..."
-                className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                className="h-10 text-sm"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -679,14 +681,11 @@ export default function ExternalJobsPage() {
               >
                 In Stock
               </Button>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={overdueOnly}
-                  onChange={(event) => setOverdueOnly(event.target.checked)}
-                />
-                Overdue only
-              </label>
+              <Checkbox
+                checked={overdueOnly}
+                onChange={(event) => setOverdueOnly(event.target.checked)}
+                label="Overdue only"
+              />
               <Popover>
                 <PopoverTrigger asChild>
                   <Button type="button" variant="outline">

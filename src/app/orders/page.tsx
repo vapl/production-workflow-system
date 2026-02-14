@@ -33,10 +33,12 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatOrderStatus } from "@/lib/domain/formatters";
 import { useRbac } from "@/contexts/RbacContext";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { ViewModeToggle } from "./components/ViewModeToggle";
 import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
+import { Input } from "@/components/ui/Input";
 
 export default function OrdersPage() {
   const {
@@ -96,7 +98,12 @@ export default function OrdersPage() {
       return [{ value: "all", label: "All" }, ...build(salesStatuses)];
     }
     return [{ value: "all", label: "All" }, ...build(salesStatuses)];
-  }, [isEngineeringUser, rules.orderStatusConfig, rules.statusLabels, user.role]);
+  }, [
+    isEngineeringUser,
+    rules.orderStatusConfig,
+    rules.statusLabels,
+    user.role,
+  ]);
   const defaultStatusFilter: OrderStatus | "all" =
     roleStatusOptions[0]?.value ?? "all";
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">(
@@ -779,7 +786,6 @@ export default function OrdersPage() {
         closeButtonLabel="Close customer orders actions"
         title="Order actions"
         enableSwipeToClose
-        panelClassName="flex max-h-[78dvh] flex-col pb-[max(6rem,env(safe-area-inset-bottom))]"
       >
         <div className="flex-1 overflow-y-auto p-3">
           <div className="space-y-2">
@@ -802,7 +808,9 @@ export default function OrdersPage() {
               }}
               disabled={isSyncing}
             >
-              <RefreshCwIcon className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+              <RefreshCwIcon
+                className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`}
+              />
               {isSyncing ? "Syncing..." : "Sync Accounting"}
             </Button>
             <Button
@@ -851,30 +859,32 @@ export default function OrdersPage() {
         closeButtonLabel="Close search"
         title="Search"
         enableSwipeToClose
-        panelClassName="pb-[max(4rem,env(safe-area-inset-bottom))]"
       >
         <div className="px-4 pt-3">
-          <label className="relative block space-y-1 text-sm">
+          <label className="ui-field">
             <span className="sr-only">Search</span>
-            <input
+            <Input
               type="search"
+              icon="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search orders, customers, products..."
-              className="h-10 w-full rounded-lg border border-border bg-input-background px-3 pr-10 text-[16px] text-foreground md:text-sm"
+              className="text-[16px] md:text-sm"
+              endAdornment={
+                searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery("");
+                    }}
+                    aria-label="Clear search"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </button>
+                ) : null
+              }
             />
-            {searchQuery ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery("");
-                }}
-                aria-label="Clear search"
-                className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
-              >
-                <XIcon className="h-4 w-4" />
-              </button>
-            ) : null}
           </label>
         </div>
       </BottomSheet>
@@ -886,7 +896,6 @@ export default function OrdersPage() {
         closeButtonLabel="Close filters"
         title="Filters"
         enableSwipeToClose
-        panelClassName="max-h-[78dvh] overflow-y-auto pb-[max(6rem,env(safe-area-inset-bottom))]"
       >
         <div className="space-y-4 px-4 pt-3">
           <div>
@@ -906,7 +915,9 @@ export default function OrdersPage() {
               <FilterOptionSelector
                 title="Engineering"
                 value={assignmentFilter}
-                onChange={(value) => setAssignmentFilter(value as "queue" | "my")}
+                onChange={(value) =>
+                  setAssignmentFilter(value as "queue" | "my")
+                }
                 options={[
                   { value: "queue", label: "Queue" },
                   { value: "my", label: "My work" },
@@ -914,14 +925,11 @@ export default function OrdersPage() {
               />
             </div>
           ) : null}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={groupByContract}
-              onChange={() => setGroupByContract((prev) => !prev)}
-            />
-            Group by Contract
-          </label>
+          <Checkbox
+            checked={groupByContract}
+            onChange={() => setGroupByContract((prev) => !prev)}
+            label="Group by Contract"
+          />
         </div>
       </BottomSheet>
 
@@ -948,7 +956,9 @@ export default function OrdersPage() {
               }}
               disabled={isSyncing}
             >
-              <RefreshCwIcon className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+              <RefreshCwIcon
+                className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`}
+              />
               {isSyncing ? "Syncing..." : "Sync Accounting"}
             </Button>
             <div className="relative" ref={importMenuRef}>
@@ -1034,8 +1044,12 @@ export default function OrdersPage() {
               }))}
               partnerGroupFilter={partnerGroupFilter}
               onPartnerGroupChange={setPartnerGroupFilter}
-              assignmentFilter={isEngineeringUser ? assignmentFilter : undefined}
-              onAssignmentChange={isEngineeringUser ? setAssignmentFilter : undefined}
+              assignmentFilter={
+                isEngineeringUser ? assignmentFilter : undefined
+              }
+              onAssignmentChange={
+                isEngineeringUser ? setAssignmentFilter : undefined
+              }
               viewMode={viewMode}
               onViewModeChange={setViewMode}
             />

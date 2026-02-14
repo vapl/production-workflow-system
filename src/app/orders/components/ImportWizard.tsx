@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { XIcon } from "lucide-react";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useOrders } from "@/app/orders/OrdersContext";
@@ -712,14 +713,11 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               </div>
             )}
 
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={createHierarchyItems}
-                onChange={(event) => setCreateHierarchyItems(event.target.checked)}
-              />
-              Create hierarchy items in Settings from imported values
-            </label>
+            <Checkbox
+              checked={createHierarchyItems}
+              onChange={(event) => setCreateHierarchyItems(event.target.checked)}
+              label="Create hierarchy items in Settings from imported values"
+            />
 
             <div className="flex justify-between">
               <Button
@@ -769,14 +767,12 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                   You are importing {rows.length} rows. This will update the
                   database in bulk.
                 </p>
-                <label className="mt-2 flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={ackLargeImport}
-                    onChange={(event) => setAckLargeImport(event.target.checked)}
-                  />
-                  I understand and want to continue
-                </label>
+                <Checkbox
+                  checked={ackLargeImport}
+                  onChange={(event) => setAckLargeImport(event.target.checked)}
+                  label="I understand and want to continue"
+                  containerClassName="mt-2 text-xs"
+                />
               </div>
             )}
             <div className="rounded-lg border border-border">

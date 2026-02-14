@@ -6,6 +6,7 @@ import { useOrders } from "@/app/orders/OrdersContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { InputField } from "@/components/ui/InputField";
 import { Badge } from "@/components/ui/Badge";
 import { supabase } from "@/lib/supabaseClient";
 import { uploadExternalJobAttachment } from "@/lib/uploadExternalJobAttachment";
@@ -252,11 +253,12 @@ export default function ExternalJobsReceivePage() {
           <CardTitle>Search</CardTitle>
         </CardHeader>
         <CardContent>
-          <input
+          <InputField
+            label="Search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Order #, partner, customer, external order..."
-            className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+            className="h-10 text-sm"
           />
         </CardContent>
       </Card>
@@ -298,19 +300,16 @@ export default function ExternalJobsReceivePage() {
                     </Badge>
                   </div>
                   <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-medium">
-                        Delivery note #
-                      </label>
-                      <input
-                        value={state?.note ?? job.deliveryNoteNo ?? ""}
-                        onChange={(event) =>
-                          handleNoteChange(job.id, event.target.value)
-                        }
-                        placeholder="e.g. DN-2026-001"
-                        className="h-9 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      />
-                    </div>
+                    <InputField
+                      label="Delivery note #"
+                      labelClassName="text-xs font-medium"
+                      value={state?.note ?? job.deliveryNoteNo ?? ""}
+                      onChange={(event) =>
+                        handleNoteChange(job.id, event.target.value)
+                      }
+                      placeholder="e.g. DN-2026-001"
+                      className="h-9 text-sm"
+                    />
                     <div className="flex flex-col gap-2">
                       <label className="text-xs font-medium">
                         Delivery note file (optional)

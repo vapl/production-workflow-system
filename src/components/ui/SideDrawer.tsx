@@ -101,6 +101,10 @@ export function SideDrawer({
               : "translate-x-full pointer-events-none",
           panelClassName,
         )}
+        style={{
+          paddingTop: "max(0.5rem, env(safe-area-inset-top))",
+          paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
+        }}
         onTouchStart={enableSwipeToClose ? handleTouchStart : undefined}
         onTouchEnd={enableSwipeToClose ? handleTouchEnd : undefined}
       >

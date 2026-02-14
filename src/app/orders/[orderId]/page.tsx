@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
+import { Input } from "@/components/ui/Input";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import {
@@ -1595,25 +1597,23 @@ export default function OrderDetailPage() {
           key={field.id}
           className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
         >
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={payload.enabled}
-              disabled={!canEditOrderInputs}
-              onChange={(event) =>
-                setOrderInputValues((prev) => ({
-                  ...prev,
-                  [field.id]: {
-                    enabled: event.target.checked,
-                    amount: payload.amount ?? null,
-                  },
-                }))
-              }
-            />
-            {label}
-          </label>
+          <Checkbox
+            checked={payload.enabled}
+            disabled={!canEditOrderInputs}
+            onChange={(event) =>
+              setOrderInputValues((prev) => ({
+                ...prev,
+                [field.id]: {
+                  enabled: event.target.checked,
+                  amount: payload.amount ?? null,
+                },
+              }))
+            }
+            label={label}
+            containerClassName="text-sm"
+          />
           <div className="flex items-center gap-2">
-            <input
+            <Input
               type="number"
               value={payload.amount ?? ""}
               disabled={!canEditOrderInputs || !payload.enabled}
@@ -1645,8 +1645,7 @@ export default function OrderDetailPage() {
           className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
         >
           {label}
-          <input
-            type="checkbox"
+          <Checkbox
             checked={Boolean(normalized)}
             disabled={!canEditOrderInputs}
             onChange={(event) =>
@@ -1929,8 +1928,8 @@ export default function OrderDetailPage() {
                     <th className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <span>Actions</span>
-                        <input
-                          type="checkbox"
+                        <Checkbox
+                          variant="box"
                           checked={allSelected}
                           onChange={(event) =>
                             toggleSelectAll(event.target.checked)
@@ -2078,7 +2077,7 @@ export default function OrderDetailPage() {
                           }
                           return (
                             <td key={column.key} className="px-3 py-2">
-                              <input
+                              <Input
                                 type={
                                   column.fieldType === "number"
                                     ? "number"
@@ -2142,8 +2141,8 @@ export default function OrderDetailPage() {
                             >
                               Remove
                             </Button>
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              variant="box"
                               checked={selectedRows.includes(rowIndex)}
                               onChange={(event) => {
                                 setTableRowSelections((prev) => {
@@ -2220,7 +2219,7 @@ export default function OrderDetailPage() {
     return (
       <label key={field.id} className="flex flex-col gap-2 text-sm font-medium">
         {label}
-        <input
+        <Input
           type={field.fieldType === "number" ? "number" : "text"}
           value={String(normalized ?? "")}
           disabled={!canEditOrderInputs}
@@ -3102,7 +3101,6 @@ export default function OrderDetailPage() {
         closeButtonLabel="Close order sections"
         title="Order sections"
         enableSwipeToClose
-        panelClassName="flex max-h-[78dvh] flex-col pb-[max(1rem,env(safe-area-inset-bottom))]"
       >
         <div className="flex-1 overflow-y-auto p-3">
           <div className="space-y-1">
@@ -3593,8 +3591,7 @@ export default function OrderDetailPage() {
                           className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
                         >
                           <span className="font-medium">{item.label}</span>
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={Boolean(checklistState[item.id])}
                             onChange={(event) =>
                               handleChecklistToggle(
@@ -4032,12 +4029,11 @@ export default function OrderDetailPage() {
                           const rawValue = externalJobFieldValues[field.id];
                           if (field.fieldType === "toggle") {
                             return (
-                              <label
+                              <div
                                 key={field.id}
-                                className="flex h-10 items-center gap-2 rounded-lg border border-border bg-input-background px-3 text-sm"
+                                className="flex h-10 items-center rounded-lg border border-border bg-input-background px-3"
                               >
-                                <input
-                                  type="checkbox"
+                                <Checkbox
                                   checked={rawValue === true}
                                   onChange={(event) =>
                                     setExternalJobFieldValues((prev) => ({
@@ -4045,12 +4041,15 @@ export default function OrderDetailPage() {
                                       [field.id]: event.target.checked,
                                     }))
                                   }
+                                  label={
+                                    <>
+                                      {field.label}
+                                      {field.isRequired ? " *" : ""}
+                                    </>
+                                  }
+                                  containerClassName="text-sm"
                                 />
-                                <span>
-                                  {field.label}
-                                  {field.isRequired ? " *" : ""}
-                                </span>
-                              </label>
+                              </div>
                             );
                           }
                           if (field.fieldType === "select") {
@@ -4154,7 +4153,7 @@ export default function OrderDetailPage() {
                               className="space-y-2 text-sm font-medium"
                             >
                               {field.label}
-                              <input
+                              <Input
                                 type={
                                   field.fieldType === "number"
                                     ? "number"
