@@ -103,10 +103,12 @@ export function TabsNav() {
       </Tabs>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 md:hidden">
-        <div className="rounded-2xl border border-border/80 bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="rounded-2xl border border-border/80 bg-background/95 shadow-lg backdrop-blur supports-backdrop-filter:bg-background/80">
           <ul
             className="grid"
-            style={{ gridTemplateColumns: `repeat(${mobileTabs.length}, minmax(0, 1fr))` }}
+            style={{
+              gridTemplateColumns: `repeat(${mobileTabs.length}, minmax(0, 1fr))`,
+            }}
           >
             {mobileTabs.map(({ value, href, label, icon: Icon }) => {
               const isActive =
@@ -126,7 +128,7 @@ export function TabsNav() {
                   >
                     <Icon
                       className={cn(
-                        "h-[18px] w-[18px]",
+                        "h-4.5 w-4.5",
                         isActive ? "text-foreground" : "text-muted-foreground",
                       )}
                     />

@@ -450,7 +450,8 @@ export default function OrderDetailPage() {
   }, [orderState?.assignedManagerId]);
 
   useEffect(() => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       setEngineers([
         { id: "eng-1", name: `${engineerLabel} 1` },
         { id: "eng-2", name: `${engineerLabel} 2` },
@@ -460,7 +461,7 @@ export default function OrderDetailPage() {
 
     let isMounted = true;
     const fetchEngineers = async () => {
-      const query = supabase
+      const query = sb
         .from("profiles")
         .select("id, full_name")
         .eq("role", "Engineering");
@@ -490,7 +491,8 @@ export default function OrderDetailPage() {
   }, [engineerLabel, tenantId]);
 
   useEffect(() => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       setManagers([
         { id: "mgr-1", name: `${managerLabel} 1` },
         { id: "mgr-2", name: `${managerLabel} 2` },
@@ -500,7 +502,7 @@ export default function OrderDetailPage() {
 
     let isMounted = true;
     const fetchManagers = async () => {
-      const query = supabase.from("profiles").select("id, full_name, role");
+      const query = sb.from("profiles").select("id, full_name, role");
       query.in("role", ["Sales"]);
       if (tenantId) {
         query.eq("tenant_id", tenantId);
@@ -534,12 +536,13 @@ export default function OrderDetailPage() {
   }, [order]);
 
   useEffect(() => {
-    if (!supabase || !tenantId) {
+    const sb = supabase;
+    if (!sb || !tenantId) {
       return;
     }
     let isMounted = true;
     const loadOrderInputFields = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("order_input_fields")
         .select(
           "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
@@ -578,7 +581,8 @@ export default function OrderDetailPage() {
   }, [supabase, tenantId]);
 
   useEffect(() => {
-    if (!supabase || !tenantId) {
+    const sb = supabase;
+    if (!sb || !tenantId) {
       setExternalJobFields([]);
       setExternalJobFieldValues({});
       setExternalJobValuesByJobId({});
@@ -586,7 +590,7 @@ export default function OrderDetailPage() {
     }
     let isMounted = true;
     const loadExternalJobFields = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("external_job_fields")
         .select(
           "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
@@ -636,7 +640,8 @@ export default function OrderDetailPage() {
   }, [supabase, tenantId]);
 
   useEffect(() => {
-    if (!supabase || !tenantId) {
+    const sb = supabase;
+    if (!sb || !tenantId) {
       setExternalJobValuesByJobId({});
       return;
     }
@@ -647,7 +652,7 @@ export default function OrderDetailPage() {
     }
     let isMounted = true;
     const loadExternalJobValues = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("external_job_field_values")
         .select("external_job_id, field_id, value")
         .eq("tenant_id", tenantId)
@@ -671,14 +676,15 @@ export default function OrderDetailPage() {
   }, [orderState?.externalJobs, supabase, tenantId]);
 
   useEffect(() => {
-    if (!supabase || !orderState?.id) {
+    const sb = supabase;
+    if (!sb || !orderState?.id) {
       setOrderInputValues({});
       setOrderInputInitialValues({});
       return;
     }
     let isMounted = true;
     const loadOrderInputValues = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("order_input_values")
         .select("field_id, value")
         .eq("order_id", orderState.id);
@@ -704,13 +710,14 @@ export default function OrderDetailPage() {
   }, [orderState?.id, supabase]);
 
   useEffect(() => {
-    if (!supabase || !orderState?.id) {
+    const sb = supabase;
+    if (!sb || !orderState?.id) {
       setProductionDisplayStatus(null);
       return;
     }
     let isMounted = true;
     const loadProductionStatus = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("production_items")
         .select("status")
         .eq("order_id", orderState.id);
@@ -773,7 +780,8 @@ export default function OrderDetailPage() {
   );
   const comments = orderState?.comments ?? [];
   useEffect(() => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       return;
     }
     const pending = attachments.filter(
@@ -790,7 +798,7 @@ export default function OrderDetailPage() {
           if (storagePublicPrefix && path.startsWith(storagePublicPrefix)) {
             path = path.slice(storagePublicPrefix.length);
           }
-          const { data } = await supabase.storage
+          const { data } = await sb.storage
             .from(supabaseBucket)
             .createSignedUrl(path, 60 * 60);
           return { id: attachment.id, url: data?.signedUrl };
@@ -816,7 +824,8 @@ export default function OrderDetailPage() {
   }, [attachments, signedAttachmentUrls]);
 
   useEffect(() => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       return;
     }
     const externalAttachments = (orderState?.externalJobs ?? []).flatMap(
@@ -837,7 +846,7 @@ export default function OrderDetailPage() {
           if (storagePublicPrefix && path.startsWith(storagePublicPrefix)) {
             path = path.slice(storagePublicPrefix.length);
           }
-          const { data } = await supabase.storage
+          const { data } = await sb.storage
             .from(supabaseBucket)
             .createSignedUrl(path, 60 * 60);
           return { id: attachment.id, url: data?.signedUrl };
@@ -1208,13 +1217,13 @@ export default function OrderDetailPage() {
                 ? "status-done"
                 : "status-ready_for_production";
   const externalJobStatusLabels: Record<ExternalJobStatus, string> = {
+    ...rules.externalJobStatusLabels,
     requested: "Requested",
     ordered: "Ordered",
     in_progress: "In progress",
     delivered: "In Stock",
     approved: "Approved",
     cancelled: "Cancelled",
-    ...rules.externalJobStatusLabels,
   };
   const externalJobStatusVariant = (status: ExternalJobStatus) => {
     switch (status) {
@@ -1290,6 +1299,9 @@ export default function OrderDetailPage() {
   }
 
   async function handleAddAttachment() {
+    if (!orderState) {
+      return;
+    }
     if (attachmentFiles.length === 0) {
       return;
     }
@@ -1348,6 +1360,9 @@ export default function OrderDetailPage() {
   }
 
   async function handleAddComment() {
+    if (!orderState) {
+      return;
+    }
     const trimmedMessage = commentMessage.trim();
     if (!trimmedMessage) {
       return;
@@ -1421,6 +1436,9 @@ export default function OrderDetailPage() {
   }
 
   async function handleParseTableFieldWithAi(field: OrderInputField) {
+    if (!orderState) {
+      return;
+    }
     if (field.fieldType !== "table") {
       return;
     }
@@ -1433,7 +1451,8 @@ export default function OrderDetailPage() {
       }));
       return;
     }
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       setTableImportNotices((prev) => ({
         ...prev,
         [field.id]: "Supabase is not configured.",
@@ -1458,7 +1477,7 @@ export default function OrderDetailPage() {
 
     const {
       data: { session },
-    } = await supabase.auth.getSession();
+    } = await sb.auth.getSession();
     const accessToken = session?.access_token;
     if (!accessToken) {
       setTableImportNotices((prev) => ({
@@ -1538,7 +1557,7 @@ export default function OrderDetailPage() {
           normalizedRows.length > 0
             ? `Detected ${normalizedRows.length} row(s) for ${field.label}.`
             : "Check the selected PDF and table columns.",
-        variant: normalizedRows.length > 0 ? "success" : "warning",
+        variant: normalizedRows.length > 0 ? "success" : "info",
       });
     } catch (error) {
       const message =
@@ -1785,10 +1804,10 @@ export default function OrderDetailPage() {
                   }}
                   disabled={!canEditOrderInputs || isParsingThisField}
                 >
-                  <SelectTrigger className="h-9 w-[260px] max-w-full min-w-0">
+                  <SelectTrigger className="h-9 w-65 max-w-full min-w-0">
                     <SelectValue
                       placeholder="Choose PDF/XLSX from Production documentation"
-                      className="block max-w-[200px] truncate text-left"
+                      className="block max-w-50 truncate text-left"
                     />
                   </SelectTrigger>
                   <SelectContent>
@@ -1797,7 +1816,7 @@ export default function OrderDetailPage() {
                       <SelectItem
                         key={attachment.id}
                         value={attachment.id}
-                        className="max-w-[420px]"
+                        className="max-w-105"
                       >
                         {attachment.name}
                       </SelectItem>
@@ -2161,7 +2180,7 @@ export default function OrderDetailPage() {
     if (field.fieldType === "date") {
       return (
         <DatePicker
-          label={label}
+          label={field.label}
           value={String(normalized ?? "")}
           onChange={(next) =>
             setOrderInputValues((prev) => ({
@@ -2192,7 +2211,7 @@ export default function OrderDetailPage() {
                 [field.id]: event.target.value,
               }))
             }
-            className="min-h-[80px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+            className="min-h-20 rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
           />
         </label>
       );
@@ -2218,6 +2237,9 @@ export default function OrderDetailPage() {
   }
 
   async function handleRemoveAttachment(attachmentId: string) {
+    if (!orderState) {
+      return;
+    }
     const target = attachments.find(
       (attachment) => attachment.id === attachmentId,
     );
@@ -2245,6 +2267,9 @@ export default function OrderDetailPage() {
   }
 
   async function handleRemoveComment(commentId: string) {
+    if (!orderState) {
+      return;
+    }
     if (
       !(await confirmRemove(
         "Delete comment?",
@@ -2265,6 +2290,9 @@ export default function OrderDetailPage() {
   }
 
   async function handleAddExternalJob() {
+    if (!orderState) {
+      return;
+    }
     const isPortalMode = externalRequestMode === "partner_portal";
     if (isPortalMode && !canSendExternalJobToPartner) {
       setExternalError("Send to partner is available on Pro plan.");
@@ -2538,6 +2566,9 @@ export default function OrderDetailPage() {
     externalJobId: string,
     status: ExternalJobStatus,
   ) {
+    if (!orderState) {
+      return;
+    }
     const targetJob = orderState.externalJobs?.find(
       (job) => job.id === externalJobId,
     );
@@ -2681,6 +2712,9 @@ export default function OrderDetailPage() {
     externalJobId: string,
     attachmentId: string,
   ) {
+    if (!orderState) {
+      return;
+    }
     const job = orderState.externalJobs?.find(
       (item) => item.id === externalJobId,
     );
@@ -2779,9 +2813,9 @@ export default function OrderDetailPage() {
         : prev,
     );
     await updateOrder(orderState.id, {
-      assignedEngineerId: null,
-      assignedEngineerName: null,
-      assignedEngineerAt: null,
+      assignedEngineerId: "",
+      assignedEngineerName: "",
+      assignedEngineerAt: "",
       status: nextStatus,
       statusChangedBy: name,
       statusChangedByRole: role,
@@ -2922,6 +2956,9 @@ export default function OrderDetailPage() {
   }
 
   async function handleChecklistToggle(id: string, checked: boolean) {
+    if (!orderState) {
+      return;
+    }
     const next = { ...checklistState, [id]: checked };
     setChecklistState(next);
     setOrderState((prev) => (prev ? { ...prev, checklist: next } : prev));
@@ -3001,7 +3038,7 @@ export default function OrderDetailPage() {
   return (
     <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
       <div className="pointer-events-none fixed right-4 top-3 z-40 md:hidden">
-        <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
           <Button
             variant="ghost"
             size="icon"
@@ -3422,7 +3459,7 @@ export default function OrderDetailPage() {
                             )
                           }
                         >
-                          <SelectTrigger className="h-8 w-[220px] rounded-md text-xs">
+                          <SelectTrigger className="h-8 w-55 rounded-md text-xs">
                             <SelectValue
                               placeholder={`Assign ${managerLabel.toLowerCase()}...`}
                             />
@@ -3479,7 +3516,7 @@ export default function OrderDetailPage() {
                             )
                           }
                         >
-                          <SelectTrigger className="h-8 w-[220px] rounded-md text-xs">
+                          <SelectTrigger className="h-8 w-55 rounded-md text-xs">
                             <SelectValue
                               placeholder={`Assign ${engineerLabel.toLowerCase()}...`}
                             />
@@ -3694,7 +3731,7 @@ export default function OrderDetailPage() {
                 </label>
                 <div className="space-y-2">
                   <div
-                    className="flex min-h-[86px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
+                    className="flex min-h-21.5 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
                     onDragOver={(event) => {
                       event.preventDefault();
                     }}
@@ -3843,7 +3880,7 @@ export default function OrderDetailPage() {
                   <textarea
                     value={commentMessage}
                     onChange={(event) => setCommentMessage(event.target.value)}
-                    className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                    className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
                     placeholder="Add a note for the next role..."
                   />
                   <div className="flex justify-end">
@@ -4106,7 +4143,7 @@ export default function OrderDetailPage() {
                                       [field.id]: event.target.value,
                                     }))
                                   }
-                                  className="min-h-[80px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                                  className="min-h-20 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
                                 />
                               </label>
                             );
@@ -4175,7 +4212,7 @@ export default function OrderDetailPage() {
                           setExternalPortalComment(event.target.value)
                         }
                         placeholder="Add request note for partner..."
-                        className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                        className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
                       />
                     </label>
                     <div className="space-y-2">
@@ -4363,7 +4400,7 @@ export default function OrderDetailPage() {
                                           : semantic === "unit_price" &&
                                               job.requestMode !==
                                                 "partner_portal"
-                                            ? job.unitPrice
+                                            ? undefined
                                             : undefined;
                                     const resolvedValue =
                                       isEmptyExternalFieldValue(value)
@@ -4419,7 +4456,7 @@ export default function OrderDetailPage() {
                                   )
                                 }
                               >
-                                <SelectTrigger className="h-8 w-[160px] rounded-md text-xs">
+                                <SelectTrigger className="h-8 w-40 rounded-md text-xs">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -4727,7 +4764,7 @@ export default function OrderDetailPage() {
                 <textarea
                   value={returnNote}
                   onChange={(event) => setReturnNote(event.target.value)}
-                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                  className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
                   placeholder="Add context for the previous role..."
                 />
               </label>

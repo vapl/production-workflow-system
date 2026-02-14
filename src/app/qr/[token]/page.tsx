@@ -68,14 +68,15 @@ function getStoragePathFromUrl(url: string, bucket: string) {
 }
 
 async function resolveSignedUrl(url: string | null | undefined, bucket: string) {
-  if (!supabase || !url) {
+  const sb = supabase;
+  if (!sb || !url) {
     return url ?? null;
   }
   const storagePath = getStoragePathFromUrl(url, bucket);
   if (!storagePath) {
     return url;
   }
-  const { data, error } = await supabase.storage
+  const { data, error } = await sb.storage
     .from(bucket)
     .createSignedUrl(storagePath, 60 * 60);
   if (error || !data?.signedUrl) {
@@ -103,7 +104,8 @@ export default function QrTokenPage({
   );
 
   useEffect(() => {
-    if (!supabase || !params.token) {
+    const sb = supabase;
+    if (!sb || !params.token) {
       return;
     }
     if (!user.isAuthenticated) {
@@ -115,7 +117,7 @@ export default function QrTokenPage({
     const load = async () => {
       setIsLoading(true);
       setError(null);
-      const { data: qrData, error: qrError } = await supabase
+      const { data: qrData, error: qrError } = await sb
         .from("production_qr_codes")
         .select("order_id, field_id, row_index, token")
         .eq("token", params.token)
@@ -130,7 +132,7 @@ export default function QrTokenPage({
       }
       setQrRow(qrData);
 
-      const { data: orderData } = await supabase
+      const { data: orderData } = await sb
         .from("orders")
         .select("id, order_number, customer_name, due_date, priority")
         .eq("id", qrData.order_id)
@@ -140,7 +142,7 @@ export default function QrTokenPage({
       }
       setOrder(orderData ?? null);
 
-      const { data: fieldData } = await supabase
+      const { data: fieldData } = await sb
         .from("order_input_fields")
         .select("id, label, options")
         .eq("id", qrData.field_id)
@@ -150,7 +152,7 @@ export default function QrTokenPage({
       }
       setField(fieldData ?? null);
 
-      const { data: valueData } = await supabase
+      const { data: valueData } = await sb
         .from("order_input_values")
         .select("value")
         .eq("order_id", qrData.order_id)
@@ -167,7 +169,7 @@ export default function QrTokenPage({
           : null;
       setRowData(rawRow);
 
-      const { data: attachmentData } = await supabase
+      const { data: attachmentData } = await sb
         .from("order_attachments")
         .select("id, name, url, created_at")
         .eq("order_id", qrData.order_id)
@@ -178,7 +180,7 @@ export default function QrTokenPage({
       }
       setAttachments(attachmentData ?? []);
 
-      const { data: assignments } = await supabase
+      const { data: assignments } = await sb
         .from("operator_station_assignments")
         .select("station_id")
         .eq("user_id", user.id)
@@ -188,7 +190,7 @@ export default function QrTokenPage({
         .filter(Boolean);
 
       if (stationIds.length > 0) {
-        const { data: items } = await supabase
+        const { data: items } = await sb
           .from("production_items")
           .select("id, item_name, qty, status, station_id, meta")
           .eq("order_id", qrData.order_id)

@@ -299,7 +299,7 @@ function OrderCard({
             {order.commentCount ?? order.comments?.length ?? 0}
           </span>
         </div>
-        <div className="pointer-events-none absolute -right-2 top-1/2 hidden h-10 w-20 -translate-y-1/2 bg-gradient-to-l from-background via-background/80 to-transparent md:group-hover:block" />
+        <div className="pointer-events-none absolute -right-2 top-1/2 hidden h-10 w-20 -translate-y-1/2 bg-linear-to-l from-background via-background/80 to-transparent md:group-hover:block" />
         <div className="absolute right-3 top-3 hidden items-center gap-1 rounded-full border border-border bg-background/90 p-0.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur md:flex md:opacity-0 md:group-hover:opacity-100">
           {onEdit ? (
             <button

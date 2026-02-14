@@ -85,7 +85,8 @@ export default function ExternalJobRespondPage() {
   const [isLoading, setIsLoading] = useState(hasToken);
   const [requestData, setRequestData] = useState<RequestResponse | null>(null);
   const [error, setError] = useState("");
-  const [fallbackPartnerOrderNumber, setFallbackPartnerOrderNumber] = useState("");
+  const [fallbackPartnerOrderNumber, setFallbackPartnerOrderNumber] =
+    useState("");
   const [fallbackCompletionDate, setFallbackCompletionDate] = useState("");
   const [note, setNote] = useState("");
   const [portalFieldValues, setPortalFieldValues] = useState<
@@ -116,7 +117,9 @@ export default function ExternalJobRespondPage() {
         return;
       }
       const uniqueFields = Array.from(
-        new Map((payload.fields ?? []).map((field) => [field.id, field])).values(),
+        new Map(
+          (payload.fields ?? []).map((field) => [field.id, field]),
+        ).values(),
       );
       setRequestData({
         request: payload.request,
@@ -125,20 +128,17 @@ export default function ExternalJobRespondPage() {
       });
       setFallbackCompletionDate(payload.request.dueDate ?? "");
       setPortalFieldValues(
-        uniqueFields.reduce<Record<string, string | boolean>>(
-          (acc, field) => {
-            if (field.fieldType === "toggle") {
-              acc[field.id] = field.value === true;
-              return acc;
-            }
-            acc[field.id] =
-              typeof field.value === "string" || typeof field.value === "number"
-                ? String(field.value)
-                : "";
+        uniqueFields.reduce<Record<string, string | boolean>>((acc, field) => {
+          if (field.fieldType === "toggle") {
+            acc[field.id] = field.value === true;
             return acc;
-          },
-          {},
-        ),
+          }
+          acc[field.id] =
+            typeof field.value === "string" || typeof field.value === "number"
+              ? String(field.value)
+              : "";
+          return acc;
+        }, {}),
       );
       setIsLoading(false);
     };
@@ -286,7 +286,11 @@ export default function ExternalJobRespondPage() {
             {requestData.request.companyLogoUrl ? (
               <Image
                 src={requestData.request.companyLogoUrl}
-                alt={displayCompanyName === "-" ? "Company logo" : displayCompanyName}
+                alt={
+                  displayCompanyName === "-"
+                    ? "Company logo"
+                    : displayCompanyName
+                }
                 width={40}
                 height={40}
                 unoptimized
@@ -306,9 +310,7 @@ export default function ExternalJobRespondPage() {
               </div>
             )}
             <div className="min-w-0">
-              <div className="truncate font-medium">
-                {displayCompanyName}
-              </div>
+              <div className="truncate font-medium">{displayCompanyName}</div>
             </div>
           </div>
           <p>
@@ -435,7 +437,7 @@ export default function ExternalJobRespondPage() {
                           [field.id]: event.target.value,
                         }))
                       }
-                      className="min-h-[100px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                      className="min-h-25 rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
                       required={field.isRequired}
                     />
                   </label>
@@ -512,7 +514,7 @@ export default function ExternalJobRespondPage() {
               <textarea
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                className="min-h-[100px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                className="min-h-25 rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
               />
             </label>
             <label className="flex flex-col gap-2 text-sm font-medium">

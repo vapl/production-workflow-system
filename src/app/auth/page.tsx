@@ -293,9 +293,10 @@ export default function AuthPage() {
     if (!supabase || !recoveryMode || recoverySessionReady || !recoveryTokens) {
       return;
     }
+    const sb = supabase;
     let active = true;
     const prepare = async () => {
-      const { error } = await supabase.auth.setSession({
+      const { error } = await sb.auth.setSession({
         access_token: recoveryTokens.accessToken,
         refresh_token: recoveryTokens.refreshToken,
       });
@@ -320,9 +321,10 @@ export default function AuthPage() {
     if (!supabase || !recoveryMode || recoverySessionReady || recoveryTokens) {
       return;
     }
+    const sb = supabase;
     let active = true;
     const checkSession = async () => {
-      const { data } = await supabase.auth.getSession();
+      const { data } = await sb.auth.getSession();
       if (!active) {
         return;
       }
@@ -380,6 +382,7 @@ export default function AuthPage() {
       setMessage("Supabase is not configured.");
       return;
     }
+    const sb = supabase;
     setStatus("sending");
     setMessage("");
     let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -403,7 +406,7 @@ export default function AuthPage() {
       }
       pollInterval = setInterval(async () => {
         try {
-          const { data } = await supabase.auth.getSession();
+          const { data } = await sb.auth.getSession();
           if (data.session?.user) {
             stopPoll();
             setStatus("sent");

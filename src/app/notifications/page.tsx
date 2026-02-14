@@ -66,13 +66,13 @@ export default function NotificationsPage() {
     let isMounted = true;
     const load = async () => {
       setIsLoading(true);
-      const query = supabase
+      let query = supabase!
         .from("notifications")
         .select("id, title, body, created_at, read_at")
         .order("created_at", { ascending: false })
         .limit(100);
       if (showUnreadOnly) {
-        query.is("read_at", null);
+        query = query.is("read_at", null);
       }
       const { data, error } = await query;
       if (!isMounted) {
@@ -106,7 +106,7 @@ export default function NotificationsPage() {
       )
       .subscribe();
     return () => {
-      supabase.removeChannel(channel);
+      void supabase!.removeChannel(channel);
     };
   }, [user.tenantId]);
 
@@ -218,7 +218,7 @@ export default function NotificationsPage() {
   return (
     <section className="space-y-0 md:space-y-4 pt-16 md:pt-0">
       <div className="pointer-events-none fixed right-4 top-3 z-40 md:hidden">
-        <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
           <Button
             variant="ghost"
             size="icon"

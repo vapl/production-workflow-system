@@ -100,6 +100,18 @@ type ExternalListField = {
   semantic: "external_order" | "due_date" | "unit_price" | "other";
 };
 
+type ExternalJobOrderJoin =
+  | {
+      order_number?: string | null;
+      customer_name?: string | null;
+    }
+  | Array<{
+      order_number?: string | null;
+      customer_name?: string | null;
+    }>
+  | null
+  | undefined;
+
 function normalizeFieldToken(value: string) {
   return value
     .trim()
@@ -167,7 +179,8 @@ export default function ExternalJobsPage() {
       { value: "all" as const, label: "All" },
       ...visibleExternalStatuses.map((status) => ({
         value: status,
-        label: externalStatusLabels[status] ?? defaultExternalStatusLabels[status],
+        label:
+          externalStatusLabels[status] ?? defaultExternalStatusLabels[status],
       })),
     ],
     [externalStatusLabels, visibleExternalStatuses],
@@ -239,33 +252,36 @@ export default function ExternalJobsPage() {
       changed_by_role?: string | null;
       changed_at: string;
     }>;
-    orders?: {
-      order_number?: string | null;
-      customer_name?: string | null;
-    } | null;
-  }) => ({
-    id: row.id,
-    orderNumber: row.orders?.order_number ?? "-",
-    customerName: row.orders?.customer_name ?? "-",
-    partnerName: row.partner_name ?? "-",
-    partnerId: row.partner_id ?? undefined,
-    externalOrderNumber: row.external_order_number,
-    requestMode: row.request_mode ?? undefined,
-    partnerResponseOrderNumber: row.partner_response_order_number ?? undefined,
-    dueDate: row.due_date,
-    partnerResponseDueDate: row.partner_response_due_date ?? undefined,
-    quantity: row.quantity ?? undefined,
-    status: row.status,
-    receivedAt: row.received_at ?? null,
-    partnerRequestSenderName: row.partner_request_sender_name ?? undefined,
-    statusHistory: (row.external_job_status_history ?? []).map((entry) => ({
-      id: entry.id,
-      status: entry.status,
-      changedBy: entry.changed_by_name ?? "Unknown",
-      changedByRole: entry.changed_by_role ?? undefined,
-      changedAt: entry.changed_at,
-    })),
-  });
+    orders?: ExternalJobOrderJoin;
+  }) => {
+    const order = Array.isArray(row.orders)
+      ? row.orders[0]
+      : (row.orders ?? undefined);
+    return {
+      id: row.id,
+      orderNumber: order?.order_number ?? "-",
+      customerName: order?.customer_name ?? "-",
+      partnerName: row.partner_name ?? "-",
+      partnerId: row.partner_id ?? undefined,
+      externalOrderNumber: row.external_order_number,
+      requestMode: row.request_mode ?? undefined,
+      partnerResponseOrderNumber:
+        row.partner_response_order_number ?? undefined,
+      dueDate: row.due_date,
+      partnerResponseDueDate: row.partner_response_due_date ?? undefined,
+      quantity: row.quantity ?? undefined,
+      status: row.status,
+      receivedAt: row.received_at ?? null,
+      partnerRequestSenderName: row.partner_request_sender_name ?? undefined,
+      statusHistory: (row.external_job_status_history ?? []).map((entry) => ({
+        id: entry.id,
+        status: entry.status,
+        changedBy: entry.changed_by_name ?? "Unknown",
+        changedByRole: entry.changed_by_role ?? undefined,
+        changedAt: entry.changed_at,
+      })),
+    };
+  };
   const getEffectiveDueDate = useCallback(
     (job: { dueDate: string; partnerResponseDueDate?: string }) =>
       job.partnerResponseDueDate || job.dueDate,
@@ -351,9 +367,10 @@ export default function ExternalJobsPage() {
       });
       return;
     }
+    const sb = supabase;
     let isMounted = true;
     const loadFields = async () => {
-      const { data } = await supabase
+      const { data } = await sb
         .from("external_job_fields")
         .select("id, key, label, field_type, unit, sort_order, is_active")
         .eq("tenant_id", user.tenantId)
@@ -398,6 +415,7 @@ export default function ExternalJobsPage() {
         }
         return;
       }
+      const sb = supabase;
       if (jobIds.length === 0) {
         if (!append) {
           setExternalFieldValuesByJobId({});
@@ -405,7 +423,7 @@ export default function ExternalJobsPage() {
         return;
       }
       const fieldIds = externalListFields.map((field) => field.id);
-      const { data } = await supabase
+      const { data } = await sb
         .from("external_job_field_values")
         .select("external_job_id, field_id, value")
         .eq("tenant_id", user.tenantId)
@@ -435,11 +453,12 @@ export default function ExternalJobsPage() {
       });
       return;
     }
+    const sb = supabase;
     let isMounted = true;
 
     const fetchPage = async (nextOffset: number, append: boolean) => {
       setIsLoading(true);
-      const query = supabase
+      const query = sb
         .from("external_jobs")
         .select(externalJobsSelect, { count: "exact" })
         .order("created_at", { ascending: false })
@@ -543,9 +562,10 @@ export default function ExternalJobsPage() {
       });
       return;
     }
+    const sb = supabase;
     let isMounted = true;
     const loadStats = async () => {
-      const base = supabase.from("external_jobs");
+      const base = sb.from("external_jobs");
       let baseQuery = base.select("id", { count: "exact", head: true });
       if (user.tenantId) {
         baseQuery = baseQuery.eq("tenant_id", user.tenantId);
@@ -638,7 +658,7 @@ export default function ExternalJobsPage() {
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-[260px] flex-1 space-y-2">
+            <div className="min-w-65 flex-1 space-y-2">
               <label className="text-sm font-medium">Search</label>
               <input
                 value={search}
@@ -674,7 +694,7 @@ export default function ExternalJobsPage() {
                     Filters
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent align="end" className="w-[360px] space-y-3">
+                <PopoverContent align="end" className="w-90 space-y-3">
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Status</label>
                     <Select
@@ -887,8 +907,9 @@ export default function ExternalJobsPage() {
                       ]);
                       return;
                     }
+                    const sb = supabase;
                     setIsLoading(true);
-                    const query = supabase
+                    const query = sb
                       .from("external_jobs")
                       .select(externalJobsSelect, { count: "exact" })
                       .order("created_at", { ascending: false })

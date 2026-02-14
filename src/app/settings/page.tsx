@@ -534,14 +534,15 @@ export default function SettingsPage() {
   }, [sortedStations]);
 
   useEffect(() => {
-    if (!supabase || !currentUser.tenantId) {
+    const sb = supabase;
+    if (!sb || !currentUser.tenantId) {
       return;
     }
     let isMounted = true;
     const loadWorkHours = async () => {
       setIsTenantSettingsLoading(true);
       try {
-        const { data, error } = await supabase
+        const { data, error } = await sb
           .from("tenant_settings")
           .select(
             "workday_start, workday_end, workdays, work_shifts, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles",
@@ -815,14 +816,15 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    if (!supabase || !currentUser.tenantId) {
+    const sb = supabase;
+    if (!sb || !currentUser.tenantId) {
       return;
     }
     let isMounted = true;
     const fetchCompany = async () => {
       setIsTenantProfileLoading(true);
       try {
-        const { data, error } = await supabase
+        const { data, error } = await sb
           .from("tenants")
           .select(
             "name, legal_name, registration_no, vat_no, billing_email, address, logo_url, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified",
@@ -865,12 +867,13 @@ export default function SettingsPage() {
   }, [companyLogoPreview]);
 
   useEffect(() => {
-    if (!supabase || !currentUser.tenantId) {
+    const sb = supabase;
+    if (!sb || !currentUser.tenantId) {
       return;
     }
     const fetchInvites = async () => {
       setIsInvitesLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("user_invites")
         .select("id, email, full_name, role, invited_at, accepted_at")
         .eq("tenant_id", currentUser.tenantId)
@@ -1306,7 +1309,8 @@ export default function SettingsPage() {
   }, [sortedLevels.length]);
 
   useEffect(() => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       setUsers([
         {
           id: currentUser.id,
@@ -1325,7 +1329,7 @@ export default function SettingsPage() {
     const fetchUsers = async () => {
       setIsUsersLoading(true);
       setUsersError(null);
-      const query = supabase
+      const query = sb
         .from("profiles")
         .select("id, full_name, role, tenant_id, is_admin")
         .order("full_name", { ascending: true });
@@ -1366,7 +1370,8 @@ export default function SettingsPage() {
   ]);
 
   useEffect(() => {
-    if (!supabase || !currentUser.isAuthenticated) {
+    const sb = supabase;
+    if (!sb || !currentUser.isAuthenticated) {
       setOperatorAssignments([]);
       return;
     }
@@ -1374,7 +1379,7 @@ export default function SettingsPage() {
     const fetchAssignments = async () => {
       setIsAssignmentsLoading(true);
       setOperatorAssignmentsError(null);
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("operator_station_assignments")
         .select("id, user_id, station_id, is_active")
         .order("created_at", { ascending: true });
@@ -3028,7 +3033,7 @@ export default function SettingsPage() {
                       value={bulkNodeInput}
                       onChange={(event) => setBulkNodeInput(event.target.value)}
                       placeholder="PE 40 Durvis\nPE 40 Vitrina\nPE 40 Logs"
-                      className="min-h-[120px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                      className="min-h-30 rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
                     />
                     <div className="text-xs text-muted-foreground">
                       Optional code: use &quot;Label | Code&quot; or
@@ -3290,7 +3295,7 @@ export default function SettingsPage() {
                       }
                       disabled={orderFieldType !== "select"}
                       placeholder="Dealer, Private, Partner"
-                      className="min-h-[80px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
+                      className="min-h-20 rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
                     />
                   </label>
                 </div>
@@ -3468,7 +3473,7 @@ export default function SettingsPage() {
                                       })
                                     }
                                     placeholder="Type A, Type B"
-                                    className="min-h-[70px] rounded-md border border-border bg-input-background px-2 py-2 text-sm"
+                                    className="min-h-17.5 rounded-md border border-border bg-input-background px-2 py-2 text-sm"
                                   />
                                 </label>
                                 <label className="flex flex-col gap-1 text-xs font-medium">
@@ -3696,7 +3701,7 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
             ) : null}
-            <div className="grid min-w-0 gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            <div className="grid min-w-0 gap-6 lg:grid-cols-2 *:min-w-0">
               <Card>
                 <CardHeader>
                   <CardTitle>Working hours</CardTitle>
@@ -3918,11 +3923,11 @@ export default function SettingsPage() {
                             <span className="rounded-full h-6 w-6 flex justify-center items-center border border-border text-xs text-muted-foreground">
                               {index + 1}
                             </span>
-                            <span className="font-medium break-words">
+                            <span className="font-medium wrap-break-word">
                               {station.name}
                             </span>
                           </div>
-                          <div className="text-sm text-muted-foreground break-words">
+                          <div className="text-sm text-muted-foreground wrap-break-word">
                             {station.description ?? "No description"}
                           </div>
                         </div>
@@ -4083,8 +4088,12 @@ export default function SettingsPage() {
                                 });
                               }}
                             />
-                            {rules.orderStatusConfig[option.value]?.label ??
-                              option.label}
+                            {(
+                              rules.orderStatusConfig as Record<
+                                string,
+                                { label?: string }
+                              >
+                            )[option.value]?.label ?? option.label}
                           </label>
                         );
                       })}
@@ -4945,7 +4954,7 @@ export default function SettingsPage() {
                       }
                       disabled={externalJobFieldType !== "select"}
                       placeholder="EUR, USD"
-                      className="min-h-[80px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
+                      className="min-h-20 rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
                     />
                   </label>
                 </div>
@@ -5296,7 +5305,7 @@ export default function SettingsPage() {
                                 !(devRoleOverride && user.id === currentUser.id)
                               }
                             >
-                              <SelectTrigger className="h-9 w-[160px] rounded-md text-sm">
+                              <SelectTrigger className="h-9 w-40 rounded-md text-sm">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -5749,7 +5758,7 @@ export default function SettingsPage() {
                                     },
                                   }))
                                 }
-                                className="h-9 min-w-[180px] flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                                className="h-9 min-w-45 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
                               />
                               <Select
                                 value={config?.color ?? "slate"}
@@ -5763,7 +5772,7 @@ export default function SettingsPage() {
                                   }))
                                 }
                               >
-                                <SelectTrigger className="h-9 w-[140px] rounded-lg border border-border bg-input-background px-3 text-sm">
+                                <SelectTrigger className="h-9 w-35 rounded-lg border border-border bg-input-background px-3 text-sm">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -5782,7 +5791,7 @@ export default function SettingsPage() {
                                   ))}
                                 </SelectContent>
                               </Select>
-                              <label className="flex min-w-[110px] items-center gap-2 text-sm">
+                              <label className="flex min-w-27.5 items-center gap-2 text-sm">
                                 {requiredActiveOrderStatuses.includes(
                                   option.value,
                                 ) ? (
@@ -5888,7 +5897,7 @@ export default function SettingsPage() {
                                     },
                                   }))
                                 }
-                                className="h-9 min-w-[180px] flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                                className="h-9 min-w-45 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
                               />
                               <Select
                                 value={config?.color ?? "slate"}
@@ -5902,7 +5911,7 @@ export default function SettingsPage() {
                                   }))
                                 }
                               >
-                                <SelectTrigger className="h-9 w-[140px] rounded-lg border border-border bg-input-background px-3 text-sm">
+                                <SelectTrigger className="h-9 w-35 rounded-lg border border-border bg-input-background px-3 text-sm">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -5921,7 +5930,7 @@ export default function SettingsPage() {
                                   ))}
                                 </SelectContent>
                               </Select>
-                              <label className="flex min-w-[110px] items-center gap-2 text-sm">
+                              <label className="flex min-w-27.5 items-center gap-2 text-sm">
                                 {requiredActiveExternalStatuses.includes(
                                   option.value,
                                 ) ? (
@@ -6118,7 +6127,7 @@ export default function SettingsPage() {
                             setNewAttachmentCategoryLabel(event.target.value)
                           }
                           placeholder="Add category"
-                          className="h-10 min-w-[200px] flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                          className="h-10 min-w-50 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
                         />
                         <Button onClick={handleAddAttachmentCategory}>
                           Add category
@@ -6264,10 +6273,12 @@ export default function SettingsPage() {
                         <label className="flex items-center gap-2">
                           <input
                             type="checkbox"
-                            checked={newChecklistRequired.includes(
-                              "ready_for_production",
-                              "in_production",
-                            )}
+                            checked={
+                              newChecklistRequired.includes(
+                                "ready_for_production",
+                              ) ||
+                              newChecklistRequired.includes("in_production")
+                            }
                             onChange={(event) => {
                               setNewChecklistRequired((prev) => {
                                 const next = new Set(prev);
@@ -6316,10 +6327,11 @@ export default function SettingsPage() {
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
-                              checked={item.requiredFor.includes(
-                                "ready_for_production",
-                                "in_production",
-                              )}
+                              checked={
+                                item.requiredFor.includes(
+                                  "ready_for_production",
+                                ) || item.requiredFor.includes("in_production")
+                              }
                               onChange={(event) => {
                                 const next = new Set(item.requiredFor);
                                 if (event.target.checked) {

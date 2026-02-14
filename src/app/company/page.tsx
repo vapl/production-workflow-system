@@ -3,12 +3,22 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeftIcon } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
 import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
-import { defaultTenantSubscription, hasTenantCapability, type TenantPlanCode } from "@/lib/subscription";
+import {
+  defaultTenantSubscription,
+  hasTenantCapability,
+  type TenantPlanCode,
+} from "@/lib/subscription";
 
 function getStoragePathFromUrl(url: string, bucket: string) {
   if (!url) {
@@ -43,14 +53,16 @@ export default function CompanyPage() {
   const [companyLogoUrl, setCompanyLogoUrl] = useState("");
   const [companyLogoDisplayUrl, setCompanyLogoDisplayUrl] = useState("");
   const [companyLogoFile, setCompanyLogoFile] = useState<File | null>(null);
-  const [companyLogoPreview, setCompanyLogoPreview] = useState<string | null>(null);
+  const [companyLogoPreview, setCompanyLogoPreview] = useState<string | null>(
+    null,
+  );
   const [companyLogoState, setCompanyLogoState] = useState<
     "idle" | "uploading" | "uploaded" | "error"
   >("idle");
   const [companyLogoMessage, setCompanyLogoMessage] = useState("");
-  const [companyState, setCompanyState] = useState<"idle" | "saving" | "saved" | "error">(
-    "idle",
-  );
+  const [companyState, setCompanyState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
   const [companyMessage, setCompanyMessage] = useState("");
   const [subscriptionPlan, setSubscriptionPlan] = useState<TenantPlanCode>(
     defaultTenantSubscription.planCode,
@@ -66,10 +78,13 @@ export default function CompanyPage() {
     if (!supabase || !currentUser.tenantId) {
       return;
     }
+    const sb = supabase;
     const fetchCompany = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("tenants")
-        .select("name, legal_name, registration_no, vat_no, billing_email, address, logo_url")
+        .select(
+          "name, legal_name, registration_no, vat_no, billing_email, address, logo_url",
+        )
         .eq("id", currentUser.tenantId)
         .maybeSingle();
       if (error || !data) {
@@ -89,7 +104,7 @@ export default function CompanyPage() {
           supabaseTenantLogoBucket,
         );
         if (storagePath) {
-          const { data: signed } = await supabase.storage
+          const { data: signed } = await sb.storage
             .from(supabaseTenantLogoBucket)
             .createSignedUrl(storagePath, 60 * 60);
           setCompanyLogoDisplayUrl(signed?.signedUrl ?? rawLogoUrl);
@@ -107,8 +122,9 @@ export default function CompanyPage() {
     if (!supabase || !currentUser.tenantId) {
       return;
     }
+    const sb = supabase;
     const fetchSubscription = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("tenant_subscriptions")
         .select("plan_code")
         .eq("tenant_id", currentUser.tenantId)
@@ -166,7 +182,10 @@ export default function CompanyPage() {
     }
     setCompanyLogoState("uploading");
     setCompanyLogoMessage("");
-    const result = await uploadTenantLogo(companyLogoFile, currentUser.tenantId);
+    const result = await uploadTenantLogo(
+      companyLogoFile,
+      currentUser.tenantId,
+    );
     if (!result.url || result.error) {
       setCompanyLogoState("error");
       const rawMessage = result.error ?? "Upload failed.";
@@ -216,9 +235,14 @@ export default function CompanyPage() {
     }
     setCompanyLogoState("uploading");
     setCompanyLogoMessage("");
-    const storagePath = getStoragePathFromUrl(companyLogoUrl, supabaseTenantLogoBucket);
+    const storagePath = getStoragePathFromUrl(
+      companyLogoUrl,
+      supabaseTenantLogoBucket,
+    );
     if (storagePath) {
-      await supabase.storage.from(supabaseTenantLogoBucket).remove([storagePath]);
+      await supabase.storage
+        .from(supabaseTenantLogoBucket)
+        .remove([storagePath]);
     }
     const { error } = await supabase
       .from("tenants")
@@ -348,7 +372,9 @@ export default function CompanyPage() {
               Registration no.
               <input
                 value={companyRegistrationNo}
-                onChange={(event) => setCompanyRegistrationNo(event.target.value)}
+                onChange={(event) =>
+                  setCompanyRegistrationNo(event.target.value)
+                }
                 className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                 disabled={!currentUser.isAdmin}
               />
@@ -422,11 +448,15 @@ export default function CompanyPage() {
                           setCompanyLogoFile(null);
                           setCompanyLogoPreview(null);
                           setCompanyLogoState("error");
-                          setCompanyLogoMessage("Logo file is too large. Max 2MB.");
+                          setCompanyLogoMessage(
+                            "Logo file is too large. Max 2MB.",
+                          );
                           return;
                         }
                         setCompanyLogoFile(file ?? null);
-                        setCompanyLogoPreview(file ? URL.createObjectURL(file) : null);
+                        setCompanyLogoPreview(
+                          file ? URL.createObjectURL(file) : null,
+                        );
                         setCompanyLogoState("idle");
                         setCompanyLogoMessage("");
                       }}
@@ -443,7 +473,9 @@ export default function CompanyPage() {
                       companyLogoState === "uploading"
                     }
                   >
-                    {companyLogoState === "uploading" ? "Uploading..." : "Upload logo"}
+                    {companyLogoState === "uploading"
+                      ? "Uploading..."
+                      : "Upload logo"}
                   </Button>
                   <Button
                     variant="ghost"
@@ -461,7 +493,9 @@ export default function CompanyPage() {
               {companyLogoMessage && (
                 <span
                   className={`text-xs ${
-                    companyLogoState === "error" ? "text-destructive" : "text-muted-foreground"
+                    companyLogoState === "error"
+                      ? "text-destructive"
+                      : "text-muted-foreground"
                   }`}
                 >
                   {companyLogoMessage}
@@ -470,13 +504,18 @@ export default function CompanyPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={handleSaveCompany} disabled={!currentUser.isAdmin || companyState === "saving"}>
+            <Button
+              onClick={handleSaveCompany}
+              disabled={!currentUser.isAdmin || companyState === "saving"}
+            >
               {companyState === "saving" ? "Saving..." : "Save company"}
             </Button>
             {companyMessage && (
               <span
                 className={`text-xs ${
-                  companyState === "error" ? "text-destructive" : "text-muted-foreground"
+                  companyState === "error"
+                    ? "text-destructive"
+                    : "text-muted-foreground"
                 }`}
               >
                 {companyMessage}
@@ -490,7 +529,8 @@ export default function CompanyPage() {
         <CardHeader>
           <CardTitle>Subscription</CardTitle>
           <CardDescription>
-            Plan switch for feature gating. Billing integration can be added later.
+            Plan switch for feature gating. Billing integration can be added
+            later.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -505,7 +545,9 @@ export default function CompanyPage() {
                     : "border-border bg-background"
                 }`}
                 onClick={() => setSubscriptionPlan("basic")}
-                disabled={!currentUser.isAdmin || subscriptionStatus === "saving"}
+                disabled={
+                  !currentUser.isAdmin || subscriptionStatus === "saving"
+                }
               >
                 <div className="font-medium">Basic</div>
                 <div className="text-xs text-muted-foreground">
@@ -520,7 +562,9 @@ export default function CompanyPage() {
                     : "border-border bg-background"
                 }`}
                 onClick={() => setSubscriptionPlan("pro")}
-                disabled={!currentUser.isAdmin || subscriptionStatus === "saving"}
+                disabled={
+                  !currentUser.isAdmin || subscriptionStatus === "saving"
+                }
               >
                 <div className="font-medium">Pro</div>
                 <div className="text-xs text-muted-foreground">
@@ -532,7 +576,8 @@ export default function CompanyPage() {
 
           <div className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
             <div>
-              externalJobs.manualEntry: <span className="font-medium">enabled</span>
+              externalJobs.manualEntry:{" "}
+              <span className="font-medium">enabled</span>
             </div>
             <div>
               externalJobs.sendToPartner:{" "}

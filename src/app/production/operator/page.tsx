@@ -90,22 +90,22 @@ type OrderAttachmentRow = {
   category: string | null;
 };
 
-  type QueueItem = {
-    id: string;
-    orderId: string;
-    orderNumber: string;
-    customerName: string;
-    dueDate: string;
-    priority: Priority;
-    status: BatchRunRow["status"];
-    batchCode: string;
-    totalQty: number;
-    material: string;
-    attachments: OrderAttachmentRow[];
-    startedAt?: string | null;
-    doneAt?: string | null;
-    items: ProductionItemRow[];
-  };
+type QueueItem = {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  dueDate: string;
+  priority: Priority;
+  status: BatchRunRow["status"];
+  batchCode: string;
+  totalQty: number;
+  material: string;
+  attachments: OrderAttachmentRow[];
+  startedAt?: string | null;
+  doneAt?: string | null;
+  items: ProductionItemRow[];
+};
 
 type PendingAction = {
   itemId: string;
@@ -134,7 +134,8 @@ function getItemGroupKey(item: ProductionItemRow) {
   const fieldLabel =
     meta && typeof meta.fieldLabel === "string" ? meta.fieldLabel : "";
   const rowIndex =
-    meta && (typeof meta.rowIndex === "number" || typeof meta.rowIndex === "string")
+    meta &&
+    (typeof meta.rowIndex === "number" || typeof meta.rowIndex === "string")
       ? String(meta.rowIndex)
       : "";
   const fallback = `${item.item_name}|${fieldLabel}|${rowIndex}`;
@@ -147,7 +148,9 @@ function pickLatestItem(
 ) {
   if (!current) return candidate;
   const currentTime = current.created_at ? Date.parse(current.created_at) : 0;
-  const candidateTime = candidate.created_at ? Date.parse(candidate.created_at) : 0;
+  const candidateTime = candidate.created_at
+    ? Date.parse(candidate.created_at)
+    : 0;
   if (candidateTime > currentTime) {
     return candidate;
   }
@@ -171,7 +174,10 @@ function getStoragePathFromUrl(url: string, bucket: string) {
   return url.slice(index + marker.length);
 }
 
-function renderAttachmentIcon(attachment: OrderAttachmentRow, signedUrl?: string) {
+function renderAttachmentIcon(
+  attachment: OrderAttachmentRow,
+  signedUrl?: string,
+) {
   const name = attachment.name.toLowerCase();
   const isPdf = name.endsWith(".pdf");
   const isImage =
@@ -199,7 +205,11 @@ function renderAttachmentIcon(attachment: OrderAttachmentRow, signedUrl?: string
     );
   }
 
-  if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")) {
+  if (
+    name.endsWith(".png") ||
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg")
+  ) {
     return (
       <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted">
         <ImageIcon className="h-4 w-4 text-muted-foreground" />
@@ -217,9 +227,7 @@ function renderAttachmentIcon(attachment: OrderAttachmentRow, signedUrl?: string
 export default function OperatorProductionPage() {
   const currentUser = useCurrentUser();
   const today = new Date().toISOString().slice(0, 10);
-  const cacheKey = currentUser.id
-    ? `pws_operator_cache_${currentUser.id}`
-    : "";
+  const cacheKey = currentUser.id ? `pws_operator_cache_${currentUser.id}` : "";
   const searchParams = useSearchParams();
   const stationFilter = searchParams.get("station");
   const [stations, setStations] = useState<Station[]>([]);
@@ -248,7 +256,9 @@ export default function OperatorProductionPage() {
   const [blockedItemId, setBlockedItemId] = useState<string | null>(null);
   const [blockedReasonId, setBlockedReasonId] = useState<string>("");
   const [blockedReasonText, setBlockedReasonText] = useState<string>("");
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null,
+  );
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
@@ -261,7 +271,8 @@ export default function OperatorProductionPage() {
     : "";
 
   useEffect(() => {
-    if (!supabase || !currentUser.id) {
+    const sb = supabase;
+    if (!sb || !currentUser.id) {
       return;
     }
     let isMounted = true;
@@ -304,7 +315,7 @@ export default function OperatorProductionPage() {
         setIsLoading(true);
       }
       setDataError("");
-      const { data: assignments, error: assignmentsError } = await supabase
+      const { data: assignments, error: assignmentsError } = await sb
         .from("operator_station_assignments")
         .select("station_id")
         .eq("user_id", currentUser.id)
@@ -334,13 +345,13 @@ export default function OperatorProductionPage() {
         return;
       }
       const [stationsResult, runsResult, depsResult] = await Promise.all([
-        supabase
+        sb
           .from("workstations")
           .select("id, name, sort_order")
           .in("id", stationIds)
           .order("sort_order", { ascending: true })
           .order("name", { ascending: true }),
-        supabase
+        sb
           .from("batch_runs")
           .select(
             "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
@@ -348,7 +359,7 @@ export default function OperatorProductionPage() {
           .in("station_id", stationIds)
           .eq("planned_date", today)
           .order("created_at", { ascending: false }),
-        supabase
+        sb
           .from("station_dependencies")
           .select("id, station_id, depends_on_station_id")
           .in("station_id", stationIds),
@@ -363,7 +374,22 @@ export default function OperatorProductionPage() {
         }
         return;
       }
-      const runs = (runsResult.data ?? []) as BatchRunRow[];
+      const runs: BatchRunRow[] = (runsResult.data ?? []).map((row) => {
+        const relatedOrder = Array.isArray(row.orders)
+          ? (row.orders[0] ?? null)
+          : (row.orders ?? null);
+        return {
+          ...(row as Omit<BatchRunRow, "orders">),
+          orders: relatedOrder
+            ? {
+                order_number: relatedOrder.order_number ?? null,
+                due_date: relatedOrder.due_date ?? null,
+                priority: (relatedOrder.priority ?? null) as Priority | null,
+                customer_name: relatedOrder.customer_name ?? null,
+              }
+            : null,
+        };
+      });
       const orderIds = Array.from(
         new Set(runs.map((run) => run.order_id)),
       ).filter(Boolean);
@@ -374,7 +400,7 @@ export default function OperatorProductionPage() {
       const [itemsResult, attachmentsResult] = await Promise.all([
         orderIds.length === 0
           ? Promise.resolve({ data: [] as ProductionItemRow[], error: null })
-          : supabase
+          : sb
               .from("production_items")
               .select(
                 "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, started_at, done_at, duration_minutes, created_at",
@@ -383,7 +409,7 @@ export default function OperatorProductionPage() {
               .in("batch_code", batchCodes),
         orderIds.length === 0
           ? Promise.resolve({ data: [] as OrderAttachmentRow[], error: null })
-          : supabase
+          : sb
               .from("order_attachments")
               .select(
                 "id, order_id, name, url, created_at, size, mime_type, category",
@@ -413,9 +439,7 @@ export default function OperatorProductionPage() {
       setStationDependencies((depsResult.data ?? []) as StationDependencyRow[]);
       const allItems = (itemsResult.data ?? []) as ProductionItemRow[];
       setProductionItems(allItems);
-      setAttachments(
-        (attachmentsResult.data ?? []) as OrderAttachmentRow[],
-      );
+      setAttachments((attachmentsResult.data ?? []) as OrderAttachmentRow[]);
       if (!usedCache) {
         setIsLoading(false);
       }
@@ -428,7 +452,7 @@ export default function OperatorProductionPage() {
               stations: stationsResult.data ?? [],
               batchRuns: runs,
               stationDependencies: depsResult.data ?? [],
-              productionItems: filteredItems,
+              productionItems: allItems,
               attachments: attachmentsResult.data ?? [],
               tenantId: currentUser.tenantId ?? null,
             }),
@@ -445,12 +469,13 @@ export default function OperatorProductionPage() {
   }, [currentUser.id, currentUser.tenantId, cacheKey]);
 
   useEffect(() => {
-    if (!supabase || !currentUser.tenantId) {
+    const sb = supabase;
+    if (!sb || !currentUser.tenantId) {
       return;
     }
     let isMounted = true;
     const loadNotificationRoles = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("tenant_settings")
         .select("notification_roles")
         .eq("tenant_id", currentUser.tenantId)
@@ -476,10 +501,11 @@ export default function OperatorProductionPage() {
   }, [currentUser.tenantId]);
 
   useEffect(() => {
-    if (!supabase || !currentUser.tenantId) {
+    const sb = supabase;
+    if (!sb || !currentUser.tenantId) {
       return;
     }
-    const channel = supabase
+    const channel = sb
       .channel(`operator-live-${currentUser.tenantId}`)
       .on(
         "postgres_changes",
@@ -532,17 +558,18 @@ export default function OperatorProductionPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      sb.removeChannel(channel);
     };
   }, [currentUser.tenantId]);
 
   useEffect(() => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       return;
     }
     let isMounted = true;
     const loadReasons = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("stop_reasons")
         .select("id, label")
         .eq("is_active", true)
@@ -562,12 +589,13 @@ export default function OperatorProductionPage() {
   }, []);
 
   useEffect(() => {
-    if (!supabase || !currentUser.tenantId) {
+    const sb = supabase;
+    if (!sb || !currentUser.tenantId) {
       return;
     }
     let isMounted = true;
     const loadWorkHours = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("tenant_settings")
         .select("workday_start, workday_end, workdays, work_shifts")
         .eq("tenant_id", currentUser.tenantId)
@@ -587,7 +615,8 @@ export default function OperatorProductionPage() {
   }, [currentUser.tenantId]);
 
   const signAttachments = async (list: OrderAttachmentRow[]) => {
-    if (!supabase || list.length === 0) {
+    const sb = supabase;
+    if (!sb || list.length === 0) {
       return;
     }
     const results = await Promise.all(
@@ -595,9 +624,12 @@ export default function OperatorProductionPage() {
         if (!attachment.url) {
           return { id: attachment.id, url: undefined };
         }
-        if (storagePublicPrefix && attachment.url.startsWith(storagePublicPrefix)) {
+        if (
+          storagePublicPrefix &&
+          attachment.url.startsWith(storagePublicPrefix)
+        ) {
           const path = getStoragePathFromUrl(attachment.url, supabaseBucket);
-          const { data } = await supabase.storage
+          const { data } = await sb.storage
             .from(supabaseBucket)
             .createSignedUrl(path, 60 * 60);
           return { id: attachment.id, url: data?.signedUrl };
@@ -605,7 +637,7 @@ export default function OperatorProductionPage() {
         if (attachment.url.startsWith("http")) {
           return { id: attachment.id, url: attachment.url };
         }
-        const { data } = await supabase.storage
+        const { data } = await sb.storage
           .from(supabaseBucket)
           .createSignedUrl(attachment.url, 60 * 60);
         return { id: attachment.id, url: data?.signedUrl };
@@ -771,7 +803,8 @@ export default function OperatorProductionPage() {
     status: BatchRunRow["status"],
     extra?: { blockedReason?: string | null; blockedReasonId?: string | null },
   ) => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       return;
     }
     const run = batchRuns.find((item) => item.id === runId);
@@ -782,24 +815,22 @@ export default function OperatorProductionPage() {
     const now = new Date().toISOString();
     const isBlocked = status === "blocked";
     const nextStartedAt =
-      status === "in_progress" ? targetItem.started_at ?? now : targetItem.started_at;
+      status === "in_progress"
+        ? (targetItem.started_at ?? now)
+        : targetItem.started_at;
     const nextDoneAt = status === "done" ? now : targetItem.done_at;
     const nextDurationMinutes =
       status === "done"
-        ? computeWorkingMinutes(
-            nextStartedAt ?? now,
-            now,
-            workingCalendar,
-          )
-        : targetItem.duration_minutes ?? null;
+        ? computeWorkingMinutes(nextStartedAt ?? now, now, workingCalendar)
+        : (targetItem.duration_minutes ?? null);
     const nextMeta = {
       ...(targetItem.meta ?? {}),
-      blocked_reason: isBlocked ? extra?.blockedReason ?? null : null,
-      blocked_reason_id: isBlocked ? extra?.blockedReasonId ?? null : null,
+      blocked_reason: isBlocked ? (extra?.blockedReason ?? null) : null,
+      blocked_reason_id: isBlocked ? (extra?.blockedReasonId ?? null) : null,
       blocked_at: isBlocked ? now : null,
       blocked_by: isBlocked ? currentUser.id : null,
     };
-    const { error } = await supabase
+    const { error } = await sb
       .from("production_items")
       .update({
         status,
@@ -816,14 +847,18 @@ export default function OperatorProductionPage() {
 
     if (status === "blocked" && currentUser.tenantId) {
       const stationName = targetItem.station_id
-        ? stationsById.get(targetItem.station_id) ?? "Station"
+        ? (stationsById.get(targetItem.station_id) ?? "Station")
         : "Station";
       const orderNumber = run.orders?.order_number ?? "Order";
       const reason =
-        extra?.blockedReason ?? (nextMeta.blocked_reason as string) ?? "Blocked";
+        extra?.blockedReason ??
+        (nextMeta.blocked_reason as string) ??
+        "Blocked";
       const roles =
-        notificationRoles.length > 0 ? notificationRoles : ["Production", "Admin"];
-      await supabase.from("notifications").insert({
+        notificationRoles.length > 0
+          ? notificationRoles
+          : ["Production", "Admin"];
+      await sb.from("notifications").insert({
         tenant_id: currentUser.tenantId,
         user_id: null,
         audience_roles: roles.length > 0 ? roles : null,
@@ -870,17 +905,17 @@ export default function OperatorProductionPage() {
               (sum, item) => sum + Number(item.duration_minutes ?? 0),
               0,
             )
-          : run.duration_minutes ?? null;
-      const { error: runError } = await supabase
+          : (run.duration_minutes ?? null);
+      const { error: runError } = await sb
         .from("batch_runs")
         .update({
           status: nextRunStatus,
           started_at:
             nextRunStatus === "in_progress"
-              ? run.started_at ?? now
+              ? (run.started_at ?? now)
               : run.started_at,
           done_at:
-            nextRunStatus === "done" ? run.done_at ?? now : run.done_at,
+            nextRunStatus === "done" ? (run.done_at ?? now) : run.done_at,
           duration_minutes: nextRunDuration,
         })
         .eq("id", runId);
@@ -896,10 +931,12 @@ export default function OperatorProductionPage() {
                 status: nextRunStatus,
                 started_at:
                   nextRunStatus === "in_progress"
-                    ? item.started_at ?? now
+                    ? (item.started_at ?? now)
                     : item.started_at,
                 done_at:
-                  nextRunStatus === "done" ? item.done_at ?? now : item.done_at,
+                  nextRunStatus === "done"
+                    ? (item.done_at ?? now)
+                    : item.done_at,
                 duration_minutes: nextRunDuration,
               }
             : item,
@@ -921,7 +958,7 @@ export default function OperatorProductionPage() {
           (sum, item) => sum + Number(item.duration_minutes ?? 0),
           0,
         );
-        await supabase
+        await sb
           .from("orders")
           .update({ production_duration_minutes: totalDuration })
           .eq("id", run.order_id);
@@ -1025,8 +1062,7 @@ export default function OperatorProductionPage() {
     }
     const manual = blockedReasonText.trim();
     const selectedLabel =
-      stopReasons.find((reason) => reason.id === blockedReasonId)?.label ??
-      "";
+      stopReasons.find((reason) => reason.id === blockedReasonId)?.label ?? "";
     const reason = manual || selectedLabel || "Blocked";
     await handleUserStatusUpdate(blockedItemId, blockedRunId, "blocked", {
       blockedReason: reason,
@@ -1051,9 +1087,7 @@ export default function OperatorProductionPage() {
             All my stations - Planned {formatDate(today)}
           </p>
         </div>
-        <div className="text-sm text-muted-foreground">
-          {currentUser.name}
-        </div>
+        <div className="text-sm text-muted-foreground">{currentUser.name}</div>
       </div>
 
       {dataError ? (
@@ -1070,7 +1104,8 @@ export default function OperatorProductionPage() {
 
       {!isLoading && visibleStations.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-          No stations available for this view. Ask admin to assign you to a station.
+          No stations available for this view. Ask admin to assign you to a
+          station.
         </div>
       ) : null}
 
@@ -1085,7 +1120,7 @@ export default function OperatorProductionPage() {
             return sum + itemMinutes;
           }, 0);
           return (
-            <Card key={station.id} className="min-h-[240px]">
+            <Card key={station.id} className="min-h-60">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">{station.name}</CardTitle>
@@ -1146,337 +1181,399 @@ export default function OperatorProductionPage() {
                           : null;
                         return (
                           <>
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <span className="font-semibold">
-                            {item.orderNumber} / {item.batchCode}
-                          </span>
-                          <div className="mt-1 text-[11px] text-muted-foreground">
-                            {item.customerName}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                            {item.items.filter((row) => row.status === "done").length}
-                            /
-                            {item.items.length}
-                          </span>
-                          <Badge variant={priorityBadge(item.priority)}>
-                            {item.priority}
-                          </Badge>
-                          <Badge
-                            variant={
-                              showBlockedStyle
-                                ? "status-blocked"
-                                : statusBadge(item.status)
-                            }
-                          >
-                            {String(item.status ?? "queued").replace("_", " ")}
-                          </Badge>
-                        </div>
-                      </div>
-                      {metaLine ? (
-                        <div className="mt-1 text-muted-foreground">
-                          {metaLine}
-                        </div>
-                      ) : null}
-                      <div className="mt-1 text-muted-foreground">
-                        {item.material}
-                      </div>
-                      {stationDurationMinutes > 0 ? (
-                        <div className="mt-1 text-[11px] text-muted-foreground">
-                          Station time: {formatDuration(stationDurationMinutes)}
-                        </div>
-                      ) : null}
-                      {orderDurationMinutes > 0 ? (
-                        <div className="mt-1 text-[11px] text-muted-foreground">
-                          Order time: {formatDuration(orderDurationMinutes)}
-                        </div>
-                      ) : null}
-                      {elapsedLabel ? (
-                        <div className="mt-2 text-[11px] text-muted-foreground">
-                          Time: {elapsedLabel}
-                        </div>
-                      ) : null}
-                      {item.items.length > 0 ? (
-                        <div className="mt-3">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 gap-2 text-xs"
-                            onClick={() =>
-                              setExpandedOrderItems((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(item.id)) {
-                                  next.delete(item.id);
-                                } else {
-                                  next.add(item.id);
-                                }
-                                return next;
-                              })
-                            }
-                          >
-                            {expandedOrderItems.has(item.id) ? (
-                              <ChevronUpIcon className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronDownIcon className="h-3.5 w-3.5" />
-                            )}
-                            {expandedOrderItems.has(item.id)
-                              ? "Hide constructions"
-                              : "Show constructions"}
-                          </Button>
-                          {expandedOrderItems.has(item.id) ? (
-                            <div className="mt-2 space-y-2">
-                              {item.items.map((prodItem) => {
-                                const blockedReason =
-                                  (prodItem.meta as Record<string, unknown> | null)?.blocked_reason ??
-                                  null;
-                                const groupKey = getItemGroupKey(prodItem);
-                                const dependencyStations =
-                                  dependenciesByStation.get(
-                                    prodItem.station_id ?? "",
-                                  ) ?? [];
-                                const blockingDependencies = dependencyStations
-                                  .map((depId) => {
-                                    const depItem =
-                                      itemsByGroupAndStation
-                                        .get(groupKey)
-                                        ?.get(depId) ?? null;
-                                    if (!depItem || depItem.status === "done") {
-                                      return null;
-                                    }
-                                    return {
-                                      stationId: depId,
-                                      status: depItem.status,
-                                    };
-                                  })
-                                  .filter(Boolean) as Array<{
-                                  stationId: string;
-                                  status: ProductionItemRow["status"];
-                                }>;
-                                const hasBlockingDependencies =
-                                  blockingDependencies.length > 0;
-                                const itemElapsedMinutes = prodItem.started_at
-                                  ? computeWorkingMinutes(
-                                      prodItem.started_at,
-                                      prodItem.done_at ?? null,
-                                      workingCalendar,
-                                    )
-                                  : 0;
-                                const itemElapsedLabel = prodItem.started_at
-                                  ? formatDuration(itemElapsedMinutes)
-                                  : null;
-                                return (
-                                  <div
-                                    key={prodItem.id}
-                                    className="rounded-md border border-border bg-muted/20 px-2 py-2"
-                                  >
-                                    <div className="flex items-start justify-between gap-2">
-                                      <div className="text-[11px] text-muted-foreground">
-                                        {prodItem.item_name}
-                                      </div>
-                                      <Badge variant={statusBadge(prodItem.status)}>
-                                        {String(prodItem.status ?? "queued").replace(
-                                          "_",
-                                          " ",
-                                        )}
-                                      </Badge>
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-muted-foreground">
-                                      Qty: {prodItem.qty}
-                                      {prodItem.material ? ` - ${prodItem.material}` : ""}
-                                    </div>
-                                    {hasBlockingDependencies ? (
-                                      <div className="mt-2 space-y-1">
-                                        <div className="text-[11px] text-amber-600">
-                                          Waiting for
-                                        </div>
-                                        <div className="flex flex-wrap gap-1">
-                                          {blockingDependencies.map((dep) => {
-                                            const name =
-                                              stationsById.get(dep.stationId) ??
-                                              "Station";
-                                            return (
-                                              <span
-                                                key={dep.stationId}
-                                                className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700"
-                                              >
-                                                {name} · {String(dep.status).replace("_", " ")}
-                                              </span>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    ) : null}
-                                    {itemElapsedLabel ? (
-                                      <div className="mt-1 text-[11px] text-muted-foreground">
-                                        Time: {itemElapsedLabel}
-                                      </div>
-                                    ) : null}
-                                    {prodItem.status === "blocked" && blockedReason ? (
-                                      <div className="mt-1 text-[11px] text-rose-600">
-                                        Blocked: {String(blockedReason)}
-                                      </div>
-                                    ) : null}
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {(() => {
-                                  const hasStarted =
-                                    Boolean(prodItem.started_at) ||
-                                    prodItem.status === "in_progress";
-                                  const isDone = prodItem.status === "done";
-                                  const isBlocked = prodItem.status === "blocked";
-                                  const isStarting = isActionLoading(
-                                    prodItem.id,
-                                    "in_progress",
-                                  );
-                                  const isCompleting = isActionLoading(
-                                    prodItem.id,
-                                    "done",
-                                  );
-                                  return (
-                                    <>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="gap-2"
-                                  disabled={
-                                    isDone ||
-                                    (hasStarted && !isBlocked) ||
-                                    (!isBlocked && hasBlockingDependencies) ||
-                                    isStarting
-                                  }
-                                  onClick={() =>
-                                    handleUserStatusUpdate(
-                                      prodItem.id,
-                                      item.id,
-                                      "in_progress",
-                                    )
-                                  }
-                                >
-                                  {isStarting ? (
-                                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                  ) : null}
-                                  {isBlocked ? "Resume" : "Start"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="gap-2"
-                                  disabled={
-                                    !hasStarted || isDone || isBlocked || isCompleting
-                                  }
-                                  onClick={() =>
-                                    handleUserStatusUpdate(
-                                      prodItem.id,
-                                      item.id,
-                                      "done",
-                                    )
-                                  }
-                                >
-                                  {isCompleting ? (
-                                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                  ) : null}
-                                  Done
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  disabled={isDone}
-                                  onClick={() => handleOpenBlocked(item.id, prodItem.id)}
-                                >
-                                  Blocked
-                                </Button>
-                                    </>
-                                  );
-                                })()}
-                              </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {item.attachments.length > 0 ? (
-                        <div className="mt-3 space-y-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 gap-2 text-xs"
-                            onClick={async () => {
-                              const next = new Set(expandedJobs);
-                              if (next.has(item.id)) {
-                                next.delete(item.id);
-                                setExpandedJobs(next);
-                                return;
-                              }
-                              next.add(item.id);
-                              setExpandedJobs(next);
-                              if (!signingJobs.has(item.id)) {
-                                setSigningJobs((prev) => {
-                                  const updated = new Set(prev);
-                                  updated.add(item.id);
-                                  return updated;
-                                });
-                                await signAttachments(item.attachments.filter(
-                                  (attachment) => !signedUrls[attachment.id],
-                                ));
-                                setSigningJobs((prev) => {
-                                  const updated = new Set(prev);
-                                  updated.delete(item.id);
-                                  return updated;
-                                });
-                              }
-                            }}
-                          >
-                            {signingJobs.has(item.id) ? (
-                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                            ) : null}
-                            {expandedJobs.has(item.id) ? (
-                              <ChevronUpIcon className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronDownIcon className="h-3.5 w-3.5" />
-                            )}
-                            {expandedJobs.has(item.id) ? "Hide files" : "Show files"}
-                          </Button>
-                          {expandedJobs.has(item.id) ? (
-                            <div className="space-y-2">
-                              {signingJobs.has(item.id) ? (
-                                <div className="text-xs text-muted-foreground">
-                                  Loading files...
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <span className="font-semibold">
+                                  {item.orderNumber} / {item.batchCode}
+                                </span>
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {item.customerName}
                                 </div>
-                              ) : null}
-                              {item.attachments.map((attachment) => {
-                                const signedUrl = signedUrls[attachment.id];
-                                return (
-                                  <a
-                                    key={attachment.id}
-                                    href={signedUrl ?? attachment.url ?? "#"}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="flex items-center gap-3 rounded-md border border-border px-2 py-2 text-xs hover:bg-muted/30"
-                                  >
-                                    {renderAttachmentIcon(attachment, signedUrl)}
-                                    <div className="flex-1 min-w-0">
-                                      <div className="font-medium truncate">
-                                        {attachment.name}
-                                      </div>
-                                      <div className="text-[11px] text-muted-foreground">
-                                        {attachment.created_at
-                                          ? formatDate(
-                                              attachment.created_at.slice(0, 10),
-                                            )
-                                          : ""}
-                                      </div>
-                                    </div>
-                                  </a>
-                                );
-                              })}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                                  {
+                                    item.items.filter(
+                                      (row) => row.status === "done",
+                                    ).length
+                                  }
+                                  /{item.items.length}
+                                </span>
+                                <Badge variant={priorityBadge(item.priority)}>
+                                  {item.priority}
+                                </Badge>
+                                <Badge
+                                  variant={
+                                    showBlockedStyle
+                                      ? "status-blocked"
+                                      : statusBadge(item.status)
+                                  }
+                                >
+                                  {String(item.status ?? "queued").replace(
+                                    "_",
+                                    " ",
+                                  )}
+                                </Badge>
+                              </div>
                             </div>
-                          ) : null}
-                        </div>
-                      ) : null}
+                            {metaLine ? (
+                              <div className="mt-1 text-muted-foreground">
+                                {metaLine}
+                              </div>
+                            ) : null}
+                            <div className="mt-1 text-muted-foreground">
+                              {item.material}
+                            </div>
+                            {stationDurationMinutes > 0 ? (
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                Station time:{" "}
+                                {formatDuration(stationDurationMinutes)}
+                              </div>
+                            ) : null}
+                            {orderDurationMinutes > 0 ? (
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                Order time:{" "}
+                                {formatDuration(orderDurationMinutes)}
+                              </div>
+                            ) : null}
+                            {elapsedLabel ? (
+                              <div className="mt-2 text-[11px] text-muted-foreground">
+                                Time: {elapsedLabel}
+                              </div>
+                            ) : null}
+                            {item.items.length > 0 ? (
+                              <div className="mt-3">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-2 text-xs"
+                                  onClick={() =>
+                                    setExpandedOrderItems((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(item.id)) {
+                                        next.delete(item.id);
+                                      } else {
+                                        next.add(item.id);
+                                      }
+                                      return next;
+                                    })
+                                  }
+                                >
+                                  {expandedOrderItems.has(item.id) ? (
+                                    <ChevronUpIcon className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <ChevronDownIcon className="h-3.5 w-3.5" />
+                                  )}
+                                  {expandedOrderItems.has(item.id)
+                                    ? "Hide constructions"
+                                    : "Show constructions"}
+                                </Button>
+                                {expandedOrderItems.has(item.id) ? (
+                                  <div className="mt-2 space-y-2">
+                                    {item.items.map((prodItem) => {
+                                      const blockedReason =
+                                        (
+                                          prodItem.meta as Record<
+                                            string,
+                                            unknown
+                                          > | null
+                                        )?.blocked_reason ?? null;
+                                      const groupKey =
+                                        getItemGroupKey(prodItem);
+                                      const dependencyStations =
+                                        dependenciesByStation.get(
+                                          prodItem.station_id ?? "",
+                                        ) ?? [];
+                                      const blockingDependencies =
+                                        dependencyStations
+                                          .map((depId) => {
+                                            const depItem =
+                                              itemsByGroupAndStation
+                                                .get(groupKey)
+                                                ?.get(depId) ?? null;
+                                            if (
+                                              !depItem ||
+                                              depItem.status === "done"
+                                            ) {
+                                              return null;
+                                            }
+                                            return {
+                                              stationId: depId,
+                                              status: depItem.status,
+                                            };
+                                          })
+                                          .filter(Boolean) as Array<{
+                                          stationId: string;
+                                          status: ProductionItemRow["status"];
+                                        }>;
+                                      const hasBlockingDependencies =
+                                        blockingDependencies.length > 0;
+                                      const itemElapsedMinutes =
+                                        prodItem.started_at
+                                          ? computeWorkingMinutes(
+                                              prodItem.started_at,
+                                              prodItem.done_at ?? null,
+                                              workingCalendar,
+                                            )
+                                          : 0;
+                                      const itemElapsedLabel =
+                                        prodItem.started_at
+                                          ? formatDuration(itemElapsedMinutes)
+                                          : null;
+                                      return (
+                                        <div
+                                          key={prodItem.id}
+                                          className="rounded-md border border-border bg-muted/20 px-2 py-2"
+                                        >
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="text-[11px] text-muted-foreground">
+                                              {prodItem.item_name}
+                                            </div>
+                                            <Badge
+                                              variant={statusBadge(
+                                                prodItem.status,
+                                              )}
+                                            >
+                                              {String(
+                                                prodItem.status ?? "queued",
+                                              ).replace("_", " ")}
+                                            </Badge>
+                                          </div>
+                                          <div className="mt-1 text-[11px] text-muted-foreground">
+                                            Qty: {prodItem.qty}
+                                            {prodItem.material
+                                              ? ` - ${prodItem.material}`
+                                              : ""}
+                                          </div>
+                                          {hasBlockingDependencies ? (
+                                            <div className="mt-2 space-y-1">
+                                              <div className="text-[11px] text-amber-600">
+                                                Waiting for
+                                              </div>
+                                              <div className="flex flex-wrap gap-1">
+                                                {blockingDependencies.map(
+                                                  (dep) => {
+                                                    const name =
+                                                      stationsById.get(
+                                                        dep.stationId,
+                                                      ) ?? "Station";
+                                                    return (
+                                                      <span
+                                                        key={dep.stationId}
+                                                        className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700"
+                                                      >
+                                                        {name} ·{" "}
+                                                        {String(
+                                                          dep.status,
+                                                        ).replace("_", " ")}
+                                                      </span>
+                                                    );
+                                                  },
+                                                )}
+                                              </div>
+                                            </div>
+                                          ) : null}
+                                          {itemElapsedLabel ? (
+                                            <div className="mt-1 text-[11px] text-muted-foreground">
+                                              Time: {itemElapsedLabel}
+                                            </div>
+                                          ) : null}
+                                          {prodItem.status === "blocked" &&
+                                          blockedReason ? (
+                                            <div className="mt-1 text-[11px] text-rose-600">
+                                              Blocked: {String(blockedReason)}
+                                            </div>
+                                          ) : null}
+                                          <div className="mt-2 flex flex-wrap gap-2">
+                                            {(() => {
+                                              const hasStarted =
+                                                Boolean(prodItem.started_at) ||
+                                                prodItem.status ===
+                                                  "in_progress";
+                                              const isDone =
+                                                prodItem.status === "done";
+                                              const isBlocked =
+                                                prodItem.status === "blocked";
+                                              const isStarting =
+                                                isActionLoading(
+                                                  prodItem.id,
+                                                  "in_progress",
+                                                );
+                                              const isCompleting =
+                                                isActionLoading(
+                                                  prodItem.id,
+                                                  "done",
+                                                );
+                                              return (
+                                                <>
+                                                  <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-2"
+                                                    disabled={
+                                                      isDone ||
+                                                      (hasStarted &&
+                                                        !isBlocked) ||
+                                                      (!isBlocked &&
+                                                        hasBlockingDependencies) ||
+                                                      isStarting
+                                                    }
+                                                    onClick={() =>
+                                                      handleUserStatusUpdate(
+                                                        prodItem.id,
+                                                        item.id,
+                                                        "in_progress",
+                                                      )
+                                                    }
+                                                  >
+                                                    {isStarting ? (
+                                                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                                    ) : null}
+                                                    {isBlocked
+                                                      ? "Resume"
+                                                      : "Start"}
+                                                  </Button>
+                                                  <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-2"
+                                                    disabled={
+                                                      !hasStarted ||
+                                                      isDone ||
+                                                      isBlocked ||
+                                                      isCompleting
+                                                    }
+                                                    onClick={() =>
+                                                      handleUserStatusUpdate(
+                                                        prodItem.id,
+                                                        item.id,
+                                                        "done",
+                                                      )
+                                                    }
+                                                  >
+                                                    {isCompleting ? (
+                                                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                                    ) : null}
+                                                    Done
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    disabled={isDone}
+                                                    onClick={() =>
+                                                      handleOpenBlocked(
+                                                        item.id,
+                                                        prodItem.id,
+                                                      )
+                                                    }
+                                                  >
+                                                    Blocked
+                                                  </Button>
+                                                </>
+                                              );
+                                            })()}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {item.attachments.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-2 text-xs"
+                                  onClick={async () => {
+                                    const next = new Set(expandedJobs);
+                                    if (next.has(item.id)) {
+                                      next.delete(item.id);
+                                      setExpandedJobs(next);
+                                      return;
+                                    }
+                                    next.add(item.id);
+                                    setExpandedJobs(next);
+                                    if (!signingJobs.has(item.id)) {
+                                      setSigningJobs((prev) => {
+                                        const updated = new Set(prev);
+                                        updated.add(item.id);
+                                        return updated;
+                                      });
+                                      await signAttachments(
+                                        item.attachments.filter(
+                                          (attachment) =>
+                                            !signedUrls[attachment.id],
+                                        ),
+                                      );
+                                      setSigningJobs((prev) => {
+                                        const updated = new Set(prev);
+                                        updated.delete(item.id);
+                                        return updated;
+                                      });
+                                    }
+                                  }}
+                                >
+                                  {signingJobs.has(item.id) ? (
+                                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                  ) : null}
+                                  {expandedJobs.has(item.id) ? (
+                                    <ChevronUpIcon className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <ChevronDownIcon className="h-3.5 w-3.5" />
+                                  )}
+                                  {expandedJobs.has(item.id)
+                                    ? "Hide files"
+                                    : "Show files"}
+                                </Button>
+                                {expandedJobs.has(item.id) ? (
+                                  <div className="space-y-2">
+                                    {signingJobs.has(item.id) ? (
+                                      <div className="text-xs text-muted-foreground">
+                                        Loading files...
+                                      </div>
+                                    ) : null}
+                                    {item.attachments.map((attachment) => {
+                                      const signedUrl =
+                                        signedUrls[attachment.id];
+                                      return (
+                                        <a
+                                          key={attachment.id}
+                                          href={
+                                            signedUrl ?? attachment.url ?? "#"
+                                          }
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="flex items-center gap-3 rounded-md border border-border px-2 py-2 text-xs hover:bg-muted/30"
+                                        >
+                                          {renderAttachmentIcon(
+                                            attachment,
+                                            signedUrl,
+                                          )}
+                                          <div className="flex-1 min-w-0">
+                                            <div className="font-medium truncate">
+                                              {attachment.name}
+                                            </div>
+                                            <div className="text-[11px] text-muted-foreground">
+                                              {attachment.created_at
+                                                ? formatDate(
+                                                    attachment.created_at.slice(
+                                                      0,
+                                                      10,
+                                                    ),
+                                                  )
+                                                : ""}
+                                            </div>
+                                          </div>
+                                        </a>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </>
                         );
                       })()}
@@ -1532,7 +1629,7 @@ export default function OperatorProductionPage() {
                   value={blockedReasonText}
                   onChange={(event) => setBlockedReasonText(event.target.value)}
                   placeholder="Type a custom reason..."
-                  className="min-h-[90px] w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
+                  className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
                 />
               </label>
               <div className="flex justify-end gap-2">
@@ -1556,7 +1653,8 @@ export default function OperatorProductionPage() {
                   }
                   className="gap-2"
                 >
-                  {blockedItemId && isActionLoading(blockedItemId, "blocked") ? (
+                  {blockedItemId &&
+                  isActionLoading(blockedItemId, "blocked") ? (
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                   ) : null}
                   Save

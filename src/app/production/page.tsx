@@ -60,6 +60,8 @@ type ProductionItemRow = {
   status: "queued" | "pending" | "in_progress" | "blocked" | "done";
   station_id: string | null;
   meta: Record<string, unknown> | null;
+  started_at?: string | null;
+  done_at?: string | null;
   duration_minutes?: number | null;
   orders?: {
     order_number: string | null;
@@ -110,6 +112,34 @@ type BatchRunRow = {
     customer_name: string | null;
   } | null;
 };
+
+function normalizeJoinedOrder(value: unknown): {
+  order_number: string | null;
+  due_date: string | null;
+  priority: Priority | null;
+  customer_name: string | null;
+} | null {
+  const item = Array.isArray(value) ? (value[0] ?? null) : value;
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+  const row = item as Record<string, unknown>;
+  const priority =
+    row.priority === "low" ||
+    row.priority === "normal" ||
+    row.priority === "high" ||
+    row.priority === "urgent"
+      ? row.priority
+      : null;
+  return {
+    order_number:
+      typeof row.order_number === "string" ? row.order_number : null,
+    due_date: typeof row.due_date === "string" ? row.due_date : null,
+    priority,
+    customer_name:
+      typeof row.customer_name === "string" ? row.customer_name : null,
+  };
+}
 
 type BatchGroup = {
   key: string;
@@ -363,32 +393,33 @@ export default function ProductionPage() {
     const loadData = async () => {
       setIsLoading(true);
       setDataError("");
-      if (!supabase) {
+      const sb = supabase;
+      if (!sb) {
         setDataError("Supabase is not configured.");
         setIsLoading(false);
         return;
       }
       const [stationsResult, itemsResult, runsResult, ordersResult] =
         await Promise.all([
-          supabase
+          sb
             .from("workstations")
             .select("id, name, is_active, sort_order")
             .eq("is_active", true)
             .order("sort_order", { ascending: true })
             .order("name", { ascending: true }),
-          supabase
+          sb
             .from("production_items")
             .select(
               "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, duration_minutes, orders (order_number, due_date, priority, customer_name)",
             )
             .order("created_at", { ascending: false }),
-          supabase
+          sb
             .from("batch_runs")
             .select(
               "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
             )
             .order("created_at", { ascending: false }),
-          supabase
+          sb
             .from("orders")
             .select(
               "id, order_number, customer_name, due_date, priority, quantity, product_name, production_duration_minutes",
@@ -419,8 +450,18 @@ export default function ProductionPage() {
           sortOrder: station.sort_order ?? 0,
         })),
       );
-      setProductionItems((itemsResult.data ?? []) as ProductionItemRow[]);
-      setBatchRuns((runsResult.data ?? []) as BatchRunRow[]);
+      setProductionItems(
+        (itemsResult.data ?? []).map((row) => ({
+          ...(row as Omit<ProductionItemRow, "orders">),
+          orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
+        })),
+      );
+      setBatchRuns(
+        (runsResult.data ?? []).map((row) => ({
+          ...(row as Omit<BatchRunRow, "orders">),
+          orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
+        })),
+      );
       setReadyOrders((ordersResult.data ?? []) as ReadyOrderRow[]);
       setIsLoading(false);
     };
@@ -436,6 +477,9 @@ export default function ProductionPage() {
     }
     let isMounted = true;
     const loadProductionDetails = async () => {
+      if (!supabase) {
+        return;
+      }
       const orderIds = Array.from(
         new Set([
           ...readyOrders.map((order) => order.id),
@@ -513,18 +557,16 @@ export default function ProductionPage() {
           return;
         }
         const nextValues: Record<string, Record<string, unknown>> = {};
-        (valuesResult.data ?? []).forEach((row: {
-          order_id: string;
-          field_id: string;
-          value: unknown;
-        }) => {
-          const orderId = row.order_id as string;
-          const fieldId = row.field_id as string;
-          if (!nextValues[orderId]) {
-            nextValues[orderId] = {};
-          }
-          nextValues[orderId][fieldId] = row.value;
-        });
+        (valuesResult.data ?? []).forEach(
+          (row: { order_id: string; field_id: string; value: unknown }) => {
+            const orderId = row.order_id as string;
+            const fieldId = row.field_id as string;
+            if (!nextValues[orderId]) {
+              nextValues[orderId] = {};
+            }
+            nextValues[orderId][fieldId] = row.value;
+          },
+        );
         setProductionValues(nextValues);
       }
 
@@ -553,10 +595,11 @@ export default function ProductionPage() {
   }, [productionItems, readyOrders]);
 
   useEffect(() => {
-    if (!supabase || !user?.tenantId) {
+    const sb = supabase;
+    if (!sb || !user?.tenantId) {
       return;
     }
-    const channel = supabase
+    const channel = sb
       .channel(`production-live-${user.tenantId}`)
       .on(
         "postgres_changes",
@@ -609,12 +652,13 @@ export default function ProductionPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      sb.removeChannel(channel);
     };
   }, [user?.tenantId]);
 
   useEffect(() => {
-    if (!supabase) {
+    const sb = supabase;
+    if (!sb) {
       return;
     }
     const allAttachments = Object.values(productionAttachments).flat();
@@ -632,7 +676,7 @@ export default function ProductionPage() {
           if (storagePublicPrefix && path.startsWith(storagePublicPrefix)) {
             path = path.slice(storagePublicPrefix.length);
           }
-          const { data } = await supabase.storage
+          const { data } = await sb.storage
             .from(supabaseBucket)
             .createSignedUrl(path, 60 * 60);
           return { id: attachment.id, url: data?.signedUrl };
@@ -682,7 +726,8 @@ export default function ProductionPage() {
     }
     if (field.fieldType === "table") {
       const rows = Array.isArray(value) ? value : [];
-      if (!field.columns || field.columns.length === 0) {
+      const columns = field.columns ?? [];
+      if (columns.length === 0) {
         return rows.length > 0 ? [`${rows.length} rows`] : [];
       }
       return rows
@@ -690,7 +735,7 @@ export default function ProductionPage() {
           if (!row || typeof row !== "object") {
             return "";
           }
-          const values = field.columns.map((column) => {
+          const values = columns.map((column) => {
             const cell = (row as Record<string, unknown>)[column.key];
             if (Array.isArray(cell)) {
               const joined = cell.map((item) => String(item)).join(" / ");
@@ -747,6 +792,9 @@ export default function ProductionPage() {
     }
     let isMounted = true;
     const loadWorkHours = async () => {
+      if (!supabase) {
+        return;
+      }
       const { data, error } = await supabase
         .from("tenant_settings")
         .select(
@@ -1551,7 +1599,13 @@ export default function ProductionPage() {
         setIsCreatingWorkOrders(false);
         return;
       }
-      setProductionItems((prev) => [...(data ?? []), ...prev]);
+      const normalizedInsertedItems: ProductionItemRow[] = (data ?? []).map(
+        (row) => ({
+          ...(row as Omit<ProductionItemRow, "orders">),
+          orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
+        }),
+      );
+      setProductionItems((prev) => [...normalizedInsertedItems, ...prev]);
     }
     const insertRows = nextGroups.flatMap((group) =>
       routeStations.map((station, index) => ({
@@ -1579,7 +1633,13 @@ export default function ProductionPage() {
       .from("orders")
       .update({ status: "in_production" })
       .in("id", Array.from(new Set(nextGroups.map((group) => group.orderId))));
-    setBatchRuns((prev) => [...(inserted ?? []), ...prev]);
+    const normalizedInsertedRuns: BatchRunRow[] = (inserted ?? []).map(
+      (row) => ({
+        ...(row as Omit<BatchRunRow, "orders">),
+        orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
+      }),
+    );
+    setBatchRuns((prev) => [...normalizedInsertedRuns, ...prev]);
     setSelectedBatchKeys([]);
     setIsSplitOpen(false);
     setIsCreatingWorkOrders(false);
@@ -2246,7 +2306,7 @@ export default function ProductionPage() {
                         setPlannedRangeDays(Number(value))
                       }
                     >
-                      <SelectTrigger className="h-9 w-[120px]">
+                      <SelectTrigger className="h-9 w-30">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -3229,7 +3289,7 @@ export default function ProductionPage() {
                       setPlannedRangeDays(Number(value))
                     }
                   >
-                    <SelectTrigger className="h-9 w-[120px]">
+                    <SelectTrigger className="h-9 w-30">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -3590,7 +3650,7 @@ export default function ProductionPage() {
                             }
                             return (
                               <div key={fieldKey} className="flex gap-2">
-                                <span className="min-w-[72px] text-muted-foreground">
+                                <span className="min-w-18 text-muted-foreground">
                                   {qrFieldLabels[fieldKey] ?? fieldKey}
                                 </span>
                                 <span className="font-medium text-foreground">

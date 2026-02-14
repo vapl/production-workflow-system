@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { OrdersTable } from "./components/OrdersTable";
 import { OrdersCards } from "./components/OrdersCards";
-import { OrdersToolbar } from "./components/OrdersToolbar";
+import { OrdersToolbar, type StatusOption } from "./components/OrdersToolbar";
 import type { Order, OrderStatus } from "@/types/orders";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -56,7 +56,7 @@ export default function OrdersPage() {
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
-  const roleStatusOptions = useMemo(() => {
+  const roleStatusOptions = useMemo<StatusOption[]>(() => {
     const engineeringStatuses: OrderStatus[] = [
       "ready_for_engineering",
       "in_engineering",
@@ -76,7 +76,7 @@ export default function OrdersPage() {
       "ready_for_production",
       "in_production",
     ];
-    const build = (statuses: OrderStatus[]) =>
+    const build = (statuses: OrderStatus[]): StatusOption[] =>
       statuses
         .filter((status) => rules.orderStatusConfig?.[status]?.isActive ?? true)
         .map((status) => ({
@@ -95,7 +95,8 @@ export default function OrdersPage() {
     }
     return [{ value: "all", label: "All" }, ...build(salesStatuses)];
   }, [rules.orderStatusConfig, rules.statusLabels, user.role]);
-  const defaultStatusFilter = roleStatusOptions[0]?.value ?? ("all" as const);
+  const defaultStatusFilter: OrderStatus | "all" =
+    roleStatusOptions[0]?.value ?? "all";
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">(
     defaultStatusFilter,
   );
@@ -226,7 +227,7 @@ export default function OrdersPage() {
       if (!stat || stat.total === 0) {
         return row;
       }
-      const displayStatus =
+      const displayStatus: OrderStatus =
         stat.done > 0 && stat.done === stat.total ? "done" : "in_production";
       return {
         ...row,
@@ -481,10 +482,14 @@ export default function OrdersPage() {
     }
     let isMounted = true;
 
+    const sb = supabase;
     const fetchOrdersPage = async (offset: number, append: boolean) => {
       setIsListLoading(true);
       try {
-        const query = supabase
+        if (!sb) {
+          return;
+        }
+        const query = sb
           .from("orders")
           .select(
             `
@@ -619,13 +624,14 @@ export default function OrdersPage() {
   ]);
 
   useEffect(() => {
-    if (!supabase || user.loading || !user.isAuthenticated) {
+    const sb = supabase;
+    if (!sb || user.loading || !user.isAuthenticated) {
       return;
     }
     let isMounted = true;
 
     const fetchCounts = async () => {
-      const baseQuery = supabase.from("orders");
+      const baseQuery = sb.from("orders");
       const counts: Partial<Record<OrderStatus | "all", number>> = {};
       const tasks = roleStatusOptions.map(async (option) => {
         if (option.value === "all") {

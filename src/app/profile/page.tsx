@@ -114,7 +114,9 @@ export default function ProfilePage() {
   }
 
   async function handleAvatarUpload() {
-    if (!avatarFile || !user.id) {
+    if (!supabase || !avatarFile || !user.id) {
+      setAvatarState("error");
+      setAvatarMessage("Supabase is not configured.");
       return;
     }
     setAvatarState("uploading");

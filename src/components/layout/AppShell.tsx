@@ -285,7 +285,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {hideHeader ? null : (
         <div className="pointer-events-none fixed inset-x-0 top-0 z-40 md:hidden">
           <div className="container mx-auto px-4 pt-3">
-            <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+            <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
               <Button
                 variant="ghost"
                 size="icon"

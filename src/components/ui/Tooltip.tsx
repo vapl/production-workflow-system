@@ -61,7 +61,7 @@ export function Tooltip({
       <span
         role="tooltip"
         className={cn(
-          "pointer-events-none absolute z-50 max-w-[220px] rounded-md border border-border bg-foreground px-2 py-1 text-[11px] text-background opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+          "pointer-events-none absolute z-50 max-w-55 rounded-md border border-border bg-foreground px-2 py-1 text-[11px] text-background opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
           isOpen ? "opacity-100" : "opacity-0",
           sideClasses[side],
           className,

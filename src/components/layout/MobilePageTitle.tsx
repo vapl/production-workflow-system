@@ -22,8 +22,10 @@ export function MobilePageTitle({
           <div className="mx-16 flex justify-center">
             <div
               className={cn(
-                "inline-flex h-9 max-w-full items-center rounded-full border border-border/80 bg-card/95 px-4 text-sm font-semibold shadow-md backdrop-blur supports-[backdrop-filter]:bg-card/80 transition-[opacity,transform] duration-200",
-                showCompact ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0",
+                "inline-flex h-9 max-w-full items-center rounded-full border border-border/80 bg-card/95 px-4 text-sm font-semibold shadow-md backdrop-blur supports-backdrop-filter:bg-card/80 transition-[opacity,transform] duration-200",
+                showCompact
+                  ? "translate-y-0 opacity-100"
+                  : "-translate-y-1 opacity-0",
               )}
             >
               <span className="truncate">{compactTitle ?? title}</span>
@@ -42,7 +44,9 @@ export function MobilePageTitle({
           )}
         >
           <h1 className="text-2xl font-semibold">{title}</h1>
-          {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+          {subtitle ? (
+            <p className="text-sm text-muted-foreground">{subtitle}</p>
+          ) : null}
         </div>
       </div>
     </>
