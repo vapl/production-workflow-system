@@ -14,7 +14,13 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists phone text;
 
+alter table public.profiles
+  add column if not exists is_owner boolean not null default false;
+
 create index if not exists profiles_tenant_id_idx on public.profiles(tenant_id);
+create unique index if not exists profiles_one_owner_per_tenant_uidx
+  on public.profiles(tenant_id)
+  where is_owner = true and tenant_id is not null;
 
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
@@ -243,7 +249,9 @@ language sql
 security definer
 set search_path = public
 as $$
-  select coalesce(is_admin, false) from public.profiles where id = auth.uid();
+  select coalesce(is_admin, false) or coalesce(is_owner, false)
+  from public.profiles
+  where id = auth.uid();
 $$;
 
 drop policy if exists "profiles_select_by_tenant" on public.profiles;

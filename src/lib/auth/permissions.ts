@@ -48,18 +48,17 @@ export const permissionDefinitions: Array<{
 ];
 
 export const defaultPermissionRoles: PermissionRoleMap = {
-  "dashboard.view": ["Owner", "Admin"],
-  "settings.view": ["Owner", "Admin"],
-  "settings.manage": ["Owner", "Admin"],
-  "production.view": ["Owner", "Admin", "Production manager", "Production"],
+  "dashboard.view": ["Admin"],
+  "settings.view": ["Admin"],
+  "settings.manage": ["Admin"],
+  "production.view": ["Admin", "Production manager", "Production"],
   "production.operator.view": [
-    "Owner",
     "Admin",
     "Production manager",
     "Production worker",
     "Production",
   ],
-  "orders.manage": ["Owner", "Admin", "Sales"],
+  "orders.manage": ["Admin", "Sales"],
 };
 
 type AppRoute =
@@ -109,12 +108,14 @@ export function mergePermissionRoles(
   };
 }
 
-export function isOwner(user: Pick<CurrentUser, "role">) {
-  return user.role === "Owner";
+export function isOwner(user: Pick<CurrentUser, "isOwner">) {
+  return user.isOwner;
 }
 
-export function isAdminLike(user: Pick<CurrentUser, "role" | "isAdmin">) {
-  return user.isAdmin || user.role === "Owner" || user.role === "Admin";
+export function isAdminLike(
+  user: Pick<CurrentUser, "role" | "isAdmin" | "isOwner">,
+) {
+  return user.isOwner || user.isAdmin || user.role === "Admin";
 }
 
 export function isProductionWorker(user: Pick<CurrentUser, "role">) {
@@ -122,7 +123,7 @@ export function isProductionWorker(user: Pick<CurrentUser, "role">) {
 }
 
 export function hasPermission(
-  user: Pick<CurrentUser, "role" | "isAdmin">,
+  user: Pick<CurrentUser, "role" | "isAdmin" | "isOwner">,
   permission: PermissionKey,
   roleMap: PermissionRoleMap = defaultPermissionRoles,
 ) {
@@ -134,7 +135,7 @@ export function hasPermission(
 
 export function canAccessRoute(
   route: AppRoute,
-  user: Pick<CurrentUser, "role" | "isAdmin">,
+  user: Pick<CurrentUser, "role" | "isAdmin" | "isOwner">,
   roleMap: PermissionRoleMap = defaultPermissionRoles,
 ) {
   if (isProductionWorker(user)) {
@@ -152,7 +153,7 @@ export function canAccessRoute(
 }
 
 export function isProductionRole(
-  user: Pick<CurrentUser, "role" | "isAdmin">,
+  user: Pick<CurrentUser, "role" | "isAdmin" | "isOwner">,
   roleMap: PermissionRoleMap = defaultPermissionRoles,
 ) {
   return (

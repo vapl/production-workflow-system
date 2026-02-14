@@ -1890,7 +1890,7 @@ export default function ProductionPage() {
           closeButtonLabel="Close production sections"
           title="Production sections"
           enableSwipeToClose
-          panelClassName="flex max-h-[78dvh] flex-col pb-[max(1rem,env(safe-area-inset-bottom))]"
+          panelClassName="flex max-h-[78dvh] flex-col pb-[max(4rem,env(safe-area-inset-bottom))]"
         >
           <div className="flex-1 overflow-y-auto p-3">
             <div className="space-y-1">

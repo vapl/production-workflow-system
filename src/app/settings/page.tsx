@@ -123,7 +123,7 @@ const workflowStatusOptions: { value: OrderStatus; label: string }[] = [
   { value: "done", label: "Done" },
 ];
 
-type AttachmentRole = UserRole | "Admin";
+type AttachmentRole = UserRole;
 
 const lockedLevelKeys = new Set([
   "contract",
@@ -481,7 +481,13 @@ export default function SettingsPage() {
     string | null
   >(null);
   const [users, setUsers] = useState<
-    { id: string; name: string; role: UserRole; isAdmin: boolean }[]
+    {
+      id: string;
+      name: string;
+      role: UserRole;
+      isAdmin: boolean;
+      isOwner: boolean;
+    }[]
   >([]);
   const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
@@ -636,6 +642,18 @@ export default function SettingsPage() {
     "idle" | "sending" | "sent" | "error"
   >("idle");
   const [inviteMessage, setInviteMessage] = useState("");
+  const [isSecurityPromptOpen, setIsSecurityPromptOpen] = useState(false);
+  const [securityPassword, setSecurityPassword] = useState("");
+  const [securityState, setSecurityState] = useState<
+    "idle" | "verifying" | "error"
+  >("idle");
+  const [securityMessage, setSecurityMessage] = useState("");
+  const [privilegedVerifiedAt, setPrivilegedVerifiedAt] = useState<
+    number | null
+  >(null);
+  const [pendingPrivilegedAction, setPendingPrivilegedAction] = useState<{
+    run: () => Promise<void>;
+  } | null>(null);
   const [permissionDrafts, setPermissionDrafts] = useState(rolePermissions);
   const [permissionState, setPermissionState] = useState<
     "idle" | "saving" | "saved" | "error"
@@ -653,6 +671,7 @@ export default function SettingsPage() {
   >([]);
   const [isInvitesLoading, setIsInvitesLoading] = useState(false);
   const canManageRolePermissions = hasPermission("settings.manage");
+  const privilegedSessionTtlMs = 5 * 60 * 1000;
   const {
     rules,
     setRules,
@@ -704,7 +723,6 @@ export default function SettingsPage() {
   const [newAttachmentCategoryLabel, setNewAttachmentCategoryLabel] =
     useState("");
   const attachmentRoles: AttachmentRole[] = [
-    "Owner",
     "Admin",
     "Sales",
     "Engineering",
@@ -759,6 +777,13 @@ export default function SettingsPage() {
       userRoleOptions.filter(
         (role) =>
           !inactiveRoleOptions.has(role) && role !== "Production worker",
+      ),
+    [],
+  );
+  const assignableRoleOptions = useMemo(
+    () =>
+      userRoleOptions.filter(
+        (role) => !inactiveRoleOptions.has(role) && role !== "Admin",
       ),
     [],
   );
@@ -1325,6 +1350,7 @@ export default function SettingsPage() {
           name: currentUser.name,
           role: currentUser.role,
           isAdmin: currentUser.isAdmin,
+          isOwner: currentUser.isOwner,
         },
       ]);
       return;
@@ -1339,7 +1365,7 @@ export default function SettingsPage() {
       setUsersError(null);
       const query = sb
         .from("profiles")
-        .select("id, full_name, role, tenant_id, is_admin")
+        .select("id, full_name, role, tenant_id, is_admin, is_owner")
         .order("full_name", { ascending: true });
       if (currentUser.tenantId) {
         query.eq("tenant_id", currentUser.tenantId);
@@ -1359,6 +1385,7 @@ export default function SettingsPage() {
           name: row.full_name ?? "User",
           role: normalizeUserRole(row.role),
           isAdmin: row.is_admin ?? false,
+          isOwner: row.is_owner ?? false,
         })),
       );
       setIsUsersLoading(false);
@@ -1374,6 +1401,7 @@ export default function SettingsPage() {
     currentUser.name,
     currentUser.role,
     currentUser.isAdmin,
+    currentUser.isOwner,
     currentUser.tenantId,
   ]);
 
@@ -1498,10 +1526,91 @@ export default function SettingsPage() {
     setUpdatingUserId(null);
   }
 
-  async function handleUpdateUserAdmin(userId: string, isAdmin: boolean) {
+  const hasFreshPrivilegedVerification = () =>
+    privilegedVerifiedAt !== null &&
+    Date.now() - privilegedVerifiedAt < privilegedSessionTtlMs;
+
+  async function runPrivilegedAction(action: () => Promise<void>) {
+    if (hasFreshPrivilegedVerification()) {
+      await action();
+      return;
+    }
+    setPendingPrivilegedAction({ run: action });
+    setSecurityPassword("");
+    setSecurityState("idle");
+    setSecurityMessage("");
+    setIsSecurityPromptOpen(true);
+  }
+
+  async function handleConfirmSecurityVerification() {
+    if (!supabase) {
+      setSecurityState("error");
+      setSecurityMessage("Supabase is not configured.");
+      return;
+    }
+    if (!currentUser.email) {
+      setSecurityState("error");
+      setSecurityMessage("Current user email is missing.");
+      return;
+    }
+    if (!securityPassword.trim()) {
+      setSecurityState("error");
+      setSecurityMessage("Password is required.");
+      return;
+    }
+
+    setSecurityState("verifying");
+    setSecurityMessage("");
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: currentUser.email,
+      password: securityPassword,
+    });
+    if (error || !data.user) {
+      setSecurityState("error");
+      setSecurityMessage(error?.message ?? "Verification failed.");
+      return;
+    }
+    if (data.user.id !== currentUser.id) {
+      setSecurityState("error");
+      setSecurityMessage("Verification user mismatch.");
+      return;
+    }
+
+    setPrivilegedVerifiedAt(Date.now());
+    setIsSecurityPromptOpen(false);
+    setSecurityPassword("");
+    setSecurityState("idle");
+    const action = pendingPrivilegedAction?.run;
+    setPendingPrivilegedAction(null);
+    if (action) {
+      await action();
+    }
+  }
+
+  function closeSecurityPrompt() {
+    setIsSecurityPromptOpen(false);
+    setSecurityPassword("");
+    setSecurityState("idle");
+    setSecurityMessage("");
+    setPendingPrivilegedAction(null);
+  }
+
+  async function handleUpdateUserAdminInternal(
+    userId: string,
+    isAdmin: boolean,
+  ) {
+    const targetUser = users.find((user) => user.id === userId);
+    if (targetUser?.isOwner && !isAdmin) {
+      setUsersError("Owner must always keep admin access.");
+      return;
+    }
     if (!supabase) {
       setUsers((prev) =>
-        prev.map((user) => (user.id === userId ? { ...user, isAdmin } : user)),
+        prev.map((user) =>
+          user.id === userId
+            ? { ...user, isAdmin: user.isOwner ? true : isAdmin }
+            : user,
+        ),
       );
       return;
     }
@@ -1516,9 +1625,113 @@ export default function SettingsPage() {
       return;
     }
     setUsers((prev) =>
-      prev.map((user) => (user.id === userId ? { ...user, isAdmin } : user)),
+      prev.map((user) =>
+        user.id === userId
+          ? { ...user, isAdmin: user.isOwner ? true : isAdmin }
+          : user,
+      ),
     );
     setUpdatingUserId(null);
+  }
+
+  async function handleUpdateUserAdmin(userId: string, isAdmin: boolean) {
+    await runPrivilegedAction(() =>
+      handleUpdateUserAdminInternal(userId, isAdmin),
+    );
+  }
+
+  async function handleUpdateUserOwnerInternal(
+    userId: string,
+    isOwner: boolean,
+  ) {
+    if (!isOwner) {
+      setUsersError("Owner cannot be removed directly. Assign another owner.");
+      return;
+    }
+
+    const currentOwner = users.find((user) => user.isOwner);
+    if (currentOwner?.id === userId) {
+      return;
+    }
+
+    if (!supabase) {
+      setUsers((prev) =>
+        prev.map((user) => {
+          if (user.id === userId) {
+            return { ...user, isOwner: true, isAdmin: true };
+          }
+          if (user.isOwner) {
+            return { ...user, isOwner: false };
+          }
+          return user;
+        }),
+      );
+      return;
+    }
+
+    setUpdatingUserId(userId);
+    setUsersError(null);
+
+    if (currentOwner) {
+      const { error: demoteError } = await supabase
+        .from("profiles")
+        .update({ is_owner: false })
+        .eq("id", currentOwner.id);
+      if (demoteError) {
+        setUsersError(demoteError.message);
+        setUpdatingUserId(null);
+        return;
+      }
+    }
+
+    const { error: promoteError } = await supabase
+      .from("profiles")
+      .update({ is_owner: true, is_admin: true })
+      .eq("id", userId);
+
+    if (promoteError) {
+      if (currentOwner) {
+        await supabase
+          .from("profiles")
+          .update({ is_owner: true, is_admin: true })
+          .eq("id", currentOwner.id);
+      }
+      setUsersError(promoteError.message);
+      setUpdatingUserId(null);
+      return;
+    }
+
+    setUsers((prev) =>
+      prev.map((user) => {
+        if (user.id === userId) {
+          return { ...user, isOwner: true, isAdmin: true };
+        }
+        if (user.isOwner) {
+          return { ...user, isOwner: false };
+        }
+        return user;
+      }),
+    );
+    setUpdatingUserId(null);
+  }
+
+  async function handleUpdateUserOwner(userId: string, isOwner: boolean) {
+    if (isOwner) {
+      const approved = await confirm({
+        title: "Transfer ownership?",
+        description:
+          "This will move Owner access to the selected user and remove Owner from the current one.",
+        confirmLabel: "Transfer owner",
+        cancelLabel: "Cancel",
+        destructive: true,
+      });
+      if (!approved) {
+        return;
+      }
+    }
+    await runPrivilegedAction(() =>
+      handleUpdateUserOwnerInternal(userId, isOwner),
+    );
   }
 
   function togglePermissionRole(permission: PermissionKey, role: UserRole) {
@@ -2664,7 +2877,7 @@ export default function SettingsPage() {
       <Tabs
         value={activeTab}
         onValueChange={setActiveTab}
-        className="space-y-6"
+        className="space-y-0 md:space-y-4"
       >
         <DesktopPageHeader
           sticky
@@ -2697,7 +2910,7 @@ export default function SettingsPage() {
               closeButtonLabel="Close settings sections"
               title="Settings sections"
               enableSwipeToClose
-              panelClassName="flex max-h-[78dvh] flex-col pb-[max(1rem,env(safe-area-inset-bottom))]"
+              panelClassName="flex max-h-[78dvh] flex-col pb-[max(4rem,env(safe-area-inset-bottom))]"
             >
               <div className="flex-1 overflow-y-auto p-3">
                 <div className="space-y-1">
@@ -5214,15 +5427,9 @@ export default function SettingsPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {userRoleOptions.map((roleOption) => (
-                          <SelectItem
-                            key={roleOption}
-                            value={roleOption}
-                            disabled={inactiveRoleOptions.has(roleOption)}
-                          >
-                            {inactiveRoleOptions.has(roleOption)
-                              ? `${roleOption} (inactive)`
-                              : roleOption}
+                        {assignableRoleOptions.map((roleOption) => (
+                          <SelectItem key={roleOption} value={roleOption}>
+                            {roleOption}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -5278,6 +5485,7 @@ export default function SettingsPage() {
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Name</th>
                       <th className="px-4 py-2 text-left font-medium">Role</th>
+                      <th className="px-4 py-2 text-left font-medium">Owner</th>
                       <th className="px-4 py-2 text-left font-medium">Admin</th>
                       <th className="px-4 py-2 text-right font-medium">
                         Actions
@@ -5288,7 +5496,7 @@ export default function SettingsPage() {
                     {isUsersLoading ? (
                       <tr>
                         <td
-                          colSpan={4}
+                          colSpan={5}
                           className="px-4 py-6 text-center text-muted-foreground"
                         >
                           <LoadingSpinner
@@ -5300,7 +5508,7 @@ export default function SettingsPage() {
                     ) : users.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={4}
+                          colSpan={5}
                           className="px-4 py-6 text-center text-muted-foreground"
                         >
                           No users found.
@@ -5325,16 +5533,18 @@ export default function SettingsPage() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {userRoleOptions.map((roleOption) => (
+                                {[
+                                  ...assignableRoleOptions,
+                                  ...(user.role === "Admin"
+                                    ? (["Admin"] as UserRole[])
+                                    : []),
+                                ].map((roleOption) => (
                                   <SelectItem
                                     key={roleOption}
                                     value={roleOption}
-                                    disabled={inactiveRoleOptions.has(
-                                      roleOption,
-                                    )}
                                   >
-                                    {inactiveRoleOptions.has(roleOption)
-                                      ? `${roleOption} (inactive)`
+                                    {roleOption === "Admin"
+                                      ? "Admin (legacy)"
                                       : roleOption}
                                   </SelectItem>
                                 ))}
@@ -5342,17 +5552,37 @@ export default function SettingsPage() {
                             </Select>
                           </td>
                           <td className="px-4 py-2">
-                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <label className="flex items-center gap-2 text-xs text-foreground">
                               <input
                                 type="checkbox"
-                                checked={user.isAdmin}
+                                checked={user.isOwner}
+                                onChange={(event) =>
+                                  handleUpdateUserOwner(
+                                    user.id,
+                                    event.target.checked,
+                                  )
+                                }
+                                disabled={
+                                  user.isOwner || !canManageRolePermissions
+                                }
+                              />
+                              Owner
+                            </label>
+                          </td>
+                          <td className="px-4 py-2">
+                            <label className="flex items-center gap-2 text-xs text-foreground">
+                              <input
+                                type="checkbox"
+                                checked={user.isOwner || user.isAdmin}
                                 onChange={(event) =>
                                   handleUpdateUserAdmin(
                                     user.id,
                                     event.target.checked,
                                   )
                                 }
-                                disabled={!canManageRolePermissions}
+                                disabled={
+                                  user.isOwner || !canManageRolePermissions
+                                }
                               />
                               Admin
                             </label>
@@ -6603,6 +6833,91 @@ export default function SettingsPage() {
           </div>
         </TabsContent>
       </Tabs>
+      <BottomSheet
+        open={isSecurityPromptOpen}
+        onClose={closeSecurityPrompt}
+        ariaLabel="Security verification"
+        title="Confirm your password"
+        closeButtonLabel="Close verification"
+        enableSwipeToClose
+        panelClassName="pb-[max(1rem,env(safe-area-inset-bottom))]"
+      >
+        <div className="space-y-3 p-4">
+          <p className="text-sm text-muted-foreground">
+            Re-enter your password to confirm Owner/Admin permission changes.
+          </p>
+          <label className="space-y-2 text-sm font-medium">
+            Password
+            <input
+              type="password"
+              value={securityPassword}
+              onChange={(event) => {
+                setSecurityPassword(event.target.value);
+                if (securityState === "error") {
+                  setSecurityState("idle");
+                  setSecurityMessage("");
+                }
+              }}
+              className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+              autoComplete="current-password"
+            />
+          </label>
+          {securityMessage ? (
+            <p className="text-xs text-destructive">{securityMessage}</p>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={closeSecurityPrompt}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmSecurityVerification}
+              disabled={securityState === "verifying"}
+            >
+              {securityState === "verifying" ? "Verifying..." : "Confirm"}
+            </Button>
+          </div>
+        </div>
+      </BottomSheet>
+      {isSecurityPromptOpen ? (
+        <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex">
+          <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
+            <h2 className="text-lg font-semibold">Confirm your password</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Re-enter your password to confirm Owner/Admin permission changes.
+            </p>
+            <label className="mt-4 block space-y-2 text-sm font-medium">
+              Password
+              <input
+                type="password"
+                value={securityPassword}
+                onChange={(event) => {
+                  setSecurityPassword(event.target.value);
+                  if (securityState === "error") {
+                    setSecurityState("idle");
+                    setSecurityMessage("");
+                  }
+                }}
+                className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                autoComplete="current-password"
+              />
+            </label>
+            {securityMessage ? (
+              <p className="mt-2 text-xs text-destructive">{securityMessage}</p>
+            ) : null}
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={closeSecurityPrompt}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmSecurityVerification}
+                disabled={securityState === "verifying"}
+              >
+                {securityState === "verifying" ? "Verifying..." : "Confirm"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {dialog}
     </section>
   );

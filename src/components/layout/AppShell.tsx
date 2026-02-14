@@ -184,7 +184,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (user.loading || !user.isAuthenticated || isPublicRoute || !pathname) {
       return;
     }
-    const authUser = { role: user.role, isAdmin: user.isAdmin };
+    const authUser = {
+      role: user.role,
+      isAdmin: user.isAdmin,
+      isOwner: user.isOwner,
+    };
     const route =
       pathname === "/"
         ? "/"
@@ -217,6 +221,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router,
     user.isAuthenticated,
     user.isAdmin,
+    user.isOwner,
     user.loading,
     user.role,
   ]);
@@ -360,7 +365,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <p className="truncate text-sm font-medium">{user.name}</p>
                   <p className="truncate text-xs text-muted-foreground">
                     {user.role}
-                    {user.isAdmin && user.role !== "Owner" ? " / Admin" : ""}
+                    {user.isOwner ? " / Owner" : user.isAdmin ? " / Admin" : ""}
                   </p>
                 </div>
               </div>

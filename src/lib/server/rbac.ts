@@ -6,6 +6,7 @@ import {
 type ActorProfile = {
   role?: string | null;
   is_admin?: boolean | null;
+  is_owner?: boolean | null;
   tenant_id?: string | null;
 };
 
@@ -48,7 +49,7 @@ export function actorHasPermission(
   if (!actor?.tenant_id) {
     return false;
   }
-  if (actor.is_admin || actor.role === "Owner" || actor.role === "Admin") {
+  if (actor.is_owner || actor.is_admin || actor.role === "Admin") {
     return true;
   }
   if (!actor.role) {

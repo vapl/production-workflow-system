@@ -696,6 +696,7 @@ export default function AuthPage() {
         full_name: finalName,
         role: normalizedRole,
         is_admin: false,
+        is_owner: false,
         tenant_id: tenantId,
         phone: invitePhone.trim() || null,
         email: authUser.email ?? null,

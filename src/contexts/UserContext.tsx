@@ -8,7 +8,6 @@ import {
 } from "@/lib/supabaseClient";
 
 export type UserRole =
-  | "Owner"
   | "Admin"
   | "Sales"
   | "Engineering"
@@ -18,7 +17,6 @@ export type UserRole =
   | "Production";
 
 export const userRoleOptions: UserRole[] = [
-  "Owner",
   "Admin",
   "Sales",
   "Engineering",
@@ -37,7 +35,7 @@ export function normalizeUserRole(value?: string | null): UserRole {
     return trimmed as UserRole;
   }
   const normalized = trimmed.toLowerCase().replace(/_/g, " ");
-  if (normalized === "owner") return "Owner";
+  if (normalized === "owner") return "Admin";
   if (normalized === "admin") return "Admin";
   if (normalized === "sales") return "Sales";
   if (normalized === "engineering") return "Engineering";
@@ -55,6 +53,7 @@ export interface CurrentUser {
   phone?: string | null;
   role: UserRole;
   isAdmin: boolean;
+  isOwner: boolean;
   tenantId?: string | null;
   tenantName?: string | null;
   tenantLogoUrl?: string | null;
@@ -73,6 +72,7 @@ const fallbackUser: CurrentUser = {
   name: "Manager",
   role: "Sales",
   isAdmin: false,
+  isOwner: false,
   phone: null,
   tenantId: null,
   tenantLogoUrl: null,
@@ -131,13 +131,14 @@ async function fetchUserRole(userId: string) {
     return {
       role: "Sales" as UserRole,
       isAdmin: false,
+      isOwner: false,
       fullName: "Manager",
       tenantId: null,
     };
   }
   const { data, error } = await supabase
     .from("profiles")
-    .select("role, full_name, tenant_id, avatar_url, is_admin, phone")
+    .select("role, full_name, tenant_id, avatar_url, is_admin, is_owner, phone")
     .eq("id", userId)
     .maybeSingle();
 
@@ -145,6 +146,7 @@ async function fetchUserRole(userId: string) {
     return {
       role: "Sales" as UserRole,
       isAdmin: false,
+      isOwner: false,
       fullName: "Manager",
       tenantId: null,
       avatarUrl: null,
@@ -154,7 +156,8 @@ async function fetchUserRole(userId: string) {
   }
 
   const role = normalizeUserRole(data.role);
-  const isAdmin = (data.is_admin ?? false) || role === "Owner" || role === "Admin";
+  const isOwner = data.is_owner ?? false;
+  const isAdmin = (data.is_admin ?? false) || isOwner || role === "Admin";
   const resolvedAvatarUrl = await resolveSignedUrl(
     data.avatar_url ?? null,
     supabaseAvatarBucket,
@@ -174,6 +177,7 @@ async function fetchUserRole(userId: string) {
     return {
       role,
       isAdmin,
+      isOwner,
       fullName: data.full_name ?? "User",
       tenantId: data.tenant_id ?? null,
       avatarUrl: resolvedAvatarUrl,
@@ -186,6 +190,7 @@ async function fetchUserRole(userId: string) {
   return {
     role,
     isAdmin,
+    isOwner,
     fullName: data.full_name ?? "User",
     tenantId: data.tenant_id ?? null,
     avatarUrl: resolvedAvatarUrl,
@@ -235,6 +240,7 @@ function readCachedProfile(userId: string) {
         fullName: string;
         role: UserRole;
         isAdmin: boolean;
+        isOwner: boolean;
         tenantId?: string | null;
         tenantName?: string | null;
         tenantLogoUrl?: string | null;
@@ -257,6 +263,7 @@ function writeCachedProfile(
     fullName: string;
     role: UserRole;
     isAdmin: boolean;
+    isOwner: boolean;
     tenantId?: string | null;
     tenantName?: string | null;
     tenantLogoUrl?: string | null;
@@ -307,6 +314,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     profile: {
       role: UserRole;
       isAdmin: boolean;
+      isOwner: boolean;
       fullName: string;
       tenantId: string | null;
       avatarUrl?: string | null;
@@ -337,16 +345,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           await supabase.from("profiles").upsert({
             id: sessionUser.id,
             full_name: fullName,
-            role: "Owner",
+            role: "Admin",
             is_admin: true,
+            is_owner: true,
             tenant_id: tenant.id,
             email: sessionUser.email ?? null,
           });
           nextProfile = {
             ...nextProfile,
             fullName,
-            role: "Owner",
+            role: "Admin",
             isAdmin: true,
+            isOwner: true,
             tenantId: tenant.id,
             tenantName: tenant.name ?? null,
           };
@@ -368,6 +378,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               full_name: fullName,
               role: normalizedRole,
               is_admin: false,
+              is_owner: false,
               tenant_id: tenantId,
               email: sessionUser.email ?? null,
             });
@@ -376,6 +387,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               fullName,
               role: normalizedRole,
               isAdmin: false,
+              isOwner: false,
               tenantId,
               tenantName: nextProfile.tenantName ?? null,
             };
@@ -397,6 +409,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             full_name: fullName,
             role: normalizedRole,
             is_admin: false,
+            is_owner: false,
             tenant_id: invite.tenant_id,
             email: sessionUser.email ?? null,
           });
@@ -409,6 +422,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             fullName,
             role: normalizedRole,
             isAdmin: false,
+            isOwner: false,
             tenantId: invite.tenant_id,
             tenantName: nextProfile.tenantName ?? null,
           };
@@ -431,6 +445,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     return {
       role: refreshed.role,
       isAdmin: refreshed.isAdmin,
+      isOwner: refreshed.isOwner,
       fullName: refreshed.fullName,
       tenantId: refreshed.tenantId,
       avatarUrl: refreshed.avatarUrl,
@@ -481,6 +496,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             phone: cached.phone ?? null,
             role: cached.role,
             isAdmin: cached.isAdmin,
+            isOwner: cached.isOwner ?? false,
             tenantId: cached.tenantId ?? null,
             avatarUrl: cached.avatarUrl ?? null,
             tenantName: cached.tenantName ?? null,
@@ -509,6 +525,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 phone: null,
                 role: "Sales",
                 isAdmin: false,
+                isOwner: false,
                 tenantId: null,
                 avatarUrl: null,
                 tenantName: null,
@@ -532,6 +549,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             phone: ensuredProfile.phone ?? null,
             role: ensuredProfile.role,
             isAdmin: ensuredProfile.isAdmin,
+            isOwner: ensuredProfile.isOwner,
             tenantId: ensuredProfile.tenantId ?? null,
             avatarUrl: ensuredProfile.avatarUrl ?? null,
             tenantName: ensuredProfile.tenantName ?? null,
@@ -550,6 +568,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             phone: null,
             role: "Sales",
             isAdmin: false,
+            isOwner: false,
             tenantId: null,
             avatarUrl: null,
             tenantName: null,
@@ -585,6 +604,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             phone: cached.phone ?? null,
             role: cached.role,
             isAdmin: cached.isAdmin,
+            isOwner: cached.isOwner ?? false,
             tenantId: cached.tenantId ?? null,
             avatarUrl: cached.avatarUrl ?? null,
             tenantName: cached.tenantName ?? null,
@@ -610,6 +630,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 phone: null,
                 role: "Sales",
                 isAdmin: false,
+                isOwner: false,
                 tenantId: null,
                 avatarUrl: null,
                 tenantName: null,
@@ -630,6 +651,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               phone: ensuredProfile.phone ?? null,
               role: ensuredProfile.role,
               isAdmin: ensuredProfile.isAdmin,
+              isOwner: ensuredProfile.isOwner,
               tenantId: ensuredProfile.tenantId ?? null,
               avatarUrl: ensuredProfile.avatarUrl ?? null,
               tenantName: ensuredProfile.tenantName ?? null,
@@ -645,6 +667,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               phone: null,
               role: "Sales",
               isAdmin: false,
+              isOwner: false,
               tenantId: null,
               avatarUrl: null,
               tenantName: null,

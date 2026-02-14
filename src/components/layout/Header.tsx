@@ -143,8 +143,9 @@ export function Header() {
           }
           if (
             !user.isAdmin &&
+            !user.isOwner &&
             !isProductionRole(
-              { role: user.role, isAdmin: user.isAdmin },
+              { role: user.role, isAdmin: user.isAdmin, isOwner: user.isOwner },
               permissions,
             )
           ) {
@@ -178,6 +179,7 @@ export function Header() {
     permissions,
     user.id,
     user.isAdmin,
+    user.isOwner,
     user.isAuthenticated,
     user.role,
     user.tenantId,
@@ -427,7 +429,8 @@ export function Header() {
                     )}
                     <span className="hidden text-foreground sm:inline">
                       {user.name} ({user.role}
-                      {user.isAdmin && user.role !== "Owner" ? " / Admin" : ""})
+                      {user.isOwner ? " / Owner" : user.isAdmin ? " / Admin" : ""}
+                      )
                     </span>
                     <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
                   </button>

@@ -30,6 +30,7 @@ type QueryBuilder = {
       tenant_id?: string | null;
       role?: string | null;
       is_admin?: boolean | null;
+      is_owner?: boolean | null;
       full_name?: string | null;
       phone?: string | null;
       allowed_roles?: string[] | null;
@@ -48,6 +49,7 @@ export interface AuthorizedActorContext {
     tenant_id?: string | null;
     role?: string | null;
     is_admin?: boolean | null;
+    is_owner?: boolean | null;
     full_name?: string | null;
     phone?: string | null;
   };
@@ -86,7 +88,7 @@ export async function requirePermissionForRequest(
 
   const { data: actorProfile } = await admin
     .from("profiles")
-    .select("id, tenant_id, full_name, role, phone, is_admin")
+    .select("id, tenant_id, full_name, role, phone, is_admin, is_owner")
     .eq("id", authData.user.id)
     .maybeSingle();
 

@@ -251,7 +251,7 @@ export default function ProfilePage() {
               </div>
               <div className="text-xs text-muted-foreground">
                 Role: {user.role}
-                {user.isAdmin ? " / Admin" : ""}
+                {user.isOwner ? " / Owner" : user.isAdmin ? " / Admin" : ""}
               </div>
             </div>
           </div>
