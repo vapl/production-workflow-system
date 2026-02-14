@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import {
   Card,
   CardContent,
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/Select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import {
   formatDate,
   formatDateTime,
@@ -37,13 +39,17 @@ import type {
   OrderComment,
   OrderStatus,
 } from "@/types/orders";
-import type { OrderInputField, OrderInputTableColumn } from "@/types/orderInputs";
+import type {
+  OrderInputField,
+  OrderInputTableColumn,
+} from "@/types/orderInputs";
 import Link from "next/link";
 import {
   ArrowLeftIcon,
   FileIcon,
   FileTextIcon,
   ImageIcon,
+  PanelRightIcon,
   PencilIcon,
   SparklesIcon,
   XIcon,
@@ -144,6 +150,7 @@ function getExternalFieldSemantic(field: ExternalJobField) {
 }
 
 export default function OrderDetailPage() {
+  const router = useRouter();
   const params = useParams<{ orderId?: string }>();
   const normalizeId = (value: string) =>
     value
@@ -338,6 +345,27 @@ export default function OrderDetailPage() {
   >({});
   const [signedExternalAttachmentUrls, setSignedExternalAttachmentUrls] =
     useState<Record<string, string>>({});
+  const [showDesktopStickyShadow, setShowDesktopStickyShadow] = useState(false);
+  const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.innerWidth < 768) {
+        setShowDesktopStickyShadow(false);
+      } else {
+        setShowDesktopStickyShadow(window.scrollY > 8);
+      }
+      setShowCompactMobileTitle(window.scrollY > 52);
+    };
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", handleScroll);
+    };
+  }, []);
 
   const canTakeOrder =
     role === "Engineering" &&
@@ -724,7 +752,8 @@ export default function OrderDetailPage() {
     () =>
       attachments.filter((attachment) => {
         const categoryLabel = attachment.category
-          ? (attachmentCategoryLabels[attachment.category] ?? attachment.category)
+          ? (attachmentCategoryLabels[attachment.category] ??
+            attachment.category)
           : "";
         const normalizedCategory = categoryLabel.trim().toLowerCase();
         const isProductionDocumentation =
@@ -1056,10 +1085,7 @@ export default function OrderDetailPage() {
       const maxSelect = Math.max(1, Math.min(3, column.maxSelect ?? 1));
       const options = (column.options ?? []).map((item) => item.trim());
       const optionMap = new Map(
-        options.map((item) => [
-          item.trim().toLowerCase(),
-          item,
-        ]),
+        options.map((item) => [item.trim().toLowerCase(), item]),
       );
       const values = Array.isArray(value)
         ? value
@@ -1482,7 +1508,7 @@ export default function OrderDetailPage() {
         const message =
           payload.error === "feature_not_available"
             ? "AI import is available on Pro plan."
-            : payload.error ?? "Failed to parse PDF.";
+            : (payload.error ?? "Failed to parse PDF.");
         setTableImportNotices((prev) => ({ ...prev, [field.id]: message }));
         return;
       }
@@ -1507,10 +1533,7 @@ export default function OrderDetailPage() {
             : `No rows detected in PDF.${payload.parserModel ? ` Model: ${payload.parserModel}.` : ""}`,
       }));
       notify({
-        title:
-          normalizedRows.length > 0
-            ? "PDF parsed"
-            : "No rows detected",
+        title: normalizedRows.length > 0 ? "PDF parsed" : "No rows detected",
         description:
           normalizedRows.length > 0
             ? `Detected ${normalizedRows.length} row(s) for ${field.label}.`
@@ -1845,11 +1868,13 @@ export default function OrderDetailPage() {
               Source: {selectedAttachment.name}
             </div>
           )}
-          {canUseAiOrderInputImport && availableParseAttachments.length === 0 && (
-            <div className="text-xs text-muted-foreground">
-              No supported files (PDF/XLSX/XLS) found in Files & Comments category &quot;Production documentation&quot;.
-            </div>
-          )}
+          {canUseAiOrderInputImport &&
+            availableParseAttachments.length === 0 && (
+              <div className="text-xs text-muted-foreground">
+                No supported files (PDF/XLSX/XLS) found in Files & Comments
+                category &quot;Production documentation&quot;.
+              </div>
+            )}
           {!canUseAiOrderInputImport && (
             <div className="text-xs text-muted-foreground">
               AI PDF import is available on Pro plan.
@@ -2288,19 +2313,17 @@ export default function OrderDetailPage() {
     const quantityRaw = isPortalMode
       ? undefined
       : getExternalFieldValueByKeys("quantity", "qty");
-    const resolvedExternalOrderNumber =
-      isPortalMode
-        ? `REQ-${Date.now().toString().slice(-6)}`
-        : typeof externalOrderNumberRaw === "string" &&
-            externalOrderNumberRaw.trim().length > 0
-          ? externalOrderNumberRaw.trim()
-          : `EXT-${Date.now().toString().slice(-6)}`;
-    const resolvedDueDate =
-      isPortalMode
-        ? orderState.dueDate
-        : typeof dueDateRaw === "string" && dueDateRaw.trim().length > 0
-          ? dueDateRaw
-          : new Date().toISOString().slice(0, 10);
+    const resolvedExternalOrderNumber = isPortalMode
+      ? `REQ-${Date.now().toString().slice(-6)}`
+      : typeof externalOrderNumberRaw === "string" &&
+          externalOrderNumberRaw.trim().length > 0
+        ? externalOrderNumberRaw.trim()
+        : `EXT-${Date.now().toString().slice(-6)}`;
+    const resolvedDueDate = isPortalMode
+      ? orderState.dueDate
+      : typeof dueDateRaw === "string" && dueDateRaw.trim().length > 0
+        ? dueDateRaw
+        : new Date().toISOString().slice(0, 10);
     const resolvedStatus = parseExternalJobStatus(statusRaw) ?? "requested";
     const resolvedQuantity =
       typeof quantityRaw === "number"
@@ -2327,7 +2350,12 @@ export default function OrderDetailPage() {
     });
     if (created) {
       let createdWithAttachments = created;
-      if (!isPortalMode && supabase && tenantId && manualExternalJobFields.length > 0) {
+      if (
+        !isPortalMode &&
+        supabase &&
+        tenantId &&
+        manualExternalJobFields.length > 0
+      ) {
         const rows = manualExternalJobFields
           .map((field) => {
             const raw = externalJobFieldValues[field.id];
@@ -2371,7 +2399,9 @@ export default function OrderDetailPage() {
         for (const file of externalPortalFiles) {
           const upload = await uploadExternalJobAttachment(file, created.id);
           if (upload.error || !upload.attachment) {
-            setExternalError(upload.error ?? "Failed to upload partner request files.");
+            setExternalError(
+              upload.error ?? "Failed to upload partner request files.",
+            );
             continue;
           }
           const attached = await addExternalJobAttachment(created.id, {
@@ -2969,9 +2999,116 @@ export default function OrderDetailPage() {
   }
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
+      <div className="pointer-events-none fixed right-4 top-3 z-40 md:hidden">
+        <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Back"
+            onClick={() => {
+              if (window.history.length > 1) {
+                router.back();
+                return;
+              }
+              router.push("/orders");
+            }}
+          >
+            <ArrowLeftIcon className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] left-4 z-40 md:hidden">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-11 w-11 rounded-full shadow-lg disabled:opacity-100"
+          onClick={() => setIsEditOpen(true)}
+          aria-label="Edit order"
+          disabled={!canEditOrderRecord}
+        >
+          <PencilIcon className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] right-4 z-40 md:hidden">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-11 w-11 rounded-full shadow-lg"
+          onClick={() => setIsMobileSectionsOpen(true)}
+          aria-label="Open order sections"
+          aria-haspopup="dialog"
+          aria-expanded={isMobileSectionsOpen}
+          aria-controls="order-sections-drawer"
+        >
+          <PanelRightIcon className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <MobilePageTitle
+        title={orderState.orderNumber}
+        showCompact={showCompactMobileTitle}
+        subtitle={orderState.customerName}
+        compactTitle={`${orderState.orderNumber} - ${orderState.customerName}`}
+        className="pt-6 pb-6"
+      />
+
+      <BottomSheet
+        id="order-sections-drawer"
+        open={isMobileSectionsOpen}
+        onClose={() => setIsMobileSectionsOpen(false)}
+        ariaLabel="Order sections"
+        closeButtonLabel="Close order sections"
+        title="Order sections"
+        enableSwipeToClose
+        panelClassName="flex max-h-[78dvh] flex-col pb-[max(1rem,env(safe-area-inset-bottom))]"
+      >
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="space-y-1">
+            {[
+              { value: "overview", label: "Overview" },
+              { value: "files", label: "Files & Comments" },
+              { value: "details", label: "Order details" },
+              { value: "workflow", label: "Workflow" },
+              { value: "external", label: "External Jobs" },
+            ].map((section) => {
+              const isActive = activeTab === section.value;
+              return (
+                <button
+                  key={section.value}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(section.value);
+                    setIsMobileSectionsOpen(false);
+                  }}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-foreground hover:bg-muted/60"
+                  }`}
+                >
+                  <span>{section.label}</span>
+                  {isActive ? <span className="text-xs">Active</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </BottomSheet>
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-4">
-        <div className="sticky top-16 z-20 border-b bg-background/90 border-border pb-3 pt-2 backdrop-blur">
+        <div
+          className={`desktop-sticky-bleed sticky top-16 z-20 hidden w-full bg-background/90 pb-3 pt-2 backdrop-blur md:block ${
+            showDesktopStickyShadow
+              ? "desktop-sticky-bleed-shadow"
+              : "desktop-sticky-bleed-no-shadow"
+          }`}
+        >
           <div className="grid gap-3 lg:grid-cols-[auto_1fr_auto] lg:items-center">
             <div className="pl-6 mr-6">
               <h1 className="text-xl font-semibold">
@@ -3014,6 +3151,11 @@ export default function OrderDetailPage() {
               </Button>
             </div>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 px-1 md:hidden">
+          <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+          <Badge variant={statusVariant}>{statusLabel(displayStatus)}</Badge>
         </div>
 
         <TabsContent value="overview">
@@ -3166,7 +3308,8 @@ export default function OrderDetailPage() {
         </TabsContent>
 
         <TabsContent value="workflow">
-          <div className="space-y-6"><div
+          <div className="space-y-6">
+            <div
               className={`grid gap-6 ${
                 activeChecklistItems.length > 0
                   ? "lg:grid-cols-[minmax(0,1fr)_360px]"
@@ -3432,8 +3575,8 @@ export default function OrderDetailPage() {
                         items
                         {rules.requireOrderInputsForEngineering
                           ? ", and required order inputs"
-                          : ""}
-                        {" "}before sending to engineering.
+                          : ""}{" "}
+                        before sending to engineering.
                       </p>
                     )}
                     {canSendToProduction && !canAdvanceToProduction && (
@@ -3442,8 +3585,8 @@ export default function OrderDetailPage() {
                         items
                         {rules.requireOrderInputsForProduction
                           ? ", and required order inputs"
-                          : ""}
-                        {" "}before sending to production.
+                          : ""}{" "}
+                        before sending to production.
                       </p>
                     )}
                   </CardContent>
@@ -3792,9 +3935,7 @@ export default function OrderDetailPage() {
                   </div>
                 </div>
 
-                <div
-                  className="grid gap-3 lg:grid-cols-2"
-                >
+                <div className="grid gap-3 lg:grid-cols-2">
                   <label className="space-y-2 text-sm font-medium">
                     Partner group
                     <Select
@@ -4008,16 +4149,18 @@ export default function OrderDetailPage() {
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         External Jobs is used to track outsourced work with
-                        partners: order details, deadlines, pricing, and delivery
-                        notes.
+                        partners: order details, deadlines, pricing, and
+                        delivery notes.
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Configure fields in Settings -&gt; Partners -&gt; External
-                        job schema, then return here.
+                        Configure fields in Settings -&gt; Partners -&gt;
+                        External job schema, then return here.
                       </p>
                       <div className="mt-3">
                         <Button variant="outline" size="sm" asChild>
-                          <Link href="/settings?tab=partners">Open settings</Link>
+                          <Link href="/settings?tab=partners">
+                            Open settings
+                          </Link>
                         </Button>
                       </div>
                     </div>
@@ -4095,7 +4238,8 @@ export default function OrderDetailPage() {
                   <p className="text-xs text-destructive">{externalError}</p>
                 )}
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  Plan: <span className="font-medium">{subscription.planCode}</span>{" "}
+                  Plan:{" "}
+                  <span className="font-medium">{subscription.planCode}</span>{" "}
                   {canSendExternalJobToPartner
                     ? "includes Send to partner."
                     : "supports manual entry only. Send to partner is available on Pro."}
@@ -4188,15 +4332,17 @@ export default function OrderDetailPage() {
                                       : manualExternalJobFields
                                     : manualExternalJobFields
                                   ).map((field, index, fields) => {
-                                    const semantic = getExternalFieldSemantic(field);
+                                    const semantic =
+                                      getExternalFieldSemantic(field);
                                     if (
                                       semantic !== "other" &&
                                       fields
                                         .slice(0, index)
                                         .some(
                                           (candidate) =>
-                                            getExternalFieldSemantic(candidate) ===
-                                            semantic,
+                                            getExternalFieldSemantic(
+                                              candidate,
+                                            ) === semantic,
                                         )
                                     ) {
                                       return null;
@@ -4215,14 +4361,14 @@ export default function OrderDetailPage() {
                                             ? job.partnerResponseDueDate
                                             : job.dueDate
                                           : semantic === "unit_price" &&
-                                              job.requestMode !== "partner_portal"
+                                              job.requestMode !==
+                                                "partner_portal"
                                             ? job.unitPrice
                                             : undefined;
-                                    const resolvedValue = isEmptyExternalFieldValue(
-                                      value,
-                                    )
-                                      ? fallbackValue
-                                      : value;
+                                    const resolvedValue =
+                                      isEmptyExternalFieldValue(value)
+                                        ? fallbackValue
+                                        : value;
                                     return (
                                       <div key={field.id}>
                                         {field.label}:{" "}
@@ -4630,5 +4776,3 @@ export default function OrderDetailPage() {
     </section>
   );
 }
-
-

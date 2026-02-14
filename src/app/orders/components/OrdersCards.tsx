@@ -138,6 +138,20 @@ function OrderCard({
       job.dueDate < today &&
       !["delivered", "approved", "cancelled"].includes(job.status),
   );
+  const hierarchyItems = activeLevels
+    .map((level) => {
+      const value = order.hierarchy?.[level.id];
+      const fallbackLabel = order.hierarchyLabels?.[level.id];
+      const displayValue = value
+        ? (nodeLabelMap.get(value) ?? fallbackLabel ?? value)
+        : "--";
+      return {
+        id: level.id,
+        label: level.name,
+        value: displayValue,
+      };
+    })
+    .filter((item) => item.value !== "--");
 
   useEffect(() => {
     function handlePosition() {
@@ -173,7 +187,7 @@ function OrderCard({
 
   return (
     <div
-      className="group relative rounded-lg border border-border bg-card p-4 shadow-sm transition hover:bg-muted/40"
+      className="group relative rounded-lg border border-border bg-card p-3 shadow-sm transition hover:bg-muted/40 md:p-4"
       role="link"
       tabIndex={0}
       onClick={() => router.push(`/orders/${order.id}`)}
@@ -184,18 +198,18 @@ function OrderCard({
         }
       }}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-2">
         <div>
           <div className="text-sm font-semibold">{order.orderNumber}</div>
           <div className="text-xs text-muted-foreground">
             {order.customerName}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end pr-10 md:pr-0 gap-1.5">
           <Badge variant={priorityVariant}>{order.priority}</Badge>
           <Badge variant={statusVariant} className={statusColorClass}>
-              {rules.statusLabels[displayStatus] ??
-                formatOrderStatus(displayStatus)}
+            {rules.statusLabels[displayStatus] ??
+              formatOrderStatus(displayStatus)}
           </Badge>
           {hasOverdueExternal && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
@@ -205,22 +219,13 @@ function OrderCard({
         </div>
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {activeLevels.map((level) => {
-          const value = order.hierarchy?.[level.id];
-          const fallbackLabel = order.hierarchyLabels?.[level.id];
-          const displayValue = value
-            ? nodeLabelMap.get(value) ?? fallbackLabel ?? value
-            : "--";
-          return (
-            <div key={level.id} className="text-xs">
-              <div className="text-muted-foreground">{level.name}</div>
-              <div className="text-foreground">
-                {displayValue}
-              </div>
-            </div>
-          );
-        })}
+      <div className="mt-2 grid gap-2 grid-cols-2">
+        {hierarchyItems.map((item) => (
+          <div key={item.id} className="text-xs">
+            <div className="text-muted-foreground">{item.label}</div>
+            <div className="text-foreground wrap-break-word">{item.value}</div>
+          </div>
+        ))}
         <div className="text-xs">
           <div className="text-muted-foreground">Quantity</div>
           <div className="text-foreground">{order.quantity ?? "--"}</div>
@@ -254,7 +259,7 @@ function OrderCard({
                   {engineerInitials}
                 </div>
               )}
-              <span>{order.assignedEngineerName}</span>
+              <span className="truncate">{order.assignedEngineerName}</span>
             </div>
           ) : (
             <div className="text-foreground">--</div>
@@ -275,7 +280,7 @@ function OrderCard({
                   {managerInitials}
                 </div>
               )}
-              <span>{order.assignedManagerName}</span>
+              <span className="truncate">{order.assignedManagerName}</span>
             </div>
           ) : (
             <div className="text-foreground">--</div>
@@ -283,7 +288,7 @@ function OrderCard({
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between">
+      <div className="mt-2 flex items-center justify-between">
         <div className="inline-flex items-center gap-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <PaperclipIcon className="h-3.5 w-3.5" />
@@ -325,7 +330,7 @@ function OrderCard({
             </button>
           ) : null}
         </div>
-        <div className="absolute right-3 top-3 md:hidden">
+        <div className="absolute right-2 top-2 md:hidden">
           <Button
             variant="ghost"
             size="icon"
@@ -413,9 +418,9 @@ export function OrdersCards({
         level.key !== "manager",
     )
     .sort((a, b) => a.order - b.order);
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(
-    {},
-  );
+  const [collapsedGroups, setCollapsedGroups] = useState<
+    Record<string, boolean>
+  >({});
 
   return (
     <div className="space-y-4">

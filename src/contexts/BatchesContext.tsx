@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Batch, BatchStatus } from "@/types/batch";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { createId } from "@/lib/utils/createId";
 
 interface BatchesContextValue {
   batches: Batch[];
@@ -111,7 +112,7 @@ export function BatchesProvider({ children }: { children: React.ReactNode }) {
       addBatch: async (batch) => {
         if (!supabase) {
           const fallback: Batch = {
-            id: crypto.randomUUID(),
+            id: createId("batch"),
             orderId: batch.orderId,
             name: batch.name,
             workstation: batch.workstation,

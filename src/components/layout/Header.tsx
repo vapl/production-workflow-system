@@ -92,7 +92,7 @@ export function Header() {
       const currentY = window.scrollY;
       if (!ticking) {
         window.requestAnimationFrame(() => {
-          setIsHidden(currentY > 0);
+          setIsHidden(window.innerWidth >= 768 && currentY > 0);
           ticking = false;
         });
         ticking = true;
@@ -314,11 +314,11 @@ export function Header() {
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 sm:justify-end">
-            <div className="text-xs text-muted-foreground">
+            <div className="hidden text-xs text-muted-foreground sm:block">
               Shift: Day | {currentDate ?? "--"}
             </div>
 
-            <div className="flex items-center gap-1 rounded-full border border-border bg-background px-2 py-1">
+            <div className="hidden items-center gap-1 rounded-full border border-border bg-background px-2 py-1 sm:flex">
               <Button
                 variant="ghost"
                 size="icon"
@@ -425,7 +425,7 @@ export function Header() {
                         {userInitials}
                       </div>
                     )}
-                    <span className="text-foreground">
+                    <span className="hidden text-foreground sm:inline">
                       {user.name} ({user.role}
                       {user.isAdmin && user.role !== "Owner" ? " / Admin" : ""})
                     </span>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { PanelRightIcon } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -19,6 +20,10 @@ import {
 } from "@/components/ui/Select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
+import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { useHierarchy } from "./HierarchyContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
 import {
@@ -266,6 +271,26 @@ const defaultQrContentFields = [
   "material",
 ];
 
+const settingsSections = [
+  { value: "structure", label: "Structure" },
+  { value: "operations", label: "Production" },
+  { value: "partners", label: "Partners" },
+  { value: "users", label: "Users" },
+  { value: "workflow", label: "Workflow" },
+  { value: "integrations", label: "Integrations" },
+] as const;
+
+type SettingsSectionValue = (typeof settingsSections)[number]["value"];
+
+const settingsSectionSubtitles: Record<SettingsSectionValue, string> = {
+  structure: "Define hierarchy, order fields, and system structure.",
+  operations: "Configure production hours, stations, and operation defaults.",
+  partners: "Manage external partners, groups, and field mappings.",
+  users: "Control user access, roles, and account permissions.",
+  workflow: "Set status flow rules, requirements, and automations.",
+  integrations: "Connect accounting, email, and external services.",
+};
+
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
@@ -321,6 +346,7 @@ export default function SettingsPage() {
     stopReasons,
     partners,
     partnerGroups,
+    isLoading: isSettingsDataLoading,
     addWorkStation,
     updateWorkStation,
     removeWorkStation,
@@ -355,20 +381,17 @@ export default function SettingsPage() {
       }),
     [orderInputFields],
   );
-  const sortedExternalJobFields = useMemo(
-    () => {
-      const uniqueById = Array.from(
-        new Map(externalJobFields.map((field) => [field.id, field])).values(),
-      );
-      return uniqueById.sort((a, b) => {
-        if (a.sortOrder !== b.sortOrder) {
-          return a.sortOrder - b.sortOrder;
-        }
-        return a.label.localeCompare(b.label);
-      });
-    },
-    [externalJobFields],
-  );
+  const sortedExternalJobFields = useMemo(() => {
+    const uniqueById = Array.from(
+      new Map(externalJobFields.map((field) => [field.id, field])).values(),
+    );
+    return uniqueById.sort((a, b) => {
+      if (a.sortOrder !== b.sortOrder) {
+        return a.sortOrder - b.sortOrder;
+      }
+      return a.label.localeCompare(b.label);
+    });
+  }, [externalJobFields]);
 
   const [stationName, setStationName] = useState("");
   const [stationDescription, setStationDescription] = useState("");
@@ -454,6 +477,8 @@ export default function SettingsPage() {
   >([]);
   const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
+  const [isTenantProfileLoading, setIsTenantProfileLoading] = useState(false);
+  const [isTenantSettingsLoading, setIsTenantSettingsLoading] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [operatorAssignments, setOperatorAssignments] = useState<
     { id: string; userId: string; stationId: string; isActive: boolean }[]
@@ -514,45 +539,52 @@ export default function SettingsPage() {
     }
     let isMounted = true;
     const loadWorkHours = async () => {
-      const { data, error } = await supabase
-        .from("tenant_settings")
-        .select(
-          "workday_start, workday_end, workdays, work_shifts, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles",
-        )
-        .eq("tenant_id", currentUser.tenantId)
-        .maybeSingle();
-      if (!isMounted) {
-        return;
-      }
-      if (error || !data) {
-        return;
-      }
-      const calendar = parseWorkingCalendar(data);
-      setWorkdays(calendar.workdays);
-      setWorkShifts(calendar.shifts);
-      if (Array.isArray(data.qr_enabled_sizes)) {
-        setQrEnabledSizes(
-          data.qr_enabled_sizes.filter(
-            (value: unknown) => typeof value === "string",
-          ),
-        );
-      }
-      if (typeof data.qr_default_size === "string") {
-        setQrDefaultSize(data.qr_default_size);
-      }
-      if (Array.isArray(data.qr_content_fields)) {
-        setQrContentFields(
-          data.qr_content_fields.filter(
-            (value: unknown) => typeof value === "string",
-          ),
-        );
-      }
-      if (Array.isArray(data.notification_roles)) {
-        setNotificationRoles(
-          data.notification_roles.filter(
-            (value: unknown) => typeof value === "string",
-          ),
-        );
+      setIsTenantSettingsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("tenant_settings")
+          .select(
+            "workday_start, workday_end, workdays, work_shifts, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles",
+          )
+          .eq("tenant_id", currentUser.tenantId)
+          .maybeSingle();
+        if (!isMounted) {
+          return;
+        }
+        if (error || !data) {
+          return;
+        }
+        const calendar = parseWorkingCalendar(data);
+        setWorkdays(calendar.workdays);
+        setWorkShifts(calendar.shifts);
+        if (Array.isArray(data.qr_enabled_sizes)) {
+          setQrEnabledSizes(
+            data.qr_enabled_sizes.filter(
+              (value: unknown) => typeof value === "string",
+            ),
+          );
+        }
+        if (typeof data.qr_default_size === "string") {
+          setQrDefaultSize(data.qr_default_size);
+        }
+        if (Array.isArray(data.qr_content_fields)) {
+          setQrContentFields(
+            data.qr_content_fields.filter(
+              (value: unknown) => typeof value === "string",
+            ),
+          );
+        }
+        if (Array.isArray(data.notification_roles)) {
+          setNotificationRoles(
+            data.notification_roles.filter(
+              (value: unknown) => typeof value === "string",
+            ),
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setIsTenantSettingsLoading(false);
+        }
       }
     };
     void loadWorkHours();
@@ -716,7 +748,8 @@ export default function SettingsPage() {
   const editablePermissionRoles = useMemo(
     () =>
       userRoleOptions.filter(
-        (role) => !inactiveRoleOptions.has(role) && role !== "Production worker",
+        (role) =>
+          !inactiveRoleOptions.has(role) && role !== "Production worker",
       ),
     [],
   );
@@ -785,31 +818,42 @@ export default function SettingsPage() {
     if (!supabase || !currentUser.tenantId) {
       return;
     }
+    let isMounted = true;
     const fetchCompany = async () => {
-      const { data, error } = await supabase
-        .from("tenants")
-        .select(
-          "name, legal_name, registration_no, vat_no, billing_email, address, logo_url, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified",
-        )
-        .eq("id", currentUser.tenantId)
-        .maybeSingle();
-      if (error || !data) {
-        return;
+      setIsTenantProfileLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("tenants")
+          .select(
+            "name, legal_name, registration_no, vat_no, billing_email, address, logo_url, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified",
+          )
+          .eq("id", currentUser.tenantId)
+          .maybeSingle();
+        if (!isMounted || error || !data) {
+          return;
+        }
+        setCompanyName(data.name ?? "");
+        setCompanyLegalName(data.legal_name ?? "");
+        setCompanyRegistrationNo(data.registration_no ?? "");
+        setCompanyVatNo(data.vat_no ?? "");
+        setCompanyBillingEmail(data.billing_email ?? "");
+        setCompanyAddress(data.address ?? "");
+        setCompanyLogoUrl(data.logo_url ?? "");
+        setOutboundFromName(data.outbound_from_name ?? "");
+        setOutboundFromEmail(data.outbound_from_email ?? "");
+        setOutboundReplyToEmail(data.outbound_reply_to_email ?? "");
+        setOutboundUseUserSender(data.outbound_use_user_sender ?? true);
+        setOutboundSenderVerified(data.outbound_sender_verified ?? false);
+      } finally {
+        if (isMounted) {
+          setIsTenantProfileLoading(false);
+        }
       }
-      setCompanyName(data.name ?? "");
-      setCompanyLegalName(data.legal_name ?? "");
-      setCompanyRegistrationNo(data.registration_no ?? "");
-      setCompanyVatNo(data.vat_no ?? "");
-      setCompanyBillingEmail(data.billing_email ?? "");
-      setCompanyAddress(data.address ?? "");
-      setCompanyLogoUrl(data.logo_url ?? "");
-      setOutboundFromName(data.outbound_from_name ?? "");
-      setOutboundFromEmail(data.outbound_from_email ?? "");
-      setOutboundReplyToEmail(data.outbound_reply_to_email ?? "");
-      setOutboundUseUserSender(data.outbound_use_user_sender ?? true);
-      setOutboundSenderVerified(data.outbound_sender_verified ?? false);
     };
-    fetchCompany();
+    void fetchCompany();
+    return () => {
+      isMounted = false;
+    };
   }, [currentUser.tenantId]);
 
   useEffect(() => {
@@ -1484,8 +1528,10 @@ export default function SettingsPage() {
     setPermissionState("saving");
     setPermissionMessage("");
     for (const def of permissionDefinitions) {
-      const nextRoles = permissionDrafts[def.key] ?? defaultPermissionRoles[def.key];
-      const currentRoles = rolePermissions[def.key] ?? defaultPermissionRoles[def.key];
+      const nextRoles =
+        permissionDrafts[def.key] ?? defaultPermissionRoles[def.key];
+      const currentRoles =
+        rolePermissions[def.key] ?? defaultPermissionRoles[def.key];
       const unchanged =
         JSON.stringify([...nextRoles].sort()) ===
         JSON.stringify([...currentRoles].sort());
@@ -1805,7 +1851,9 @@ export default function SettingsPage() {
       .eq("id", currentUser.tenantId);
     if (error) {
       setOutboundState("error");
-      setOutboundMessage(error.message ?? "Failed to save outbound email settings.");
+      setOutboundMessage(
+        error.message ?? "Failed to save outbound email settings.",
+      );
       return;
     }
     setOutboundState("saved");
@@ -2512,34 +2560,168 @@ export default function SettingsPage() {
   }
 
   const [activeTab, setActiveTab] = useState("structure");
+  const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
+  const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
-    if (tab) {
+    if (tab && settingsSections.some((section) => section.value === tab)) {
       setActiveTab(tab);
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    if (!isMobileSectionsOpen) {
+      return;
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileSectionsOpen(false);
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMobileSectionsOpen]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.innerWidth >= 768) {
+        setShowCompactMobileTitle(false);
+        return;
+      }
+      setShowCompactMobileTitle(window.scrollY > 110);
+    };
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) {
+        return;
+      }
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        handleScroll();
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", handleScroll);
+    };
+  }, []);
+
+  const activeSectionLabel =
+    settingsSections.find((section) => section.value === activeTab)?.label ??
+    "Settings";
+  const activeSectionSubtitle =
+    settingsSectionSubtitles[
+      (settingsSections.find((section) => section.value === activeTab)?.value ??
+        "structure") as SettingsSectionValue
+    ];
+
   return (
-    <section className="space-y-6">
+    <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
+      <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] right-4 z-40 md:hidden">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-11 w-11 rounded-full shadow-lg"
+          onClick={() => setIsMobileSectionsOpen(true)}
+          aria-label="Open settings sections"
+          aria-haspopup="dialog"
+          aria-expanded={isMobileSectionsOpen}
+          aria-controls="settings-sections-drawer"
+        >
+          <PanelRightIcon className="h-4 w-4" />
+        </Button>
+      </div>
+      <MobilePageTitle
+        title={activeSectionLabel}
+        showCompact={showCompactMobileTitle}
+        subtitle={activeSectionSubtitle}
+        className="pt-6 pb-6"
+      />
+
       <Tabs
         value={activeTab}
         onValueChange={setActiveTab}
         className="space-y-6"
       >
-        <div className="sticky top-16 z-20 border-b border-border bg-background/90 pb-2 pt-2 backdrop-blur">
-          <TabsList className="w-full justify-start overflow-x-auto flex-nowrap">
-            <TabsTrigger value="structure">Structure</TabsTrigger>
-            <TabsTrigger value="operations">Production</TabsTrigger>
-            <TabsTrigger value="partners">Partners</TabsTrigger>
-            <TabsTrigger value="users">Users</TabsTrigger>
-            <TabsTrigger value="workflow">Workflow</TabsTrigger>
-            <TabsTrigger value="integrations">Integrations</TabsTrigger>
-          </TabsList>
-        </div>
+        <DesktopPageHeader
+          sticky
+          title={activeSectionLabel}
+          subtitle={activeSectionSubtitle}
+          className="md:sticky md:top-16 md:z-20 md:bg-background/95 md:backdrop-blur"
+          actions={
+            <TabsList className="justify-start overflow-x-auto flex-nowrap">
+              {settingsSections.map((section) => (
+                <TabsTrigger key={section.value} value={section.value}>
+                  {section.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          }
+        />
+
+        {
+          <>
+            <BottomSheet
+              id="settings-sections-drawer"
+              open={isMobileSectionsOpen}
+              onClose={() => setIsMobileSectionsOpen(false)}
+              ariaLabel="Settings sections"
+              closeButtonLabel="Close settings sections"
+              title="Settings sections"
+              enableSwipeToClose
+              panelClassName="flex max-h-[78dvh] flex-col pb-[max(1rem,env(safe-area-inset-bottom))]"
+            >
+              <div className="flex-1 overflow-y-auto p-3">
+                <div className="space-y-1">
+                  {settingsSections.map((section) => {
+                    const isActive = activeTab === section.value;
+                    return (
+                      <button
+                        key={section.value}
+                        type="button"
+                        onClick={() => {
+                          setActiveTab(section.value);
+                          setIsMobileSectionsOpen(false);
+                        }}
+                        aria-current={isActive ? "page" : undefined}
+                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                          isActive
+                            ? "bg-accent text-accent-foreground"
+                            : "text-foreground hover:bg-muted/60"
+                        }`}
+                      >
+                        <span>{section.label}</span>
+                        {isActive ? (
+                          <span className="text-xs">Active</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </BottomSheet>
+          </>
+        }
 
         <TabsContent value="structure">
           <div className="space-y-6">
+            {isSettingsDataLoading ? (
+              <Card className="min-w-0">
+                <CardContent className="py-10">
+                  <LoadingSpinner label="Loading structure settings..." />
+                </CardContent>
+              </Card>
+            ) : null}
             <Card>
               <CardHeader>
                 <CardTitle>Hierarchy Levels</CardTitle>
@@ -2752,7 +2934,6 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-
             <Card>
               <CardHeader>
                 <CardTitle>Reference Lists</CardTitle>
@@ -2850,7 +3031,8 @@ export default function SettingsPage() {
                       className="min-h-[120px] rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
                     />
                     <div className="text-xs text-muted-foreground">
-                      Optional code: use &quot;Label | Code&quot; or &quot;Label;Code&quot;.
+                      Optional code: use &quot;Label | Code&quot; or
+                      &quot;Label;Code&quot;.
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -2989,7 +3171,6 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-
             <Card>
               <CardHeader>
                 <CardTitle>Order inputs</CardTitle>
@@ -3275,7 +3456,8 @@ export default function SettingsPage() {
                             {column.fieldType === "select" && (
                               <div className="grid gap-2 md:grid-cols-[1fr_160px] md:items-end">
                                 <label className="flex flex-col gap-1 text-xs font-medium">
-                                  Options (comma, newline, or &quot;\\&quot; separated)
+                                  Options (comma, newline, or &quot;\\&quot;
+                                  separated)
                                   <textarea
                                     value={(column.options ?? []).join("\n")}
                                     onChange={(event) =>
@@ -3505,9 +3687,16 @@ export default function SettingsPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="operations">
-          <div className="space-y-6">
-            <div className="grid gap-6 lg:grid-cols-2">
+        <TabsContent value="operations" className="min-w-0 overflow-x-hidden">
+          <div className="min-w-0 space-y-6 overflow-x-hidden">
+            {isSettingsDataLoading || isTenantSettingsLoading ? (
+              <Card>
+                <CardContent className="py-10">
+                  <LoadingSpinner label="Loading production settings..." />
+                </CardContent>
+              </Card>
+            ) : null}
+            <div className="grid min-w-0 gap-6 lg:grid-cols-2 [&>*]:min-w-0">
               <Card>
                 <CardHeader>
                   <CardTitle>Working hours</CardTitle>
@@ -3516,7 +3705,7 @@ export default function SettingsPage() {
                     start/stop duration calculations.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="min-w-0 space-y-4">
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-medium">Workdays</label>
                     <div className="flex flex-wrap gap-2">
@@ -3551,7 +3740,7 @@ export default function SettingsPage() {
                     {workShifts.map((shift, index) => (
                       <div
                         key={`${index}-${shift.start}-${shift.end}`}
-                        className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+                        className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
                       >
                         <div className="flex flex-col gap-2">
                           <label className="text-xs font-medium text-muted-foreground">
@@ -3570,7 +3759,7 @@ export default function SettingsPage() {
                               )
                             }
                             placeholder="08:00"
-                            className={`h-10 rounded-lg border bg-input-background px-3 text-sm ${
+                            className={`h-10 w-full rounded-lg border bg-input-background px-3 text-sm ${
                               isValidWorkTime(shift.start)
                                 ? "border-border"
                                 : "border-destructive"
@@ -3587,10 +3776,14 @@ export default function SettingsPage() {
                             pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
                             value={shift.end}
                             onChange={(event) =>
-                              handleWorkShiftChange(index, "end", event.target.value)
+                              handleWorkShiftChange(
+                                index,
+                                "end",
+                                event.target.value,
+                              )
                             }
                             placeholder="17:00"
-                            className={`h-10 rounded-lg border bg-input-background px-3 text-sm ${
+                            className={`h-10 w-full rounded-lg border bg-input-background px-3 text-sm ${
                               isValidWorkTime(shift.end)
                                 ? "border-border"
                                 : "border-destructive"
@@ -3603,6 +3796,7 @@ export default function SettingsPage() {
                           size="sm"
                           onClick={() => handleRemoveShift(index)}
                           disabled={workShifts.length <= 1}
+                          className="justify-self-start md:justify-self-auto"
                         >
                           Remove
                         </Button>
@@ -3670,13 +3864,13 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm text-muted-foreground">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0 text-sm text-muted-foreground">
                       {selectedWorkStationIds.length > 0
                         ? `${selectedWorkStationIds.length} selected`
                         : " "}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
                         <input
                           type="checkbox"
@@ -3713,24 +3907,26 @@ export default function SettingsPage() {
                     {displayStations.map((station, index) => (
                       <div
                         key={station.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                        className="flex flex-wrap items-center justify-between gap-3 overflow-hidden rounded-lg border border-border px-4 py-3"
                         draggable
                         onDragStart={() => setDragStationId(station.id)}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={() => handleStationDrop(station.id)}
                       >
-                        <div>
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <span className="rounded-full h-6 w-6 flex justify-center items-center border border-border text-xs text-muted-foreground">
                               {index + 1}
                             </span>
-                            <span className="font-medium">{station.name}</span>
+                            <span className="font-medium break-words">
+                              {station.name}
+                            </span>
                           </div>
-                          <div className="text-sm text-muted-foreground text-wrap">
+                          <div className="text-sm text-muted-foreground break-words">
                             {station.description ?? "No description"}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
                           <label className="flex items-center gap-2 text-sm">
                             <input
                               type="checkbox"
@@ -4082,7 +4278,10 @@ export default function SettingsPage() {
                               colSpan={Math.max(1, displayStations.length + 1)}
                               className="px-4 py-6 text-center text-muted-foreground"
                             >
-                              Loading assignments...
+                              <LoadingSpinner
+                                className="justify-center"
+                                label="Loading assignments..."
+                              />
                             </td>
                           </tr>
                         ) : users.length === 0 ? (
@@ -4173,13 +4372,13 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm text-muted-foreground">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0 text-sm text-muted-foreground">
                       {selectedStopReasonIds.length > 0
                         ? `${selectedStopReasonIds.length} selected`
                         : " "}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
                         <input
                           type="checkbox"
@@ -4282,6 +4481,13 @@ export default function SettingsPage() {
 
         <TabsContent value="partners">
           <div className="space-y-6">
+            {isSettingsDataLoading ? (
+              <Card className="min-w-0">
+                <CardContent className="py-10">
+                  <LoadingSpinner label="Loading partner settings..." />
+                </CardContent>
+              </Card>
+            ) : null}
             <Card>
               <CardHeader>
                 <CardTitle>Partners</CardTitle>
@@ -4289,7 +4495,7 @@ export default function SettingsPage() {
                   Maintain external suppliers for outsourced steps.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="min-w-0 space-y-4">
                 <div className="border-t border-border pt-4 pb-8">
                   <div className="text-sm font-medium">Partner groups</div>
                   <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
@@ -4536,23 +4742,23 @@ export default function SettingsPage() {
                       key={partner.id}
                       className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
                     >
-                    <div>
-                      <div className="font-medium">{partner.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {partner.groupId
-                          ? (partnerGroups.find(
-                              (group) => group.id === partner.groupId,
-                            )?.name ?? "Group")
-                          : "No group"}
-                      </div>
-                      {(partner.email || partner.phone) && (
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {partner.email ? `Email: ${partner.email}` : ""}
-                          {partner.email && partner.phone ? " • " : ""}
-                          {partner.phone ? `Phone: ${partner.phone}` : ""}
+                      <div>
+                        <div className="font-medium">{partner.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {partner.groupId
+                            ? (partnerGroups.find(
+                                (group) => group.id === partner.groupId,
+                              )?.name ?? "Group")
+                            : "No group"}
                         </div>
-                      )}
-                    </div>
+                        {(partner.email || partner.phone) && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {partner.email ? `Email: ${partner.email}` : ""}
+                            {partner.email && partner.phone ? " • " : ""}
+                            {partner.phone ? `Phone: ${partner.phone}` : ""}
+                          </div>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2">
                         <label className="flex items-center gap-2 text-sm">
                           <input
@@ -4939,6 +5145,11 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {isUsersLoading || isInvitesLoading || rolePermissionsLoading ? (
+                <div className="rounded-lg border border-border bg-muted/20 p-4">
+                  <LoadingSpinner label="Loading user access settings..." />
+                </div>
+              ) : null}
               <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <div className="text-sm font-medium">Invite user</div>
                 <div className="mt-3 grid gap-3 items-center md:grid-cols-[minmax(220px,1.2fr)_minmax(200px,1fr)_minmax(140px,0.5fr)_auto] md:items-end">
@@ -5055,7 +5266,10 @@ export default function SettingsPage() {
                           colSpan={4}
                           className="px-4 py-6 text-center text-muted-foreground"
                         >
-                          Loading users...
+                          <LoadingSpinner
+                            className="justify-center"
+                            label="Loading users..."
+                          />
                         </td>
                       </tr>
                     ) : users.length === 0 ? (
@@ -5090,7 +5304,9 @@ export default function SettingsPage() {
                                   <SelectItem
                                     key={roleOption}
                                     value={roleOption}
-                                    disabled={inactiveRoleOptions.has(roleOption)}
+                                    disabled={inactiveRoleOptions.has(
+                                      roleOption,
+                                    )}
                                   >
                                     {inactiveRoleOptions.has(roleOption)
                                       ? `${roleOption} (inactive)`
@@ -5146,8 +5362,8 @@ export default function SettingsPage() {
                   </Button>
                 </div>
                 {rolePermissionsLoading ? (
-                  <div className="text-xs text-muted-foreground">
-                    Loading RBAC...
+                  <div className="rounded-md border border-border bg-muted/20 px-3 py-3">
+                    <LoadingSpinner label="Loading RBAC..." />
                   </div>
                 ) : null}
                 {rolePermissionsError ? (
@@ -5190,15 +5406,21 @@ export default function SettingsPage() {
                           className="border-t border-border align-top"
                         >
                           <td className="px-3 py-2">
-                            <div className="font-medium">{definition.label}</div>
+                            <div className="font-medium">
+                              {definition.label}
+                            </div>
                             <div className="text-xs text-muted-foreground">
                               {definition.description}
                             </div>
                           </td>
                           {editablePermissionRoles.map((role) => {
                             const allowed =
-                              permissionDrafts[definition.key]?.includes(role) ??
-                              defaultPermissionRoles[definition.key].includes(role);
+                              permissionDrafts[definition.key]?.includes(
+                                role,
+                              ) ??
+                              defaultPermissionRoles[definition.key].includes(
+                                role,
+                              );
                             return (
                               <td
                                 key={`${definition.key}-${role}`}
@@ -5251,7 +5473,10 @@ export default function SettingsPage() {
                             colSpan={5}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
-                            Loading invites...
+                            <LoadingSpinner
+                              className="justify-center"
+                              label="Loading invites..."
+                            />
                           </td>
                         </tr>
                       ) : invites.length === 0 ? (
@@ -5331,8 +5556,8 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               {!isLoadedFromDb ? (
-                <div className="text-xs text-muted-foreground">
-                  Syncing workflow rules...
+                <div className="rounded-lg border border-border bg-muted/20 p-4">
+                  <LoadingSpinner label="Syncing workflow rules..." />
                 </div>
               ) : null}
               <div className="grid gap-6">
@@ -5495,14 +5720,17 @@ export default function SettingsPage() {
                     <div className="mt-2 space-y-2">
                       {workflowStatusOptions.map((option) => {
                         const config = orderStatusConfigDrafts[option.value];
-                        const previewLabel = config?.label?.trim() || option.label;
+                        const previewLabel =
+                          config?.label?.trim() || option.label;
                         return (
                           <div
                             key={option.value}
                             className="rounded-lg border border-border bg-background/50 p-3"
                           >
                             <div className="mb-2 flex items-center justify-between gap-3">
-                              <div className="text-sm font-medium">{option.label}</div>
+                              <div className="text-sm font-medium">
+                                {option.label}
+                              </div>
                               <span
                                 className={`inline-flex w-fit items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getStatusBadgeColorClass(config?.color)}`}
                               >
@@ -5629,15 +5857,19 @@ export default function SettingsPage() {
                     </div>
                     <div className="mt-2 space-y-2">
                       {externalJobStatusOptions.map((option) => {
-                        const config = externalJobStatusConfigDrafts[option.value];
-                        const previewLabel = config?.label?.trim() || option.label;
+                        const config =
+                          externalJobStatusConfigDrafts[option.value];
+                        const previewLabel =
+                          config?.label?.trim() || option.label;
                         return (
                           <div
                             key={option.value}
                             className="rounded-lg border border-border bg-background/50 p-3"
                           >
                             <div className="mb-2 flex items-center justify-between gap-3">
-                              <div className="text-sm font-medium">{option.label}</div>
+                              <div className="text-sm font-medium">
+                                {option.label}
+                              </div>
                               <span
                                 className={`inline-flex w-fit items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getStatusBadgeColorClass(config?.color)}`}
                               >
@@ -5707,13 +5939,15 @@ export default function SettingsPage() {
                                     option.value,
                                   )}
                                   onChange={(event) =>
-                                    setExternalJobStatusConfigDrafts((prev) => ({
-                                      ...prev,
-                                      [option.value]: {
-                                        ...prev[option.value],
-                                        isActive: event.target.checked,
-                                      },
-                                    }))
+                                    setExternalJobStatusConfigDrafts(
+                                      (prev) => ({
+                                        ...prev,
+                                        [option.value]: {
+                                          ...prev[option.value],
+                                          isActive: event.target.checked,
+                                        },
+                                      }),
+                                    )
                                   }
                                 />
                                 <span>Active</span>
@@ -6202,6 +6436,13 @@ export default function SettingsPage() {
 
         <TabsContent value="integrations">
           <div className="space-y-4">
+            {isTenantProfileLoading ? (
+              <Card>
+                <CardContent className="py-10">
+                  <LoadingSpinner label="Loading integration settings..." />
+                </CardContent>
+              </Card>
+            ) : null}
             <Card>
               <CardHeader>
                 <CardTitle>Outbound Email Sender</CardTitle>
@@ -6215,7 +6456,9 @@ export default function SettingsPage() {
                     From name
                     <input
                       value={outboundFromName}
-                      onChange={(event) => setOutboundFromName(event.target.value)}
+                      onChange={(event) =>
+                        setOutboundFromName(event.target.value)
+                      }
                       className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       placeholder={companyName || "Company"}
                       disabled={!currentUser.isAdmin}
@@ -6226,7 +6469,9 @@ export default function SettingsPage() {
                     <input
                       type="email"
                       value={outboundFromEmail}
-                      onChange={(event) => setOutboundFromEmail(event.target.value)}
+                      onChange={(event) =>
+                        setOutboundFromEmail(event.target.value)
+                      }
                       className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       placeholder="orders@your-company.com"
                       disabled={!currentUser.isAdmin}
@@ -6278,7 +6523,9 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     onClick={handleSaveOutboundEmail}
-                    disabled={!currentUser.isAdmin || outboundState === "saving"}
+                    disabled={
+                      !currentUser.isAdmin || outboundState === "saving"
+                    }
                   >
                     {outboundState === "saving"
                       ? "Saving..."

@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useNotifications } from "@/components/ui/Notifications";
+import { createId } from "@/lib/utils/createId";
 
 export interface HierarchyLevel {
   id: string;
@@ -236,7 +237,7 @@ export function HierarchyProvider({
       nodes,
       addLevel: async (level) => {
         if (!supabase) {
-          setLevels((prev) => [...prev, { ...level, id: crypto.randomUUID() }]);
+          setLevels((prev) => [...prev, { ...level, id: createId("level") }]);
           return;
         }
         if (!user.tenantId) {
@@ -313,14 +314,14 @@ export function HierarchyProvider({
       },
       addNode: async (node) => {
         if (!supabase) {
-          const nodeId = node.id ?? crypto.randomUUID();
+          const nodeId = node.id ?? createId("node");
           setNodes((prev) => [...prev, { ...node, id: nodeId }]);
           return;
         }
         if (!user.tenantId) {
           return;
         }
-        const nodeId = node.id ?? crypto.randomUUID();
+        const nodeId = node.id ?? createId("node");
         const { data, error } = await supabase
           .from("hierarchy_nodes")
           .insert({

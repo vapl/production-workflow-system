@@ -1,12 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  LayoutGridIcon,
-  LayoutListIcon,
-  SearchIcon,
-  SlidersHorizontalIcon,
-} from "lucide-react";
+import { SearchIcon, SlidersHorizontalIcon } from "lucide-react";
 
 import type { OrderStatus } from "@/types/orders";
 import {
@@ -16,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
+import { ViewModeToggle } from "./ViewModeToggle";
 
 export type StatusOption = { value: OrderStatus | "all"; label: string };
 type StatusFilter = StatusOption["value"];
@@ -91,32 +87,11 @@ export function OrdersToolbar({
           />
         </div>
         {viewMode && onViewModeChange ? (
-          <div className="flex items-center gap-1 rounded-full border border-border bg-background p-1 text-xs shadow-sm lg:ml-3">
-            <button
-              type="button"
-              onClick={() => onViewModeChange("table")}
-              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition ${
-                viewMode === "table"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted/50"
-              }`}
-            >
-              <LayoutListIcon className="h-3.5 w-3.5" />
-              Table
-            </button>
-            <button
-              type="button"
-              onClick={() => onViewModeChange("cards")}
-              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition ${
-                viewMode === "cards"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted/50"
-              }`}
-            >
-              <LayoutGridIcon className="h-3.5 w-3.5" />
-              Cards
-            </button>
-          </div>
+          <ViewModeToggle
+            value={viewMode}
+            onChange={onViewModeChange}
+            className="lg:ml-3"
+          />
         ) : null}
       </div>
 

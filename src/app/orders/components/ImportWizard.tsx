@@ -14,6 +14,7 @@ import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useNotifications } from "@/components/ui/Notifications";
 import { parseOrdersWorkbook } from "@/lib/excel/ordersExcel";
+import { createId } from "@/lib/utils/createId";
 import type { OrderStatus } from "@/types/orders";
 
 const requiredFields = [
@@ -423,7 +424,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
             return;
           }
           const currentParentId = parentId;
-          const newId = crypto.randomUUID();
+          const newId = createId("node");
           nodeKeyMap.set(key, newId);
           updatedHierarchy[level.id] = newId;
           parentId = newId;

@@ -6,9 +6,20 @@ import { OrdersTable } from "./components/OrdersTable";
 import { OrdersCards } from "./components/OrdersCards";
 import { OrdersToolbar } from "./components/OrdersToolbar";
 import type { Order, OrderStatus } from "@/types/orders";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { PlusIcon } from "lucide-react";
+import {
+  DownloadIcon,
+  ExternalLinkIcon,
+  FileSpreadsheetIcon,
+  PanelRightIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
+  UploadIcon,
+  XIcon,
+} from "lucide-react";
 import { OrderModal } from "./components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
@@ -21,6 +32,10 @@ import { supabase, supabaseAvatarBucket } from "@/lib/supabaseClient";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatOrderStatus } from "@/lib/domain/formatters";
 import { useRbac } from "@/contexts/RbacContext";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
+import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
+import { ViewModeToggle } from "./components/ViewModeToggle";
 
 export default function OrdersPage() {
   const {
@@ -76,18 +91,11 @@ export default function OrdersPage() {
       return build(productionStatuses);
     }
     if (user.role === "Sales") {
-      return [
-        { value: "all", label: "All" },
-        ...build(salesStatuses),
-      ];
+      return [{ value: "all", label: "All" }, ...build(salesStatuses)];
     }
-    return [
-      { value: "all", label: "All" },
-      ...build(salesStatuses),
-    ];
+    return [{ value: "all", label: "All" }, ...build(salesStatuses)];
   }, [rules.orderStatusConfig, rules.statusLabels, user.role]);
-  const defaultStatusFilter =
-    roleStatusOptions[0]?.value ?? ("all" as const);
+  const defaultStatusFilter = roleStatusOptions[0]?.value ?? ("all" as const);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">(
     defaultStatusFilter,
   );
@@ -100,6 +108,10 @@ export default function OrdersPage() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
+  const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const [partnerGroupFilter, setPartnerGroupFilter] = useState("");
   const [assignmentFilter, setAssignmentFilter] = useState<"queue" | "my">(
     "queue",
@@ -177,10 +189,10 @@ export default function OrdersPage() {
     return rows.map((order) => ({
       ...order,
       assignedEngineerAvatarUrl: order.assignedEngineerId
-        ? avatarMap.get(order.assignedEngineerId) ?? undefined
+        ? (avatarMap.get(order.assignedEngineerId) ?? undefined)
         : undefined,
       assignedManagerAvatarUrl: order.assignedManagerId
-        ? avatarMap.get(order.assignedManagerId) ?? undefined
+        ? (avatarMap.get(order.assignedManagerId) ?? undefined)
         : undefined,
     }));
   };
@@ -227,17 +239,29 @@ export default function OrdersPage() {
     if (typeof window === "undefined") {
       return;
     }
-    const stored = window.localStorage.getItem("pws-orders-view");
-    if (stored === "table" || stored === "cards") {
-      setViewMode(stored);
-      return;
-    }
-    const isMobile = window.matchMedia("(max-width: 767px)").matches;
-    setViewMode(isMobile ? "cards" : "table");
+    const media = window.matchMedia("(max-width: 767px)");
+    const applyDefault = () => {
+      if (media.matches) {
+        setViewMode("cards");
+        return;
+      }
+      const stored = window.localStorage.getItem("pws-orders-view");
+      if (stored === "table" || stored === "cards") {
+        setViewMode(stored);
+      } else {
+        setViewMode("table");
+      }
+    };
+    applyDefault();
+    media.addEventListener("change", applyDefault);
+    return () => media.removeEventListener("change", applyDefault);
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
+      return;
+    }
+    if (window.matchMedia("(max-width: 767px)").matches) {
       return;
     }
     window.localStorage.setItem("pws-orders-view", viewMode);
@@ -267,6 +291,101 @@ export default function OrdersPage() {
     document.addEventListener("click", handleClick);
     return () => document.removeEventListener("click", handleClick);
   }, [isImportMenuOpen]);
+
+  useEffect(() => {
+    if (!isMobileActionsOpen) {
+      return;
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileActionsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMobileActionsOpen]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.innerWidth >= 768) {
+        setShowCompactMobileTitle(false);
+        return;
+      }
+      setShowCompactMobileTitle(window.scrollY > 110);
+    };
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) {
+        return;
+      }
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        handleScroll();
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileSearchOpen && !isMobileFiltersOpen) {
+      return;
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileSearchOpen(false);
+        setIsMobileFiltersOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMobileSearchOpen, isMobileFiltersOpen]);
+
+  useEffect(() => {
+    const hasMobileDrawerOpen = isMobileActionsOpen || isMobileFiltersOpen;
+    if (!hasMobileDrawerOpen) {
+      return;
+    }
+    if (window.innerWidth >= 768) {
+      return;
+    }
+
+    const scrollY = window.scrollY;
+    const {
+      overflow: previousOverflow,
+      position: previousPosition,
+      top: previousTop,
+      left: previousLeft,
+      right: previousRight,
+      width: previousWidth,
+    } = document.body.style;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.position = previousPosition;
+      document.body.style.top = previousTop;
+      document.body.style.left = previousLeft;
+      document.body.style.right = previousRight;
+      document.body.style.width = previousWidth;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isMobileActionsOpen, isMobileSearchOpen, isMobileFiltersOpen]);
 
   useEffect(() => {
     setStatusFilter(defaultStatusFilter);
@@ -302,7 +421,7 @@ export default function OrdersPage() {
       const label =
         contractId === "none"
           ? "No contract"
-          : contractLabelMap.get(contractId) ?? contractId;
+          : (contractLabelMap.get(contractId) ?? contractId);
       if (!groups.has(label)) {
         groups.set(label, []);
       }
@@ -598,16 +717,198 @@ export default function OrdersPage() {
   }
 
   return (
-    <section className="space-y-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Customer Orders</CardTitle>
-          <div className="flex items-center gap-2">
-            <Link href="/orders/external">
-              <Button variant="outline">External Jobs</Button>
+    <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
+      <MobilePageTitle
+        title="Customer Orders"
+        showCompact={showCompactMobileTitle}
+        subtitle="Plan customer orders, sync accounting data, and manage delivery workflow."
+        className="pt-6 pb-6"
+      />
+
+      <BottomSheet
+        id="orders-actions-drawer"
+        open={isMobileActionsOpen}
+        onClose={() => setIsMobileActionsOpen(false)}
+        ariaLabel="Customer order actions"
+        closeButtonLabel="Close customer orders actions"
+        title="Order actions"
+        enableSwipeToClose
+        panelClassName="flex max-h-[78dvh] flex-col pb-[max(6rem,env(safe-area-inset-bottom))]"
+      >
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="space-y-2">
+            <Link
+              href="/orders/external"
+              onClick={() => setIsMobileActionsOpen(false)}
+              className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
+            >
+              <ExternalLinkIcon className="h-4 w-4" />
+              External Jobs
             </Link>
             <Button
               variant="outline"
+              className="w-full justify-start gap-2"
+              onClick={async () => {
+                setIsSyncing(true);
+                await syncAccountingOrders();
+                setIsSyncing(false);
+                setIsMobileActionsOpen(false);
+              }}
+              disabled={isSyncing}
+            >
+              <RefreshCwIcon className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+              {isSyncing ? "Syncing..." : "Sync Accounting"}
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-2"
+              onClick={() => {
+                const levelNames = levels.map((level) => level.name);
+                const blob = buildOrdersTemplate(levelNames);
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                anchor.download = "pws-orders-template.xlsx";
+                anchor.click();
+                URL.revokeObjectURL(url);
+                setIsMobileActionsOpen(false);
+              }}
+            >
+              <DownloadIcon className="h-4 w-4" />
+              Download template
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-2"
+              onClick={() => {
+                setIsImportOpen(true);
+                setIsMobileActionsOpen(false);
+              }}
+            >
+              <FileSpreadsheetIcon className="h-4 w-4" />
+              Import Excel
+            </Button>
+            <div className="pt-2">
+              <div className="mb-2 text-xs font-medium text-muted-foreground">
+                View mode
+              </div>
+              <ViewModeToggle value={viewMode} onChange={setViewMode} />
+            </div>
+          </div>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={isMobileSearchOpen}
+        onClose={() => setIsMobileSearchOpen(false)}
+        ariaLabel="Search orders"
+        closeButtonLabel="Close search"
+        title="Search"
+        enableSwipeToClose
+        panelClassName="pb-[max(4rem,env(safe-area-inset-bottom))]"
+      >
+        <div className="px-4 pt-3">
+          <label className="relative block space-y-1 text-sm">
+            <span className="sr-only">Search</span>
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search orders, customers, products..."
+              className="h-10 w-full rounded-lg border border-border bg-input-background px-3 pr-10 text-[16px] text-foreground md:text-sm"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery("");
+                }}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
+              >
+                <XIcon className="h-4 w-4" />
+              </button>
+            ) : null}
+          </label>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={isMobileFiltersOpen}
+        onClose={() => setIsMobileFiltersOpen(false)}
+        ariaLabel="Order filters"
+        closeButtonLabel="Close filters"
+        title="Filters"
+        enableSwipeToClose
+        panelClassName="max-h-[78dvh] overflow-y-auto pb-[max(6rem,env(safe-area-inset-bottom))]"
+      >
+        <div className="space-y-4 px-4 pt-3">
+          <div>
+            <div className="mb-2 text-sm font-medium">Status</div>
+            <div className="flex flex-wrap gap-2">
+              {roleStatusOptions.map((option) => {
+                const active = statusFilter === option.value;
+                return (
+                  <Button
+                    key={option.value}
+                    size="sm"
+                    variant={active ? "default" : "outline"}
+                    onClick={() => setStatusFilter(option.value)}
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+          {user.role === "Engineering" ? (
+            <div>
+              <div className="mb-2 text-sm font-medium">Engineering</div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={assignmentFilter === "queue" ? "default" : "outline"}
+                  onClick={() => setAssignmentFilter("queue")}
+                >
+                  Queue
+                </Button>
+                <Button
+                  size="sm"
+                  variant={assignmentFilter === "my" ? "default" : "outline"}
+                  onClick={() => setAssignmentFilter("my")}
+                >
+                  My work
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={groupByContract}
+              onChange={() => setGroupByContract((prev) => !prev)}
+            />
+            Group by Contract
+          </label>
+        </div>
+      </BottomSheet>
+
+      <DesktopPageHeader
+        sticky
+        title="Customer Orders"
+        subtitle="Plan customer orders, sync accounting data, and manage delivery workflow."
+        className="md:sticky md:top-16 md:bg-background/95 z-20 md:backdrop-blur"
+        actions={
+          <div className="hidden items-center gap-2 md:flex">
+            <Link href="/orders/external">
+              <Button variant="outline" className="gap-2">
+                <ExternalLinkIcon className="h-4 w-4" />
+                External Jobs
+              </Button>
+            </Link>
+            <Button
+              variant="outline"
+              className="gap-2"
               onClick={async () => {
                 setIsSyncing(true);
                 await syncAccountingOrders();
@@ -615,20 +916,23 @@ export default function OrdersPage() {
               }}
               disabled={isSyncing}
             >
+              <RefreshCwIcon className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
               {isSyncing ? "Syncing..." : "Sync Accounting"}
             </Button>
             <div className="relative" ref={importMenuRef}>
               <Button
                 variant="outline"
+                className="gap-2"
                 onClick={() => setIsImportMenuOpen((prev) => !prev)}
               >
+                <UploadIcon className="h-4 w-4" />
                 Import
               </Button>
               {isImportMenuOpen && (
                 <div className="absolute right-0 top-11 z-50 w-48 rounded-lg border border-border bg-card p-1 shadow-lg">
                   <button
                     type="button"
-                    className="flex w-full items-center rounded-md px-3 py-2 text-sm hover:bg-muted/50"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted/50"
                     onClick={() => {
                       const levelNames = levels.map((level) => level.name);
                       const blob = buildOrdersTemplate(levelNames);
@@ -641,16 +945,18 @@ export default function OrdersPage() {
                       setIsImportMenuOpen(false);
                     }}
                   >
+                    <DownloadIcon className="h-4 w-4" />
                     Download template
                   </button>
                   <button
                     type="button"
-                    className="flex w-full items-center rounded-md px-3 py-2 text-sm hover:bg-muted/50"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted/50"
                     onClick={() => {
                       setIsImportOpen(true);
                       setIsImportMenuOpen(false);
                     }}
                   >
+                    <FileSpreadsheetIcon className="h-4 w-4" />
                     Import Excel
                   </button>
                 </div>
@@ -668,39 +974,44 @@ export default function OrdersPage() {
               New Order
             </Button>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        }
+      />
+
+      <Card className="rounded-none border-0 bg-transparent shadow-none">
+        <CardContent className="space-y-4 px-0 md:px-4">
           {error && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {error}
             </div>
           )}
-          <OrdersToolbar
-            searchQuery={searchQuery}
-            statusFilter={statusFilter}
-            onSearchChange={setSearchQuery}
-            onStatusChange={setStatusFilter}
-            groupByContract={groupByContract}
-            onToggleGroupByContract={() =>
-              setGroupByContract((prev) => !prev)
-            }
-            statusCounts={statusCounts}
-            statusOptions={roleStatusOptions}
-            partnerGroupOptions={activeGroups.map((group) => ({
-              value: group.id,
-              label: group.name,
-            }))}
-            partnerGroupFilter={partnerGroupFilter}
-            onPartnerGroupChange={setPartnerGroupFilter}
-            assignmentFilter={
-              user.role === "Engineering" ? assignmentFilter : undefined
-            }
-            onAssignmentChange={
-              user.role === "Engineering" ? setAssignmentFilter : undefined
-            }
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-          />
+          <div className="hidden md:block">
+            <OrdersToolbar
+              searchQuery={searchQuery}
+              statusFilter={statusFilter}
+              onSearchChange={setSearchQuery}
+              onStatusChange={setStatusFilter}
+              groupByContract={groupByContract}
+              onToggleGroupByContract={() =>
+                setGroupByContract((prev) => !prev)
+              }
+              statusCounts={statusCounts}
+              statusOptions={roleStatusOptions}
+              partnerGroupOptions={activeGroups.map((group) => ({
+                value: group.id,
+                label: group.name,
+              }))}
+              partnerGroupFilter={partnerGroupFilter}
+              onPartnerGroupChange={setPartnerGroupFilter}
+              assignmentFilter={
+                user.role === "Engineering" ? assignmentFilter : undefined
+              }
+              onAssignmentChange={
+                user.role === "Engineering" ? setAssignmentFilter : undefined
+              }
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+            />
+          </div>
           {viewMode === "cards" ? (
             <OrdersCards
               orders={visibleOrders}
@@ -812,9 +1123,8 @@ export default function OrdersPage() {
                         );
                       }
                       if (partnerGroupFilter) {
-                        const orderIds = await getOrderIdsForPartnerGroup(
-                          partnerGroupFilter,
-                        );
+                        const orderIds =
+                          await getOrderIdsForPartnerGroup(partnerGroupFilter);
                         if (orderIds.length === 0) {
                           return;
                         }
@@ -831,10 +1141,13 @@ export default function OrdersPage() {
                         dueDate: row.due_date,
                         priority: row.priority,
                         status: row.status,
-                        assignedEngineerId: row.assigned_engineer_id ?? undefined,
-                        assignedEngineerName: row.assigned_engineer_name ?? undefined,
+                        assignedEngineerId:
+                          row.assigned_engineer_id ?? undefined,
+                        assignedEngineerName:
+                          row.assigned_engineer_name ?? undefined,
                         assignedManagerId: row.assigned_manager_id ?? undefined,
-                        assignedManagerName: row.assigned_manager_name ?? undefined,
+                        assignedManagerName:
+                          row.assigned_manager_name ?? undefined,
                         attachments: row.order_attachments?.map((item) => ({
                           id: item.id,
                           name: "Attachment",
@@ -860,8 +1173,10 @@ export default function OrdersPage() {
                           partnerId: job.partner_id ?? undefined,
                         })),
                       })) as Order[];
-                      const withProduction = await applyProductionStatus(mapped);
-                      const enriched = await resolveOrderAvatars(withProduction);
+                      const withProduction =
+                        await applyProductionStatus(mapped);
+                      const enriched =
+                        await resolveOrderAvatars(withProduction);
                       setVisibleOrders((prev) => [...prev, ...enriched]);
                     } finally {
                       setIsListLoading(false);
@@ -930,6 +1245,59 @@ export default function OrdersPage() {
           </div>
         </div>
       )}
+      <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 md:hidden">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-12 w-12 rounded-full bg-card shadow-lg"
+              onClick={() => setIsMobileFiltersOpen(true)}
+              aria-label="Open filters"
+            >
+              <SlidersHorizontalIcon className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-12 w-12 rounded-full bg-card shadow-lg"
+              onClick={() => setIsMobileSearchOpen(true)}
+              aria-label="Open search"
+            >
+              <SearchIcon className="h-5 w-5" />
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-12 w-12 rounded-full bg-card shadow-lg"
+              onClick={() => setIsMobileActionsOpen(true)}
+              aria-label="Open customer orders actions"
+              aria-haspopup="dialog"
+              aria-expanded={isMobileActionsOpen}
+              aria-controls="orders-actions-drawer"
+            >
+              <PanelRightIcon className="h-5 w-5" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="fixed inset-x-4 bottom-[calc(10.75rem+env(safe-area-inset-bottom))] z-30 flex justify-end md:hidden">
+        <Button
+          className="h-11 max-w-full rounded-full px-4 shadow-lg"
+          onClick={() => {
+            setEditingOrder(null);
+            setIsModalOpen(true);
+          }}
+          disabled={!canEditOrDeleteOrders}
+        >
+          <PlusIcon className="mr-1 h-4 w-4" />
+          New Order
+        </Button>
+      </div>
     </section>
   );
 }

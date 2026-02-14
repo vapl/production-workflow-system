@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useMemo, useRef, useState } from "react";
 import { CheckCircleIcon, InfoIcon, XCircleIcon } from "lucide-react";
+import { createId } from "@/lib/utils/createId";
 
 type NotificationVariant = "success" | "error" | "info";
 
@@ -57,7 +58,7 @@ export function NotificationsProvider({
     () => ({
       notifications,
       notify: ({ title, description, variant = "success", durationMs = 3500 }) => {
-        const id = crypto.randomUUID();
+        const id = createId("notification");
         setNotifications((prev) => [
           ...prev,
           { id, title, description, variant },
@@ -145,11 +146,11 @@ export function NotificationsViewport() {
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex w-full max-w-sm flex-col gap-2">
+    <div className="fixed left-1/2 top-[calc(env(safe-area-inset-top)+0.75rem)] z-50 flex w-[calc(100vw-1rem)] max-w-sm -translate-x-1/2 flex-col gap-2 md:left-auto md:top-auto md:w-full md:translate-x-0 md:bottom-6 md:right-6">
       {notifications.map((item) => (
         <div
           key={item.id}
-          className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-lg"
+          className="animate-notification-in-mobile flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-lg md:animate-none"
           onMouseEnter={() => pause(item.id)}
           onMouseLeave={() => resume(item.id)}
         >

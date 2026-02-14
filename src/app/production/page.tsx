@@ -15,6 +15,9 @@ import {
 } from "@/components/ui/Select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
+import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
@@ -25,12 +28,16 @@ import {
 } from "@/lib/domain/workingCalendar";
 import type { OrderInputField } from "@/types/orderInputs";
 import {
+  CalendarIcon,
+  ClipboardListIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   ExternalLinkIcon,
+  Info,
+  ListIcon,
+  PanelRightIcon,
   PaperclipIcon,
   XIcon,
-  Info,
 } from "lucide-react";
 import Link from "next/link";
 import QRCode from "qrcode";
@@ -314,6 +321,11 @@ export default function ProductionPage() {
   );
   const [isSplitOpen, setIsSplitOpen] = useState(false);
   const [isCreatingWorkOrders, setIsCreatingWorkOrders] = useState(false);
+  const [activeProductionTab, setActiveProductionTab] = useState<
+    "planning" | "list" | "calendar"
+  >("planning");
+  const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
+  const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const [removingQueueId, setRemovingQueueId] = useState<string | null>(null);
   const [splitRows, setSplitRows] = useState<
     Array<{
@@ -501,7 +513,11 @@ export default function ProductionPage() {
           return;
         }
         const nextValues: Record<string, Record<string, unknown>> = {};
-        (valuesResult.data ?? []).forEach((row: any) => {
+        (valuesResult.data ?? []).forEach((row: {
+          order_id: string;
+          field_id: string;
+          value: unknown;
+        }) => {
           const orderId = row.order_id as string;
           const fieldId = row.field_id as string;
           if (!nextValues[orderId]) {
@@ -693,7 +709,9 @@ export default function ProductionPage() {
     }
     if (field.fieldType === "toggle_number") {
       const payload =
-        typeof value === "object" && value !== null ? (value as any) : {};
+        typeof value === "object" && value !== null
+          ? (value as Record<string, unknown>)
+          : {};
       const enabled = Boolean(payload.enabled);
       const amount =
         payload.amount === "" ||
@@ -1741,22 +1759,157 @@ export default function ProductionPage() {
   const isReadyLoading = isLoading;
   const isQueuesLoading = isLoading;
 
+  useEffect(() => {
+    if (!isMobileSectionsOpen) {
+      return;
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileSectionsOpen(false);
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMobileSectionsOpen]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.innerWidth >= 768) {
+        setShowCompactMobileTitle(false);
+        return;
+      }
+      setShowCompactMobileTitle(window.scrollY > 110);
+    };
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) {
+        return;
+      }
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        handleScroll();
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", handleScroll);
+    };
+  }, []);
+
   return (
     <>
-      <Tabs defaultValue="planning" className="space-y-6">
-        <div className="sticky top-16 z-10 flex flex-wrap items-end justify-between gap-4 bg-background/95 px-4 py-3">
-          <div>
-            <h2 className="text-2xl font-semibold">Production</h2>
-            <p className="text-sm text-muted-foreground">
-              Plan work orders, batch similar items, and assign to stations.
-            </p>
+      <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] right-4 z-40 md:hidden">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-11 w-11 rounded-full shadow-lg"
+          onClick={() => setIsMobileSectionsOpen(true)}
+          aria-label="Open production sections"
+          aria-haspopup="dialog"
+          aria-expanded={isMobileSectionsOpen}
+          aria-controls="production-sections-drawer"
+        >
+          <PanelRightIcon className="h-4 w-4" />
+        </Button>
+      </div>
+      <>
+        <BottomSheet
+          id="production-sections-drawer"
+          open={isMobileSectionsOpen}
+          onClose={() => setIsMobileSectionsOpen(false)}
+          ariaLabel="Production sections"
+          closeButtonLabel="Close production sections"
+          title="Production sections"
+          enableSwipeToClose
+          panelClassName="flex max-h-[78dvh] flex-col pb-[max(1rem,env(safe-area-inset-bottom))]"
+        >
+          <div className="flex-1 overflow-y-auto p-3">
+            <div className="space-y-1">
+              {[
+                {
+                  value: "planning",
+                  label: "Planning",
+                  icon: ClipboardListIcon,
+                },
+                { value: "list", label: "Orders", icon: ListIcon },
+                { value: "calendar", label: "Calendar", icon: CalendarIcon },
+              ].map((section) => {
+                const isActive = activeProductionTab === section.value;
+                const SectionIcon = section.icon;
+                return (
+                  <button
+                    key={section.value}
+                    type="button"
+                    onClick={() => {
+                      setActiveProductionTab(
+                        section.value as "planning" | "list" | "calendar",
+                      );
+                      setIsMobileSectionsOpen(false);
+                    }}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                      isActive
+                        ? "bg-accent text-accent-foreground"
+                        : "text-foreground hover:bg-muted/60"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      {SectionIcon ? <SectionIcon className="h-4 w-4" /> : null}
+                      {section.label}
+                    </span>
+                    {isActive ? <span className="text-xs">Active</span> : null}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <TabsList>
-            <TabsTrigger value="planning">Planning</TabsTrigger>
-            <TabsTrigger value="list">Orders</TabsTrigger>
-            <TabsTrigger value="calendar">Calendar</TabsTrigger>
-          </TabsList>
-        </div>
+        </BottomSheet>
+      </>
+
+      <Tabs
+        value={activeProductionTab}
+        onValueChange={(value) =>
+          setActiveProductionTab(value as "planning" | "list" | "calendar")
+        }
+        className="space-y-0 md:space-y-4 pt-16 md:pt-0"
+      >
+        <MobilePageTitle
+          title="Production"
+          showCompact={showCompactMobileTitle}
+          subtitle="Plan work orders, batch similar items, and assign to stations."
+          className="pt-6 pb-6"
+        />
+        <DesktopPageHeader
+          sticky
+          title="Production"
+          subtitle="Plan work orders, batch similar items, and assign to stations."
+          className="md:sticky md:top-16 md:z-10 md:bg-background/95 md:backdrop-blur"
+          actions={
+            <TabsList className="hidden md:flex">
+              <TabsTrigger value="planning" className="gap-2">
+                <ClipboardListIcon className="h-4 w-4" />
+                Planning
+              </TabsTrigger>
+              <TabsTrigger value="list" className="gap-2">
+                <ListIcon className="h-4 w-4" />
+                Orders
+              </TabsTrigger>
+              <TabsTrigger value="calendar" className="gap-2">
+                <CalendarIcon className="h-4 w-4" />
+                Calendar
+              </TabsTrigger>
+            </TabsList>
+          }
+        />
 
         <TabsContent value="planning" className="space-y-6">
           <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
@@ -2619,8 +2772,8 @@ export default function ProductionPage() {
                   Loading orders...
                 </div>
               ) : null}
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <label className="flex-1 space-y-1 text-xs text-muted-foreground">
+              <div className="space-y-3">
+                <label className="block w-full space-y-1 text-xs text-muted-foreground">
                   Search
                   <input
                     value={qrSearch}
@@ -2629,106 +2782,108 @@ export default function ProductionPage() {
                     className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground"
                   />
                 </label>
-                <DatePicker
-                  label="Date"
-                  value={qrFilterDate}
-                  onChange={setQrFilterDate}
-                  className="space-y-1 text-xs text-muted-foreground"
-                  triggerClassName="h-9"
-                />
-                <label className="space-y-1 text-xs text-muted-foreground">
-                  Status
-                  <Select
-                    value={qrFilterStatus}
-                    onValueChange={(value) =>
-                      setQrFilterStatus(
-                        value as
-                          | "all"
-                          | "queued"
-                          | "pending"
-                          | "in_progress"
-                          | "blocked"
-                          | "done",
-                      )
-                    }
-                  >
-                    <SelectTrigger className="h-9 w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="queued">Queued</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="in_progress">In progress</SelectItem>
-                      <SelectItem value="blocked">Blocked</SelectItem>
-                      <SelectItem value="done">Done</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
-                <label className="space-y-1 text-xs text-muted-foreground">
-                  Station
-                  <Select
-                    value={qrFilterStation}
-                    onValueChange={setQrFilterStation}
-                  >
-                    <SelectTrigger className="h-9 w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All stations</SelectItem>
-                      {stations.map((station) => (
-                        <SelectItem key={station.id} value={station.id}>
-                          {station.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      setQrFilterDate(new Date().toISOString().slice(0, 10))
-                    }
-                  >
-                    Today
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setQrSearch("");
-                      setQrFilterDate("");
-                      setQrFilterStatus("all");
-                      setQrFilterStation("all");
-                    }}
-                  >
-                    Clear filters
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setQrSelectedRowIds([])}
-                    disabled={qrSelectedRowIds.length === 0}
-                  >
-                    Clear selection
-                  </Button>
-                  <Button
-                    onClick={() =>
-                      handleOpenQrModal(
-                        filteredSelectableRows.filter((row) =>
-                          qrSelectedRowIds.includes(row.id),
-                        ),
-                      )
-                    }
-                    disabled={
-                      qrSelectedRowIds.length === 0 || qrState === "loading"
-                    }
-                    className="gap-2"
-                  >
-                    {qrState === "loading" ? (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                    ) : null}
-                    Print QR
-                  </Button>
+                <div className="grid gap-3 md:flex md:flex-wrap md:items-end md:justify-between">
+                  <DatePicker
+                    label="Date"
+                    value={qrFilterDate}
+                    onChange={setQrFilterDate}
+                    className="space-y-1 text-xs text-muted-foreground"
+                    triggerClassName="h-9"
+                  />
+                  <label className="space-y-1 text-xs text-muted-foreground">
+                    Status
+                    <Select
+                      value={qrFilterStatus}
+                      onValueChange={(value) =>
+                        setQrFilterStatus(
+                          value as
+                            | "all"
+                            | "queued"
+                            | "pending"
+                            | "in_progress"
+                            | "blocked"
+                            | "done",
+                        )
+                      }
+                    >
+                      <SelectTrigger className="h-9 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="queued">Queued</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="in_progress">In progress</SelectItem>
+                        <SelectItem value="blocked">Blocked</SelectItem>
+                        <SelectItem value="done">Done</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label className="space-y-1 text-xs text-muted-foreground">
+                    Station
+                    <Select
+                      value={qrFilterStation}
+                      onValueChange={setQrFilterStation}
+                    >
+                      <SelectTrigger className="h-9 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All stations</SelectItem>
+                        {stations.map((station) => (
+                          <SelectItem key={station.id} value={station.id}>
+                            {station.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setQrFilterDate(new Date().toISOString().slice(0, 10))
+                      }
+                    >
+                      Today
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setQrSearch("");
+                        setQrFilterDate("");
+                        setQrFilterStatus("all");
+                        setQrFilterStation("all");
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setQrSelectedRowIds([])}
+                      disabled={qrSelectedRowIds.length === 0}
+                    >
+                      Clear selection
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        handleOpenQrModal(
+                          filteredSelectableRows.filter((row) =>
+                            qrSelectedRowIds.includes(row.id),
+                          ),
+                        )
+                      }
+                      disabled={
+                        qrSelectedRowIds.length === 0 || qrState === "loading"
+                      }
+                      className="gap-2"
+                    >
+                      {qrState === "loading" ? (
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                      ) : null}
+                      Print QR
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -2773,51 +2928,35 @@ export default function ProductionPage() {
                   No construction rows found for the current filters.
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-muted/40 text-xs text-muted-foreground">
-                      <tr>
-                        <th className="px-3 py-2"></th>
-                        <th className="px-3 py-2">Order</th>
-                        <th className="px-3 py-2">Customer</th>
-                        <th className="px-3 py-2">Construction</th>
-                        <th className="px-3 py-2">Due</th>
-                        <th className="px-3 py-2">Started</th>
-                        <th className="px-3 py-2">Qty</th>
-                        <th className="px-3 py-2">Batch</th>
-                        <th className="px-3 py-2 text-right">Total time</th>
-                        {stations.map((station) => (
-                          <th
-                            key={station.id}
-                            className="px-3 py-2 text-center"
-                          >
-                            {station.name}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredQrRows.map((row) => {
-                        const isChecked = qrSelectedRowIds.includes(row.id);
-                        const isSelectable = row.fieldId !== "fallback";
-                        const rowKey = rowKeyForRow(row);
-                        const stationStatuses = stationStatusMap.get(rowKey);
-                        const batchKey = `${row.orderId}:${row.batchCode}`;
-                        const runStats = batchRunStats.get(batchKey);
-                        const timeStats = rowTimeStats.get(rowKey);
-                        const startedAt = runStats?.startAt ?? "";
-                        const startedDate = startedAt
-                          ? formatDateInput(startedAt.slice(0, 10))
-                          : "";
-                        const totalMinutes =
-                          timeStats?.totalMinutes ??
-                          runStats?.totalMinutes ??
-                          0;
-                        const hasTimeData =
-                          Boolean(timeStats) || Boolean(runStats);
-                        return (
-                          <tr key={row.id} className="border-t border-border">
-                            <td className="px-3 py-2">
+                <>
+                  <div className="space-y-3 md:hidden">
+                    {filteredQrRows.map((row) => {
+                      const isChecked = qrSelectedRowIds.includes(row.id);
+                      const isSelectable = row.fieldId !== "fallback";
+                      const rowKey = rowKeyForRow(row);
+                      const stationStatuses = stationStatusMap.get(rowKey);
+                      const batchKey = `${row.orderId}:${row.batchCode}`;
+                      const runStats = batchRunStats.get(batchKey);
+                      const timeStats = rowTimeStats.get(rowKey);
+                      const startedAt = runStats?.startAt ?? "";
+                      const startedDate = startedAt
+                        ? formatDateInput(startedAt.slice(0, 10))
+                        : "";
+                      const totalMinutes =
+                        timeStats?.totalMinutes ?? runStats?.totalMinutes ?? 0;
+                      const hasTimeData =
+                        Boolean(timeStats) || Boolean(runStats);
+                      return (
+                        <div
+                          key={row.id}
+                          className={`rounded-lg border px-3 py-3 ${
+                            isChecked
+                              ? "border-primary/40 bg-primary/5"
+                              : "border-border bg-card"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <label className="flex items-start gap-3">
                               <input
                                 type="checkbox"
                                 checked={isChecked}
@@ -2834,21 +2973,64 @@ export default function ProductionPage() {
                                   });
                                 }}
                               />
-                            </td>
-                            <td className="px-3 py-2 font-medium">
-                              {row.orderNumber}
-                            </td>
-                            <td className="px-3 py-2">{row.customerName}</td>
-                            <td className="px-3 py-2">{row.itemName}</td>
-                            <td className="px-3 py-2">
-                              {row.dueDate ? formatDateInput(row.dueDate) : "-"}
-                            </td>
-                            <td className="px-3 py-2">{startedDate || "-"}</td>
-                            <td className="px-3 py-2">{row.qty}</td>
-                            <td className="px-3 py-2">{row.batchCode}</td>
-                            <td className="px-3 py-2 text-right">
-                              {hasTimeData ? formatDuration(totalMinutes) : "-"}
-                            </td>
+                              <div className="min-w-0">
+                                <div className="font-semibold">
+                                  {row.orderNumber} / {row.batchCode}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {row.customerName}
+                                </div>
+                              </div>
+                            </label>
+                            <Badge variant={priorityBadge(row.priority)}>
+                              {row.priority}
+                            </Badge>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <div className="text-muted-foreground">
+                                Construction
+                              </div>
+                              <div className="font-medium text-foreground">
+                                {row.itemName}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-muted-foreground">Qty</div>
+                              <div className="font-medium text-foreground">
+                                {row.qty}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-muted-foreground">Due</div>
+                              <div className="font-medium text-foreground">
+                                {row.dueDate
+                                  ? formatDateInput(row.dueDate)
+                                  : "-"}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-muted-foreground">
+                                Started
+                              </div>
+                              <div className="font-medium text-foreground">
+                                {startedDate || "-"}
+                              </div>
+                            </div>
+                            <div className="col-span-2">
+                              <div className="text-muted-foreground">
+                                Total time
+                              </div>
+                              <div className="font-medium text-foreground">
+                                {hasTimeData
+                                  ? formatDuration(totalMinutes)
+                                  : "-"}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 space-y-2">
                             {stations.map((station) => {
                               const entry = stationStatuses?.get(station.id);
                               const stationMinutes =
@@ -2856,30 +3038,23 @@ export default function ProductionPage() {
                                 runStats?.stationMinutes.get(station.id) ??
                                 0;
                               return (
-                                <td
+                                <div
                                   key={station.id}
-                                  className="px-3 py-2 text-center text-xs"
+                                  className="flex items-center justify-between rounded-md border border-border/70 px-2 py-1.5 text-xs"
                                 >
+                                  <span className="text-muted-foreground">
+                                    {station.name}
+                                  </span>
                                   {entry?.status ? (
-                                    <div className="flex flex-col items-center gap-1">
-                                      <div className="relative flex items-center justify-center gap-2">
-                                        <Badge
-                                          variant={statusBadge(
-                                            entry.status as BatchRunRow["status"],
-                                          )}
-                                        >
-                                          {entry.status.replace("_", " ")}
-                                        </Badge>
-                                        {entry.status === "blocked" &&
-                                        entry.blockedReason ? (
-                                          <Tooltip
-                                            content={entry.blockedReason}
-                                          >
-                                            <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
-                                          </Tooltip>
-                                        ) : null}
-                                      </div>
-                                      <span className="text-[11px] text-muted-foreground">
+                                    <div className="flex items-center gap-2">
+                                      <Badge
+                                        variant={statusBadge(
+                                          entry.status as BatchRunRow["status"],
+                                        )}
+                                      >
+                                        {entry.status.replace("_", " ")}
+                                      </Badge>
+                                      <span className="text-muted-foreground">
                                         {formatDuration(stationMinutes)}
                                       </span>
                                     </div>
@@ -2888,15 +3063,146 @@ export default function ProductionPage() {
                                       -
                                     </span>
                                   )}
-                                </td>
+                                </div>
                               );
                             })}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-muted/40 text-xs text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2"></th>
+                          <th className="px-3 py-2">Order</th>
+                          <th className="px-3 py-2">Customer</th>
+                          <th className="px-3 py-2">Construction</th>
+                          <th className="px-3 py-2">Due</th>
+                          <th className="px-3 py-2">Started</th>
+                          <th className="px-3 py-2">Qty</th>
+                          <th className="px-3 py-2">Batch</th>
+                          <th className="px-3 py-2 text-right">Total time</th>
+                          {stations.map((station) => (
+                            <th
+                              key={station.id}
+                              className="px-3 py-2 text-center"
+                            >
+                              {station.name}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredQrRows.map((row) => {
+                          const isChecked = qrSelectedRowIds.includes(row.id);
+                          const isSelectable = row.fieldId !== "fallback";
+                          const rowKey = rowKeyForRow(row);
+                          const stationStatuses = stationStatusMap.get(rowKey);
+                          const batchKey = `${row.orderId}:${row.batchCode}`;
+                          const runStats = batchRunStats.get(batchKey);
+                          const timeStats = rowTimeStats.get(rowKey);
+                          const startedAt = runStats?.startAt ?? "";
+                          const startedDate = startedAt
+                            ? formatDateInput(startedAt.slice(0, 10))
+                            : "";
+                          const totalMinutes =
+                            timeStats?.totalMinutes ??
+                            runStats?.totalMinutes ??
+                            0;
+                          const hasTimeData =
+                            Boolean(timeStats) || Boolean(runStats);
+                          return (
+                            <tr key={row.id} className="border-t border-border">
+                              <td className="px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  disabled={!isSelectable}
+                                  onChange={(event) => {
+                                    if (!isSelectable) {
+                                      return;
+                                    }
+                                    setQrSelectedRowIds((prev) => {
+                                      if (event.target.checked) {
+                                        return [...prev, row.id];
+                                      }
+                                      return prev.filter((id) => id !== row.id);
+                                    });
+                                  }}
+                                />
+                              </td>
+                              <td className="px-3 py-2 font-medium">
+                                {row.orderNumber}
+                              </td>
+                              <td className="px-3 py-2">{row.customerName}</td>
+                              <td className="px-3 py-2">{row.itemName}</td>
+                              <td className="px-3 py-2">
+                                {row.dueDate
+                                  ? formatDateInput(row.dueDate)
+                                  : "-"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {startedDate || "-"}
+                              </td>
+                              <td className="px-3 py-2">{row.qty}</td>
+                              <td className="px-3 py-2">{row.batchCode}</td>
+                              <td className="px-3 py-2 text-right">
+                                {hasTimeData
+                                  ? formatDuration(totalMinutes)
+                                  : "-"}
+                              </td>
+                              {stations.map((station) => {
+                                const entry = stationStatuses?.get(station.id);
+                                const stationMinutes =
+                                  timeStats?.stationMinutes.get(station.id) ??
+                                  runStats?.stationMinutes.get(station.id) ??
+                                  0;
+                                return (
+                                  <td
+                                    key={station.id}
+                                    className="px-3 py-2 text-center text-xs"
+                                  >
+                                    {entry?.status ? (
+                                      <div className="flex flex-col items-center gap-1">
+                                        <div className="relative flex items-center justify-center gap-2">
+                                          <Badge
+                                            variant={statusBadge(
+                                              entry.status as BatchRunRow["status"],
+                                            )}
+                                          >
+                                            {entry.status.replace("_", " ")}
+                                          </Badge>
+                                          {entry.status === "blocked" &&
+                                          entry.blockedReason ? (
+                                            <Tooltip
+                                              content={entry.blockedReason}
+                                            >
+                                              <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
+                                            </Tooltip>
+                                          ) : null}
+                                        </div>
+                                        <span className="text-[11px] text-muted-foreground">
+                                          {formatDuration(stationMinutes)}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground">
+                                        -
+                                      </span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>

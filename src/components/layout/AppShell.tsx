@@ -1,19 +1,39 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import {
+  LayoutDashboardIcon,
+  MenuIcon,
+  PackageIcon,
+  FactoryIcon,
+  SettingsIcon,
+  UserIcon,
+  Building2Icon,
+  LogOutIcon,
+  XIcon,
+} from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { TabsNav } from "@/components/layout/TabsNav";
-import { useCurrentUser } from "@/contexts/UserContext";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { Button } from "@/components/ui/Button";
+import { SideDrawer } from "@/components/ui/SideDrawer";
+import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { canAccessRoute, isProductionWorker } from "@/lib/auth/permissions";
 import { useRbac } from "@/contexts/RbacContext";
+import { cn } from "@/components/ui/utils";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
-  const { permissions } = useRbac();
+  const { signOut } = useAuthActions();
+  const { permissions, hasPermission } = useRbac();
   const pathname = usePathname();
   const router = useRouter();
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const swipeStartX = useRef<number | null>(null);
+  const swipeStartY = useRef<number | null>(null);
   const isAuthRoute = pathname?.startsWith("/auth");
   const isExternalJobRespondRoute = pathname?.startsWith(
     "/external-jobs/respond/",
@@ -26,6 +46,47 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname?.startsWith("/production/operator");
   const hideHeader =
     isExternalJobRespondRoute || pathname?.startsWith("/production/operator");
+  const canViewDashboard = hasPermission("dashboard.view");
+  const canViewProduction = hasPermission("production.view");
+  const canViewSettings = hasPermission("settings.view");
+  const canViewCompany = user.isAdmin;
+
+  const drawerNavItems = useMemo(
+    () =>
+      [
+        canViewDashboard
+          ? {
+              href: "/",
+              label: "Dashboard",
+              icon: LayoutDashboardIcon,
+            }
+          : null,
+        {
+          href: "/orders",
+          label: "Orders",
+          icon: PackageIcon,
+        },
+        canViewProduction
+          ? {
+              href: "/production",
+              label: "Production",
+              icon: FactoryIcon,
+            }
+          : null,
+        canViewSettings
+          ? {
+              href: "/settings",
+              label: "Settings",
+              icon: SettingsIcon,
+            }
+          : null,
+      ].filter(Boolean) as Array<{
+        href: string;
+        label: string;
+        icon: React.ComponentType<{ className?: string }>;
+      }>,
+    [canViewDashboard, canViewProduction, canViewSettings],
+  );
 
   useEffect(() => {
     const errorHandler = (event: ErrorEvent) => {
@@ -55,6 +116,65 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!isMobileDrawerOpen) {
+      return;
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileDrawerOpen(false);
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMobileDrawerOpen]);
+
+  useEffect(() => {
+    if (hideHeader) {
+      return;
+    }
+    const handleTouchStart = (event: TouchEvent) => {
+      if (isMobileDrawerOpen || window.innerWidth >= 768) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch || touch.clientX > 24) {
+        return;
+      }
+      swipeStartX.current = touch.clientX;
+      swipeStartY.current = touch.clientY;
+    };
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (isMobileDrawerOpen || window.innerWidth >= 768) {
+        return;
+      }
+      const startX = swipeStartX.current;
+      const startY = swipeStartY.current;
+      const touch = event.changedTouches[0];
+      swipeStartX.current = null;
+      swipeStartY.current = null;
+      if (!touch || startX === null || startY === null) {
+        return;
+      }
+      const deltaX = touch.clientX - startX;
+      const deltaY = Math.abs(touch.clientY - startY);
+      if (deltaX > 72 && deltaY < 48) {
+        setIsMobileDrawerOpen(true);
+      }
+    };
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [hideHeader, isMobileDrawerOpen]);
+
+  useEffect(() => {
     if (!user.loading && !user.isAuthenticated && !isPublicRoute) {
       router.replace("/auth");
     }
@@ -72,13 +192,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ? "/settings"
           : pathname.startsWith("/production/operator")
             ? "/production/operator"
-          : pathname.startsWith("/production")
-            ? "/production"
-            : pathname.startsWith("/company")
-              ? "/company"
-              : pathname.startsWith("/orders")
-                ? "/orders"
-                : null;
+            : pathname.startsWith("/production")
+              ? "/production"
+              : pathname.startsWith("/company")
+                ? "/company"
+                : pathname.startsWith("/orders")
+                  ? "/orders"
+                  : null;
     if (!route) {
       return;
     }
@@ -139,18 +259,196 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const tenantInitials = (user.tenantName ?? "Company")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  const userInitials = user.name
+    ? user.name
+        .split(" ")
+        .filter(Boolean)
+        .map((part) => part[0])
+        .slice(0, 2)
+        .join("")
+        .toUpperCase()
+    : "U";
   return (
     <>
-      {hideHeader ? null : <Header />}
+      {hideHeader ? null : (
+        <div className="hidden md:block">
+          <Header />
+        </div>
+      )}
+      {hideHeader ? null : (
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-40 md:hidden">
+          <div className="container mx-auto px-4 pt-3">
+            <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsMobileDrawerOpen(true)}
+                aria-label="Open menu"
+                aria-haspopup="dialog"
+                aria-expanded={isMobileDrawerOpen}
+                aria-controls="global-mobile-drawer"
+              >
+                <MenuIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {hideHeader ? null : (
+        <>
+          <SideDrawer
+            id="global-mobile-drawer"
+            open={isMobileDrawerOpen}
+            onClose={() => setIsMobileDrawerOpen(false)}
+            ariaLabel="Navigation menu"
+            closeButtonLabel="Close menu"
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-4">
+              <div className="flex items-center gap-3">
+                {user.tenantLogoUrl ? (
+                  <img
+                    src={user.tenantLogoUrl}
+                    alt={user.tenantName ?? "Company logo"}
+                    className="h-10 w-10 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-xs font-semibold text-foreground">
+                    {tenantInitials}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">
+                    {user.tenantName ?? "Company workspace"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Production Workflow System
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Close menu"
+                onClick={() => setIsMobileDrawerOpen(false)}
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="border-b border-border p-4">
+              <div className="flex items-center gap-3">
+                {user.avatarUrl ? (
+                  <img
+                    src={user.avatarUrl}
+                    alt={user.name}
+                    className="h-9 w-9 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+                    {userInitials}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{user.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {user.role}
+                    {user.isAdmin && user.role !== "Owner" ? " / Admin" : ""}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <nav className="flex-1 overflow-y-auto p-3">
+              <div className="space-y-1">
+                {drawerNavItems.map(({ href, label, icon: Icon }) => {
+                  const isActive =
+                    href === "/"
+                      ? pathname === "/"
+                      : pathname?.startsWith(href);
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setIsMobileDrawerOpen(false)}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
+                        isActive
+                          ? "bg-accent text-accent-foreground"
+                          : "text-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </nav>
+
+            <div className="space-y-3 border-t border-border p-3">
+              <div className="space-y-1">
+                <Link
+                  href="/profile"
+                  onClick={() => setIsMobileDrawerOpen(false)}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
+                >
+                  <UserIcon className="h-4 w-4" />
+                  Profile settings
+                </Link>
+                {canViewCompany ? (
+                  <Link
+                    href="/company"
+                    onClick={() => setIsMobileDrawerOpen(false)}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
+                  >
+                    <Building2Icon className="h-4 w-4" />
+                    Company settings
+                  </Link>
+                ) : null}
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <ThemeToggle className="w-full justify-center" />
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => {
+                    setIsMobileDrawerOpen(false);
+                    void signOut();
+                  }}
+                >
+                  <LogOutIcon className="h-4 w-4" />
+                  Sign out
+                </Button>
+              </div>
+            </div>
+          </SideDrawer>
+        </>
+      )}
       {!hideTabsNav ? (
-        <div className="sticky top-0 w-full z-30 bg-background/90 backdrop-blur">
-          <div className="container w-full mx-auto px-4 py-3">
+        <div className="sticky top-0 z-30 w-full md:bg-background/90 md:backdrop-blur">
+          <div className="container mx-auto w-full px-0 py-0 md:px-4 md:py-3">
             <TabsNav />
           </div>
         </div>
       ) : null}
       <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
-        <main className="container mx-auto px-4 py-6">{children}</main>
+        <main
+          className={`container mx-auto px-4 py-6 ${
+            hideTabsNav
+              ? ""
+              : "pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-6"
+          }`}
+        >
+          {children}
+        </main>
       </div>
     </>
   );
