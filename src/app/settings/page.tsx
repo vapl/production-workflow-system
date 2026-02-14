@@ -2,7 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { PanelRightIcon } from "lucide-react";
+import {
+  FactoryIcon,
+  GitBranchIcon,
+  NetworkIcon,
+  PanelRightIcon,
+  PuzzleIcon,
+  UsersIcon,
+  WorkflowIcon,
+} from "lucide-react";
 import {
   Card,
   CardContent,
@@ -272,12 +280,12 @@ const defaultQrContentFields = [
 ];
 
 const settingsSections = [
-  { value: "structure", label: "Structure" },
-  { value: "operations", label: "Production" },
-  { value: "partners", label: "Partners" },
-  { value: "users", label: "Users" },
-  { value: "workflow", label: "Workflow" },
-  { value: "integrations", label: "Integrations" },
+  { value: "structure", label: "Structure", icon: NetworkIcon },
+  { value: "operations", label: "Production", icon: FactoryIcon },
+  { value: "partners", label: "Partners", icon: GitBranchIcon },
+  { value: "users", label: "Users", icon: UsersIcon },
+  { value: "workflow", label: "Workflow", icon: WorkflowIcon },
+  { value: "integrations", label: "Integrations", icon: PuzzleIcon },
 ] as const;
 
 type SettingsSectionValue = (typeof settingsSections)[number]["value"];
@@ -2666,7 +2674,12 @@ export default function SettingsPage() {
           actions={
             <TabsList className="justify-start overflow-x-auto flex-nowrap">
               {settingsSections.map((section) => (
-                <TabsTrigger key={section.value} value={section.value}>
+                <TabsTrigger
+                  key={section.value}
+                  value={section.value}
+                  className="gap-2"
+                >
+                  <section.icon className="h-4 w-4" />
                   {section.label}
                 </TabsTrigger>
               ))}
@@ -2705,7 +2718,10 @@ export default function SettingsPage() {
                             : "text-foreground hover:bg-muted/60"
                         }`}
                       >
-                        <span>{section.label}</span>
+                        <span className="flex items-center gap-2">
+                          <section.icon className="h-4 w-4" />
+                          {section.label}
+                        </span>
                         {isActive ? (
                           <span className="text-xs">Active</span>
                         ) : null}

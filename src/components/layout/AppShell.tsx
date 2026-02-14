@@ -439,7 +439,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       ) : null}
-      <div className="flex min-h-screen items-start justify-center bg-background font-sans text-foreground">
+      <div className="flex min-h-screen w-full items-start justify-center overflow-x-clip bg-background font-sans text-foreground">
         <main
           className={`container mx-auto px-4 py-6 ${
             hideTabsNav
