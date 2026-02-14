@@ -1952,7 +1952,7 @@ export default function ProductionPage() {
           sticky
           title="Production"
           subtitle="Plan work orders, batch similar items, and assign to stations."
-          className="md:sticky md:top-16 md:z-10 md:bg-background/95 md:backdrop-blur"
+          className="md:z-20"
           actions={
             <TabsList className="hidden md:flex">
               <TabsTrigger value="planning" className="gap-2">

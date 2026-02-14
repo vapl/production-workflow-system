@@ -46,6 +46,7 @@ export function DesktopPageHeader({
     <div
       className={cn(
         "hidden md:relative md:block md:w-full",
+        sticky && "md:-mt-px md:sticky md:top-16 md:z-20 md:bg-background",
         fullBleed && "desktop-sticky-bleed",
         sticky && showStickyShadow
           ? "desktop-sticky-bleed-shadow"

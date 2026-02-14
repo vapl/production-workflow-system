@@ -244,7 +244,7 @@
   }
 
   .desktop-sticky-bleed {
-    @apply md:before:pointer-events-none md:before:absolute md:before:inset-y-0 md:before:left-[calc((100dvw-100%)/-2)] md:before:-z-10 md:before:w-[100dvw] md:before:bg-inherit;
+    @apply md:before:pointer-events-none md:before:absolute md:before:inset-y-0 md:before:left-[calc((100dvw-100%)/-2)] md:before:-z-10 md:before:w-[100dvw] md:before:bg-background;
   }
 
   .desktop-sticky-bleed-shadow {

@@ -128,7 +128,7 @@ const SelectItem = ({
 }: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>) => (
   <SelectPrimitive.Item
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-md px-2 py-1.5 text-sm outline-none",
+      "relative flex w-full cursor-default select-none items-center rounded-md px-2 pr-10 py-1.5 text-sm outline-none",
       "focus:bg-muted focus:text-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
       className,
     )}

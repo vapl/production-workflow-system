@@ -903,7 +903,7 @@ export default function OrdersPage() {
         sticky
         title="Customer Orders"
         subtitle="Plan customer orders, sync accounting data, and manage delivery workflow."
-        className="md:sticky md:top-16 md:bg-background/95 z-20 md:backdrop-blur"
+        className="md:z-20"
         actions={
           <div className="hidden items-center gap-2 md:flex">
             <Link href="/orders/external">

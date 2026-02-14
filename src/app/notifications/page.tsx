@@ -247,7 +247,7 @@ export default function NotificationsPage() {
         sticky
         title="Notifications"
         subtitle="Review system updates, unread alerts, and workflow events."
-        className="md:sticky md:top-16 md:bg-background/95 z-20 md:backdrop-blur"
+        className="md:z-20"
       />
 
       <Card>

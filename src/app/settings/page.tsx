@@ -2883,7 +2883,7 @@ export default function SettingsPage() {
           sticky
           title={activeSectionLabel}
           subtitle={activeSectionSubtitle}
-          className="md:sticky md:top-16 md:z-20 md:bg-background/95 md:backdrop-blur"
+          className="md:z-20"
           actions={
             <TabsList className="justify-start overflow-x-auto flex-nowrap">
               {settingsSections.map((section) => (

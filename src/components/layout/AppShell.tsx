@@ -438,7 +438,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </>
       )}
       {!hideTabsNav ? (
-        <div className="sticky top-0 z-30 w-full md:bg-background/90 md:backdrop-blur">
+        <div className="sticky top-0 z-30 w-full md:bg-background">
           <div className="container mx-auto w-full px-0 py-0 md:px-4 md:py-3">
             <TabsNav />
           </div>
