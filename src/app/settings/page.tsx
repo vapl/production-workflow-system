@@ -21,6 +21,8 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { InputField } from "@/components/ui/InputField";
+import { SelectField } from "@/components/ui/SelectField";
+import { TextAreaField } from "@/components/ui/TextAreaField";
 import { Checkbox } from "@/components/ui/Checkbox";
 import {
   Select,
@@ -3158,8 +3160,7 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap gap-3">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Level</label>
+                  <SelectField label="Level" value={selectedLevelId} onValueChange={setSelectedLevelId}>
                     <Select
                       value={selectedLevelId}
                       onValueChange={setSelectedLevelId}
@@ -3175,12 +3176,13 @@ export default function SettingsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  </SelectField>
                   {parentLevel && (
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium">
-                        Parent ({parentLevel.name})
-                      </label>
+                    <SelectField
+                      label={`Parent (${parentLevel.name})`}
+                      value={nodeParentId}
+                      onValueChange={setNodeParentId}
+                    >
                       <Select
                         value={nodeParentId}
                         onValueChange={setNodeParentId}
@@ -3197,7 +3199,7 @@ export default function SettingsPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
+                    </SelectField>
                   )}
                 </div>
 
@@ -3229,21 +3231,19 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">
-                      Bulk add (one per line)
-                    </label>
-                    <textarea
-                      value={bulkNodeInput}
-                      onChange={(event) => setBulkNodeInput(event.target.value)}
-                      placeholder="PE 40 Durvis\nPE 40 Vitrina\nPE 40 Logs"
-                      className="min-h-30 rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                    />
-                    <div className="text-xs text-muted-foreground">
-                      Optional code: use &quot;Label | Code&quot; or
-                      &quot;Label;Code&quot;.
-                    </div>
-                  </div>
+                  <TextAreaField
+                    label="Bulk add (one per line)"
+                    value={bulkNodeInput}
+                    onChange={(event) => setBulkNodeInput(event.target.value)}
+                    placeholder="PE 40 Durvis\nPE 40 Vitrina\nPE 40 Logs"
+                    className="min-h-30"
+                    description={
+                      <>
+                        Optional code: use &quot;Label | Code&quot; or
+                        &quot;Label;Code&quot;.
+                      </>
+                    }
+                  />
                   <div className="flex gap-2">
                     <Button onClick={handleBulkAddNodes}>Add list</Button>
                   </div>
@@ -3410,8 +3410,13 @@ export default function SettingsPage() {
                     placeholder="Construction count"
                     className="h-10 text-sm"
                   />
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Group</label>
+                  <SelectField
+                    label="Group"
+                    value={orderFieldGroup}
+                    onValueChange={(value) =>
+                      setOrderFieldGroup(value as OrderInputGroupKey)
+                    }
+                  >
                     <Select
                       value={orderFieldGroup}
                       onValueChange={(value) =>
@@ -3429,9 +3434,14 @@ export default function SettingsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Type</label>
+                  </SelectField>
+                  <SelectField
+                    label="Type"
+                    value={orderFieldType}
+                    onValueChange={(value) =>
+                      setOrderFieldType(value as OrderInputFieldType)
+                    }
+                  >
                     <Select
                       value={orderFieldType}
                       onValueChange={(value) =>
@@ -3449,7 +3459,7 @@ export default function SettingsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  </SelectField>
                   <InputField
                     label="Order"
                     type="number"
@@ -3479,18 +3489,14 @@ export default function SettingsPage() {
                     placeholder="pcs"
                     className="h-10 text-sm"
                   />
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    Select options (comma, newline, or &quot;\&quot; separated)
-                    <textarea
-                      value={orderFieldOptions}
-                      onChange={(event) =>
-                        setOrderFieldOptions(event.target.value)
-                      }
-                      disabled={orderFieldType !== "select"}
-                      placeholder="Dealer, Private, Partner"
-                      className="min-h-20 rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
-                    />
-                  </label>
+                  <TextAreaField
+                    label='Select options (comma, newline, or "\\\\" separated)'
+                    value={orderFieldOptions}
+                    onChange={(event) => setOrderFieldOptions(event.target.value)}
+                    disabled={orderFieldType !== "select"}
+                    placeholder="Dealer, Private, Partner"
+                    className="min-h-20 disabled:opacity-50"
+                  />
                 </div>
 
                 {orderFieldType === "table" && (
@@ -3576,8 +3582,18 @@ export default function SettingsPage() {
                                 className="h-9 text-sm"
                                 labelClassName="text-xs font-medium"
                               />
-                              <label className="flex flex-col gap-1 text-xs font-medium">
-                                Type
+                              <SelectField
+                                label="Type"
+                                value={column.fieldType}
+                                onValueChange={(value) =>
+                                  updateOrderFieldColumn(index, {
+                                    fieldType:
+                                      value as OrderInputTableColumnType,
+                                  })
+                                }
+                                labelClassName="text-xs font-medium"
+                                className="space-y-1"
+                              >
                                 <Select
                                   value={column.fieldType}
                                   onValueChange={(value) =>
@@ -3603,7 +3619,7 @@ export default function SettingsPage() {
                                     )}
                                   </SelectContent>
                                 </Select>
-                              </label>
+                              </SelectField>
                               <InputField
                                 label="Unit"
                                 value={column.unit ?? ""}
@@ -3648,22 +3664,20 @@ export default function SettingsPage() {
                             </div>
                             {column.fieldType === "select" && (
                               <div className="grid gap-2 md:grid-cols-[1fr_160px] md:items-end">
-                                <label className="flex flex-col gap-1 text-xs font-medium">
-                                  Options (comma, newline, or &quot;\\&quot;
-                                  separated)
-                                  <textarea
-                                    value={(column.options ?? []).join("\n")}
-                                    onChange={(event) =>
-                                      updateOrderFieldColumn(index, {
-                                        options: parseOrderFieldOptions(
-                                          event.target.value,
-                                        ),
-                                      })
-                                    }
-                                    placeholder="Type A, Type B"
-                                    className="min-h-17.5 rounded-md border border-border bg-input-background px-2 py-2 text-sm"
-                                  />
-                                </label>
+                                <TextAreaField
+                                  label='Options (comma, newline, or "\\\\" separated)'
+                                  value={(column.options ?? []).join("\n")}
+                                  onChange={(event) =>
+                                    updateOrderFieldColumn(index, {
+                                      options: parseOrderFieldOptions(
+                                        event.target.value,
+                                      ),
+                                    })
+                                  }
+                                  placeholder="Type A, Type B"
+                                  className="min-h-17.5 rounded-md px-2 py-2 text-sm"
+                                  labelClassName="text-xs font-medium"
+                                />
                                 <label className="flex flex-col gap-1 text-xs font-medium">
                                   Max selects (1-3)
                                   <Input
@@ -4838,8 +4852,13 @@ export default function SettingsPage() {
                     placeholder="+371 2xxxxxxx"
                     className="h-10 text-sm"
                   />
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Group</label>
+                  <SelectField
+                    label="Group"
+                    value={partnerGroupId || "__none__"}
+                    onValueChange={(value) =>
+                      setPartnerGroupId(value === "__none__" ? "" : value)
+                    }
+                  >
                     <Select
                       value={partnerGroupId || "__none__"}
                       onValueChange={(value) =>
@@ -4860,7 +4879,7 @@ export default function SettingsPage() {
                           ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  </SelectField>
                   <div className="flex gap-2">
                     <Button onClick={handleSavePartner}>
                       {editingPartnerId ? "Save partner" : "Add partner"}
@@ -5030,8 +5049,13 @@ export default function SettingsPage() {
                     placeholder="Unit price"
                     className="h-10 text-sm"
                   />
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Type</label>
+                  <SelectField
+                    label="Type"
+                    value={externalJobFieldType}
+                    onValueChange={(value) =>
+                      setExternalJobFieldType(value as ExternalJobFieldType)
+                    }
+                  >
                     <Select
                       value={externalJobFieldType}
                       onValueChange={(value) =>
@@ -5049,9 +5073,14 @@ export default function SettingsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Scope</label>
+                  </SelectField>
+                  <SelectField
+                    label="Scope"
+                    value={externalJobFieldScope}
+                    onValueChange={(value) =>
+                      setExternalJobFieldScope(value as ExternalJobFieldScope)
+                    }
+                  >
                     <Select
                       value={externalJobFieldScope}
                       onValueChange={(value) =>
@@ -5069,7 +5098,7 @@ export default function SettingsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  </SelectField>
                   <InputField
                     label="Order"
                     type="number"
@@ -5097,29 +5126,25 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    Unit (optional)
-                    <Input
-                      value={externalJobFieldUnit}
-                      onChange={(event) =>
-                        setExternalJobFieldUnit(event.target.value)
-                      }
-                      placeholder="EUR"
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    Select options (comma, newline, or backslash separated)
-                    <textarea
-                      value={externalJobFieldOptions}
-                      onChange={(event) =>
-                        setExternalJobFieldOptions(event.target.value)
-                      }
-                      disabled={externalJobFieldType !== "select"}
-                      placeholder="EUR, USD"
-                      className="min-h-20 rounded-lg border border-border bg-input-background px-3 py-2 text-sm disabled:opacity-50"
-                    />
-                  </label>
+                  <InputField
+                    label="Unit (optional)"
+                    value={externalJobFieldUnit}
+                    onChange={(event) =>
+                      setExternalJobFieldUnit(event.target.value)
+                    }
+                    placeholder="EUR"
+                    className="h-10 text-sm"
+                  />
+                  <TextAreaField
+                    label="Select options (comma, newline, or backslash separated)"
+                    value={externalJobFieldOptions}
+                    onChange={(event) =>
+                      setExternalJobFieldOptions(event.target.value)
+                    }
+                    disabled={externalJobFieldType !== "select"}
+                    placeholder="EUR, USD"
+                    className="min-h-20 disabled:opacity-50"
+                  />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-4 text-sm">
@@ -5327,31 +5352,30 @@ export default function SettingsPage() {
               <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <div className="text-sm font-medium">Invite user</div>
                 <div className="mt-3 grid gap-3 items-center md:grid-cols-[minmax(220px,1.2fr)_minmax(200px,1fr)_minmax(140px,0.5fr)_auto] md:items-end">
-                  <label className="space-y-2 text-sm font-medium">
-                    Email
-                    <Input
-                      type="email"
-                      value={inviteEmail}
-                      onChange={(event) => setInviteEmail(event.target.value)}
-                      placeholder="user@company.com"
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={!canManageRolePermissions}
-                    />
-                  </label>
-                  <label className="space-y-2 text-sm font-medium">
-                    Full name
-                    <Input
-                      value={inviteFullName}
-                      onChange={(event) =>
-                        setInviteFullName(event.target.value)
-                      }
-                      placeholder="Full name"
-                      className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      disabled={!canManageRolePermissions}
-                    />
-                  </label>
-                  <label className="space-y-2 text-sm font-medium">
-                    Role
+                  <InputField
+                    label="Email"
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(event) => setInviteEmail(event.target.value)}
+                    placeholder="user@company.com"
+                    className="h-10 w-full text-sm"
+                    disabled={!canManageRolePermissions}
+                  />
+                  <InputField
+                    label="Full name"
+                    value={inviteFullName}
+                    onChange={(event) =>
+                      setInviteFullName(event.target.value)
+                    }
+                    placeholder="Full name"
+                    className="h-10 w-full text-sm"
+                    disabled={!canManageRolePermissions}
+                  />
+                  <SelectField
+                    label="Role"
+                    value={inviteRole}
+                    onValueChange={(value) => setInviteRole(value as UserRole)}
+                  >
                     <Select
                       value={inviteRole}
                       onValueChange={(value) =>
@@ -5370,7 +5394,7 @@ export default function SettingsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </label>
+                  </SelectField>
                   <Button
                     onClick={handleInviteUser}
                     disabled={
@@ -6322,11 +6346,21 @@ export default function SettingsPage() {
                       </div>
                       <div className="grid gap-3 md:grid-cols-2">
                         {attachmentRoles.map((role) => (
-                          <label
+                          <SelectField
                             key={role}
-                            className="space-y-2 text-sm font-medium"
+                            label={role}
+                            value={
+                              attachmentDefaultDrafts[role] ??
+                              attachmentCategoryDrafts[0]?.id ??
+                              ""
+                            }
+                            onValueChange={(value) =>
+                              setAttachmentDefaultDrafts((prev) => ({
+                                ...prev,
+                                [role]: value,
+                              }))
+                            }
                           >
-                            {role}
                             <Select
                               value={
                                 attachmentDefaultDrafts[role] ??
@@ -6354,7 +6388,7 @@ export default function SettingsPage() {
                                 ))}
                               </SelectContent>
                             </Select>
-                          </label>
+                          </SelectField>
                         ))}
                       </div>
                       <p className="text-xs text-muted-foreground">

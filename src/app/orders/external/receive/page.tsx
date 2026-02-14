@@ -6,6 +6,7 @@ import { useOrders } from "@/app/orders/OrdersContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { FileField } from "@/components/ui/FileField";
 import { InputField } from "@/components/ui/InputField";
 import { Badge } from "@/components/ui/Badge";
 import { supabase } from "@/lib/supabaseClient";
@@ -310,18 +311,14 @@ export default function ExternalJobsReceivePage() {
                       placeholder="e.g. DN-2026-001"
                       className="h-9 text-sm"
                     />
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-medium">
-                        Delivery note file (optional)
-                      </label>
-                      <input
-                        type="file"
-                        onChange={(event) =>
-                          handleFileChange(job.id, event.target.files?.[0])
-                        }
-                        className="text-xs"
-                      />
-                    </div>
+                    <FileField
+                      label="Delivery note file (optional)"
+                      onChange={(event) =>
+                        handleFileChange(job.id, event.target.files?.[0])
+                      }
+                      className="text-xs"
+                      labelClassName="text-xs font-medium"
+                    />
                     <div className="flex flex-col gap-2">
                       <Button
                         onClick={() => handleReceive(job)}

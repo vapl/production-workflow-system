@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { FileField } from "@/components/ui/FileField";
 import { InputField } from "@/components/ui/InputField";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
@@ -422,36 +423,33 @@ export default function CompanyPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm">
-                    Select file
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (companyLogoPreview) {
-                          URL.revokeObjectURL(companyLogoPreview);
-                        }
-                        if (file && file.size > maxLogoBytes) {
-                          setCompanyLogoFile(null);
-                          setCompanyLogoPreview(null);
-                          setCompanyLogoState("error");
-                          setCompanyLogoMessage(
-                            "Logo file is too large. Max 2MB.",
-                          );
-                          return;
-                        }
-                        setCompanyLogoFile(file ?? null);
-                        setCompanyLogoPreview(
-                          file ? URL.createObjectURL(file) : null,
+                  <FileField
+                    label="Select file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (companyLogoPreview) {
+                        URL.revokeObjectURL(companyLogoPreview);
+                      }
+                      if (file && file.size > maxLogoBytes) {
+                        setCompanyLogoFile(null);
+                        setCompanyLogoPreview(null);
+                        setCompanyLogoState("error");
+                        setCompanyLogoMessage(
+                          "Logo file is too large. Max 2MB.",
                         );
-                        setCompanyLogoState("idle");
-                        setCompanyLogoMessage("");
-                      }}
-                      disabled={!currentUser.isAdmin}
-                      className="sr-only"
-                    />
-                  </label>
+                        return;
+                      }
+                      setCompanyLogoFile(file ?? null);
+                      setCompanyLogoPreview(file ? URL.createObjectURL(file) : null);
+                      setCompanyLogoState("idle");
+                      setCompanyLogoMessage("");
+                    }}
+                    disabled={!currentUser.isAdmin}
+                    wrapperClassName="w-auto"
+                    labelClassName="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm"
+                    className="sr-only"
+                  />
                   <Button
                     variant="outline"
                     onClick={handleUploadCompanyLogo}

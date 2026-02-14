@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { FileField } from "@/components/ui/FileField";
 import { InputField } from "@/components/ui/InputField";
 import {
   supabase,
@@ -366,31 +367,30 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <label className="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm">
-                  Select file
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (avatarPreview) {
-                        URL.revokeObjectURL(avatarPreview);
-                      }
-                      if (file && file.size > maxAvatarBytes) {
-                        setAvatarFile(null);
-                        setAvatarPreview(null);
-                        setAvatarState("error");
-                        setAvatarMessage("Avatar file is too large. Max 2MB.");
-                        return;
-                      }
-                      setAvatarFile(file ?? null);
-                      setAvatarPreview(file ? URL.createObjectURL(file) : null);
-                      setAvatarState("idle");
-                      setAvatarMessage("");
-                    }}
-                    className="sr-only"
-                  />
-                </label>
+                <FileField
+                  label="Select file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (avatarPreview) {
+                      URL.revokeObjectURL(avatarPreview);
+                    }
+                    if (file && file.size > maxAvatarBytes) {
+                      setAvatarFile(null);
+                      setAvatarPreview(null);
+                      setAvatarState("error");
+                      setAvatarMessage("Avatar file is too large. Max 2MB.");
+                      return;
+                    }
+                    setAvatarFile(file ?? null);
+                    setAvatarPreview(file ? URL.createObjectURL(file) : null);
+                    setAvatarState("idle");
+                    setAvatarMessage("");
+                  }}
+                  wrapperClassName="w-auto"
+                  labelClassName="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground shadow-sm"
+                  className="sr-only"
+                />
                 <Button
                   variant="outline"
                   onClick={handleAvatarUpload}

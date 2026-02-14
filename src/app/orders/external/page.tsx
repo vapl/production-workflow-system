@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { SelectField } from "@/components/ui/SelectField";
 import {
   Select,
   SelectContent,
@@ -694,8 +695,7 @@ export default function ExternalJobsPage() {
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent align="end" className="w-90 space-y-3">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Status</label>
+                  <SelectField label="Status" value={statusFilter} onValueChange={(value) => setStatusFilter(value as ExternalJobStatus | "all")}>
                     <Select
                       value={statusFilter}
                       onValueChange={(value) =>
@@ -713,9 +713,8 @@ export default function ExternalJobsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Partner group</label>
+                  </SelectField>
+                  <SelectField label="Partner group" value={partnerGroupFilter || "__all__"} onValueChange={(value) => setPartnerGroupFilter(value === "__all__" ? "" : value)}>
                     <Select
                       value={partnerGroupFilter || "__all__"}
                       onValueChange={(value) =>
@@ -734,9 +733,8 @@ export default function ExternalJobsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Partner</label>
+                  </SelectField>
+                  <SelectField label="Partner" value={partnerFilter || "__all__"} onValueChange={(value) => setPartnerFilter(value === "__all__" ? "" : value)}>
                     <Select
                       value={partnerFilter || "__all__"}
                       onValueChange={(value) =>
@@ -761,7 +759,7 @@ export default function ExternalJobsPage() {
                           ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  </SelectField>
                   <div className="flex justify-end">
                     <Button
                       type="button"

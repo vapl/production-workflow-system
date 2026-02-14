@@ -10,6 +10,8 @@ import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
 import { Input } from "@/components/ui/Input";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
+import { RangeField } from "@/components/ui/RangeField";
+import { SelectField } from "@/components/ui/SelectField";
 import {
   Select,
   SelectContent,
@@ -2325,8 +2327,12 @@ export default function ProductionPage() {
               onChange={setViewDate}
               className="space-y-1 text-xs text-muted-foreground"
             />
-            <label className="space-y-1 text-xs text-muted-foreground block">
-              Range
+            <SelectField
+              label="Range"
+              labelClassName="text-xs text-muted-foreground"
+              value={String(plannedRangeDays)}
+              onValueChange={(value) => setPlannedRangeDays(Number(value))}
+            >
               <Select
                 value={String(plannedRangeDays)}
                 onValueChange={(value) => setPlannedRangeDays(Number(value))}
@@ -2341,7 +2347,7 @@ export default function ProductionPage() {
                   <SelectItem value="14">14 days</SelectItem>
                 </SelectContent>
               </Select>
-            </label>
+            </SelectField>
             <div className="flex justify-end">
               <Button onClick={() => setIsMobileQueueFiltersOpen(false)}>
                 Done
@@ -2478,8 +2484,14 @@ export default function ProductionPage() {
                           className="h-9 text-sm text-foreground"
                         />
                       </label>
-                      <label className="space-y-1 text-xs text-muted-foreground">
-                        Priority
+                      <SelectField
+                        label="Priority"
+                        labelClassName="text-xs text-muted-foreground"
+                        value={readyPriority}
+                        onValueChange={(value) =>
+                          setReadyPriority(value as Priority | "all")
+                        }
+                      >
                         <Select
                           value={readyPriority}
                           onValueChange={(value) =>
@@ -2497,7 +2509,7 @@ export default function ProductionPage() {
                             <SelectItem value="low">Low</SelectItem>
                           </SelectContent>
                         </Select>
-                      </label>
+                      </SelectField>
                     </div>
                     {filteredReadyGroups.map((group) => {
                       const isSelected = selectedBatchKeys.includes(group.key);
@@ -2701,8 +2713,13 @@ export default function ProductionPage() {
                           : "No selection"}
                       </div>
                     </div>
-                    <label className="hidden space-y-1 text-xs text-muted-foreground md:block">
-                      Route
+                    <SelectField
+                      label="Route"
+                      labelClassName="text-xs text-muted-foreground"
+                      value={selectedRouteKey}
+                      onValueChange={setSelectedRouteKey}
+                      className="hidden space-y-1 md:block"
+                    >
                       {routes.length > 1 ? (
                         <Select
                           value={selectedRouteKey}
@@ -2740,7 +2757,7 @@ export default function ProductionPage() {
                           "No matching stations for default route."
                         )}
                       </div>
-                    </label>
+                    </SelectField>
                     <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground md:hidden">
                       <div className="font-medium text-foreground">
                         Route: {activeRoute?.label ?? "Default route"}
@@ -2807,8 +2824,15 @@ export default function ProductionPage() {
                     onChange={setViewDate}
                     className="flex items-center gap-2 whitespace-nowrap text-sm"
                   />
-                    <label className="flex items-center gap-2 whitespace-nowrap text-sm">
-                      Range
+                    <SelectField
+                      label="Range"
+                      labelClassName="text-sm font-normal text-muted-foreground"
+                      value={String(plannedRangeDays)}
+                      onValueChange={(value) =>
+                        setPlannedRangeDays(Number(value))
+                      }
+                      className="flex items-center gap-2 whitespace-nowrap"
+                    >
                       <Select
                         value={String(plannedRangeDays)}
                         onValueChange={(value) =>
@@ -2825,7 +2849,7 @@ export default function ProductionPage() {
                           <SelectItem value="14">14 days</SelectItem>
                         </SelectContent>
                       </Select>
-                    </label>
+                    </SelectField>
                   </div>
                   <div className="text-xs font-normal text-muted-foreground md:hidden">
                     {formatDateInput(viewDate)} - {plannedRangeDays} day
@@ -3830,8 +3854,15 @@ export default function ProductionPage() {
                   onChange={setViewDate}
                   className="flex items-center gap-2"
                 />
-                <label className="flex items-center gap-2">
-                  Range
+                <SelectField
+                  label="Range"
+                  labelClassName="text-xs font-medium text-muted-foreground"
+                  value={String(plannedRangeDays)}
+                  onValueChange={(value) =>
+                    setPlannedRangeDays(Number(value))
+                  }
+                  className="flex items-center gap-2"
+                >
                   <Select
                     value={String(plannedRangeDays)}
                     onValueChange={(value) =>
@@ -3848,7 +3879,7 @@ export default function ProductionPage() {
                       <SelectItem value="14">14 days</SelectItem>
                     </SelectContent>
                   </Select>
-                </label>
+                </SelectField>
               </div>
 
               {calendarDates.length === 0 || stations.length === 0 ? (
@@ -4032,8 +4063,7 @@ export default function ProductionPage() {
             </div>
             <div className="grid h-[calc(90vh-72px)] gap-6 overflow-hidden px-6 py-4 lg:grid-cols-[320px_1fr]">
               <div className="space-y-4 overflow-y-auto pr-2">
-                <label className="space-y-2 text-sm font-medium">
-                  Label size
+                <SelectField label="Label size" value={qrSize} onValueChange={setQrSize}>
                   <Select value={qrSize} onValueChange={setQrSize}>
                     <SelectTrigger className="h-10 w-full">
                       <SelectValue />
@@ -4046,7 +4076,7 @@ export default function ProductionPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </label>
+                </SelectField>
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Content fields</div>
                   <div className="text-xs text-muted-foreground">
@@ -4115,8 +4145,13 @@ export default function ProductionPage() {
                   </div>
                 </div>
                 <div className="grid gap-3">
-                  <label className="space-y-2 text-sm font-medium">
-                    Orientation
+                  <SelectField
+                    label="Orientation"
+                    value={qrOrientation}
+                    onValueChange={(value) =>
+                      setQrOrientation(value as "portrait" | "landscape")
+                    }
+                  >
                     <Select
                       value={qrOrientation}
                       onValueChange={(value) =>
@@ -4131,24 +4166,18 @@ export default function ProductionPage() {
                         <SelectItem value="landscape">Horizontal</SelectItem>
                       </SelectContent>
                     </Select>
-                  </label>
-                  <label className="space-y-2 text-sm font-medium">
-                    Preview zoom
-                    <input
-                      type="range"
-                      min={0.5}
-                      max={1.5}
-                      step={0.1}
-                      value={qrPreviewScale}
-                      onChange={(event) =>
-                        setQrPreviewScale(Number(event.target.value))
-                      }
-                      className="w-full"
-                    />
-                    <div className="text-xs text-muted-foreground">
-                      {Math.round(qrPreviewScale * 100)}%
-                    </div>
-                  </label>
+                  </SelectField>
+                  <RangeField
+                    label="Preview zoom"
+                    min={0.5}
+                    max={1.5}
+                    step={0.1}
+                    value={qrPreviewScale}
+                    onChange={(event) =>
+                      setQrPreviewScale(Number(event.target.value))
+                    }
+                    description={`${Math.round(qrPreviewScale * 100)}%`}
+                  />
                 </div>
                 {qrState === "loading" ? (
                   <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">

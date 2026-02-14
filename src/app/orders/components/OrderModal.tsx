@@ -4,13 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { InputField } from "@/components/ui/InputField";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/Select";
+import { SelectField } from "@/components/ui/SelectField";
+import { TextAreaField } from "@/components/ui/TextAreaField";
 import { XIcon } from "lucide-react";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 
@@ -436,7 +431,10 @@ export function OrderModal({
                 if (isCategoryProductOnly || isEditingOrderNumber) {
                   return;
                 }
-                const message = validateField("orderNumber", event.target.value);
+                const message = validateField(
+                  "orderNumber",
+                  event.target.value,
+                );
                 setErrors((prev) => ({
                   ...prev,
                   orderNumber: message,
@@ -474,7 +472,10 @@ export function OrderModal({
                 if (isCategoryProductOnly) {
                   return;
                 }
-                const message = validateField("customerName", event.target.value);
+                const message = validateField(
+                  "customerName",
+                  event.target.value,
+                );
                 setErrors((prev) => ({
                   ...prev,
                   customerName: message,
@@ -510,7 +511,10 @@ export function OrderModal({
                 if (isCategoryProductOnly) {
                   return;
                 }
-                const message = validateField("customerEmail", event.target.value);
+                const message = validateField(
+                  "customerEmail",
+                  event.target.value,
+                );
                 setErrors((prev) => ({
                   ...prev,
                   customerEmail: message,
@@ -668,7 +672,9 @@ export function OrderModal({
               required
               disabled={isCategoryProductOnly}
               error={
-                touched.quantity && errors.quantity ? errors.quantity : undefined
+                touched.quantity && errors.quantity
+                  ? errors.quantity
+                  : undefined
               }
             />
             <div className="space-y-2 text-sm font-medium">
@@ -692,7 +698,7 @@ export function OrderModal({
                 }}
                 min={minDueDate}
                 disabled={isCategoryProductOnly}
-                className="space-y-2 text-sm font-medium"
+                className=" text-sm font-medium"
                 triggerClassName={`h-10 ${
                   touched.dueDate && errors.dueDate
                     ? "border-destructive"
@@ -707,42 +713,34 @@ export function OrderModal({
             </div>
           </div>
 
-          <label className="space-y-2 text-sm font-medium">
-            Priority
-            <Select
-              value={formState.priority}
-              onValueChange={(value) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  priority: value as "low" | "normal" | "high" | "urgent",
-                }))
-              }
-              disabled={isCategoryProductOnly}
-            >
-              <SelectTrigger className="h-10 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="urgent">Urgent</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
+          <SelectField
+            label="Priority"
+            value={formState.priority}
+            onValueChange={(value) =>
+              setFormState((prev) => ({
+                ...prev,
+                priority: value as "low" | "normal" | "high" | "urgent",
+              }))
+            }
+            disabled={isCategoryProductOnly}
+            options={[
+              { value: "low", label: "Low" },
+              { value: "normal", label: "Normal" },
+              { value: "high", label: "High" },
+              { value: "urgent", label: "Urgent" },
+            ]}
+          />
 
-          <label className="space-y-2 text-sm font-medium">
-            Notes
-            <textarea
-              value={formState.notes}
-              onChange={(event) =>
-                setFormState((prev) => ({ ...prev, notes: event.target.value }))
-              }
-              className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
-              placeholder="Special requirements or additional information..."
-              disabled={isCategoryProductOnly}
-            />
-          </label>
+          <TextAreaField
+            label="Notes"
+            value={formState.notes}
+            onChange={(event) =>
+              setFormState((prev) => ({ ...prev, notes: event.target.value }))
+            }
+            className="min-h-22.5"
+            placeholder="Special requirements or additional information..."
+            disabled={isCategoryProductOnly}
+          />
 
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>

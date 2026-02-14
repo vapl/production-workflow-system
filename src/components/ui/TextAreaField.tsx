@@ -3,55 +3,51 @@
 import * as React from "react";
 import { cn } from "@/components/ui/utils";
 
-type FileFieldProps = Omit<React.ComponentProps<"input">, "type" | "id"> & {
+type TextAreaFieldProps = Omit<React.ComponentProps<"textarea">, "id"> & {
   id?: string;
   label?: React.ReactNode;
   description?: React.ReactNode;
   error?: React.ReactNode;
-  wrapperClassName?: string;
   labelClassName?: string;
   descriptionClassName?: string;
   errorClassName?: string;
 };
 
-export function FileField({
+export function TextAreaField({
   id,
   label,
   description,
   error,
   required,
-  wrapperClassName,
   className,
   labelClassName,
   descriptionClassName,
   errorClassName,
-  ...inputProps
-}: FileFieldProps) {
+  ...props
+}: TextAreaFieldProps) {
   const generatedId = React.useId();
-  const inputId = id ?? `file-field-${generatedId}`;
+  const textareaId = id ?? `textarea-field-${generatedId}`;
 
   return (
-    <div className={cn("space-y-2", wrapperClassName)}>
+    <div className="space-y-2">
       {label ? (
         <label
-          htmlFor={inputId}
-          className={cn("text-sm font-medium", labelClassName)}
+          htmlFor={textareaId}
+          className={cn("text-sm font-medium text-foreground", labelClassName)}
         >
           {label}
           {required ? " *" : ""}
         </label>
       ) : null}
-      <input
-        id={inputId}
-        type="file"
+      <textarea
+        id={textareaId}
         required={required}
         className={cn(
-          "ui-control w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground",
-          "file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary-foreground",
+          "w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
           className,
         )}
-        {...inputProps}
+        {...props}
       />
       {description ? (
         <div className={cn("text-xs text-muted-foreground", descriptionClassName)}>
@@ -64,3 +60,4 @@ export function FileField({
     </div>
   );
 }
+
