@@ -13,11 +13,13 @@ function Calendar({
   className,
   classNames,
   showOutsideDays = true,
+  weekStartsOn = 1,
   ...props
 }: CalendarProps) {
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      weekStartsOn={weekStartsOn}
       className={cn("p-3", className)}
       classNames={{
         root: "p-0",

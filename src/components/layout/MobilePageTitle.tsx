@@ -18,7 +18,7 @@ export function MobilePageTitle({
   return (
     <>
       <div className="pointer-events-none fixed inset-x-0 top-0 z-40 md:hidden">
-        <div className="container mx-auto px-4 pt-4">
+        <div className="container mx-auto px-4 pt-[calc(env(safe-area-inset-top)+1rem)]">
           <div className="mx-16 flex justify-center">
             <div
               className={cn(
@@ -34,7 +34,10 @@ export function MobilePageTitle({
         </div>
       </div>
 
-      <div className={cn("z-10 px-4 py-3 md:hidden", className)}>
+      <div
+        className={cn("z-10 px-4 pb-3 md:hidden", className)}
+        style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)" }}
+      >
         <div
           className={cn(
             "min-w-0 transition-[opacity,transform] duration-200",

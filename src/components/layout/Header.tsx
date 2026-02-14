@@ -11,25 +11,69 @@ import {
 import { Button } from "@/components/ui/Button";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
-import { useNotifications } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
-import { isProductionRole } from "@/lib/auth/permissions";
-import { useRbac } from "@/contexts/RbacContext";
 
 type NotificationItem = {
   id: string;
+  type?: string | null;
   title: string;
   body?: string | null;
   created_at: string;
   read_at?: string | null;
 };
 
+function notificationBadgeClass(type?: string | null) {
+  if (type === "blocked") {
+    return "border-amber-300 bg-amber-50 text-amber-700";
+  }
+  if (type === "resumed") {
+    return "border-emerald-300 bg-emerald-50 text-emerald-700";
+  }
+  if (type === "done") {
+    return "border-sky-300 bg-sky-50 text-sky-700";
+  }
+  return "border-border bg-muted text-muted-foreground";
+}
+
+function notificationBadgeLabel(type?: string | null) {
+  if (type === "blocked") return "Blocked";
+  if (type === "resumed") return "Resumed";
+  if (type === "done") return "Done";
+  return "Info";
+}
+
+function formatNotificationBody(body?: string | null) {
+  if (!body) return null;
+  if (body.includes("\n")) return body;
+  const legacy = body.match(/^(.*?) at (.*?)\. (.*?)(?: \(by (.*?)\))?\.$/);
+  if (!legacy) return body;
+  const [, item, station, actionOrReason, actor] = legacy;
+  const actorLine = actor ? `\nBy: ${actor}` : "";
+  return `Item: ${item}\nStation: ${station}\nAction: ${actionOrReason}${actorLine}`;
+}
+
+function notificationBodyRows(body?: string | null) {
+  const formatted = formatNotificationBody(body);
+  if (!formatted) return [];
+  return formatted
+    .split("\n")
+    .map((line) => {
+      const idx = line.indexOf(":");
+      if (idx === -1) {
+        return { label: "", value: line.trim() };
+      }
+      return {
+        label: line.slice(0, idx).trim(),
+        value: line.slice(idx + 1).trim(),
+      };
+    })
+    .filter((row) => row.value.length > 0);
+}
+
 export function Header() {
   const user = useCurrentUser();
-  const { permissions } = useRbac();
   const { signOut } = useAuthActions();
-  const { notify } = useNotifications();
   const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
@@ -135,38 +179,26 @@ export function Header() {
         (payload) => {
           const next = payload.new as {
             user_id?: string | null;
+            type?: string | null;
             title?: string;
             body?: string | null;
+            created_at?: string;
           };
           if (next.user_id && next.user_id !== user.id) {
-            return;
-          }
-          if (
-            !user.isAdmin &&
-            !user.isOwner &&
-            !isProductionRole(
-              { role: user.role, isAdmin: user.isAdmin, isOwner: user.isOwner },
-              permissions,
-            )
-          ) {
             return;
           }
           setUnreadCount((prev) => prev + 1);
           setNotificationItems((prev) => [
             {
               id: (payload.new as any).id,
+              type: next.type ?? null,
               title: next.title ?? "Notification",
               body: next.body ?? null,
-              created_at: (payload.new as any).created_at ?? new Date().toISOString(),
+              created_at: next.created_at ?? new Date().toISOString(),
               read_at: null,
             },
             ...prev,
           ]);
-          notify({
-            title: next.title ?? "Notification",
-            description: next.body ?? undefined,
-            variant: "info",
-          });
         },
       )
       .subscribe();
@@ -175,13 +207,8 @@ export function Header() {
       supabase.removeChannel(channel);
     };
   }, [
-    notify,
-    permissions,
     user.id,
-    user.isAdmin,
-    user.isOwner,
     user.isAuthenticated,
-    user.role,
     user.tenantId,
   ]);
 
@@ -196,7 +223,7 @@ export function Header() {
     const loadNotifications = async () => {
       const { data, error } = await supabase
         .from("notifications")
-        .select("id, title, body, created_at, read_at")
+        .select("id, type, title, body, created_at, read_at")
         .order("created_at", { ascending: false })
         .limit(20);
       if (!isMounted) {
@@ -373,10 +400,31 @@ export function Header() {
                                 : "bg-muted/30 text-foreground hover:bg-muted/50"
                             }`}
                           >
+                            <span
+                              className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${notificationBadgeClass(item.type)}`}
+                            >
+                              {notificationBadgeLabel(item.type)}
+                            </span>
                             <span className="font-medium">{item.title}</span>
-                            {item.body ? <span>{item.body}</span> : null}
+                            {item.body ? (
+                              <div className="mt-1 space-y-1 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5">
+                                {notificationBodyRows(item.body).map((row, idx) => (
+                                  <div
+                                    key={`${item.id}-row-${idx}`}
+                                    className="flex gap-1.5"
+                                  >
+                                    {row.label ? (
+                                      <span className="min-w-12 text-muted-foreground">
+                                        {row.label}:
+                                      </span>
+                                    ) : null}
+                                    <span className="text-foreground">{row.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
                             <span className="text-[10px] text-muted-foreground">
-                              {new Date(item.created_at).toLocaleString()}
+                              {new Date(item.created_at).toLocaleString("lv-LV")}
                             </span>
                           </button>
                         ))

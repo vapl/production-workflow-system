@@ -7,6 +7,7 @@ import { format, isValid, parseISO, startOfDay } from "date-fns";
 import { cn } from "@/components/ui/utils";
 import { Calendar } from "@/components/ui/Calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/Popover";
+import { useWorkingCalendar } from "@/contexts/WorkingCalendarContext";
 
 type DatePickerProps = {
   value: string;
@@ -29,6 +30,8 @@ export function DatePicker({
   min,
   placeholder = "Select date",
 }: DatePickerProps) {
+  const [open, setOpen] = React.useState(false);
+  const { workdays } = useWorkingCalendar();
   const selectedDate = React.useMemo(() => {
     if (!value) return undefined;
     const parsed = parseISO(value);
@@ -46,7 +49,7 @@ export function DatePicker({
   return (
     <label className={cn("space-y-1 text-xs text-muted-foreground", className)}>
       {label ? <span>{label}</span> : null}
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
@@ -67,12 +70,21 @@ export function DatePicker({
           <Calendar
             mode="single"
             selected={selectedDate}
+            modifiers={{
+              nonWorkingDay: (date) => !workdays.includes(date.getDay()),
+            }}
+            modifiersClassNames={{
+              nonWorkingDay:
+                "text-rose-500/90 bg-rose-50/60 dark:bg-rose-950/20",
+            }}
             onSelect={(date) => {
               if (!date) {
                 onChange("");
+                setOpen(false);
                 return;
               }
               onChange(format(date, "yyyy-MM-dd"));
+              setOpen(false);
             }}
             disabled={(date) =>
               minDate ? startOfDay(date) < startOfDay(minDate) : false

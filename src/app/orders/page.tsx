@@ -36,6 +36,7 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { ViewModeToggle } from "./components/ViewModeToggle";
+import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 
 export default function OrdersPage() {
   const {
@@ -54,6 +55,7 @@ export default function OrdersPage() {
   const canEditOrDeleteOrders = hasPermission("orders.manage");
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
+  const isEngineeringUser = user.role.toLowerCase().startsWith("engineer");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const roleStatusOptions = useMemo<StatusOption[]>(() => {
@@ -84,8 +86,8 @@ export default function OrdersPage() {
           label: rules.statusLabels?.[status] ?? formatOrderStatus(status),
         }));
 
-    if (user.role === "Engineering") {
-      return build(engineeringStatuses);
+    if (isEngineeringUser) {
+      return [{ value: "all", label: "All" }, ...build(engineeringStatuses)];
     }
     if (user.role === "Production") {
       return build(productionStatuses);
@@ -94,7 +96,7 @@ export default function OrdersPage() {
       return [{ value: "all", label: "All" }, ...build(salesStatuses)];
     }
     return [{ value: "all", label: "All" }, ...build(salesStatuses)];
-  }, [rules.orderStatusConfig, rules.statusLabels, user.role]);
+  }, [isEngineeringUser, rules.orderStatusConfig, rules.statusLabels, user.role]);
   const defaultStatusFilter: OrderStatus | "all" =
     roleStatusOptions[0]?.value ?? "all";
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">(
@@ -392,10 +394,10 @@ export default function OrdersPage() {
     setStatusFilter(defaultStatusFilter);
   }, [defaultStatusFilter]);
   useEffect(() => {
-    if (user.role === "Engineering") {
+    if (isEngineeringUser) {
       setAssignmentFilter("queue");
     }
-  }, [user.role]);
+  }, [isEngineeringUser]);
 
   const [statusCounts, setStatusCounts] = useState<
     Partial<Record<OrderStatus | "all", number>>
@@ -434,6 +436,42 @@ export default function OrdersPage() {
     }));
   }, [contractLabelMap, contractLevel, visibleOrders, groupByContract]);
 
+  const getLocalFilteredOrders = (source: Order[]) => {
+    let filtered = source;
+    if (isEngineeringUser) {
+      filtered = filtered.filter((order) =>
+        assignmentFilter === "queue"
+          ? !order.assignedEngineerId
+          : order.assignedEngineerId === user.id,
+      );
+    }
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((order) => order.status === statusFilter);
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length > 0) {
+      filtered = filtered.filter((order) =>
+        [order.orderNumber, order.customerName, order.productName ?? ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
+      );
+    }
+    if (partnerGroupFilter) {
+      const groupPartnerIds = new Set(
+        partners
+          .filter((partner) => partner.groupId === partnerGroupFilter)
+          .map((partner) => partner.id),
+      );
+      filtered = filtered.filter((order) =>
+        (order.externalJobs ?? []).some(
+          (job) => !!job.partnerId && groupPartnerIds.has(job.partnerId),
+        ),
+      );
+    }
+    return filtered;
+  };
+
   async function getOrderIdsForPartnerGroup(groupId: string) {
     if (!supabase || !user.tenantId) {
       return [];
@@ -457,14 +495,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     if (!supabase || user.loading || !user.isAuthenticated) {
-      const localFiltered =
-        user.role === "Engineering"
-          ? orders.filter((order) =>
-              assignmentFilter === "queue"
-                ? !order.assignedEngineerId
-                : order.assignedEngineerId === user.id,
-            )
-          : orders;
+      const localFiltered = getLocalFilteredOrders(orders);
       setVisibleOrders(localFiltered);
       setTotalOrders(localFiltered.length);
       const fallbackCounts: Partial<Record<OrderStatus | "all", number>> = {};
@@ -520,7 +551,7 @@ export default function OrdersPage() {
         if (statusFilter !== "all") {
           query.eq("status", statusFilter);
         }
-        if (user.role === "Engineering") {
+        if (isEngineeringUser) {
           if (assignmentFilter === "queue") {
             query.is("assigned_engineer_id", null);
           } else {
@@ -548,6 +579,9 @@ export default function OrdersPage() {
           return;
         }
         if (fetchError) {
+          const fallback = getLocalFilteredOrders(orders);
+          setVisibleOrders(fallback);
+          setTotalOrders(fallback.length);
           return;
         }
         const mapped = (data ?? []).map((row) => ({
@@ -591,6 +625,12 @@ export default function OrdersPage() {
         })) as Order[];
         const withProduction = await applyProductionStatus(mapped);
         const enriched = await resolveOrderAvatars(withProduction);
+        if (!append && enriched.length === 0 && orders.length > 0) {
+          const fallback = getLocalFilteredOrders(orders);
+          setVisibleOrders(fallback);
+          setTotalOrders(fallback.length);
+          return;
+        }
         setVisibleOrders((prev) =>
           append ? [...prev, ...enriched] : enriched,
         );
@@ -619,7 +659,7 @@ export default function OrdersPage() {
     user.isAuthenticated,
     user.loading,
     user.tenantId,
-    user.role,
+    isEngineeringUser,
     user.id,
   ]);
 
@@ -850,42 +890,28 @@ export default function OrdersPage() {
       >
         <div className="space-y-4 px-4 pt-3">
           <div>
-            <div className="mb-2 text-sm font-medium">Status</div>
-            <div className="flex flex-wrap gap-2">
-              {roleStatusOptions.map((option) => {
-                const active = statusFilter === option.value;
-                return (
-                  <Button
-                    key={option.value}
-                    size="sm"
-                    variant={active ? "default" : "outline"}
-                    onClick={() => setStatusFilter(option.value)}
-                  >
-                    {option.label}
-                  </Button>
-                );
-              })}
-            </div>
+            <FilterOptionSelector
+              title="Status"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={roleStatusOptions.map((option) => ({
+                value: option.value,
+                label: option.label,
+                count: statusCounts[option.value] ?? 0,
+              }))}
+            />
           </div>
-          {user.role === "Engineering" ? (
+          {isEngineeringUser ? (
             <div>
-              <div className="mb-2 text-sm font-medium">Engineering</div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant={assignmentFilter === "queue" ? "default" : "outline"}
-                  onClick={() => setAssignmentFilter("queue")}
-                >
-                  Queue
-                </Button>
-                <Button
-                  size="sm"
-                  variant={assignmentFilter === "my" ? "default" : "outline"}
-                  onClick={() => setAssignmentFilter("my")}
-                >
-                  My work
-                </Button>
-              </div>
+              <FilterOptionSelector
+                title="Engineering"
+                value={assignmentFilter}
+                onChange={(value) => setAssignmentFilter(value as "queue" | "my")}
+                options={[
+                  { value: "queue", label: "Queue" },
+                  { value: "my", label: "My work" },
+                ]}
+              />
             </div>
           ) : null}
           <label className="flex items-center gap-2 text-sm">
@@ -1008,12 +1034,8 @@ export default function OrdersPage() {
               }))}
               partnerGroupFilter={partnerGroupFilter}
               onPartnerGroupChange={setPartnerGroupFilter}
-              assignmentFilter={
-                user.role === "Engineering" ? assignmentFilter : undefined
-              }
-              onAssignmentChange={
-                user.role === "Engineering" ? setAssignmentFilter : undefined
-              }
+              assignmentFilter={isEngineeringUser ? assignmentFilter : undefined}
+              onAssignmentChange={isEngineeringUser ? setAssignmentFilter : undefined}
               viewMode={viewMode}
               onViewModeChange={setViewMode}
             />
@@ -1115,7 +1137,7 @@ export default function OrdersPage() {
                       if (statusFilter !== "all") {
                         query.eq("status", statusFilter);
                       }
-                      if (user.role === "Engineering") {
+                      if (isEngineeringUser) {
                         if (assignmentFilter === "queue") {
                           query.is("assigned_engineer_id", null);
                         } else {

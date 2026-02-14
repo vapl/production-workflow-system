@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { OrdersProvider } from "@/app/orders/OrdersContext";
@@ -13,6 +13,7 @@ import { WorkflowProvider } from "@/contexts/WorkflowContext";
 import { AppShell } from "@/components/layout/AppShell";
 import { ServiceWorker } from "@/components/pwa/ServiceWorker";
 import { RbacProvider } from "@/contexts/RbacContext";
+import { WorkingCalendarProvider } from "@/contexts/WorkingCalendarContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,6 +24,9 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+
+// Flip to `false` if mobile pinch-zoom should be enabled again.
+const DISABLE_MOBILE_ZOOM = true;
 
 export const metadata: Metadata = {
   title: "Production Workflow System",
@@ -43,6 +47,22 @@ export const metadata: Metadata = {
   },
 };
 
+const appViewport: Viewport = DISABLE_MOBILE_ZOOM
+  ? {
+      width: "device-width",
+      initialScale: 1,
+      maximumScale: 1,
+      userScalable: false,
+      viewportFit: "cover",
+    }
+  : {
+      width: "device-width",
+      initialScale: 1,
+      viewportFit: "cover",
+    };
+
+export const viewport: Viewport = appViewport;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -58,14 +78,16 @@ export default function RootLayout({
           <NotificationsProvider>
             <RbacProvider>
               <WorkflowProvider>
-                <HierarchyProvider>
-                  <OrdersProvider>
-                    <BatchesProvider>
-                      <AppShell>{children}</AppShell>
-                      <NotificationsViewport />
-                    </BatchesProvider>
-                  </OrdersProvider>
-                </HierarchyProvider>
+                <WorkingCalendarProvider>
+                  <HierarchyProvider>
+                    <OrdersProvider>
+                      <BatchesProvider>
+                        <AppShell>{children}</AppShell>
+                        <NotificationsViewport />
+                      </BatchesProvider>
+                    </OrdersProvider>
+                  </HierarchyProvider>
+                </WorkingCalendarProvider>
               </WorkflowProvider>
             </RbacProvider>
           </NotificationsProvider>

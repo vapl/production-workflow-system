@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
+import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 import {
   Select,
   SelectContent,
@@ -331,9 +333,7 @@ export default function ProductionPage() {
   >("idle");
   const [qrError, setQrError] = useState<string | null>(null);
   const [qrSearch, setQrSearch] = useState("");
-  const [qrFilterDate, setQrFilterDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [qrFilterDate, setQrFilterDate] = useState("");
   const [qrFilterStatus, setQrFilterStatus] = useState<
     "all" | "queued" | "pending" | "in_progress" | "blocked" | "done"
   >("all");
@@ -1161,6 +1161,77 @@ export default function ProductionPage() {
     stationStatusMap,
     rowPlannedDateMap,
   ]);
+
+  const qrRowsForStatusCounts = useMemo(() => {
+    const query = qrSearch.trim().toLowerCase();
+    return orderConstructionRows.filter((row) => {
+      const rowKey = rowKeyForRow(row);
+      const stationStatuses = stationStatusMap.get(rowKey);
+      const plannedDate = rowPlannedDateMap.get(rowKey) ?? "";
+
+      if (qrFilterDate && plannedDate && plannedDate !== qrFilterDate) {
+        return false;
+      }
+      if (qrFilterDate && !plannedDate) {
+        return false;
+      }
+      if (qrFilterStation !== "all") {
+        const entry = stationStatuses?.get(qrFilterStation);
+        if (!entry) {
+          return false;
+        }
+      }
+      if (!query) {
+        return true;
+      }
+      return (
+        row.orderNumber.toLowerCase().includes(query) ||
+        row.customerName.toLowerCase().includes(query) ||
+        row.batchCode.toLowerCase().includes(query) ||
+        row.itemName.toLowerCase().includes(query) ||
+        row.fieldLabel.toLowerCase().includes(query)
+      );
+    });
+  }, [
+    orderConstructionRows,
+    qrSearch,
+    qrFilterDate,
+    qrFilterStation,
+    stationStatusMap,
+    rowPlannedDateMap,
+  ]);
+
+  const qrStatusCounts = useMemo(() => {
+    const hasStatus = (
+      row: (typeof qrRowsForStatusCounts)[number],
+      status: "queued" | "pending" | "in_progress" | "blocked" | "done",
+    ) => {
+      const rowKey = rowKeyForRow(row);
+      const stationStatuses = stationStatusMap.get(rowKey);
+      if (qrFilterStation !== "all") {
+        const entry = stationStatuses?.get(qrFilterStation);
+        return entry?.status === status;
+      }
+      return Array.from(stationStatuses?.values() ?? []).some(
+        (entry) => entry.status === status,
+      );
+    };
+
+    return {
+      all: qrRowsForStatusCounts.length,
+      queued: qrRowsForStatusCounts.filter((row) => hasStatus(row, "queued"))
+        .length,
+      pending: qrRowsForStatusCounts.filter((row) => hasStatus(row, "pending"))
+        .length,
+      in_progress: qrRowsForStatusCounts.filter((row) =>
+        hasStatus(row, "in_progress"),
+      ).length,
+      blocked: qrRowsForStatusCounts.filter((row) => hasStatus(row, "blocked"))
+        .length,
+      done: qrRowsForStatusCounts.filter((row) => hasStatus(row, "done"))
+        .length,
+    };
+  }, [qrRowsForStatusCounts, stationStatusMap, qrFilterStation]);
 
   const filteredSelectableRows = useMemo(
     () => filteredQrRows.filter((row) => row.fieldId !== "fallback"),
@@ -2843,81 +2914,99 @@ export default function ProductionPage() {
                   />
                 </label>
                 <div className="grid gap-3 md:flex md:flex-wrap md:items-end md:justify-between">
-                  <DatePicker
-                    label="Date"
-                    value={qrFilterDate}
-                    onChange={setQrFilterDate}
-                    className="space-y-1 text-xs text-muted-foreground"
-                    triggerClassName="h-9"
-                  />
-                  <label className="space-y-1 text-xs text-muted-foreground">
-                    Status
-                    <Select
-                      value={qrFilterStatus}
-                      onValueChange={(value) =>
-                        setQrFilterStatus(
-                          value as
-                            | "all"
-                            | "queued"
-                            | "pending"
-                            | "in_progress"
-                            | "blocked"
-                            | "done",
-                        )
-                      }
-                    >
-                      <SelectTrigger className="h-9 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        <SelectItem value="queued">Queued</SelectItem>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="in_progress">In progress</SelectItem>
-                        <SelectItem value="blocked">Blocked</SelectItem>
-                        <SelectItem value="done">Done</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <label className="space-y-1 text-xs text-muted-foreground">
-                    Station
-                    <Select
-                      value={qrFilterStation}
-                      onValueChange={setQrFilterStation}
-                    >
-                      <SelectTrigger className="h-9 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All stations</SelectItem>
-                        {stations.map((station) => (
-                          <SelectItem key={station.id} value={station.id}>
-                            {station.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        setQrFilterDate(new Date().toISOString().slice(0, 10))
-                      }
-                    >
-                      Today
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setQrSearch("");
-                        setQrFilterDate("");
-                        setQrFilterStatus("all");
-                        setQrFilterStation("all");
-                      }}
-                    >
-                      Clear filters
-                    </Button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <FiltersDropdown contentClassName="w-[min(360px,calc(100vw-2rem))] p-4">
+                      <div className="space-y-4">
+                        <DatePicker
+                          label="Date"
+                          value={qrFilterDate}
+                          onChange={setQrFilterDate}
+                          className="space-y-1 text-xs text-muted-foreground"
+                          triggerClassName="h-9"
+                        />
+                        <div className="h-px bg-border/70" />
+                        <FilterOptionSelector
+                          title="Status"
+                          value={qrFilterStatus}
+                          onChange={setQrFilterStatus}
+                          chipsClassName="gap-3"
+                          options={[
+                            {
+                              value: "all",
+                              label: "All",
+                              count: qrStatusCounts.all,
+                            },
+                            {
+                              value: "queued",
+                              label: "Queued",
+                              count: qrStatusCounts.queued,
+                            },
+                            {
+                              value: "pending",
+                              label: "Pending",
+                              count: qrStatusCounts.pending,
+                            },
+                            {
+                              value: "in_progress",
+                              label: "In progress",
+                              count: qrStatusCounts.in_progress,
+                            },
+                            {
+                              value: "blocked",
+                              label: "Blocked",
+                              count: qrStatusCounts.blocked,
+                            },
+                            {
+                              value: "done",
+                              label: "Done",
+                              count: qrStatusCounts.done,
+                            },
+                          ]}
+                        />
+                        <div className="h-px bg-border/70" />
+                        <FilterOptionSelector
+                          title="Station"
+                          mode="chips"
+                          selectPlaceholder="All stations"
+                          value={qrFilterStation}
+                          onChange={setQrFilterStation}
+                          chipsClassName="gap-3"
+                          options={[
+                            { value: "all", label: "All stations" },
+                            ...stations.map((station) => ({
+                              value: station.id,
+                              label: station.name,
+                            })),
+                          ]}
+                        />
+                        <div className="h-px bg-border/70" />
+                        <div className="flex flex-wrap items-center gap-3">
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              setQrFilterDate(
+                                new Date().toISOString().slice(0, 10),
+                              )
+                            }
+                          >
+                            Today
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setQrSearch("");
+                              setQrFilterDate("");
+                              setQrFilterStatus("all");
+                              setQrFilterStation("all");
+                            }}
+                          >
+                            Clear filters
+                          </Button>
+                        </div>
+                      </div>
+                    </FiltersDropdown>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 md:ml-auto">
                     <Button
                       variant="outline"
                       onClick={() => setQrSelectedRowIds([])}
@@ -3107,13 +3196,21 @@ export default function ProductionPage() {
                                   </span>
                                   {entry?.status ? (
                                     <div className="flex items-center gap-2">
-                                      <Badge
-                                        variant={statusBadge(
-                                          entry.status as BatchRunRow["status"],
-                                        )}
-                                      >
-                                        {entry.status.replace("_", " ")}
-                                      </Badge>
+                                      <div className="relative flex items-center justify-center gap-2">
+                                        <Badge
+                                          variant={statusBadge(
+                                            entry.status as BatchRunRow["status"],
+                                          )}
+                                        >
+                                          {entry.status.replace("_", " ")}
+                                        </Badge>
+                                        {entry.status === "blocked" &&
+                                        entry.blockedReason ? (
+                                          <Tooltip content={entry.blockedReason}>
+                                            <Info className="absolute bottom-0 right-0 bg-background rounded-full inline-flex h-3.5 w-3.5 text-amber-700" />
+                                          </Tooltip>
+                                        ) : null}
+                                      </div>
                                       <span className="text-muted-foreground">
                                         {formatDuration(stationMinutes)}
                                       </span>

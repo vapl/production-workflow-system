@@ -1,10 +1,40 @@
 "use client";
 
-import { createContext, useContext, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { CheckCircleIcon, InfoIcon, XCircleIcon } from "lucide-react";
 import { createId } from "@/lib/utils/createId";
+import { supabase } from "@/lib/supabaseClient";
+import { useCurrentUser } from "@/contexts/UserContext";
 
 type NotificationVariant = "success" | "error" | "info";
+
+function variantFromNotificationType(type?: string | null): NotificationVariant {
+  if (type === "blocked") {
+    return "error";
+  }
+  if (type === "resumed" || type === "done") {
+    return "success";
+  }
+  return "info";
+}
+
+function formatNotificationBody(body?: string) {
+  if (!body) return undefined;
+  if (body.includes("\n")) return body;
+  const legacy = body.match(/^(.*?) at (.*?)\. (.*?)(?: \(by (.*?)\))?\.$/);
+  if (!legacy) return body;
+  const [, item, station, actionOrReason, actor] = legacy;
+  const actorLine = actor ? `\nBy: ${actor}` : "";
+  return `Item: ${item}\nStation: ${station}\nAction: ${actionOrReason}${actorLine}`;
+}
 
 interface Notification {
   id: string;
@@ -46,6 +76,7 @@ export function NotificationsProvider({
 }: {
   children: React.ReactNode;
 }) {
+  const user = useCurrentUser();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const timeoutsRef = useRef(
     new Map<
@@ -53,29 +84,40 @@ export function NotificationsProvider({
       { timeoutId: ReturnType<typeof setTimeout>; startTime: number; remainingMs: number }
     >(),
   );
+  const notify = useCallback(
+    ({
+      title,
+      description,
+      variant = "success",
+      durationMs = 3500,
+    }: {
+      title: string;
+      description?: string;
+      variant?: NotificationVariant;
+      durationMs?: number;
+    }) => {
+      const id = createId("notification");
+      setNotifications((prev) => [...prev, { id, title, description, variant }]);
+      if (durationMs > 0) {
+        const startTime = Date.now();
+        const timeoutId = setTimeout(() => {
+          setNotifications((prev) => prev.filter((item) => item.id !== id));
+          timeoutsRef.current.delete(id);
+        }, durationMs);
+        timeoutsRef.current.set(id, {
+          timeoutId,
+          startTime,
+          remainingMs: durationMs,
+        });
+      }
+    },
+    [],
+  );
 
   const value = useMemo<NotificationsContextValue>(
     () => ({
       notifications,
-      notify: ({ title, description, variant = "success", durationMs = 3500 }) => {
-        const id = createId("notification");
-        setNotifications((prev) => [
-          ...prev,
-          { id, title, description, variant },
-        ]);
-        if (durationMs > 0) {
-          const startTime = Date.now();
-          const timeoutId = setTimeout(() => {
-            setNotifications((prev) => prev.filter((item) => item.id !== id));
-            timeoutsRef.current.delete(id);
-          }, durationMs);
-          timeoutsRef.current.set(id, {
-            timeoutId,
-            startTime,
-            remainingMs: durationMs,
-          });
-        }
-      },
+      notify,
       dismiss: (id) => {
         const timer = timeoutsRef.current.get(id);
         if (timer) {
@@ -120,8 +162,47 @@ export function NotificationsProvider({
         });
       },
     }),
-    [notifications],
+    [notifications, notify],
   );
+
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb || !user.isAuthenticated || !user.tenantId) {
+      return;
+    }
+    const channel = sb
+      .channel(`notifications-toast:${user.tenantId}:${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `tenant_id=eq.${user.tenantId}`,
+        },
+        (payload) => {
+          const next = payload.new as {
+            user_id?: string | null;
+            type?: string | null;
+            title?: string;
+            body?: string | null;
+          };
+          if (next.user_id && next.user_id !== user.id) {
+            return;
+          }
+          notify({
+            title: next.title ?? "Notification",
+            description: formatNotificationBody(next.body ?? undefined),
+            variant: variantFromNotificationType(next.type),
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
+  }, [notify, user.id, user.isAuthenticated, user.tenantId]);
 
   return (
     <NotificationsContext.Provider value={value}>
@@ -158,7 +239,9 @@ export function NotificationsViewport() {
           <div className="flex-1 text-sm">
             <div className="font-medium">{item.title}</div>
             {item.description && (
-              <div className="text-muted-foreground">{item.description}</div>
+              <div className="whitespace-pre-line text-muted-foreground">
+                {item.description}
+              </div>
             )}
           </div>
           <button

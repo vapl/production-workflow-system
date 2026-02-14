@@ -61,6 +61,7 @@ import {
   type WorkflowTargetStatus,
   type WorkflowStatusColor,
 } from "@/contexts/WorkflowContext";
+import { useWorkingCalendar } from "@/contexts/WorkingCalendarContext";
 import {
   DEFAULT_WORKDAYS,
   DEFAULT_WORK_SHIFTS,
@@ -513,8 +514,9 @@ export default function SettingsPage() {
   >("idle");
   const [qrSettingsMessage, setQrSettingsMessage] = useState("");
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
-    "Production",
+    "Production manager",
     "Admin",
+    "Owner",
   ]);
   const [notificationState, setNotificationState] = useState<
     "idle" | "saving" | "saved" | "error"
@@ -683,6 +685,7 @@ export default function SettingsPage() {
     saveError,
     isLoadedFromDb,
   } = useWorkflowRules();
+  const { refresh: refreshWorkingCalendar } = useWorkingCalendar();
   const [newChecklistLabel, setNewChecklistLabel] = useState("");
   const [newChecklistRequired, setNewChecklistRequired] = useState<
     WorkflowTargetStatus[]
@@ -2162,6 +2165,8 @@ export default function SettingsPage() {
     });
     if (error) {
       setWorkdayError(error.message);
+    } else {
+      await refreshWorkingCalendar();
     }
     setIsWorkdaySaving(false);
   }
@@ -2237,7 +2242,7 @@ export default function SettingsPage() {
     }
     const roles = notificationRoles.length
       ? notificationRoles
-      : ["Production", "Admin"];
+      : ["Production manager", "Admin", "Owner"];
     setNotificationRoles(roles);
     setNotificationState("saving");
     setNotificationMessage("");
@@ -4357,12 +4362,20 @@ export default function SettingsPage() {
                 <CardHeader>
                   <CardTitle>Notifications</CardTitle>
                   <CardDescription>
-                    Choose who receives system notifications about blocked work.
+                    Choose who receives system notifications about blocked and
+                    resumed work.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-                    {["Sales", "Engineering", "Production", "Admin"].map(
+                    {[
+                      "Production manager",
+                      "Admin",
+                      "Owner",
+                      "Production",
+                      "Engineering",
+                      "Sales",
+                    ].map(
                       (role) => (
                         <label
                           key={role}

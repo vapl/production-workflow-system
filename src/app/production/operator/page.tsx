@@ -262,8 +262,9 @@ export default function OperatorProductionPage() {
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
-    "Production",
+    "Production manager",
     "Admin",
+    "Owner",
   ]);
 
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -813,7 +814,9 @@ export default function OperatorProductionPage() {
       return;
     }
     const now = new Date().toISOString();
+    const wasBlocked = targetItem.status === "blocked";
     const isBlocked = status === "blocked";
+    const isResumed = wasBlocked && status === "in_progress";
     const nextStartedAt =
       status === "in_progress"
         ? (targetItem.started_at ?? now)
@@ -846,6 +849,7 @@ export default function OperatorProductionPage() {
     }
 
     if (status === "blocked" && currentUser.tenantId) {
+      const actorName = currentUser.name?.trim() || "Operator";
       const stationName = targetItem.station_id
         ? (stationsById.get(targetItem.station_id) ?? "Station")
         : "Station";
@@ -857,19 +861,73 @@ export default function OperatorProductionPage() {
       const roles =
         notificationRoles.length > 0
           ? notificationRoles
-          : ["Production", "Admin"];
+          : ["Production manager", "Admin", "Owner"];
       await sb.from("notifications").insert({
         tenant_id: currentUser.tenantId,
         user_id: null,
         audience_roles: roles.length > 0 ? roles : null,
         type: "blocked",
         title: `Blocked: ${orderNumber}`,
-        body: `${targetItem.item_name} at ${stationName}. ${reason}`,
+        body: `Item: ${targetItem.item_name}\nStation: ${stationName}\nReason: ${reason}\nBy: ${actorName}`,
         data: {
           order_id: run.order_id,
           production_item_id: targetItem.id,
           station_id: targetItem.station_id,
           reason,
+          actor_name: actorName,
+          actor_user_id: currentUser.id,
+        },
+      });
+    }
+    if (isResumed && currentUser.tenantId) {
+      const actorName = currentUser.name?.trim() || "Operator";
+      const stationName = targetItem.station_id
+        ? (stationsById.get(targetItem.station_id) ?? "Station")
+        : "Station";
+      const orderNumber = run.orders?.order_number ?? "Order";
+      const roles =
+        notificationRoles.length > 0
+          ? notificationRoles
+          : ["Production manager", "Admin", "Owner"];
+      await sb.from("notifications").insert({
+        tenant_id: currentUser.tenantId,
+        user_id: null,
+        audience_roles: roles.length > 0 ? roles : null,
+        type: "resumed",
+        title: `Resumed: ${orderNumber}`,
+        body: `Item: ${targetItem.item_name}\nStation: ${stationName}\nAction: Work resumed\nBy: ${actorName}`,
+        data: {
+          order_id: run.order_id,
+          production_item_id: targetItem.id,
+          station_id: targetItem.station_id,
+          actor_name: actorName,
+          actor_user_id: currentUser.id,
+        },
+      });
+    }
+    if (status === "done" && currentUser.tenantId) {
+      const actorName = currentUser.name?.trim() || "Operator";
+      const stationName = targetItem.station_id
+        ? (stationsById.get(targetItem.station_id) ?? "Station")
+        : "Station";
+      const orderNumber = run.orders?.order_number ?? "Order";
+      const roles =
+        notificationRoles.length > 0
+          ? notificationRoles
+          : ["Production manager", "Admin", "Owner"];
+      await sb.from("notifications").insert({
+        tenant_id: currentUser.tenantId,
+        user_id: null,
+        audience_roles: roles.length > 0 ? roles : null,
+        type: "done",
+        title: `Done: ${orderNumber}`,
+        body: `Item: ${targetItem.item_name}\nStation: ${stationName}\nAction: Work completed\nBy: ${actorName}`,
+        data: {
+          order_id: run.order_id,
+          production_item_id: targetItem.id,
+          station_id: targetItem.station_id,
+          actor_name: actorName,
+          actor_user_id: currentUser.id,
         },
       });
     }

@@ -3037,7 +3037,7 @@ export default function OrderDetailPage() {
 
   return (
     <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
-      <div className="pointer-events-none fixed right-4 top-3 z-40 md:hidden">
+      <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+0.75rem)] z-40 md:hidden">
         <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
           <Button
             variant="ghost"
