@@ -24,6 +24,7 @@ export type ExternalJobFieldType =
   | "toggle";
 
 export type ExternalJobFieldScope = "manual" | "portal_response";
+export type ExternalJobFieldRole = "none" | "planned_price" | "invoice_price";
 
 export interface ExternalJobField {
   id: string;
@@ -31,8 +32,13 @@ export interface ExternalJobField {
   label: string;
   fieldType: ExternalJobFieldType;
   scope?: ExternalJobFieldScope;
+  fieldRole?: ExternalJobFieldRole;
   unit?: string;
   options?: string[];
+  aiAliases?: string[];
+  aiEnabled?: boolean;
+  aiMatchOnly?: boolean;
+  showInTable?: boolean;
   isRequired: boolean;
   isActive: boolean;
   sortOrder: number;

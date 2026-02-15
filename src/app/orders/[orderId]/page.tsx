@@ -598,7 +598,7 @@ export default function OrderDetailPage() {
       const { data, error } = await sb
         .from("external_job_fields")
         .select(
-          "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+          "id, key, label, field_type, scope, field_role, show_in_table, ai_enabled, ai_match_only, ai_aliases, unit, options, is_required, is_active, sort_order",
         )
         .eq("is_active", true)
         .order("sort_order", { ascending: true })
@@ -615,6 +615,11 @@ export default function OrderDetailPage() {
         label: row.label,
         fieldType: row.field_type as ExternalJobField["fieldType"],
         scope: (row.scope ?? "manual") as ExternalJobField["scope"],
+        fieldRole: (row.field_role ?? "none") as ExternalJobField["fieldRole"],
+        showInTable: row.show_in_table ?? true,
+        aiEnabled: row.ai_enabled ?? false,
+        aiMatchOnly: row.ai_match_only ?? false,
+        aiAliases: row.ai_aliases ?? undefined,
         unit: row.unit ?? undefined,
         options: row.options?.options ?? undefined,
         isRequired: row.is_required ?? false,

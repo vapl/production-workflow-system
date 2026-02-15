@@ -145,6 +145,13 @@ create table if not exists public.external_job_fields (
   label text not null,
   field_type text not null
     check (field_type in ('text', 'textarea', 'number', 'date', 'select', 'toggle')),
+  scope text not null default 'manual'
+    check (scope in ('manual', 'portal_response')),
+  field_role text not null default 'none'
+    check (field_role in ('none', 'planned_price', 'invoice_price')),
+  show_in_table boolean not null default true,
+  ai_enabled boolean not null default false,
+  ai_aliases text[] not null default '{}'::text[],
   unit text,
   options jsonb,
   is_required boolean not null default false,
@@ -160,6 +167,12 @@ create index if not exists external_job_fields_tenant_id_idx
   on public.external_job_fields(tenant_id);
 create index if not exists external_job_fields_sort_order_idx
   on public.external_job_fields(sort_order);
+create index if not exists external_job_fields_scope_idx
+  on public.external_job_fields(scope);
+create index if not exists external_job_fields_field_role_idx
+  on public.external_job_fields(field_role);
+create index if not exists external_job_fields_ai_enabled_idx
+  on public.external_job_fields(ai_enabled);
 
 create table if not exists public.external_job_field_values (
   id uuid primary key default gen_random_uuid(),
@@ -564,6 +577,8 @@ create table if not exists public.tenant_settings (
   workday_end time not null default '17:00',
   workdays integer[] not null default array[1, 2, 3, 4, 5],
   work_shifts jsonb not null default '[{"start":"08:00","end":"17:00"}]'::jsonb,
+  external_price_reconciliation_enabled boolean not null default false,
+  external_table_columns jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

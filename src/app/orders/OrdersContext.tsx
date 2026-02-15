@@ -101,6 +101,7 @@ interface OrdersContextValue {
       partnerName: string;
       partnerEmail?: string;
       partnerRequestComment?: string;
+      partnerResponseNote?: string | null;
       externalOrderNumber: string;
       quantity?: number;
       dueDate: string;
@@ -1645,6 +1646,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (patch.partnerRequestComment !== undefined)
           updatePayload.partner_request_comment =
             patch.partnerRequestComment || null;
+        if (patch.partnerResponseNote !== undefined)
+          updatePayload.partner_response_note =
+            patch.partnerResponseNote || null;
         if (patch.externalOrderNumber !== undefined)
           updatePayload.external_order_number = patch.externalOrderNumber;
         if (patch.quantity !== undefined) updatePayload.quantity = patch.quantity;

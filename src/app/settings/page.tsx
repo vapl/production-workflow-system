@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   FactoryIcon,
@@ -35,6 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { DataTable } from "@/components/ui/DataTable";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { useHierarchy } from "./HierarchyContext";
@@ -77,6 +78,7 @@ import {
   type WorkShift,
 } from "@/lib/domain/workingCalendar";
 import type {
+  ExternalJobFieldRole,
   ExternalJobFieldScope,
   ExternalJobFieldType,
   ExternalJobStatus,
@@ -238,6 +240,15 @@ const externalJobFieldScopeOptions: {
   { value: "portal_response", label: "Partner portal response" },
 ];
 
+const externalJobFieldRoleOptions: {
+  value: ExternalJobFieldRole;
+  label: string;
+}[] = [
+  { value: "none", label: "None" },
+  { value: "planned_price", label: "Planned price" },
+  { value: "invoice_price", label: "Invoice price" },
+];
+
 const orderInputColumnTypeOptions: {
   value: OrderInputTableColumnType;
   label: string;
@@ -303,6 +314,12 @@ const settingsSectionSubtitles: Record<SettingsSectionValue, string> = {
   users: "Control user access, roles, and account permissions.",
   workflow: "Set status flow rules, requirements, and automations.",
   integrations: "Connect accounting, email, and external services.",
+};
+
+type ExternalTableColumnSetting = {
+  id: string;
+  visible: boolean;
+  label?: string;
 };
 
 export default function SettingsPage() {
@@ -406,7 +423,38 @@ export default function SettingsPage() {
       return a.label.localeCompare(b.label);
     });
   }, [externalJobFields]);
-
+  const externalTableColumnCatalog = useMemo(
+    () => [
+      { id: "sys.order_number", label: "Order #" },
+      { id: "sys.customer_name", label: "Customer" },
+      { id: "sys.partner_name", label: "Partner" },
+      ...sortedExternalJobFields
+        .filter((field) => field.showInTable ?? true)
+        .map((field) => ({
+          id: `field.${field.id}`,
+          label: field.label,
+        })),
+      { id: "cmp.price_diff", label: "Price diff" },
+      { id: "sys.received_at", label: "Received" },
+      { id: "sys.added_by", label: "Added by" },
+      { id: "sys.status", label: "Status" },
+    ],
+    [sortedExternalJobFields],
+  );
+  const externalTableColumnCatalogById = useMemo(
+    () =>
+      Object.fromEntries(
+        externalTableColumnCatalog.map((column) => [column.id, column]),
+      ),
+    [externalTableColumnCatalog],
+  );
+  const externalJobFieldById = useMemo(
+    () =>
+      Object.fromEntries(
+        sortedExternalJobFields.map((field) => [field.id, field]),
+      ),
+    [sortedExternalJobFields],
+  );
   const [stationName, setStationName] = useState("");
   const [stationDescription, setStationDescription] = useState("");
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
@@ -449,11 +497,21 @@ export default function SettingsPage() {
     useState<ExternalJobFieldType>("text");
   const [externalJobFieldScope, setExternalJobFieldScope] =
     useState<ExternalJobFieldScope>("manual");
+  const [externalJobFieldRole, setExternalJobFieldRole] =
+    useState<ExternalJobFieldRole>("none");
   const [externalJobFieldUnit, setExternalJobFieldUnit] = useState("");
   const [externalJobFieldOptions, setExternalJobFieldOptions] = useState("");
   const [externalJobFieldRequired, setExternalJobFieldRequired] =
     useState(false);
   const [externalJobFieldActive, setExternalJobFieldActive] = useState(true);
+  const [externalJobFieldShowInTable, setExternalJobFieldShowInTable] =
+    useState(true);
+  const [externalJobFieldAiEnabled, setExternalJobFieldAiEnabled] =
+    useState(false);
+  const [externalJobFieldAiMatchOnly, setExternalJobFieldAiMatchOnly] =
+    useState(false);
+  const [externalJobFieldAiAliases, setExternalJobFieldAiAliases] =
+    useState("");
   const [externalJobFieldSortOrder, setExternalJobFieldSortOrder] = useState(0);
   const [editingExternalJobFieldId, setEditingExternalJobFieldId] = useState<
     string | null
@@ -527,6 +585,24 @@ export default function SettingsPage() {
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [notificationMessage, setNotificationMessage] = useState("");
+  const [externalTableColumns, setExternalTableColumns] = useState<
+    ExternalTableColumnSetting[]
+  >([]);
+  const [dragExternalTableColumnId, setDragExternalTableColumnId] = useState<
+    string | null
+  >(null);
+  const [externalTableDropIndex, setExternalTableDropIndex] = useState<
+    number | null
+  >(null);
+  const [externalTableState, setExternalTableState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [externalTableMessage, setExternalTableMessage] = useState("");
+  const [externalPricingEnabled, setExternalPricingEnabled] = useState(false);
+  const [externalPricingState, setExternalPricingState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [externalPricingMessage, setExternalPricingMessage] = useState("");
   const [devRoleOverride, setDevRoleOverride] = useState(false);
   const sortedStations = useMemo(
     () =>
@@ -566,7 +642,7 @@ export default function SettingsPage() {
         const { data, error } = await sb
           .from("tenant_settings")
           .select(
-            "workday_start, workday_end, workdays, work_shifts, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles",
+            "workday_start, workday_end, workdays, work_shifts, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles, external_price_reconciliation_enabled, external_table_columns",
           )
           .eq("tenant_id", currentUser.tenantId)
           .maybeSingle();
@@ -601,6 +677,35 @@ export default function SettingsPage() {
             data.notification_roles.filter(
               (value: unknown) => typeof value === "string",
             ),
+          );
+        }
+        if (typeof data.external_price_reconciliation_enabled === "boolean") {
+          setExternalPricingEnabled(data.external_price_reconciliation_enabled);
+        }
+        if (Array.isArray(data.external_table_columns)) {
+          setExternalTableColumns(
+            data.external_table_columns
+              .map((item) => {
+                if (
+                  item &&
+                  typeof item === "object" &&
+                  "id" in item &&
+                  typeof (item as { id?: unknown }).id === "string"
+                ) {
+                  return {
+                    id: (item as { id: string }).id,
+                    visible: (item as { visible?: unknown }).visible !== false,
+                    label:
+                      typeof (item as { label?: unknown }).label === "string"
+                        ? (item as { label: string }).label
+                        : undefined,
+                  } as ExternalTableColumnSetting;
+                }
+                return null;
+              })
+              .filter((item): item is ExternalTableColumnSetting =>
+                Boolean(item),
+              ),
           );
         }
       } finally {
@@ -1989,10 +2094,15 @@ export default function SettingsPage() {
       label,
       fieldType: target.fieldType,
       scope: target.scope ?? "manual",
+      fieldRole: target.fieldRole ?? "none",
       unit: target.unit,
       options: target.options,
       isRequired: target.isRequired,
       isActive: target.isActive,
+      showInTable: target.showInTable ?? true,
+      aiEnabled: target.aiEnabled ?? false,
+      aiMatchOnly: target.aiMatchOnly ?? false,
+      aiAliases: target.aiAliases ?? [],
       sortOrder: target.sortOrder + 1,
     });
   }
@@ -2264,6 +2374,53 @@ export default function SettingsPage() {
     setNotificationMessage("Saved.");
   }
 
+  async function handleSaveExternalPricingSettings() {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    setExternalPricingState("saving");
+    setExternalPricingMessage("");
+    const { error } = await supabase.from("tenant_settings").upsert({
+      tenant_id: currentUser.tenantId,
+      external_price_reconciliation_enabled: externalPricingEnabled,
+    });
+    if (error) {
+      setExternalPricingState("error");
+      setExternalPricingMessage(
+        error.message ?? "Failed to save price reconciliation settings.",
+      );
+      return;
+    }
+    setExternalPricingState("saved");
+    setExternalPricingMessage("Saved.");
+  }
+
+  async function handleSaveExternalTableColumns() {
+    if (!supabase || !currentUser.tenantId) {
+      return;
+    }
+    setExternalTableState("saving");
+    setExternalTableMessage("");
+    const payload = externalTableColumns.map((item) => ({
+      id: item.id,
+      visible: item.visible,
+      label: item.label?.trim() || null,
+    }));
+    const { error } = await supabase.from("tenant_settings").upsert({
+      tenant_id: currentUser.tenantId,
+      external_table_columns: payload,
+    });
+    if (error) {
+      setExternalTableState("error");
+      setExternalTableMessage(
+        error.message ?? "Failed to save external table columns.",
+      );
+      return;
+    }
+    setExternalTableState("saved");
+    setExternalTableMessage("Saved.");
+  }
+
   function resetOrderFieldForm() {
     setOrderFieldLabel("");
     setOrderFieldKey("");
@@ -2283,10 +2440,15 @@ export default function SettingsPage() {
     setExternalJobFieldLabel("");
     setExternalJobFieldType("text");
     setExternalJobFieldScope("manual");
+    setExternalJobFieldRole("none");
     setExternalJobFieldUnit("");
     setExternalJobFieldOptions("");
     setExternalJobFieldRequired(false);
     setExternalJobFieldActive(true);
+    setExternalJobFieldShowInTable(true);
+    setExternalJobFieldAiEnabled(false);
+    setExternalJobFieldAiMatchOnly(false);
+    setExternalJobFieldAiAliases("");
     setExternalJobFieldSortOrder(0);
     setEditingExternalJobFieldId(null);
   }
@@ -2373,6 +2535,32 @@ export default function SettingsPage() {
       setSelectedExternalJobFieldIds(next);
     }
   }, [externalJobFields, selectedExternalJobFieldIds]);
+
+  useEffect(() => {
+    setExternalTableColumns((prev) => {
+      const catalogIds = new Set(externalTableColumnCatalog.map((c) => c.id));
+      const defaults = externalTableColumnCatalog.map((column) => ({
+        id: column.id,
+        visible: true,
+      }));
+      if (prev.length === 0) {
+        return defaults;
+      }
+      const kept = prev.filter((item) => catalogIds.has(item.id));
+      const missing = defaults.filter(
+        (item) => !kept.some((existing) => existing.id === item.id),
+      );
+      const next = [...kept, ...missing];
+      const isSame =
+        next.length === prev.length &&
+        next.every(
+          (item, index) =>
+            prev[index]?.id === item.id &&
+            prev[index]?.visible === item.visible,
+        );
+      return isSame ? prev : next;
+    });
+  }, [externalTableColumnCatalog]);
 
   useEffect(() => {
     const valid = new Set(currentLevelNodes.map((node) => node.id));
@@ -2489,15 +2677,23 @@ export default function SettingsPage() {
       externalJobFieldType === "select"
         ? parseOrderFieldOptions(externalJobFieldOptions)
         : undefined;
+    const aiAliases = parseOrderFieldOptions(externalJobFieldAiAliases);
+    const normalizedFieldRole =
+      externalJobFieldType === "number" ? externalJobFieldRole : "none";
     if (editingExternalJobFieldId) {
       await updateExternalJobField(editingExternalJobFieldId, {
         label: trimmedLabel,
         fieldType: externalJobFieldType,
         scope: externalJobFieldScope,
+        fieldRole: normalizedFieldRole,
         unit: externalJobFieldUnit.trim() || undefined,
         options,
         isRequired: externalJobFieldRequired,
         isActive: externalJobFieldActive,
+        showInTable: externalJobFieldShowInTable,
+        aiEnabled: externalJobFieldAiEnabled,
+        aiMatchOnly: externalJobFieldAiEnabled && externalJobFieldAiMatchOnly,
+        aiAliases,
         sortOrder: Number.isFinite(externalJobFieldSortOrder)
           ? externalJobFieldSortOrder
           : 0,
@@ -2510,10 +2706,15 @@ export default function SettingsPage() {
       label: trimmedLabel,
       fieldType: externalJobFieldType,
       scope: externalJobFieldScope,
+      fieldRole: normalizedFieldRole,
       unit: externalJobFieldUnit.trim() || undefined,
       options,
       isRequired: externalJobFieldRequired,
       isActive: externalJobFieldActive,
+      showInTable: externalJobFieldShowInTable,
+      aiEnabled: externalJobFieldAiEnabled,
+      aiMatchOnly: externalJobFieldAiEnabled && externalJobFieldAiMatchOnly,
+      aiAliases,
       sortOrder: Number.isFinite(externalJobFieldSortOrder)
         ? externalJobFieldSortOrder
         : 0,
@@ -2556,10 +2757,15 @@ export default function SettingsPage() {
     setExternalJobFieldLabel(target.label);
     setExternalJobFieldType(target.fieldType);
     setExternalJobFieldScope(target.scope ?? "manual");
+    setExternalJobFieldRole(target.fieldRole ?? "none");
     setExternalJobFieldUnit(target.unit ?? "");
     setExternalJobFieldOptions((target.options ?? []).join(", "));
     setExternalJobFieldRequired(target.isRequired);
     setExternalJobFieldActive(target.isActive);
+    setExternalJobFieldShowInTable(target.showInTable ?? true);
+    setExternalJobFieldAiEnabled(target.aiEnabled ?? false);
+    setExternalJobFieldAiMatchOnly(target.aiMatchOnly ?? false);
+    setExternalJobFieldAiAliases((target.aiAliases ?? []).join(", "));
     setExternalJobFieldSortOrder(target.sortOrder);
   }
 
@@ -2631,6 +2837,137 @@ export default function SettingsPage() {
     );
     setIsStationOrderSaving(false);
   }
+
+  function reorderExternalTableColumns(
+    columns: ExternalTableColumnSetting[],
+    draggedId: string,
+    toIndex: number,
+  ) {
+    const fromIndex = columns.findIndex((column) => column.id === draggedId);
+    if (fromIndex === -1) {
+      return columns;
+    }
+    const next = [...columns];
+    const [moved] = next.splice(fromIndex, 1);
+    const safeIndex = Math.max(0, Math.min(toIndex, next.length));
+    next.splice(safeIndex, 0, moved);
+    return next;
+  }
+
+  const externalSchemaTableColumns = useMemo(
+    () => [
+      {
+        id: "label",
+        label: "Label",
+        widthClassName: "min-w-[100px] md:min-w-[140px]",
+      },
+      { id: "type", label: "Type", widthClassName: "min-w-[110px] md:min-w-0" },
+      {
+        id: "scope",
+        label: "Scope",
+        widthClassName: "min-w-[120px] md:min-w-0",
+      },
+      {
+        id: "role",
+        label: "Role",
+        widthClassName: "min-w-[110px] md:min-w-0",
+      },
+      {
+        id: "unit",
+        label: "Unit",
+        widthClassName: "min-w-[64px] md:min-w-0",
+      },
+      {
+        id: "order",
+        label: "Order",
+        widthClassName: "min-w-[64px] md:min-w-0",
+      },
+      {
+        id: "required",
+        label: "Required",
+        widthClassName: "min-w-[84px] md:min-w-0",
+      },
+      {
+        id: "active",
+        label: "Active",
+        widthClassName: "min-w-[72px] md:min-w-0",
+      },
+      {
+        id: "in_table",
+        label: "In table",
+        widthClassName: "min-w-[84px] md:min-w-0",
+      },
+      {
+        id: "ai",
+        label: "AI",
+        widthClassName: "min-w-[60px] md:min-w-0",
+      },
+      {
+        id: "match_only",
+        label: "Match only",
+        widthClassName: "min-w-[96px] md:min-w-0",
+      },
+      {
+        id: "actions",
+        label: (
+          <div className="flex items-center justify-end gap-2">
+            <span>Actions</span>
+            <Checkbox
+              variant="box"
+              checked={
+                sortedExternalJobFields.length > 0 &&
+                selectedExternalJobFieldIds.length ===
+                  sortedExternalJobFields.length
+              }
+              onChange={(event) => {
+                if (event.target.checked) {
+                  setSelectedExternalJobFieldIds(
+                    sortedExternalJobFields.map((field) => field.id),
+                  );
+                } else {
+                  setSelectedExternalJobFieldIds([]);
+                }
+              }}
+            />
+          </div>
+        ),
+        widthClassName: "min-w-[250px] md:min-w-0",
+        headerClassName: "text-right",
+      },
+    ],
+    [selectedExternalJobFieldIds.length, sortedExternalJobFields],
+  );
+  const usersAccessColumns = useMemo(
+    () => [
+      {
+        id: "name",
+        label: "Name",
+        widthClassName: "min-w-[160px] md:min-w-[220px]",
+      },
+      {
+        id: "role",
+        label: "Role",
+        widthClassName: "min-w-[140px] md:min-w-[180px]",
+      },
+      {
+        id: "owner",
+        label: "Owner",
+        widthClassName: "min-w-[90px] md:min-w-[110px]",
+      },
+      {
+        id: "admin",
+        label: "Admin",
+        widthClassName: "min-w-[90px] md:min-w-[110px]",
+      },
+      {
+        id: "actions",
+        label: "Actions",
+        widthClassName: "min-w-[100px] md:min-w-[120px]",
+        headerClassName: "text-right",
+      },
+    ],
+    [],
+  );
 
   function reorderStations(
     stations: WorkStation[],
@@ -2996,7 +3333,9 @@ export default function SettingsPage() {
                   <div className="flex flex-wrap items-center gap-4 pt-2">
                     <Checkbox
                       checked={levelRequired}
-                      onChange={(event) => setLevelRequired(event.target.checked)}
+                      onChange={(event) =>
+                        setLevelRequired(event.target.checked)
+                      }
                       label="Required"
                     />
                     <Checkbox
@@ -3029,8 +3368,8 @@ export default function SettingsPage() {
                   rename the labels, but keep their meaning.
                 </p>
 
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-sm">
+                <div className="overflow-x-hidden rounded-lg border border-border">
+                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
@@ -3160,7 +3499,11 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap gap-3">
-                  <SelectField label="Level" value={selectedLevelId} onValueChange={setSelectedLevelId}>
+                  <SelectField
+                    label="Level"
+                    value={selectedLevelId}
+                    onValueChange={setSelectedLevelId}
+                  >
                     <Select
                       value={selectedLevelId}
                       onValueChange={setSelectedLevelId}
@@ -3264,8 +3607,8 @@ export default function SettingsPage() {
                     Remove selected
                   </Button>
                 </div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-sm">
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
@@ -3284,7 +3627,8 @@ export default function SettingsPage() {
                               variant="box"
                               checked={
                                 currentLevelNodes.length > 0 &&
-                                selectedNodeIds.length === currentLevelNodes.length
+                                selectedNodeIds.length ===
+                                  currentLevelNodes.length
                               }
                               onChange={(event) => {
                                 if (event.target.checked) {
@@ -3492,7 +3836,9 @@ export default function SettingsPage() {
                   <TextAreaField
                     label='Select options (comma, newline, or "\\\\" separated)'
                     value={orderFieldOptions}
-                    onChange={(event) => setOrderFieldOptions(event.target.value)}
+                    onChange={(event) =>
+                      setOrderFieldOptions(event.target.value)
+                    }
                     disabled={orderFieldType !== "select"}
                     placeholder="Dealer, Private, Partner"
                     className="min-h-20 disabled:opacity-50"
@@ -3633,7 +3979,9 @@ export default function SettingsPage() {
                                 labelClassName="text-xs font-medium"
                               />
                               <div className="space-y-1">
-                                <div className="text-xs font-medium">Required</div>
+                                <div className="text-xs font-medium">
+                                  Required
+                                </div>
                                 <Checkbox
                                   checked={column.isRequired ?? false}
                                   onChange={(event) =>
@@ -3742,8 +4090,8 @@ export default function SettingsPage() {
                     Remove selected
                   </Button>
                 </div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-sm">
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
@@ -3976,7 +4324,9 @@ export default function SettingsPage() {
                           }
                           placeholder="17:00"
                           className={`h-10 w-full text-sm ${
-                            isValidWorkTime(shift.end) ? "" : "border-destructive"
+                            isValidWorkTime(shift.end)
+                              ? ""
+                              : "border-destructive"
                           }`}
                           labelClassName="text-xs font-medium text-muted-foreground"
                         />
@@ -4058,7 +4408,6 @@ export default function SettingsPage() {
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Checkbox
                           variant="box"
-                          
                           checked={
                             displayStations.length > 0 &&
                             selectedWorkStationIds.length ===
@@ -4074,7 +4423,7 @@ export default function SettingsPage() {
                             }
                           }}
                           disabled={displayStations.length === 0}
-                         />
+                        />
                         Select all
                       </label>
                       <Button
@@ -4114,14 +4463,13 @@ export default function SettingsPage() {
                         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
                           <label className="flex items-center gap-2 text-sm">
                             <Checkbox
-                              
                               checked={station.isActive}
                               onChange={(event) =>
                                 updateWorkStation(station.id, {
                                   isActive: event.target.checked,
                                 })
                               }
-                             />
+                            />
                             Active
                           </label>
                           <Button
@@ -4156,7 +4504,6 @@ export default function SettingsPage() {
                           </Button>
                           <Checkbox
                             variant="box"
-                            
                             checked={selectedWorkStationIds.includes(
                               station.id,
                             )}
@@ -4168,7 +4515,7 @@ export default function SettingsPage() {
                                 return prev.filter((id) => id !== station.id);
                               });
                             }}
-                           />
+                          />
                         </div>
                       </div>
                     ))}
@@ -4196,7 +4543,6 @@ export default function SettingsPage() {
                               className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
                             >
                               <Checkbox
-                                
                                 checked={checked}
                                 onChange={(event) => {
                                   setQrEnabledSizes((prev) => {
@@ -4208,7 +4554,7 @@ export default function SettingsPage() {
                                     );
                                   });
                                 }}
-                               />
+                              />
                               {option.label}
                             </label>
                           );
@@ -4256,7 +4602,6 @@ export default function SettingsPage() {
                             className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
                           >
                             <Checkbox
-                              
                               checked={checked}
                               onChange={(event) => {
                                 setQrContentFields((prev) => {
@@ -4268,7 +4613,7 @@ export default function SettingsPage() {
                                   );
                                 });
                               }}
-                             />
+                            />
                             {(
                               rules.orderStatusConfig as Record<
                                 string,
@@ -4328,7 +4673,6 @@ export default function SettingsPage() {
                         className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
                       >
                         <Checkbox
-                          
                           checked={notificationRoles.includes(role)}
                           onChange={(event) => {
                             setNotificationRoles((prev) => {
@@ -4338,7 +4682,7 @@ export default function SettingsPage() {
                               return prev.filter((item) => item !== role);
                             });
                           }}
-                         />
+                        />
                         {role}
                       </label>
                     ))}
@@ -4410,7 +4754,6 @@ export default function SettingsPage() {
                                       className="flex items-center gap-2 rounded-md border border-border px-2 py-1"
                                     >
                                       <Checkbox
-                                        
                                         checked={checked}
                                         onChange={(event) => {
                                           const next = new Set(selected);
@@ -4424,7 +4767,7 @@ export default function SettingsPage() {
                                             Array.from(next),
                                           );
                                         }}
-                                       />
+                                      />
                                       {dep.name}
                                     </label>
                                   );
@@ -4509,7 +4852,6 @@ export default function SettingsPage() {
                                   <td key={station.id} className="px-4 py-2">
                                     <label className="flex items-center gap-2">
                                       <Checkbox
-                                        
                                         checked={isAssigned}
                                         onChange={() =>
                                           handleToggleOperatorAssignment(
@@ -4517,7 +4859,7 @@ export default function SettingsPage() {
                                             station.id,
                                           )
                                         }
-                                       />
+                                      />
                                       <span className="text-xs text-muted-foreground">
                                         Assigned
                                       </span>
@@ -4574,7 +4916,6 @@ export default function SettingsPage() {
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Checkbox
                           variant="box"
-                          
                           checked={
                             stopReasons.length > 0 &&
                             selectedStopReasonIds.length === stopReasons.length
@@ -4589,7 +4930,7 @@ export default function SettingsPage() {
                             }
                           }}
                           disabled={stopReasons.length === 0}
-                         />
+                        />
                         Select all
                       </label>
                       <Button
@@ -4611,14 +4952,13 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-2">
                         <label className="flex items-center gap-2 text-sm">
                           <Checkbox
-                            
                             checked={reason.isActive}
                             onChange={(event) =>
                               updateStopReason(reason.id, {
                                 isActive: event.target.checked,
                               })
                             }
-                           />
+                          />
                           Active
                         </label>
                         <Button
@@ -4651,9 +4991,8 @@ export default function SettingsPage() {
                         >
                           Remove
                         </Button>
-                          <Checkbox
-                            variant="box"
-                          
+                        <Checkbox
+                          variant="box"
                           checked={selectedStopReasonIds.includes(reason.id)}
                           onChange={(event) => {
                             setSelectedStopReasonIds((prev) => {
@@ -4663,7 +5002,7 @@ export default function SettingsPage() {
                               return prev.filter((id) => id !== reason.id);
                             });
                           }}
-                         />
+                        />
                       </div>
                     </div>
                   ))}
@@ -4725,9 +5064,8 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Checkbox
-                              variant="box"
-                            
+                          <Checkbox
+                            variant="box"
                             checked={
                               partnerGroups.length > 0 &&
                               selectedPartnerGroupIds.length ===
@@ -4743,7 +5081,7 @@ export default function SettingsPage() {
                               }
                             }}
                             disabled={partnerGroups.length === 0}
-                           />
+                          />
                           Select all
                         </label>
                         <Button
@@ -4765,14 +5103,13 @@ export default function SettingsPage() {
                         <div className="flex items-center gap-2">
                           <label className="flex items-center gap-2 text-sm">
                             <Checkbox
-                              
                               checked={group.isActive}
                               onChange={(event) =>
                                 updatePartnerGroup(group.id, {
                                   isActive: event.target.checked,
                                 })
                               }
-                             />
+                            />
                             Active
                           </label>
                           <Button
@@ -4807,7 +5144,6 @@ export default function SettingsPage() {
                           </Button>
                           <Checkbox
                             variant="box"
-                            
                             checked={selectedPartnerGroupIds.includes(group.id)}
                             onChange={(event) => {
                               setSelectedPartnerGroupIds((prev) => {
@@ -4817,7 +5153,7 @@ export default function SettingsPage() {
                                 return prev.filter((id) => id !== group.id);
                               });
                             }}
-                           />
+                          />
                         </div>
                       </div>
                     ))}
@@ -4903,7 +5239,6 @@ export default function SettingsPage() {
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Checkbox
                           variant="box"
-                          
                           checked={
                             partners.length > 0 &&
                             selectedPartnerIds.length === partners.length
@@ -4918,7 +5253,7 @@ export default function SettingsPage() {
                             }
                           }}
                           disabled={partners.length === 0}
-                         />
+                        />
                         Select all
                       </label>
                       <Button
@@ -4948,7 +5283,7 @@ export default function SettingsPage() {
                         {(partner.email || partner.phone) && (
                           <div className="mt-1 text-xs text-muted-foreground">
                             {partner.email ? `Email: ${partner.email}` : ""}
-                            {partner.email && partner.phone ? " • " : ""}
+                            {partner.email && partner.phone ? " | " : ""}
                             {partner.phone ? `Phone: ${partner.phone}` : ""}
                           </div>
                         )}
@@ -4956,14 +5291,13 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-2">
                         <label className="flex items-center gap-2 text-sm">
                           <Checkbox
-                            
                             checked={partner.isActive}
                             onChange={(event) =>
                               updatePartner(partner.id, {
                                 isActive: event.target.checked,
                               })
                             }
-                           />
+                          />
                           Active
                         </label>
                         <Button
@@ -4996,9 +5330,8 @@ export default function SettingsPage() {
                         >
                           Remove
                         </Button>
-                          <Checkbox
-                            variant="box"
-                          
+                        <Checkbox
+                          variant="box"
                           checked={selectedPartnerIds.includes(partner.id)}
                           onChange={(event) => {
                             setSelectedPartnerIds((prev) => {
@@ -5008,7 +5341,7 @@ export default function SettingsPage() {
                               return prev.filter((id) => id !== partner.id);
                             });
                           }}
-                         />
+                        />
                       </div>
                     </div>
                   ))}
@@ -5039,7 +5372,45 @@ export default function SettingsPage() {
                   Add or edit the fields shown on external job forms.
                 </div>
 
-                <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(140px,0.6fr)_minmax(190px,0.7fr)_minmax(120px,0.4fr)_auto] lg:items-end">
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={externalPricingEnabled}
+                        onChange={(event) =>
+                          setExternalPricingEnabled(event.target.checked)
+                        }
+                      />
+                      Enable price reconciliation (planned vs invoice)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleSaveExternalPricingSettings}
+                        disabled={externalPricingState === "saving"}
+                      >
+                        {externalPricingState === "saving"
+                          ? "Saving..."
+                          : "Save pricing"}
+                      </Button>
+                      {externalPricingState !== "idle" &&
+                      externalPricingMessage ? (
+                        <span
+                          className={`text-xs ${
+                            externalPricingState === "error"
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {externalPricingMessage}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(140px,0.6fr)_minmax(190px,0.7fr)_minmax(190px,0.7fr)_minmax(120px,0.4fr)_auto] lg:items-end">
                   <InputField
                     label="Label"
                     value={externalJobFieldLabel}
@@ -5052,15 +5423,23 @@ export default function SettingsPage() {
                   <SelectField
                     label="Type"
                     value={externalJobFieldType}
-                    onValueChange={(value) =>
-                      setExternalJobFieldType(value as ExternalJobFieldType)
-                    }
+                    onValueChange={(value) => {
+                      const nextType = value as ExternalJobFieldType;
+                      setExternalJobFieldType(nextType);
+                      if (nextType !== "number") {
+                        setExternalJobFieldRole("none");
+                      }
+                    }}
                   >
                     <Select
                       value={externalJobFieldType}
-                      onValueChange={(value) =>
-                        setExternalJobFieldType(value as ExternalJobFieldType)
-                      }
+                      onValueChange={(value) => {
+                        const nextType = value as ExternalJobFieldType;
+                        setExternalJobFieldType(nextType);
+                        if (nextType !== "number") {
+                          setExternalJobFieldRole("none");
+                        }
+                      }}
                     >
                       <SelectTrigger className="h-10 w-full">
                         <SelectValue />
@@ -5099,6 +5478,32 @@ export default function SettingsPage() {
                       </SelectContent>
                     </Select>
                   </SelectField>
+                  <SelectField
+                    label="Role"
+                    value={externalJobFieldRole}
+                    onValueChange={(value) =>
+                      setExternalJobFieldRole(value as ExternalJobFieldRole)
+                    }
+                  >
+                    <Select
+                      value={externalJobFieldRole}
+                      onValueChange={(value) =>
+                        setExternalJobFieldRole(value as ExternalJobFieldRole)
+                      }
+                      disabled={externalJobFieldType !== "number"}
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {externalJobFieldRoleOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </SelectField>
                   <InputField
                     label="Order"
                     type="number"
@@ -5125,7 +5530,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   <InputField
                     label="Unit (optional)"
                     value={externalJobFieldUnit}
@@ -5145,191 +5550,380 @@ export default function SettingsPage() {
                     placeholder="EUR, USD"
                     className="min-h-20 disabled:opacity-50"
                   />
+                  <TextAreaField
+                    label="AI aliases (comma, newline, or backslash separated)"
+                    value={externalJobFieldAiAliases}
+                    onChange={(event) =>
+                      setExternalJobFieldAiAliases(event.target.value)
+                    }
+                    disabled={!externalJobFieldAiEnabled}
+                    placeholder="invoice no, invoice nr, contract number"
+                    className="min-h-20 disabled:opacity-50"
+                  />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-4 text-sm">
                   <label className="flex items-center gap-2">
                     <Checkbox
-                      
                       checked={externalJobFieldRequired}
                       onChange={(event) =>
                         setExternalJobFieldRequired(event.target.checked)
                       }
-                     />
+                    />
                     Required
                   </label>
                   <label className="flex items-center gap-2">
                     <Checkbox
-                      
                       checked={externalJobFieldActive}
                       onChange={(event) =>
                         setExternalJobFieldActive(event.target.checked)
                       }
-                     />
+                    />
                     Active
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={externalJobFieldShowInTable}
+                      onChange={(event) =>
+                        setExternalJobFieldShowInTable(event.target.checked)
+                      }
+                    />
+                    In table
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={externalJobFieldAiEnabled}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setExternalJobFieldAiEnabled(checked);
+                        if (!checked) {
+                          setExternalJobFieldAiMatchOnly(false);
+                        }
+                      }}
+                    />
+                    AI extract
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={externalJobFieldAiMatchOnly}
+                      onChange={(event) =>
+                        setExternalJobFieldAiMatchOnly(event.target.checked)
+                      }
+                      disabled={!externalJobFieldAiEnabled}
+                    />
+                    AI match only
                   </label>
                 </div>
 
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-sm text-muted-foreground">
                     {selectedExternalJobFieldIds.length > 0
                       ? `${selectedExternalJobFieldIds.length} selected`
                       : " "}
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleDeleteSelectedExternalJobFields}
-                    disabled={selectedExternalJobFieldIds.length === 0}
-                  >
-                    Remove selected
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleSaveExternalTableColumns}
+                      disabled={externalTableState === "saving"}
+                    >
+                      {externalTableState === "saving"
+                        ? "Saving columns..."
+                        : "Save table columns"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleDeleteSelectedExternalJobFields}
+                      disabled={selectedExternalJobFieldIds.length === 0}
+                    >
+                      Remove selected
+                    </Button>
+                  </div>
                 </div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/40 text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Label
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Type
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Scope
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Unit
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Order
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Required
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Active
-                        </th>
-                        <th className="px-4 py-2 text-right font-medium">
-                          <div className="flex items-center justify-end gap-2">
-                            <span>Actions</span>
-                            <Checkbox
-                              variant="box"
-                              
-                              checked={
-                                sortedExternalJobFields.length > 0 &&
-                                selectedExternalJobFieldIds.length ===
-                                  sortedExternalJobFields.length
-                              }
-                              onChange={(event) => {
-                                if (event.target.checked) {
-                                  setSelectedExternalJobFieldIds(
-                                    sortedExternalJobFields.map(
-                                      (field) => field.id,
-                                    ),
-                                  );
-                                } else {
-                                  setSelectedExternalJobFieldIds([]);
-                                }
-                              }}
-                             />
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedExternalJobFields.length === 0 ? (
+                {externalTableState !== "idle" && externalTableMessage ? (
+                  <div
+                    className={`text-xs ${
+                      externalTableState === "error"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {externalTableMessage}
+                  </div>
+                ) : null}
+                <DataTable
+                  mode="custom"
+                  columns={externalSchemaTableColumns}
+                  stickyFirstColumn
+                  wrapperClassName="overflow-x-auto overflow-y-hidden rounded-lg border border-border"
+                  tableClassName="w-full table-auto [&_th]:whitespace-normal [&_th]:break-words [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4"
+                  customBody={
+                    <>
+                      {externalTableColumns.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={8}
+                            colSpan={12}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
-                            No external job fields configured.
+                            No external table columns configured.
                           </td>
                         </tr>
                       ) : (
-                        sortedExternalJobFields.map((field) => (
-                          <tr key={field.id} className="border-t border-border">
-                            <td className="px-4 py-2">
-                              <div className="font-medium">{field.label}</div>
-                            </td>
-                            <td className="px-4 py-2 text-sm">
-                              {externalJobFieldTypeOptions.find(
-                                (option) => option.value === field.fieldType,
-                              )?.label ?? field.fieldType}
-                            </td>
-                            <td className="px-4 py-2 text-sm">
-                              {externalJobFieldScopeOptions.find(
-                                (option) =>
-                                  option.value === (field.scope ?? "manual"),
-                              )?.label ?? "Manual entry"}
-                            </td>
-                            <td className="px-4 py-2 text-sm">
-                              {field.unit || "--"}
-                            </td>
-                            <td className="px-4 py-2 text-sm">
-                              {field.sortOrder}
-                            </td>
-                            <td className="px-4 py-2 text-sm">
-                              {field.isRequired ? "Yes" : "No"}
-                            </td>
-                            <td className="px-4 py-2 text-sm">
-                              {field.isActive ? "Yes" : "No"}
-                            </td>
-                            <td className="px-4 py-2 text-right">
-                              <div className="flex justify-end items-center gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    handleEditExternalJobField(field.id)
+                        externalTableColumns.map((column, fullIndex) => {
+                          const fieldId = column.id.startsWith("field.")
+                            ? column.id.slice("field.".length)
+                            : null;
+                          const field = fieldId
+                            ? externalJobFieldById[fieldId]
+                            : null;
+                          const catalogEntry =
+                            externalTableColumnCatalogById[column.id];
+                          const defaultLabel =
+                            catalogEntry?.label ?? field?.label ?? column.id;
+
+                          return (
+                            <Fragment key={`table-column-${column.id}`}>
+                              <tr
+                                className={`border-t border-border transition-all ${
+                                  externalTableDropIndex === fullIndex
+                                    ? "h-4 bg-primary/10"
+                                    : "h-0"
+                                }`}
+                              >
+                                <td colSpan={12} className="p-0" />
+                              </tr>
+                              <tr
+                                className={`border-t border-border ${
+                                  dragExternalTableColumnId === column.id
+                                    ? "bg-primary/5"
+                                    : "bg-background"
+                                }`}
+                                draggable
+                                onDragStart={() => {
+                                  setDragExternalTableColumnId(column.id);
+                                  setExternalTableDropIndex(fullIndex);
+                                }}
+                                onDragOver={(event) => {
+                                  event.preventDefault();
+                                  const rect =
+                                    event.currentTarget.getBoundingClientRect();
+                                  const before =
+                                    event.clientY < rect.top + rect.height / 2;
+                                  setExternalTableDropIndex(
+                                    before ? fullIndex : fullIndex + 1,
+                                  );
+                                }}
+                                onDrop={(event) => {
+                                  event.preventDefault();
+                                  if (
+                                    !dragExternalTableColumnId ||
+                                    externalTableDropIndex === null
+                                  ) {
+                                    return;
                                   }
+                                  setExternalTableColumns((prev) =>
+                                    reorderExternalTableColumns(
+                                      prev,
+                                      dragExternalTableColumnId,
+                                      externalTableDropIndex,
+                                    ),
+                                  );
+                                  setDragExternalTableColumnId(null);
+                                  setExternalTableDropIndex(null);
+                                }}
+                                onDragEnd={() => {
+                                  setDragExternalTableColumnId(null);
+                                  setExternalTableDropIndex(null);
+                                }}
+                              >
+                                <td
+                                  className={`sticky left-0 z-10 min-w-[360px] px-3 py-2 md:px-4 ${
+                                    dragExternalTableColumnId === column.id
+                                      ? "bg-primary/5"
+                                      : "bg-background"
+                                  }`}
                                 >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    handleCopyExternalJobField(field.id)
-                                  }
-                                >
-                                  Copy
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() =>
-                                    handleDeleteExternalJobField(field.id)
-                                  }
-                                >
-                                  Remove
-                                </Button>
-                                <Checkbox
-                                  variant="box"
-                                  
-                                  checked={selectedExternalJobFieldIds.includes(
-                                    field.id,
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="cursor-grab text-muted-foreground"
+                                      aria-hidden
+                                    >
+                                      ::
+                                    </span>
+                                    <div className="min-w-[320px] flex-1">
+                                      <Input
+                                        value={column.label ?? ""}
+                                        onChange={(event) =>
+                                          setExternalTableColumns((prev) =>
+                                            prev.map((item) =>
+                                              item.id === column.id
+                                                ? {
+                                                    ...item,
+                                                    label: event.target.value,
+                                                  }
+                                                : item,
+                                            ),
+                                          )
+                                        }
+                                        placeholder={defaultLabel}
+                                        className="h-9 w-full"
+                                      />
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="min-w-[120px] px-3 py-2 text-sm md:px-4">
+                                  {field
+                                    ? (externalJobFieldTypeOptions.find(
+                                        (option) =>
+                                          option.value === field.fieldType,
+                                      )?.label ?? field.fieldType)
+                                    : "System"}
+                                </td>
+                                <td className="min-w-[130px] px-3 py-2 text-sm md:px-4">
+                                  {field
+                                    ? (externalJobFieldScopeOptions.find(
+                                        (option) =>
+                                          option.value ===
+                                          (field.scope ?? "manual"),
+                                      )?.label ?? "Manual entry")
+                                    : "External table"}
+                                </td>
+                                <td className="min-w-[120px] px-3 py-2 text-sm md:px-4">
+                                  {field
+                                    ? (externalJobFieldRoleOptions.find(
+                                        (option) =>
+                                          option.value ===
+                                          (field.fieldRole ?? "none"),
+                                      )?.label ?? "None")
+                                    : "--"}
+                                </td>
+                                <td className="min-w-[70px] px-3 py-2 text-sm md:px-4">
+                                  {field ? field.unit || "--" : "--"}
+                                </td>
+                                <td className="min-w-[70px] px-3 py-2 text-sm md:px-4">
+                                  {fullIndex}
+                                </td>
+                                <td className="min-w-[90px] px-3 py-2 text-sm md:px-4">
+                                  {field
+                                    ? field.isRequired
+                                      ? "Yes"
+                                      : "No"
+                                    : "--"}
+                                </td>
+                                <td className="min-w-[80px] px-3 py-2 text-sm md:px-4">
+                                  {field
+                                    ? field.isActive
+                                      ? "Yes"
+                                      : "No"
+                                    : "--"}
+                                </td>
+                                <td className="min-w-[90px] px-3 py-2 text-sm md:px-4">
+                                  <Checkbox
+                                    checked={column.visible}
+                                    onChange={(event) =>
+                                      setExternalTableColumns((prev) =>
+                                        prev.map((item) =>
+                                          item.id === column.id
+                                            ? {
+                                                ...item,
+                                                visible: event.target.checked,
+                                              }
+                                            : item,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                </td>
+                                <td className="min-w-[70px] px-3 py-2 text-sm md:px-4">
+                                  {field
+                                    ? field.aiEnabled
+                                      ? "Yes"
+                                      : "No"
+                                    : "--"}
+                                </td>
+                                <td className="min-w-[110px] px-3 py-2 text-sm md:px-4">
+                                  {field
+                                    ? field.aiMatchOnly
+                                      ? "Yes"
+                                      : "No"
+                                    : "--"}
+                                </td>
+                                <td className="min-w-[290px] px-3 py-2 text-right md:px-4">
+                                  {field ? (
+                                    <div className="flex flex-nowrap items-center justify-end gap-2">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() =>
+                                          handleEditExternalJobField(field.id)
+                                        }
+                                      >
+                                        Edit
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() =>
+                                          handleCopyExternalJobField(field.id)
+                                        }
+                                      >
+                                        Copy
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() =>
+                                          handleDeleteExternalJobField(field.id)
+                                        }
+                                      >
+                                        Remove
+                                      </Button>
+                                      <Checkbox
+                                        variant="box"
+                                        checked={selectedExternalJobFieldIds.includes(
+                                          field.id,
+                                        )}
+                                        onChange={(event) => {
+                                          setSelectedExternalJobFieldIds(
+                                            (prev) => {
+                                              if (event.target.checked) {
+                                                return [...prev, field.id];
+                                              }
+                                              return prev.filter(
+                                                (id) => id !== field.id,
+                                              );
+                                            },
+                                          );
+                                        }}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">
+                                      {defaultLabel}
+                                    </span>
                                   )}
-                                  onChange={(event) => {
-                                    setSelectedExternalJobFieldIds((prev) => {
-                                      if (event.target.checked) {
-                                        return [...prev, field.id];
-                                      }
-                                      return prev.filter(
-                                        (id) => id !== field.id,
-                                      );
-                                    });
-                                  }}
-                                 />
-                              </div>
-                            </td>
-                          </tr>
-                        ))
+                                </td>
+                              </tr>
+                              {fullIndex === externalTableColumns.length - 1 ? (
+                                <tr
+                                  className={`border-t border-border transition-all ${
+                                    externalTableDropIndex === fullIndex + 1
+                                      ? "h-4 bg-primary/10"
+                                      : "h-0"
+                                  }`}
+                                >
+                                  <td colSpan={12} className="p-0" />
+                                </tr>
+                              ) : null}
+                            </Fragment>
+                          );
+                        })
                       )}
-                    </tbody>
-                  </table>
-                </div>
+                    </>
+                  }
+                />
               </CardContent>
             </Card>
           </div>
@@ -5364,9 +5958,7 @@ export default function SettingsPage() {
                   <InputField
                     label="Full name"
                     value={inviteFullName}
-                    onChange={(event) =>
-                      setInviteFullName(event.target.value)
-                    }
+                    onChange={(event) => setInviteFullName(event.target.value)}
                     placeholder="Full name"
                     className="h-10 w-full text-sm"
                     disabled={!canManageRolePermissions}
@@ -5425,12 +6017,11 @@ export default function SettingsPage() {
                 !canManageRolePermissions && (
                   <label className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Checkbox
-                      
                       checked={devRoleOverride}
                       onChange={(event) =>
                         setDevRoleOverride(event.target.checked)
                       }
-                     />
+                    />
                     Dev override: allow changing your own role
                   </label>
                 )}
@@ -5439,123 +6030,96 @@ export default function SettingsPage() {
                   {usersError}
                 </div>
               )}
-              <div className="overflow-x-auto rounded-lg border border-border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-2 text-left font-medium">Name</th>
-                      <th className="px-4 py-2 text-left font-medium">Role</th>
-                      <th className="px-4 py-2 text-left font-medium">Owner</th>
-                      <th className="px-4 py-2 text-left font-medium">Admin</th>
-                      <th className="px-4 py-2 text-right font-medium">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {isUsersLoading ? (
-                      <tr>
-                        <td
-                          colSpan={5}
-                          className="px-4 py-6 text-center text-muted-foreground"
-                        >
-                          <LoadingSpinner
-                            className="justify-center"
-                            label="Loading users..."
-                          />
-                        </td>
-                      </tr>
-                    ) : users.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={5}
-                          className="px-4 py-6 text-center text-muted-foreground"
-                        >
-                          No users found.
-                        </td>
-                      </tr>
-                    ) : (
-                      users.map((user) => (
-                        <tr key={user.id} className="border-t border-border">
-                          <td className="px-4 py-2 font-medium">{user.name}</td>
-                          <td className="px-4 py-2">
-                            <Select
-                              value={user.role}
-                              onValueChange={(value) =>
-                                handleUpdateUserRole(user.id, value as UserRole)
-                              }
-                              disabled={
-                                !canManageRolePermissions &&
-                                !(devRoleOverride && user.id === currentUser.id)
-                              }
-                            >
-                              <SelectTrigger className="h-9 w-40 rounded-md text-sm">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {[
-                                  ...assignableRoleOptions,
-                                  ...(user.role === "Admin"
-                                    ? (["Admin"] as UserRole[])
-                                    : []),
-                                ].map((roleOption) => (
-                                  <SelectItem
-                                    key={roleOption}
-                                    value={roleOption}
-                                  >
-                                    {roleOption === "Admin"
-                                      ? "Admin (legacy)"
-                                      : roleOption}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </td>
-                          <td className="px-4 py-2">
-                            <label className="flex items-center gap-2 text-xs text-foreground">
-                              <Checkbox
-                                
-                                checked={user.isOwner}
-                                onChange={(event) =>
-                                  handleUpdateUserOwner(
-                                    user.id,
-                                    event.target.checked,
-                                  )
-                                }
-                                disabled={
-                                  user.isOwner || !canManageRolePermissions
-                                }
-                               />
-                              Owner
-                            </label>
-                          </td>
-                          <td className="px-4 py-2">
-                            <label className="flex items-center gap-2 text-xs text-foreground">
-                              <Checkbox
-                                
-                                checked={user.isOwner || user.isAdmin}
-                                onChange={(event) =>
-                                  handleUpdateUserAdmin(
-                                    user.id,
-                                    event.target.checked,
-                                  )
-                                }
-                                disabled={
-                                  user.isOwner || !canManageRolePermissions
-                                }
-                               />
-                              Admin
-                            </label>
-                          </td>
-                          <td className="px-4 py-2 text-right text-xs text-muted-foreground">
-                            {updatingUserId === user.id ? "Saving..." : ""}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={usersAccessColumns}
+                rows={isUsersLoading ? [] : users}
+                getRowId={(user) => user.id}
+                wrapperClassName="overflow-x-auto overflow-y-hidden rounded-lg border border-border"
+                tableClassName="w-full [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm [&_th]:whitespace-normal [&_th]:break-words [&_td]:whitespace-normal md:[&_th]:px-4 md:[&_td]:px-4"
+                emptyState={
+                  isUsersLoading ? (
+                    <LoadingSpinner
+                      className="justify-center"
+                      label="Loading users..."
+                    />
+                  ) : (
+                    "No users found."
+                  )
+                }
+                renderCell={(user, column) => {
+                  if (column.id === "name") {
+                    return <span className="font-medium">{user.name}</span>;
+                  }
+                  if (column.id === "role") {
+                    return (
+                      <Select
+                        value={user.role}
+                        onValueChange={(value) =>
+                          handleUpdateUserRole(user.id, value as UserRole)
+                        }
+                        disabled={
+                          !canManageRolePermissions &&
+                          !(devRoleOverride && user.id === currentUser.id)
+                        }
+                      >
+                        <SelectTrigger className="h-9 w-40 rounded-md text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[
+                            ...assignableRoleOptions,
+                            ...(user.role === "Admin"
+                              ? (["Admin"] as UserRole[])
+                              : []),
+                          ].map((roleOption) => (
+                            <SelectItem key={roleOption} value={roleOption}>
+                              {roleOption === "Admin"
+                                ? "Admin (legacy)"
+                                : roleOption}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    );
+                  }
+                  if (column.id === "owner") {
+                    return (
+                      <label className="flex items-center gap-2 text-xs text-foreground">
+                        <Checkbox
+                          checked={user.isOwner}
+                          onChange={(event) =>
+                            handleUpdateUserOwner(user.id, event.target.checked)
+                          }
+                          disabled={user.isOwner || !canManageRolePermissions}
+                        />
+                        Owner
+                      </label>
+                    );
+                  }
+                  if (column.id === "admin") {
+                    return (
+                      <label className="flex items-center gap-2 text-xs text-foreground">
+                        <Checkbox
+                          checked={user.isOwner || user.isAdmin}
+                          onChange={(event) =>
+                            handleUpdateUserAdmin(user.id, event.target.checked)
+                          }
+                          disabled={user.isOwner || !canManageRolePermissions}
+                        />
+                        Admin
+                      </label>
+                    );
+                  }
+                  if (column.id === "actions") {
+                    return (
+                      <span className="block text-right text-xs text-muted-foreground">
+                        {updatingUserId === user.id ? "Saving..." : ""}
+                      </span>
+                    );
+                  }
+                  return "--";
+                }}
+              />
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -5642,13 +6206,12 @@ export default function SettingsPage() {
                                 className="px-3 py-2 text-center"
                               >
                                 <Checkbox
-                                  
                                   checked={allowed}
                                   onChange={() =>
                                     togglePermissionRole(definition.key, role)
                                   }
                                   disabled={!canManageRolePermissions}
-                                 />
+                                />
                               </td>
                             );
                           })}
@@ -5830,31 +6393,28 @@ export default function SettingsPage() {
                   <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
                     <label className="flex items-center gap-2">
                       <Checkbox
-                        
                         checked={rules.requireCommentForEngineering}
                         onChange={(event) =>
                           setRules({
                             requireCommentForEngineering: event.target.checked,
                           })
                         }
-                       />
+                      />
                       Require comment before engineering
                     </label>
                     <label className="flex items-center gap-2">
                       <Checkbox
-                        
                         checked={rules.requireCommentForProduction}
                         onChange={(event) =>
                           setRules({
                             requireCommentForProduction: event.target.checked,
                           })
                         }
-                       />
+                      />
                       Require comment before production
                     </label>
                     <label className="flex items-center gap-2">
                       <Checkbox
-                        
                         checked={rules.requireOrderInputsForEngineering}
                         onChange={(event) =>
                           setRules({
@@ -5862,12 +6422,11 @@ export default function SettingsPage() {
                               event.target.checked,
                           })
                         }
-                       />
+                      />
                       Require order inputs before engineering
                     </label>
                     <label className="flex items-center gap-2">
                       <Checkbox
-                        
                         checked={rules.requireOrderInputsForProduction}
                         onChange={(event) =>
                           setRules({
@@ -5875,21 +6434,20 @@ export default function SettingsPage() {
                               event.target.checked,
                           })
                         }
-                       />
+                      />
                       Require order inputs before production
                     </label>
                   </div>
                   <div className="mt-4 rounded-lg border border-border bg-background/60 p-3">
                     <label className="flex items-center gap-2 text-sm font-medium">
                       <Checkbox
-                        
                         checked={rules.dueIndicatorEnabled}
                         onChange={(event) =>
                           setRules({
                             dueIndicatorEnabled: event.target.checked,
                           })
                         }
-                       />
+                      />
                       Enable due date indicators
                     </label>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -5903,7 +6461,6 @@ export default function SettingsPage() {
                             className="flex items-center gap-2"
                           >
                             <Checkbox
-                              
                               checked={isChecked}
                               disabled={!rules.dueIndicatorEnabled}
                               onChange={(event) => {
@@ -5918,7 +6475,7 @@ export default function SettingsPage() {
                                       ),
                                 });
                               }}
-                             />
+                            />
                             {option.label}
                           </label>
                         );
@@ -6009,7 +6566,6 @@ export default function SettingsPage() {
                                   </span>
                                 ) : null}
                                 <Checkbox
-                                  
                                   checked={config?.isActive ?? true}
                                   disabled={requiredActiveOrderStatuses.includes(
                                     option.value,
@@ -6023,7 +6579,7 @@ export default function SettingsPage() {
                                       },
                                     }))
                                   }
-                                 />
+                                />
                                 <span>Active</span>
                               </label>
                             </div>
@@ -6148,7 +6704,6 @@ export default function SettingsPage() {
                                   </span>
                                 ) : null}
                                 <Checkbox
-                                  
                                   checked={config?.isActive ?? true}
                                   disabled={requiredActiveExternalStatuses.includes(
                                     option.value,
@@ -6164,7 +6719,7 @@ export default function SettingsPage() {
                                       }),
                                     )
                                   }
-                                 />
+                                />
                                 <span>Active</span>
                               </label>
                             </div>
@@ -6468,7 +7023,6 @@ export default function SettingsPage() {
                       <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                         <label className="flex items-center gap-2">
                           <Checkbox
-                            
                             checked={newChecklistRequired.includes(
                               "ready_for_engineering",
                             )}
@@ -6483,12 +7037,11 @@ export default function SettingsPage() {
                                 return Array.from(next);
                               });
                             }}
-                           />
+                          />
                           Required for engineering
                         </label>
                         <label className="flex items-center gap-2">
                           <Checkbox
-                            
                             checked={
                               newChecklistRequired.includes(
                                 "ready_for_production",
@@ -6506,7 +7059,7 @@ export default function SettingsPage() {
                                 return Array.from(next);
                               });
                             }}
-                           />
+                          />
                           Required for production
                         </label>
                       </div>
@@ -6522,7 +7075,6 @@ export default function SettingsPage() {
                         <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                           <label className="flex items-center gap-2">
                             <Checkbox
-                              
                               checked={item.requiredFor.includes(
                                 "ready_for_engineering",
                               )}
@@ -6537,12 +7089,11 @@ export default function SettingsPage() {
                                   requiredFor: Array.from(next),
                                 });
                               }}
-                             />
+                            />
                             Eng.
                           </label>
                           <label className="flex items-center gap-2">
                             <Checkbox
-                              
                               checked={
                                 item.requiredFor.includes(
                                   "ready_for_production",
@@ -6559,19 +7110,18 @@ export default function SettingsPage() {
                                   requiredFor: Array.from(next),
                                 });
                               }}
-                             />
+                            />
                             Prod.
                           </label>
                           <label className="flex items-center gap-2">
                             <Checkbox
-                              
                               checked={item.isActive}
                               onChange={(event) =>
                                 updateChecklistItem(item.id, {
                                   isActive: event.target.checked,
                                 })
                               }
-                             />
+                            />
                             Active
                           </label>
                         </div>
@@ -6722,24 +7272,22 @@ export default function SettingsPage() {
                     Sender mode
                     <label className="flex items-center gap-2 text-sm font-normal">
                       <Checkbox
-                        
                         checked={outboundUseUserSender}
                         onChange={(event) =>
                           setOutboundUseUserSender(event.target.checked)
                         }
                         disabled={!currentUser.isAdmin}
-                       />
+                      />
                       Use engineer email as sender when domain matches
                     </label>
                     <label className="flex items-center gap-2 text-sm font-normal">
                       <Checkbox
-                        
                         checked={outboundSenderVerified}
                         onChange={(event) =>
                           setOutboundSenderVerified(event.target.checked)
                         }
                         disabled={!currentUser.isAdmin}
-                       />
+                      />
                       Domain is verified in Resend
                     </label>
                   </div>

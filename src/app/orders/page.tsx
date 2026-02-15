@@ -795,7 +795,7 @@ export default function OrdersPage() {
               className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
             >
               <ExternalLinkIcon className="h-4 w-4" />
-              External Jobs
+              Partner Orders
             </Link>
             <Button
               variant="outline"
@@ -943,7 +943,7 @@ export default function OrdersPage() {
             <Link href="/orders/external">
               <Button variant="outline" className="gap-2">
                 <ExternalLinkIcon className="h-4 w-4" />
-                External Jobs
+                Partner Orders
               </Button>
             </Link>
             <Button
