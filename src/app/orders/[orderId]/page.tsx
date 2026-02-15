@@ -5,7 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { FileField } from "@/components/ui/FileField";
 import { Input } from "@/components/ui/Input";
+import { SelectField } from "@/components/ui/SelectField";
+import { TextAreaField } from "@/components/ui/TextAreaField";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import {
@@ -595,7 +598,7 @@ export default function OrderDetailPage() {
       const { data, error } = await sb
         .from("external_job_fields")
         .select(
-          "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+          "id, key, label, field_type, scope, field_role, show_in_table, ai_enabled, ai_match_only, ai_aliases, unit, options, is_required, is_active, sort_order",
         )
         .eq("is_active", true)
         .order("sort_order", { ascending: true })
@@ -612,6 +615,11 @@ export default function OrderDetailPage() {
         label: row.label,
         fieldType: row.field_type as ExternalJobField["fieldType"],
         scope: (row.scope ?? "manual") as ExternalJobField["scope"],
+        fieldRole: (row.field_role ?? "none") as ExternalJobField["fieldRole"],
+        showInTable: row.show_in_table ?? true,
+        aiEnabled: row.ai_enabled ?? false,
+        aiMatchOnly: row.ai_match_only ?? false,
+        aiAliases: row.ai_aliases ?? undefined,
         unit: row.unit ?? undefined,
         options: row.options?.options ?? undefined,
         isRequired: row.is_required ?? false,
@@ -1661,11 +1669,21 @@ export default function OrderDetailPage() {
 
     if (field.fieldType === "select") {
       return (
-        <label
+        <SelectField
           key={field.id}
-          className="flex flex-col gap-2 text-sm font-medium"
+          label={label}
+          value={
+            normalized === undefined || normalized === null || normalized === ""
+              ? "__none__"
+              : String(normalized)
+          }
+          onValueChange={(value) =>
+            setOrderInputValues((prev) => ({
+              ...prev,
+              [field.id]: value === "__none__" ? "" : value,
+            }))
+          }
         >
-          {label}
           <Select
             value={
               normalized === undefined ||
@@ -1694,7 +1712,7 @@ export default function OrderDetailPage() {
               ))}
             </SelectContent>
           </Select>
-        </label>
+        </SelectField>
       );
     }
 
@@ -2196,23 +2214,19 @@ export default function OrderDetailPage() {
 
     if (field.fieldType === "textarea") {
       return (
-        <label
+        <TextAreaField
           key={field.id}
-          className="flex flex-col gap-2 text-sm font-medium"
-        >
-          {label}
-          <textarea
-            value={String(normalized ?? "")}
-            disabled={!canEditOrderInputs}
-            onChange={(event) =>
-              setOrderInputValues((prev) => ({
-                ...prev,
-                [field.id]: event.target.value,
-              }))
-            }
-            className="min-h-20 rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-          />
-        </label>
+          label={label}
+          value={String(normalized ?? "")}
+          disabled={!canEditOrderInputs}
+          onChange={(event) =>
+            setOrderInputValues((prev) => ({
+              ...prev,
+              [field.id]: event.target.value,
+            }))
+          }
+          className="min-h-20"
+        />
       );
     }
 
@@ -3702,8 +3716,15 @@ export default function OrderDetailPage() {
                 <CardTitle>Attachments</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <label className="space-y-2 text-sm font-medium">
-                  Category
+                <SelectField
+                  label="Category"
+                  value={attachmentCategory}
+                  onValueChange={(value) => {
+                    setAttachmentCategory(value);
+                    setIsAttachmentCategoryManual(true);
+                  }}
+                  description="Pick the best bucket before uploading files."
+                >
                   <Select
                     value={attachmentCategory}
                     onValueChange={(value) => {
@@ -3722,10 +3743,7 @@ export default function OrderDetailPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <span className="text-xs text-muted-foreground">
-                    Pick the best bucket before uploading files.
-                  </span>
-                </label>
+                </SelectField>
                 <div className="space-y-2">
                   <div
                     className="flex min-h-21.5 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
@@ -3745,11 +3763,10 @@ export default function OrderDetailPage() {
                   >
                     <ImageIcon className="h-5 w-5" />
                     <span>Drag files here or click to upload</span>
-                    <input
+                    <FileField
                       id="attachment-file-input"
-                      type="file"
                       multiple
-                      className="hidden"
+                      wrapperClassName="hidden"
                       onChange={(event) => {
                         if (event.target.files) {
                           handleFilesAdded(event.target.files);
@@ -3970,8 +3987,13 @@ export default function OrderDetailPage() {
                 </div>
 
                 <div className="grid gap-3 lg:grid-cols-2">
-                  <label className="space-y-2 text-sm font-medium">
-                    Partner group
+                  <SelectField
+                    label="Partner group"
+                    value={externalPartnerGroupId || "__all__"}
+                    onValueChange={(value) =>
+                      setExternalPartnerGroupId(value === "__all__" ? "" : value)
+                    }
+                  >
                     <Select
                       value={externalPartnerGroupId || "__all__"}
                       onValueChange={(value) =>
@@ -3992,9 +4014,14 @@ export default function OrderDetailPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </label>
-                  <label className="space-y-2 text-sm font-medium">
-                    Partner
+                  </SelectField>
+                  <SelectField
+                    label="Partner"
+                    value={externalPartnerId || "__none__"}
+                    onValueChange={(value) =>
+                      setExternalPartnerId(value === "__none__" ? "" : value)
+                    }
+                  >
                     <Select
                       value={externalPartnerId || "__none__"}
                       onValueChange={(value) =>
@@ -4019,7 +4046,7 @@ export default function OrderDetailPage() {
                           ))}
                       </SelectContent>
                     </Select>
-                  </label>
+                  </SelectField>
                 </div>
                 {externalRequestMode === "manual" ? (
                   manualExternalJobFields.length > 0 ? (
@@ -4067,11 +4094,22 @@ export default function OrderDetailPage() {
                                   label: option,
                                 }));
                             return (
-                              <label
+                              <SelectField
                                 key={field.id}
-                                className="space-y-2 text-sm font-medium"
+                                label={field.label}
+                                value={
+                                  typeof rawValue === "string" && rawValue
+                                    ? rawValue
+                                    : "__none__"
+                                }
+                                onValueChange={(value) =>
+                                  setExternalJobFieldValues((prev) => ({
+                                    ...prev,
+                                    [field.id]:
+                                      value === "__none__" ? "" : value,
+                                  }))
+                                }
                               >
-                                {field.label}
                                 <Select
                                   value={
                                     typeof rawValue === "string" && rawValue
@@ -4103,7 +4141,7 @@ export default function OrderDetailPage() {
                                     ))}
                                   </SelectContent>
                                 </Select>
-                              </label>
+                              </SelectField>
                             );
                           }
                           if (field.fieldType === "date") {
@@ -4127,24 +4165,18 @@ export default function OrderDetailPage() {
                           }
                           if (field.fieldType === "textarea") {
                             return (
-                              <label
+                              <TextAreaField
                                 key={field.id}
-                                className="space-y-2 text-sm font-medium"
-                              >
-                                {field.label}
-                                <textarea
-                                  value={
-                                    typeof rawValue === "string" ? rawValue : ""
-                                  }
-                                  onChange={(event) =>
-                                    setExternalJobFieldValues((prev) => ({
-                                      ...prev,
-                                      [field.id]: event.target.value,
-                                    }))
-                                  }
-                                  className="min-h-20 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                                />
-                              </label>
+                                label={field.label}
+                                value={typeof rawValue === "string" ? rawValue : ""}
+                                onChange={(event) =>
+                                  setExternalJobFieldValues((prev) => ({
+                                    ...prev,
+                                    [field.id]: event.target.value,
+                                  }))
+                                }
+                                className="min-h-20"
+                              />
                             );
                           }
                           return (
@@ -4203,24 +4235,22 @@ export default function OrderDetailPage() {
                   )
                 ) : (
                   <div className="space-y-3 rounded-lg border border-border bg-muted/10 px-4 py-3">
-                    <label className="space-y-2 text-sm font-medium">
-                      Comment for partner (optional)
-                      <textarea
-                        value={externalPortalComment}
-                        onChange={(event) =>
-                          setExternalPortalComment(event.target.value)
-                        }
-                        placeholder="Add request note for partner..."
-                        className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                      />
-                    </label>
+                    <TextAreaField
+                      label="Comment for partner (optional)"
+                      value={externalPortalComment}
+                      onChange={(event) =>
+                        setExternalPortalComment(event.target.value)
+                      }
+                      placeholder="Add request note for partner..."
+                      className="min-h-22.5"
+                    />
                     <div className="space-y-2">
                       <div className="text-sm font-medium">
                         Files for partner (optional)
                       </div>
-                      <input
-                        type="file"
+                      <FileField
                         multiple
+                        wrapperClassName="w-full"
                         onChange={(event) => {
                           const files = Array.from(event.target.files ?? []);
                           if (files.length === 0) {
@@ -4484,11 +4514,10 @@ export default function OrderDetailPage() {
                                 Attachments
                               </div>
                               <div className="flex items-center gap-2">
-                                <input
+                                <FileField
                                   id={`external-files-${job.id}`}
-                                  type="file"
                                   multiple
-                                  className="hidden"
+                                  wrapperClassName="hidden"
                                   onChange={(event) => {
                                     if (event.target.files) {
                                       handleExternalFilesAdded(
@@ -4735,8 +4764,13 @@ export default function OrderDetailPage() {
               {statusLabel(returnTargetStatus)}.
             </p>
             <div className="mt-4 space-y-3">
-              <label className="space-y-2 text-sm font-medium">
-                Reason
+              <SelectField
+                label="Reason"
+                value={returnReason || "__none__"}
+                onValueChange={(value) =>
+                  setReturnReason(value === "__none__" ? "" : value)
+                }
+              >
                 <Select
                   value={returnReason || "__none__"}
                   onValueChange={(value) =>
@@ -4757,16 +4791,14 @@ export default function OrderDetailPage() {
                       ))}
                   </SelectContent>
                 </Select>
-              </label>
-              <label className="space-y-2 text-sm font-medium">
-                Comment
-                <textarea
-                  value={returnNote}
-                  onChange={(event) => setReturnNote(event.target.value)}
-                  className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                  placeholder="Add context for the previous role..."
-                />
-              </label>
+              </SelectField>
+              <TextAreaField
+                label="Comment"
+                value={returnNote}
+                onChange={(event) => setReturnNote(event.target.value)}
+                className="min-h-22.5"
+                placeholder="Add context for the previous role..."
+              />
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="outline" onClick={() => setIsReturnOpen(false)}>

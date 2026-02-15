@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { SelectField } from "@/components/ui/SelectField";
+import { TextAreaField } from "@/components/ui/TextAreaField";
 import {
   Select,
   SelectContent,
@@ -1660,8 +1662,14 @@ export default function OperatorProductionPage() {
               </button>
             </div>
             <div className="mt-4 space-y-3 text-sm">
-              <label className="space-y-1 text-xs text-muted-foreground">
-                Reason template
+              <SelectField
+                label="Reason template"
+                labelClassName="text-xs text-muted-foreground"
+                value={blockedReasonId || "__none__"}
+                onValueChange={(value) =>
+                  setBlockedReasonId(value === "__none__" ? "" : value)
+                }
+              >
                 <Select
                   value={blockedReasonId || "__none__"}
                   onValueChange={(value) =>
@@ -1680,16 +1688,15 @@ export default function OperatorProductionPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </label>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                Manual note
-                <textarea
-                  value={blockedReasonText}
-                  onChange={(event) => setBlockedReasonText(event.target.value)}
-                  placeholder="Type a custom reason..."
-                  className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground"
-                />
-              </label>
+              </SelectField>
+              <TextAreaField
+                label="Manual note"
+                labelClassName="text-xs text-muted-foreground"
+                value={blockedReasonText}
+                onChange={(event) => setBlockedReasonText(event.target.value)}
+                placeholder="Type a custom reason..."
+                className="min-h-22.5"
+              />
               <div className="flex justify-end gap-2">
                 <Button
                   variant="ghost"

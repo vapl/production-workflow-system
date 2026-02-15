@@ -11,6 +11,7 @@ import type {
 } from "@/types/orderInputs";
 import type {
   ExternalJobField,
+  ExternalJobFieldRole,
   ExternalJobFieldScope,
   ExternalJobFieldType,
 } from "@/types/orders";
@@ -193,6 +194,11 @@ function mapExternalJobField(row: {
   label: string;
   field_type: string;
   scope?: string | null;
+  field_role?: string | null;
+  show_in_table?: boolean | null;
+  ai_enabled?: boolean | null;
+  ai_match_only?: boolean | null;
+  ai_aliases?: string[] | null;
   unit?: string | null;
   options?: { options?: string[] } | null;
   is_required?: boolean | null;
@@ -205,8 +211,13 @@ function mapExternalJobField(row: {
     label: decodeUtf8Mojibake(row.label),
     fieldType: row.field_type as ExternalJobFieldType,
     scope: (row.scope ?? "manual") as ExternalJobFieldScope,
-    unit: normalizeMaybeString(row.unit),
-    options: normalizeStringArray(row.options?.options),
+    fieldRole: (row.field_role ?? "none") as ExternalJobFieldRole,
+    showInTable: row.show_in_table ?? true,
+    aiEnabled: row.ai_enabled ?? false,
+    aiMatchOnly: row.ai_match_only ?? false,
+    aiAliases: row.ai_aliases ?? undefined,
+    unit: row.unit ?? undefined,
+    options: row.options?.options ?? undefined,
     isRequired: row.is_required ?? false,
     isActive: row.is_active ?? true,
     sortOrder: row.sort_order ?? 0,
@@ -271,6 +282,7 @@ function isMissingExternalJobFieldsSchema(error?: {
     message.includes("external_job_fields") ||
     message.includes("external job fields") ||
     message.includes("scope") ||
+    message.includes("field_role") ||
     message.includes("schema cache")
   );
 }
@@ -484,7 +496,7 @@ export function useSettingsData(): SettingsDataState {
       supabase
         .from("external_job_fields")
         .select(
-          "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+          "id, key, label, field_type, scope, field_role, show_in_table, ai_enabled, ai_match_only, ai_aliases, unit, options, is_required, is_active, sort_order",
         )
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
@@ -892,6 +904,11 @@ export function useSettingsData(): SettingsDataState {
             label: payload.label,
             field_type: payload.fieldType,
             scope: payload.scope ?? "manual",
+            field_role: payload.fieldRole ?? "none",
+            show_in_table: payload.showInTable ?? true,
+            ai_enabled: payload.aiEnabled ?? false,
+            ai_match_only: payload.aiMatchOnly ?? false,
+            ai_aliases: payload.aiAliases ?? [],
             unit: payload.unit ?? null,
             options:
               payload.fieldType === "select"
@@ -902,7 +919,7 @@ export function useSettingsData(): SettingsDataState {
             sort_order: payload.sortOrder ?? 0,
           })
           .select(
-            "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+            "id, key, label, field_type, scope, field_role, show_in_table, ai_enabled, ai_match_only, ai_aliases, unit, options, is_required, is_active, sort_order",
           )
           .single();
         if (insertError || !data) {
@@ -936,6 +953,16 @@ export function useSettingsData(): SettingsDataState {
         if (patch.fieldType !== undefined)
           updatePayload.field_type = patch.fieldType;
         if (patch.scope !== undefined) updatePayload.scope = patch.scope;
+        if (patch.fieldRole !== undefined)
+          updatePayload.field_role = patch.fieldRole;
+        if (patch.showInTable !== undefined)
+          updatePayload.show_in_table = patch.showInTable;
+        if (patch.aiEnabled !== undefined)
+          updatePayload.ai_enabled = patch.aiEnabled;
+        if (patch.aiMatchOnly !== undefined)
+          updatePayload.ai_match_only = patch.aiMatchOnly;
+        if (patch.aiAliases !== undefined)
+          updatePayload.ai_aliases = patch.aiAliases;
         if (patch.unit !== undefined) updatePayload.unit = patch.unit ?? null;
         if (patch.options !== undefined) {
           const resolvedType =
@@ -955,7 +982,7 @@ export function useSettingsData(): SettingsDataState {
           .update(updatePayload)
           .eq("id", fieldId)
           .select(
-            "id, key, label, field_type, scope, unit, options, is_required, is_active, sort_order",
+            "id, key, label, field_type, scope, field_role, show_in_table, ai_enabled, ai_match_only, ai_aliases, unit, options, is_required, is_active, sort_order",
           )
           .single();
         if (updateError || !data) {

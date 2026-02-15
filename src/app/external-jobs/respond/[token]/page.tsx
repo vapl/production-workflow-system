@@ -5,7 +5,10 @@ import { useParams } from "next/navigation";
 import Image from "next/image";
 import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { FileField } from "@/components/ui/FileField";
 import { InputField } from "@/components/ui/InputField";
+import { SelectField } from "@/components/ui/SelectField";
+import { TextAreaField } from "@/components/ui/TextAreaField";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { DatePicker } from "@/components/ui/DatePicker";
 
@@ -424,51 +427,41 @@ export default function ExternalJobRespondPage() {
               }
               if (field.fieldType === "textarea") {
                 return (
-                  <label
+                  <TextAreaField
                     key={field.id}
-                    className="flex flex-col gap-2 text-sm font-medium"
-                  >
-                    {label}
-                    <textarea
-                      value={typeof value === "string" ? value : ""}
-                      onChange={(event) =>
-                        setPortalFieldValues((prev) => ({
-                          ...prev,
-                          [field.id]: event.target.value,
-                        }))
-                      }
-                      className="min-h-25 rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                      required={field.isRequired}
-                    />
-                  </label>
+                    label={label}
+                    value={typeof value === "string" ? value : ""}
+                    onChange={(event) =>
+                      setPortalFieldValues((prev) => ({
+                        ...prev,
+                        [field.id]: event.target.value,
+                      }))
+                    }
+                    className="min-h-25"
+                    required={field.isRequired}
+                  />
                 );
               }
               if (field.fieldType === "select") {
                 return (
-                  <label
+                  <SelectField
                     key={field.id}
-                    className="flex flex-col gap-2 text-sm font-medium"
-                  >
-                    {label}
-                    <select
-                      value={typeof value === "string" ? value : ""}
-                      onChange={(event) =>
-                        setPortalFieldValues((prev) => ({
-                          ...prev,
-                          [field.id]: event.target.value,
-                        }))
-                      }
-                      className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
-                      required={field.isRequired}
-                    >
-                      <option value="">Select value</option>
-                      {(field.options ?? []).map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    label={label}
+                    value={typeof value === "string" ? value : ""}
+                    onValueChange={(next) =>
+                      setPortalFieldValues((prev) => ({
+                        ...prev,
+                        [field.id]: next === "__none__" ? "" : next,
+                      }))
+                    }
+                    options={[
+                      { value: "__none__", label: "Select value" },
+                      ...((field.options ?? []).map((option) => ({
+                        value: option,
+                        label: option,
+                      })) as Array<{ value: string; label: string }>),
+                    ]}
+                  />
                 );
               }
               if (field.fieldType === "date") {
@@ -505,22 +498,17 @@ export default function ExternalJobRespondPage() {
                 />
               );
             })}
-            <label className="flex flex-col gap-2 text-sm font-medium">
-              Note (optional)
-              <textarea
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                className="min-h-25 rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-medium">
-              Attachment (optional)
-              <input
-                type="file"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                className="text-sm"
-              />
-            </label>
+            <TextAreaField
+              label="Note (optional)"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              className="min-h-25"
+            />
+            <FileField
+              label="Attachment (optional)"
+              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              className="text-sm"
+            />
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? "Submitting..." : "Submit"}

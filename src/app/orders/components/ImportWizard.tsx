@@ -9,7 +9,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
+import { SelectField } from "@/components/ui/SelectField";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { FileField } from "@/components/ui/FileField";
 import { XIcon } from "lucide-react";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useOrders } from "@/app/orders/OrdersContext";
@@ -530,10 +532,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
             <div className="flex min-h-[140px] items-center justify-center rounded-xl border border-dashed border-border bg-muted/30">
               <label className="cursor-pointer text-sm text-muted-foreground">
                 Click to upload .xlsx
-                <input
-                  type="file"
+                <FileField
                   accept=".xlsx"
-                  className="hidden"
+                  wrapperClassName="hidden"
                   onChange={async (event) => {
                     const file = event.target.files?.[0];
                     if (file) {
@@ -556,9 +557,17 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
           <div className="mt-6 space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               {[...requiredFields, ...optionalFields].map((field) => (
-                <label key={field.key} className="space-y-2 text-sm font-medium">
-                  {field.label}
-                  {"required" in field && field.required ? " *" : ""}
+                <SelectField
+                  key={field.key}
+                  label={`${field.label}${"required" in field && field.required ? " *" : ""}`}
+                  value={mapping[field.key] ?? "__none__"}
+                  onValueChange={(value) =>
+                    setMapping((prev) => ({
+                      ...prev,
+                      [field.key]: value === "__none__" ? "" : value,
+                    }))
+                  }
+                >
                   <Select
                     value={mapping[field.key] ?? "__none__"}
                     onValueChange={(value) =>
@@ -580,7 +589,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                       ))}
                     </SelectContent>
                   </Select>
-                </label>
+                </SelectField>
               ))}
             </div>
 
@@ -589,11 +598,17 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                 <h3 className="text-sm font-semibold">Hierarchy columns</h3>
                 <div className="mt-3 grid gap-4 md:grid-cols-2">
                   {hierarchyFields.map((field) => (
-                    <label
+                    <SelectField
                       key={field.key}
-                      className="space-y-2 text-sm font-medium"
+                      label={field.label}
+                      value={mapping[field.key] ?? "__none__"}
+                      onValueChange={(value) =>
+                        setMapping((prev) => ({
+                          ...prev,
+                          [field.key]: value === "__none__" ? "" : value,
+                        }))
+                      }
                     >
-                      {field.label}
                       <Select
                         value={mapping[field.key] ?? "__none__"}
                         onValueChange={(value) =>
@@ -615,7 +630,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                           ))}
                         </SelectContent>
                       </Select>
-                    </label>
+                    </SelectField>
                   ))}
                 </div>
               </div>
@@ -631,10 +646,18 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
                       {uniqueStatusValues.map((value) => (
-                        <label key={value} className="space-y-2 text-sm">
-                          <span className="text-xs text-muted-foreground">
-                            {value}
-                          </span>
+                        <SelectField
+                          key={value}
+                          label={value}
+                          labelClassName="text-xs text-muted-foreground font-normal"
+                          value={statusMapping[value] ?? "draft"}
+                          onValueChange={(next) =>
+                            setStatusMapping((prev) => ({
+                              ...prev,
+                              [value]: next as OrderStatus,
+                            }))
+                          }
+                        >
                           <Select
                             value={statusMapping[value] ?? "draft"}
                             onValueChange={(next) =>
@@ -666,7 +689,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                               </SelectItem>
                             </SelectContent>
                           </Select>
-                        </label>
+                        </SelectField>
                       ))}
                     </div>
                   </div>
@@ -678,10 +701,22 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
                       {uniquePriorityValues.map((value) => (
-                        <label key={value} className="space-y-2 text-sm">
-                          <span className="text-xs text-muted-foreground">
-                            {value}
-                          </span>
+                        <SelectField
+                          key={value}
+                          label={value}
+                          labelClassName="text-xs text-muted-foreground font-normal"
+                          value={priorityMapping[value] ?? "normal"}
+                          onValueChange={(next) =>
+                            setPriorityMapping((prev) => ({
+                              ...prev,
+                              [value]: next as
+                                | "low"
+                                | "normal"
+                                | "high"
+                                | "urgent",
+                            }))
+                          }
+                        >
                           <Select
                             value={priorityMapping[value] ?? "normal"}
                             onValueChange={(next) =>
@@ -705,7 +740,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                               <SelectItem value="urgent">urgent</SelectItem>
                             </SelectContent>
                           </Select>
-                        </label>
+                        </SelectField>
                       ))}
                     </div>
                   </div>

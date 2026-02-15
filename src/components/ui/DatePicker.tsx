@@ -14,6 +14,7 @@ type DatePickerProps = {
   onChange: (value: string) => void;
   label?: string;
   className?: string;
+  labelClassName?: string;
   triggerClassName?: string;
   disabled?: boolean;
   min?: string;
@@ -25,6 +26,7 @@ export function DatePicker({
   onChange,
   label,
   className,
+  labelClassName,
   triggerClassName,
   disabled,
   min,
@@ -47,8 +49,12 @@ export function DatePicker({
   const formatted = selectedDate ? format(selectedDate, "dd.MM.yyyy") : "";
 
   return (
-    <label className={cn("ui-field", className)}>
-      {label ? <span>{label}</span> : null}
+    <label className={cn("space-y-2", className)}>
+      {label ? (
+        <span className={cn("text-sm font-medium text-foreground", labelClassName)}>
+          {label}
+        </span>
+      ) : null}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
