@@ -80,6 +80,47 @@ interface SettingsDataState {
   removePartnerGroup: (groupId: string) => Promise<void>;
 }
 
+const mojibakePattern = /[ÃÂÄÅ]/;
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
+
+function decodeUtf8Mojibake(value: string): string {
+  if (!mojibakePattern.test(value)) {
+    return value;
+  }
+
+  const bytes = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    const codePoint = value.charCodeAt(index);
+    if (codePoint > 0xff) {
+      return value;
+    }
+    bytes[index] = codePoint;
+  }
+
+  const decoded = utf8Decoder.decode(bytes);
+  if (decoded.includes("�")) {
+    return value;
+  }
+
+  const roundTrip = String.fromCharCode(...utf8Encoder.encode(decoded));
+  return roundTrip === value ? decoded : value;
+}
+
+function normalizeMaybeString(value?: string | null): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return decodeUtf8Mojibake(value);
+}
+
+function normalizeStringArray(values?: string[]): string[] | undefined {
+  if (!values) {
+    return undefined;
+  }
+  return values.map((value) => decodeUtf8Mojibake(value));
+}
+
 function mapWorkStation(row: {
   id: string;
   name: string;
@@ -121,15 +162,24 @@ function mapOrderInputField(row: {
   show_in_production?: boolean | null;
   sort_order?: number | null;
 }): OrderInputField {
+  const normalizedColumns = row.options?.columns?.map((column) => ({
+    ...column,
+    key: decodeUtf8Mojibake(column.key),
+    label: decodeUtf8Mojibake(column.label),
+    aiKey: normalizeMaybeString(column.aiKey),
+    unit: normalizeMaybeString(column.unit),
+    options: normalizeStringArray(column.options),
+  }));
+
   return {
     id: row.id,
-    key: row.key,
-    label: row.label,
+    key: decodeUtf8Mojibake(row.key),
+    label: decodeUtf8Mojibake(row.label),
     groupKey: (row.group_key ?? "order_info") as OrderInputGroupKey,
     fieldType: row.field_type as OrderInputFieldType,
-    unit: row.unit ?? undefined,
-    options: row.options?.options ?? undefined,
-    columns: row.options?.columns ?? undefined,
+    unit: normalizeMaybeString(row.unit),
+    options: normalizeStringArray(row.options?.options),
+    columns: normalizedColumns,
     isRequired: row.is_required ?? false,
     isActive: row.is_active ?? true,
     showInProduction: row.show_in_production ?? false,
@@ -151,12 +201,12 @@ function mapExternalJobField(row: {
 }): ExternalJobField {
   return {
     id: row.id,
-    key: row.key,
-    label: row.label,
+    key: decodeUtf8Mojibake(row.key),
+    label: decodeUtf8Mojibake(row.label),
     fieldType: row.field_type as ExternalJobFieldType,
     scope: (row.scope ?? "manual") as ExternalJobFieldScope,
-    unit: row.unit ?? undefined,
-    options: row.options?.options ?? undefined,
+    unit: normalizeMaybeString(row.unit),
+    options: normalizeStringArray(row.options?.options),
     isRequired: row.is_required ?? false,
     isActive: row.is_active ?? true,
     sortOrder: row.sort_order ?? 0,

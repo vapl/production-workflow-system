@@ -5532,6 +5532,100 @@ export default function SettingsPage() {
                   </tbody>
                 </table>
               </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Invites</div>
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Email
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Full name
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Role
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Status
+                        </th>
+                        <th className="px-4 py-2 text-right font-medium">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {isInvitesLoading ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-4 py-6 text-center text-muted-foreground"
+                          >
+                            <LoadingSpinner
+                              className="justify-center"
+                              label="Loading invites..."
+                            />
+                          </td>
+                        </tr>
+                      ) : invites.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-4 py-6 text-center text-muted-foreground"
+                          >
+                            No invites yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        invites.map((invite) => (
+                          <tr
+                            key={invite.id}
+                            className="border-t border-border"
+                          >
+                            <td className="px-4 py-2">{invite.email}</td>
+                            <td className="px-4 py-2">
+                              {invite.fullName ?? "--"}
+                            </td>
+                            <td className="px-4 py-2">{invite.role}</td>
+                            <td className="px-4 py-2 text-xs text-muted-foreground">
+                              {invite.acceptedAt ? "Accepted" : "Pending"}
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleResendInvite(invite.email)
+                                  }
+                                  disabled={
+                                    invite.acceptedAt !== null ||
+                                    !canManageRolePermissions
+                                  }
+                                >
+                                  Resend
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleCancelInvite(invite.id)}
+                                  disabled={
+                                    invite.acceptedAt !== null ||
+                                    !canManageRolePermissions
+                                  }
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -5630,100 +5724,6 @@ export default function SettingsPage() {
                           })}
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Invites</div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/40 text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Email
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Full name
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Role
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          Status
-                        </th>
-                        <th className="px-4 py-2 text-right font-medium">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {isInvitesLoading ? (
-                        <tr>
-                          <td
-                            colSpan={5}
-                            className="px-4 py-6 text-center text-muted-foreground"
-                          >
-                            <LoadingSpinner
-                              className="justify-center"
-                              label="Loading invites..."
-                            />
-                          </td>
-                        </tr>
-                      ) : invites.length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={5}
-                            className="px-4 py-6 text-center text-muted-foreground"
-                          >
-                            No invites yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        invites.map((invite) => (
-                          <tr
-                            key={invite.id}
-                            className="border-t border-border"
-                          >
-                            <td className="px-4 py-2">{invite.email}</td>
-                            <td className="px-4 py-2">
-                              {invite.fullName ?? "--"}
-                            </td>
-                            <td className="px-4 py-2">{invite.role}</td>
-                            <td className="px-4 py-2 text-xs text-muted-foreground">
-                              {invite.acceptedAt ? "Accepted" : "Pending"}
-                            </td>
-                            <td className="px-4 py-2 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() =>
-                                    handleResendInvite(invite.email)
-                                  }
-                                  disabled={
-                                    invite.acceptedAt !== null ||
-                                    !canManageRolePermissions
-                                  }
-                                >
-                                  Resend
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleCancelInvite(invite.id)}
-                                  disabled={
-                                    invite.acceptedAt !== null ||
-                                    !canManageRolePermissions
-                                  }
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      )}
                     </tbody>
                   </table>
                 </div>
