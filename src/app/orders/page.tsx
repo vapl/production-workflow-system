@@ -1020,7 +1020,7 @@ export default function OrdersPage() {
       />
 
       <Card className="rounded-none border-0 bg-transparent shadow-none">
-        <CardContent className="space-y-4 px-0 md:px-4">
+        <CardContent className="space-y-4 px-0">
           {error && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {error}

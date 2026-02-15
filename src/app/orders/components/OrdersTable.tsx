@@ -47,9 +47,9 @@ export function OrdersTable({
         level.key !== "manager",
     )
     .sort((a, b) => a.order - b.order);
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(
-    {},
-  );
+  const [collapsedGroups, setCollapsedGroups] = useState<
+    Record<string, boolean>
+  >({});
 
   const totalColumns = 9 + activeLevels.length;
 
@@ -72,15 +72,13 @@ export function OrdersTable({
             ))}
             <TableHead className="whitespace-normal">Quantity</TableHead>
             <TableHead className="whitespace-normal">Due Date</TableHead>
-            <TableHead className="whitespace-normal">
-              {engineerLabel}
-            </TableHead>
-            <TableHead className="whitespace-normal">
-              {managerLabel}
-            </TableHead>
+            <TableHead className="whitespace-normal">{engineerLabel}</TableHead>
+            <TableHead className="whitespace-normal">{managerLabel}</TableHead>
             <TableHead className="whitespace-normal">Priority</TableHead>
             <TableHead className="whitespace-normal">Status</TableHead>
-            <TableHead className="text-right whitespace-normal">Actions</TableHead>
+            <TableHead className="text-right whitespace-normal">
+              Actions
+            </TableHead>
           </TableRow>
         </TableHeader>
 
