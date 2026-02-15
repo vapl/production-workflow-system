@@ -70,7 +70,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           tableClassName,
         )}
       >
-        <thead className={cn("bg-muted/40 text-muted-foreground", headClassName)}>
+        <thead className={cn("bg-muted text-muted-foreground", headClassName)}>
           <tr>
             {columns.map((column, columnIndex) => (
               <th
@@ -79,7 +79,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   "px-4 py-2 text-left font-medium whitespace-nowrap",
                   column.widthClassName,
                   stickyFirstColumn && columnIndex === 0
-                    ? "sticky left-0 z-20 bg-muted/40"
+                    ? "sticky left-0 z-20 bg-muted"
                     : "",
                   column.headerClassName,
                 )}

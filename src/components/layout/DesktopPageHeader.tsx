@@ -54,7 +54,7 @@ export function DesktopPageHeader({
         className,
       )}
     >
-      <div className="flex w-full items-end justify-between gap-4 px-4 py-3">
+      <div className="flex w-full lg:items-end justify-between gap-4 py-3 flex-col lg:flex-row items-start">
         <div className="min-w-0">
           <h2 className="text-2xl font-semibold">{title}</h2>
           {subtitle ? (

@@ -3,11 +3,14 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
+  CopyIcon,
   FactoryIcon,
   GitBranchIcon,
   NetworkIcon,
   PanelRightIcon,
+  PencilIcon,
   PuzzleIcon,
+  Trash2Icon,
   UsersIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -3452,7 +3455,7 @@ export default function SettingsPage() {
                                 size="sm"
                                 onClick={() => handleEditLevel(level.id)}
                               >
-                                Edit
+                                <PencilIcon className="h-4 w-4" />
                               </Button>
                               <Button
                                 variant="ghost"
@@ -3469,7 +3472,7 @@ export default function SettingsPage() {
                                 }}
                                 disabled={lockedLevelKeys.has(level.key)}
                               >
-                                Remove
+                                <Trash2Icon className="h-4 w-4" />
                               </Button>
                             </div>
                           </td>
@@ -3667,14 +3670,14 @@ export default function SettingsPage() {
                                 size="sm"
                                 onClick={() => handleEditNode(node.id)}
                               >
-                                Edit
+                                <PencilIcon className="h-4 w-4" />
                               </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleCopyNode(node.id)}
                               >
-                                Copy
+                                <CopyIcon className="h-4 w-4" />
                               </Button>
                               <Button
                                 variant="ghost"
@@ -3690,7 +3693,7 @@ export default function SettingsPage() {
                                   removeNode(node.id);
                                 }}
                               >
-                                Remove
+                                <Trash2Icon className="h-4 w-4" />
                               </Button>
                               <Checkbox
                                 variant="box"
@@ -4006,7 +4009,7 @@ export default function SettingsPage() {
                                     removeOrderFieldColumn(index);
                                   }}
                                 >
-                                  Remove
+                                  <Trash2Icon className="h-4 w-4" />
                                 </Button>
                               </div>
                             </div>
@@ -4186,14 +4189,14 @@ export default function SettingsPage() {
                                   variant="outline"
                                   onClick={() => handleEditOrderField(field.id)}
                                 >
-                                  Edit
+                                  <PencilIcon className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleCopyOrderField(field.id)}
                                 >
-                                  Copy
+                                  <CopyIcon className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   size="sm"
@@ -4202,7 +4205,7 @@ export default function SettingsPage() {
                                     handleDeleteOrderField(field.id)
                                   }
                                 >
-                                  Remove
+                                  <Trash2Icon className="h-4 w-4" />
                                 </Button>
                                 <Checkbox
                                   variant="box"
@@ -4338,7 +4341,7 @@ export default function SettingsPage() {
                           disabled={workShifts.length <= 1}
                           className="justify-self-start md:justify-self-auto"
                         >
-                          Remove
+                          <Trash2Icon className="h-4 w-4" />
                         </Button>
                       </div>
                     ))}
@@ -4477,14 +4480,14 @@ export default function SettingsPage() {
                             size="sm"
                             onClick={() => handleEditStation(station.id)}
                           >
-                            Edit
+                            <PencilIcon className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => handleCopyWorkStation(station.id)}
                           >
-                            Copy
+                            <CopyIcon className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -4500,7 +4503,7 @@ export default function SettingsPage() {
                               removeWorkStation(station.id);
                             }}
                           >
-                            Remove
+                            <Trash2Icon className="h-4 w-4" />
                           </Button>
                           <Checkbox
                             variant="box"
@@ -4966,14 +4969,14 @@ export default function SettingsPage() {
                           size="sm"
                           onClick={() => handleEditStopReason(reason.id)}
                         >
-                          Edit
+                          <PencilIcon className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleCopyStopReason(reason.id)}
                         >
-                          Copy
+                          <CopyIcon className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
@@ -4989,7 +4992,7 @@ export default function SettingsPage() {
                             removeStopReason(reason.id);
                           }}
                         >
-                          Remove
+                          <Trash2Icon className="h-4 w-4" />
                         </Button>
                         <Checkbox
                           variant="box"
@@ -5117,14 +5120,14 @@ export default function SettingsPage() {
                             size="sm"
                             onClick={() => handleEditPartnerGroup(group.id)}
                           >
-                            Edit
+                            <PencilIcon className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => handleCopyPartnerGroup(group.id)}
                           >
-                            Copy
+                            <CopyIcon className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -5140,7 +5143,7 @@ export default function SettingsPage() {
                               removePartnerGroup(group.id);
                             }}
                           >
-                            Remove
+                            <Trash2Icon className="h-4 w-4" />
                           </Button>
                           <Checkbox
                             variant="box"
@@ -5305,14 +5308,14 @@ export default function SettingsPage() {
                           size="sm"
                           onClick={() => handleEditPartner(partner.id)}
                         >
-                          Edit
+                          <PencilIcon className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleCopyPartner(partner.id)}
                         >
-                          Copy
+                          <CopyIcon className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
@@ -5328,7 +5331,7 @@ export default function SettingsPage() {
                             removePartner(partner.id);
                           }}
                         >
-                          Remove
+                          <Trash2Icon className="h-4 w-4" />
                         </Button>
                         <Checkbox
                           variant="box"
@@ -5657,7 +5660,7 @@ export default function SettingsPage() {
                   mode="custom"
                   columns={externalSchemaTableColumns}
                   stickyFirstColumn
-                  wrapperClassName="overflow-x-auto overflow-y-hidden rounded-lg border border-border"
+                  wrapperClassName="overflow-x-auto overflow-y-hidden rounded-lg border border-border md:overflow-x-visible"
                   tableClassName="w-full table-auto [&_th]:whitespace-normal [&_th]:break-words [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4"
                   customBody={
                     <>
@@ -5691,9 +5694,7 @@ export default function SettingsPage() {
                                     ? "h-4 bg-primary/10"
                                     : "h-0"
                                 }`}
-                              >
-                                <td colSpan={12} className="p-0" />
-                              </tr>
+                              ></tr>
                               <tr
                                 className={`border-t border-border ${
                                   dragExternalTableColumnId === column.id
@@ -5739,7 +5740,7 @@ export default function SettingsPage() {
                                 }}
                               >
                                 <td
-                                  className={`sticky left-0 z-10 min-w-[360px] px-3 py-2 md:px-4 ${
+                                  className={`sticky left-0 z-10 min-w-[100px] px-3 py-2 md:min-w-[140px] md:px-4 ${
                                     dragExternalTableColumnId === column.id
                                       ? "bg-primary/5"
                                       : "bg-background"
@@ -5752,7 +5753,7 @@ export default function SettingsPage() {
                                     >
                                       ::
                                     </span>
-                                    <div className="min-w-[320px] flex-1">
+                                    <div className="min-w-[100px] flex-1 md:min-w-[120px]">
                                       <Input
                                         value={column.label ?? ""}
                                         onChange={(event) =>
@@ -5768,12 +5769,12 @@ export default function SettingsPage() {
                                           )
                                         }
                                         placeholder={defaultLabel}
-                                        className="h-9 w-full"
+                                        className="h-8 w-full text-sm"
                                       />
                                     </div>
                                   </div>
                                 </td>
-                                <td className="min-w-[120px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[120px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? (externalJobFieldTypeOptions.find(
                                         (option) =>
@@ -5781,7 +5782,7 @@ export default function SettingsPage() {
                                       )?.label ?? field.fieldType)
                                     : "System"}
                                 </td>
-                                <td className="min-w-[130px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[130px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? (externalJobFieldScopeOptions.find(
                                         (option) =>
@@ -5790,7 +5791,7 @@ export default function SettingsPage() {
                                       )?.label ?? "Manual entry")
                                     : "External table"}
                                 </td>
-                                <td className="min-w-[120px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[120px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? (externalJobFieldRoleOptions.find(
                                         (option) =>
@@ -5799,27 +5800,27 @@ export default function SettingsPage() {
                                       )?.label ?? "None")
                                     : "--"}
                                 </td>
-                                <td className="min-w-[70px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[70px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field ? field.unit || "--" : "--"}
                                 </td>
-                                <td className="min-w-[70px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[70px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {fullIndex}
                                 </td>
-                                <td className="min-w-[90px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[90px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? field.isRequired
                                       ? "Yes"
                                       : "No"
                                     : "--"}
                                 </td>
-                                <td className="min-w-[80px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[80px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? field.isActive
                                       ? "Yes"
                                       : "No"
                                     : "--"}
                                 </td>
-                                <td className="min-w-[90px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[90px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   <Checkbox
                                     checked={column.visible}
                                     onChange={(event) =>
@@ -5836,49 +5837,58 @@ export default function SettingsPage() {
                                     }
                                   />
                                 </td>
-                                <td className="min-w-[70px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[70px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? field.aiEnabled
                                       ? "Yes"
                                       : "No"
                                     : "--"}
                                 </td>
-                                <td className="min-w-[110px] px-3 py-2 text-sm md:px-4">
+                                <td className="min-w-[110px] px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? field.aiMatchOnly
                                       ? "Yes"
                                       : "No"
                                     : "--"}
                                 </td>
-                                <td className="min-w-[290px] px-3 py-2 text-right md:px-4">
+                                <td className="min-w-[290px] px-3 py-2 text-right md:min-w-0 md:px-4">
                                   {field ? (
                                     <div className="flex flex-nowrap items-center justify-end gap-2">
                                       <Button
                                         size="sm"
                                         variant="outline"
+                                        className="h-8 w-8 p-0"
+                                        aria-label="Edit field"
+                                        title="Edit"
                                         onClick={() =>
                                           handleEditExternalJobField(field.id)
                                         }
                                       >
-                                        Edit
+                                        <PencilIcon className="h-4 w-4" />
                                       </Button>
                                       <Button
                                         size="sm"
                                         variant="outline"
+                                        className="h-8 w-8 p-0"
+                                        aria-label="Copy field"
+                                        title="Copy"
                                         onClick={() =>
                                           handleCopyExternalJobField(field.id)
                                         }
                                       >
-                                        Copy
+                                        <CopyIcon className="h-4 w-4" />
                                       </Button>
                                       <Button
                                         size="sm"
                                         variant="ghost"
+                                        className="h-8 w-8 p-0"
+                                        aria-label="Remove field"
+                                        title="Remove"
                                         onClick={() =>
                                           handleDeleteExternalJobField(field.id)
                                         }
                                       >
-                                        Remove
+                                        <Trash2Icon className="h-4 w-4" />
                                       </Button>
                                       <Checkbox
                                         variant="box"
@@ -6120,6 +6130,100 @@ export default function SettingsPage() {
                   return "--";
                 }}
               />
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Invites</div>
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Email
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Full name
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Role
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          Status
+                        </th>
+                        <th className="px-4 py-2 text-right font-medium">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {isInvitesLoading ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-4 py-6 text-center text-muted-foreground"
+                          >
+                            <LoadingSpinner
+                              className="justify-center"
+                              label="Loading invites..."
+                            />
+                          </td>
+                        </tr>
+                      ) : invites.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-4 py-6 text-center text-muted-foreground"
+                          >
+                            No invites yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        invites.map((invite) => (
+                          <tr
+                            key={invite.id}
+                            className="border-t border-border"
+                          >
+                            <td className="px-4 py-2">{invite.email}</td>
+                            <td className="px-4 py-2">
+                              {invite.fullName ?? "--"}
+                            </td>
+                            <td className="px-4 py-2">{invite.role}</td>
+                            <td className="px-4 py-2 text-xs text-muted-foreground">
+                              {invite.acceptedAt ? "Accepted" : "Pending"}
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleResendInvite(invite.email)
+                                  }
+                                  disabled={
+                                    invite.acceptedAt !== null ||
+                                    !canManageRolePermissions
+                                  }
+                                >
+                                  Resend
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleCancelInvite(invite.id)}
+                                  disabled={
+                                    invite.acceptedAt !== null ||
+                                    !canManageRolePermissions
+                                  }
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -6782,7 +6886,7 @@ export default function SettingsPage() {
                               }
                               disabled={attachmentCategoryDrafts.length <= 1}
                             >
-                              Remove
+                              <Trash2Icon className="h-4 w-4" />
                             </Button>
                           </div>
                         ))}
@@ -7046,7 +7150,7 @@ export default function SettingsPage() {
                               removeChecklistItem(item.id);
                             }}
                           >
-                            Remove
+                            <Trash2Icon className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
@@ -7101,7 +7205,7 @@ export default function SettingsPage() {
                               removeReturnReason(reason);
                             }}
                           >
-                            Remove
+                            <Trash2Icon className="h-4 w-4" />
                           </Button>
                         </div>
                       ))}
