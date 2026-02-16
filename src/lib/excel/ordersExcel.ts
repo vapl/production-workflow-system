@@ -29,8 +29,11 @@ export function buildOrdersTemplate(levelNames: string[]): Blob {
 export async function parseOrdersWorkbook(
   file: File,
 ): Promise<Record<string, unknown>[]> {
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array" });
+  const lowerName = file.name.toLowerCase();
+  const isCsv = lowerName.endsWith(".csv");
+  const workbook = isCsv
+    ? XLSX.read(await file.text(), { type: "string" })
+    : XLSX.read(await file.arrayBuffer(), { type: "array" });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
     return [];

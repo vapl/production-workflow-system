@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { OrdersTable } from "./components/OrdersTable";
 import { OrdersCards } from "./components/OrdersCards";
@@ -9,15 +9,11 @@ import type { Order, OrderStatus } from "@/types/orders";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import {
-  DownloadIcon,
   ExternalLinkIcon,
-  FileSpreadsheetIcon,
   PanelRightIcon,
   PlusIcon,
-  RefreshCwIcon,
   SearchIcon,
   SlidersHorizontalIcon,
-  UploadIcon,
   XIcon,
 } from "lucide-react";
 import { OrderModal } from "./components/OrderModal";
@@ -25,7 +21,6 @@ import { useOrders } from "@/app/orders/OrdersContext";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
-import { buildOrdersTemplate } from "@/lib/excel/ordersExcel";
 import { ImportWizard } from "./components/ImportWizard";
 import { usePartners } from "@/hooks/usePartners";
 import { supabase, supabaseAvatarBucket } from "@/lib/supabaseClient";
@@ -47,7 +42,6 @@ export default function OrdersPage() {
     updateOrder,
     removeOrder,
     error,
-    syncAccountingOrders,
   } = useOrders();
   const { nodes, levels } = useHierarchy();
   const user = useCurrentUser();
@@ -113,11 +107,7 @@ export default function OrdersPage() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Order | null>(null);
   const [groupByContract, setGroupByContract] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const syncStartedRef = useRef(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
-  const importMenuRef = useRef<HTMLDivElement | null>(null);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
@@ -276,31 +266,6 @@ export default function OrdersPage() {
     }
     window.localStorage.setItem("pws-orders-view", viewMode);
   }, [viewMode]);
-
-  useEffect(() => {
-    if (syncStartedRef.current) {
-      return;
-    }
-    if (levels.length === 0) {
-      return;
-    }
-    syncStartedRef.current = true;
-    void syncAccountingOrders();
-  }, [levels, syncAccountingOrders]);
-
-  useEffect(() => {
-    if (!isImportMenuOpen) {
-      return;
-    }
-    function handleClick(event: MouseEvent) {
-      const target = event.target as Node;
-      if (importMenuRef.current && !importMenuRef.current.contains(target)) {
-        setIsImportMenuOpen(false);
-      }
-    }
-    document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
-  }, [isImportMenuOpen]);
 
   useEffect(() => {
     if (!isMobileActionsOpen) {
@@ -741,7 +706,8 @@ export default function OrdersPage() {
       authorRole: user.role,
     };
 
-    await addOrder(newOrder);
+    const created = await addOrder(newOrder);
+    return Boolean(created);
   }
 
   async function handleEditOrder(values: {
@@ -756,9 +722,9 @@ export default function OrdersPage() {
     hierarchy?: Record<string, string>;
   }) {
     if (!editingOrder || !canEditOrDeleteOrders) {
-      return;
+      return false;
     }
-    await updateOrder(editingOrder.id, {
+    const updated = await updateOrder(editingOrder.id, {
       customerName: values.customerName,
       productName: values.productName,
       quantity: values.quantity,
@@ -767,6 +733,7 @@ export default function OrdersPage() {
       priority: values.priority,
     });
     setEditingOrder(null);
+    return Boolean(updated);
   }
 
   return (
@@ -774,7 +741,7 @@ export default function OrdersPage() {
       <MobilePageTitle
         title="Customer Orders"
         showCompact={showCompactMobileTitle}
-        subtitle="Plan customer orders, sync accounting data, and manage delivery workflow."
+        subtitle="Plan customer orders and manage delivery workflow."
         className="pt-6 pb-6"
       />
 
@@ -797,51 +764,6 @@ export default function OrdersPage() {
               <ExternalLinkIcon className="h-4 w-4" />
               Partner Orders
             </Link>
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-2"
-              onClick={async () => {
-                setIsSyncing(true);
-                await syncAccountingOrders();
-                setIsSyncing(false);
-                setIsMobileActionsOpen(false);
-              }}
-              disabled={isSyncing}
-            >
-              <RefreshCwIcon
-                className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`}
-              />
-              {isSyncing ? "Syncing..." : "Sync Accounting"}
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-2"
-              onClick={() => {
-                const levelNames = levels.map((level) => level.name);
-                const blob = buildOrdersTemplate(levelNames);
-                const url = URL.createObjectURL(blob);
-                const anchor = document.createElement("a");
-                anchor.href = url;
-                anchor.download = "pws-orders-template.xlsx";
-                anchor.click();
-                URL.revokeObjectURL(url);
-                setIsMobileActionsOpen(false);
-              }}
-            >
-              <DownloadIcon className="h-4 w-4" />
-              Download template
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-2"
-              onClick={() => {
-                setIsImportOpen(true);
-                setIsMobileActionsOpen(false);
-              }}
-            >
-              <FileSpreadsheetIcon className="h-4 w-4" />
-              Import Excel
-            </Button>
             <div className="pt-2">
               <div className="mb-2 text-xs font-medium text-muted-foreground">
                 View mode
@@ -936,7 +858,7 @@ export default function OrdersPage() {
       <DesktopPageHeader
         sticky
         title="Customer Orders"
-        subtitle="Plan customer orders, sync accounting data, and manage delivery workflow."
+        subtitle="Plan customer orders and manage delivery workflow."
         className="md:z-20"
         actions={
           <div className="hidden items-center gap-2 md:flex">
@@ -946,64 +868,6 @@ export default function OrdersPage() {
                 Partner Orders
               </Button>
             </Link>
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={async () => {
-                setIsSyncing(true);
-                await syncAccountingOrders();
-                setIsSyncing(false);
-              }}
-              disabled={isSyncing}
-            >
-              <RefreshCwIcon
-                className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`}
-              />
-              {isSyncing ? "Syncing..." : "Sync Accounting"}
-            </Button>
-            <div className="relative" ref={importMenuRef}>
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => setIsImportMenuOpen((prev) => !prev)}
-              >
-                <UploadIcon className="h-4 w-4" />
-                Import
-              </Button>
-              {isImportMenuOpen && (
-                <div className="absolute right-0 top-11 z-50 w-48 rounded-lg border border-border bg-card p-1 shadow-lg">
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted/50"
-                    onClick={() => {
-                      const levelNames = levels.map((level) => level.name);
-                      const blob = buildOrdersTemplate(levelNames);
-                      const url = URL.createObjectURL(blob);
-                      const anchor = document.createElement("a");
-                      anchor.href = url;
-                      anchor.download = "pws-orders-template.xlsx";
-                      anchor.click();
-                      URL.revokeObjectURL(url);
-                      setIsImportMenuOpen(false);
-                    }}
-                  >
-                    <DownloadIcon className="h-4 w-4" />
-                    Download template
-                  </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted/50"
-                    onClick={() => {
-                      setIsImportOpen(true);
-                      setIsImportMenuOpen(false);
-                    }}
-                  >
-                    <FileSpreadsheetIcon className="h-4 w-4" />
-                    Import Excel
-                  </button>
-                </div>
-              )}
-            </div>
             <Button
               className="gap-2"
               onClick={() => {
@@ -1256,6 +1120,8 @@ export default function OrdersPage() {
             : undefined
         }
         existingOrderNumbers={orders.map((order) => order.orderNumber)}
+        enableCreateEntryModeSelection={!editingOrder}
+        onOpenImportExcel={() => setIsImportOpen(true)}
       />
       <ImportWizard
         open={isImportOpen}

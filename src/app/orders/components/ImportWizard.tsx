@@ -12,11 +12,14 @@ import {
 import { SelectField } from "@/components/ui/SelectField";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { FileField } from "@/components/ui/FileField";
-import { XIcon } from "lucide-react";
+import { DownloadIcon, FileSpreadsheetIcon, XIcon } from "lucide-react";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useNotifications } from "@/components/ui/Notifications";
-import { parseOrdersWorkbook } from "@/lib/excel/ordersExcel";
+import {
+  buildOrdersTemplate,
+  parseOrdersWorkbook,
+} from "@/lib/excel/ordersExcel";
 import { createId } from "@/lib/utils/createId";
 import type { OrderStatus } from "@/types/orders";
 
@@ -86,9 +89,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
-  const [statusMapping, setStatusMapping] = useState<Record<string, OrderStatus>>(
-    {},
-  );
+  const [statusMapping, setStatusMapping] = useState<
+    Record<string, OrderStatus>
+  >({});
   const [priorityMapping, setPriorityMapping] = useState<
     Record<string, "low" | "normal" | "high" | "urgent">
   >({});
@@ -125,11 +128,37 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     setIsImporting(false);
   }
 
+  function handleDownloadTemplate() {
+    const levelNames = levels
+      .filter((level) => level.key !== "engineer" && level.key !== "manager")
+      .map((level) => level.name);
+    const blob = buildOrdersTemplate(levelNames);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "pws-orders-template.xlsx";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleFile(file: File) {
+    const lowerName = file.name.toLowerCase();
+    const isSupported =
+      lowerName.endsWith(".xlsx") ||
+      lowerName.endsWith(".xls") ||
+      lowerName.endsWith(".csv");
+    if (!isSupported) {
+      notify({
+        title: "Unsupported file type",
+        description: "Use .xlsx, .xls, or .csv.",
+        variant: "error",
+      });
+      return;
+    }
     const parsed = await parseOrdersWorkbook(file);
     if (parsed.length === 0) {
       notify({
-        title: "Excel import failed",
+        title: "Import failed",
         description: "No rows found in the file.",
         variant: "error",
       });
@@ -192,19 +221,19 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
         if (next[value]) {
           return;
         }
-          const normalized = normalizeEnum(value);
-          if (
-            normalized === "draft" ||
-            normalized === "ready_for_engineering" ||
-            normalized === "in_engineering" ||
-              normalized === "engineering_blocked" ||
-            normalized === "ready_for_production" ||
-            normalized === "in_production"
-          ) {
-            next[value] = normalized as OrderStatus;
-          } else {
-            next[value] = "draft";
-          }
+        const normalized = normalizeEnum(value);
+        if (
+          normalized === "draft" ||
+          normalized === "ready_for_engineering" ||
+          normalized === "in_engineering" ||
+          normalized === "engineering_blocked" ||
+          normalized === "ready_for_production" ||
+          normalized === "in_production"
+        ) {
+          next[value] = normalized as OrderStatus;
+        } else {
+          next[value] = "draft";
+        }
       });
       return next;
     });
@@ -316,7 +345,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                 ? (normalized as "low" | "normal" | "high" | "urgent")
                 : "normal";
             })();
-        const status =
+      const status =
         rawStatus && statusMapping[rawStatus]
           ? statusMapping[rawStatus]
           : (() => {
@@ -324,7 +353,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               return normalized === "draft" ||
                 normalized === "ready_for_engineering" ||
                 normalized === "in_engineering" ||
-                  normalized === "engineering_blocked" ||
+                normalized === "engineering_blocked" ||
                 normalized === "ready_for_production" ||
                 normalized === "in_production"
                 ? (normalized as OrderStatus)
@@ -375,7 +404,10 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     if (errors.length > 0) {
       notify({
         title: "Excel import failed",
-        description: errors.slice(0, 3).map((err) => err.message).join(" "),
+        description: errors
+          .slice(0, 3)
+          .map((err) => err.message)
+          .join(" "),
         variant: "error",
       });
       return;
@@ -511,7 +543,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
           <div>
             <h2 className="text-lg font-semibold">Import orders</h2>
             <p className="text-sm text-muted-foreground">
-              {fileName ? fileName : "Upload your Excel file"}
+              {fileName ? fileName : "Upload your Excel or CSV file"}
             </p>
           </div>
           <button
@@ -529,21 +561,42 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
 
         {step === "upload" && (
           <div className="mt-6 space-y-4">
-            <div className="flex min-h-[140px] items-center justify-center rounded-xl border border-dashed border-border bg-muted/30">
-              <label className="cursor-pointer text-sm text-muted-foreground">
-                Click to upload .xlsx
-                <FileField
-                  accept=".xlsx"
-                  wrapperClassName="hidden"
-                  onChange={async (event) => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                      await handleFile(file);
-                    }
-                    event.target.value = "";
-                  }}
-                />
-              </label>
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="mb-3 flex items-start gap-2 text-sm text-muted-foreground">
+                <FileSpreadsheetIcon className="mt-0.5 h-4 w-4" />
+                <div className="flex flex-col w-full md:flex-row justify-between items-start">
+                  <div>
+                    <div className="font-medium text-foreground">
+                      Add import file
+                    </div>
+                    <div>Drag & drop a file here, or click to browse.</div>
+                    <div className="text-xs">
+                      Supported formats:{" "}
+                      <span className="font-medium">.xlsx, .xls, .csv</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 md:mt-0 inline-flex items-center gap-1.5 text-xs font-medium text-foreground underline decoration-dotted underline-offset-2 hover:text-primary"
+                    onClick={handleDownloadTemplate}
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    Download template
+                  </button>
+                </div>
+              </div>
+              <FileField
+                accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                emptyText="Drag & drop Excel/CSV file here or click to upload"
+                emptyHint="First row should contain column names (headers)"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    await handleFile(file);
+                  }
+                  event.target.value = "";
+                }}
+              />
             </div>
             <div className="flex justify-end">
               <Button variant="outline" onClick={onClose}>
@@ -622,7 +675,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                           <SelectValue placeholder="-- Not mapped --" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__none__">-- Not mapped --</SelectItem>
+                          <SelectItem value="__none__">
+                            -- Not mapped --
+                          </SelectItem>
                           {headers.map((header) => (
                             <SelectItem key={header} value={header}>
                               {header}
@@ -636,7 +691,8 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               </div>
             )}
 
-            {(uniqueStatusValues.length > 0 || uniquePriorityValues.length > 0) && (
+            {(uniqueStatusValues.length > 0 ||
+              uniquePriorityValues.length > 0) && (
               <div className="space-y-4 rounded-xl border border-border bg-muted/30 p-4">
                 <h3 className="text-sm font-semibold">Value mappings</h3>
                 {uniqueStatusValues.length > 0 && (
@@ -750,7 +806,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
 
             <Checkbox
               checked={createHierarchyItems}
-              onChange={(event) => setCreateHierarchyItems(event.target.checked)}
+              onChange={(event) =>
+                setCreateHierarchyItems(event.target.checked)
+              }
               label="Create hierarchy items in Settings from imported values"
             />
 
@@ -778,8 +836,8 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
             {previewErrors.length > 0 && (
               <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <div className="font-medium">
-                  {previewErrors.length} errors found. Fix the Excel file and try
-                  again.
+                  {previewErrors.length} errors found. Fix the Excel file and
+                  try again.
                 </div>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
                   {previewErrors.slice(0, 6).map((error) => (
@@ -832,7 +890,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               ))}
             </div>
             <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep("map")}>Back</Button>
+              <Button variant="outline" onClick={() => setStep("map")}>
+                Back
+              </Button>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={onClose}>
                   Cancel
