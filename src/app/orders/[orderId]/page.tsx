@@ -3991,7 +3991,9 @@ export default function OrderDetailPage() {
                     label="Partner group"
                     value={externalPartnerGroupId || "__all__"}
                     onValueChange={(value) =>
-                      setExternalPartnerGroupId(value === "__all__" ? "" : value)
+                      setExternalPartnerGroupId(
+                        value === "__all__" ? "" : value,
+                      )
                     }
                   >
                     <Select
@@ -4168,7 +4170,9 @@ export default function OrderDetailPage() {
                               <TextAreaField
                                 key={field.id}
                                 label={field.label}
-                                value={typeof rawValue === "string" ? rawValue : ""}
+                                value={
+                                  typeof rawValue === "string" ? rawValue : ""
+                                }
                                 onChange={(event) =>
                                   setExternalJobFieldValues((prev) => ({
                                     ...prev,
@@ -4717,7 +4721,7 @@ export default function OrderDetailPage() {
         onClose={() => setIsEditOpen(false)}
         onSubmit={async (values) => {
           if (!canEditOrderRecord) {
-            return;
+            return false;
           }
           setOrderState((prev) =>
             prev
@@ -4740,6 +4744,7 @@ export default function OrderDetailPage() {
             dueDate: values.dueDate,
             priority: values.priority,
           });
+          return true;
         }}
         title="Edit Order"
         submitLabel="Save Changes"

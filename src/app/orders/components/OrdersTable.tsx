@@ -55,7 +55,7 @@ export function OrdersTable({
 
   return (
     <div className="rounded-md border overflow-x-auto">
-      <Table className="w-full min-w-[900px]">
+      <Table className="w-full min-w-225">
         <TableHeader>
           <TableRow>
             <TableHead className="whitespace-nowrap">Order #</TableHead>
