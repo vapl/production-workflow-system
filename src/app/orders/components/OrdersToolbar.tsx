@@ -29,6 +29,13 @@ interface OrdersToolbarProps {
   onAssignmentChange?: (value: AssignmentFilter) => void;
   viewMode?: "table" | "cards";
   onViewModeChange?: (value: "table" | "cards") => void;
+  overdueOnly?: boolean;
+  onToggleOverdueOnly?: () => void;
+  blockedOnly?: boolean;
+  onToggleBlockedOnly?: () => void;
+  unassignedOnly?: boolean;
+  onToggleUnassignedOnly?: () => void;
+  showGroupByContract?: boolean;
 }
 
 export function OrdersToolbar({
@@ -44,6 +51,13 @@ export function OrdersToolbar({
   onAssignmentChange,
   viewMode,
   onViewModeChange,
+  overdueOnly = false,
+  onToggleOverdueOnly,
+  blockedOnly = false,
+  onToggleBlockedOnly,
+  unassignedOnly = false,
+  onToggleUnassignedOnly,
+  showGroupByContract = true,
 }: OrdersToolbarProps) {
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -72,10 +86,12 @@ export function OrdersToolbar({
               <div className="space-y-2">
                 <div className="text-sm font-medium">Engineering</div>
                 <div className="flex flex-wrap gap-2">
-                  {([
-                    { value: "queue", label: "Queue" },
-                    { value: "my", label: "My work" },
-                  ] as const).map((option) => {
+                  {(
+                    [
+                      { value: "queue", label: "Queue" },
+                      { value: "my", label: "My work" },
+                    ] as const
+                  ).map((option) => {
                     const isActive = assignmentFilter === option.value;
                     return (
                       <button
@@ -111,11 +127,40 @@ export function OrdersToolbar({
               />
             </div>
             <div className="h-px bg-border/70" />
-            <Checkbox
-              checked={groupByContract}
-              onChange={onToggleGroupByContract}
-              label="Group by Contract"
-            />
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Quick filters</div>
+              <div className="flex flex-wrap gap-2">
+                <Checkbox
+                  checked={overdueOnly}
+                  onChange={() => onToggleOverdueOnly?.()}
+                  label="Overdue only"
+                />
+                {assignmentFilter !== undefined ? (
+                  <Checkbox
+                    checked={blockedOnly}
+                    onChange={() => onToggleBlockedOnly?.()}
+                    label="Blocked only"
+                  />
+                ) : null}
+                {assignmentFilter !== undefined ? (
+                  <Checkbox
+                    checked={unassignedOnly}
+                    onChange={() => onToggleUnassignedOnly?.()}
+                    label="Unassigned only"
+                  />
+                ) : null}
+              </div>
+            </div>
+            {showGroupByContract ? (
+              <>
+                <div className="h-px bg-border/70" />
+                <Checkbox
+                  checked={groupByContract}
+                  onChange={onToggleGroupByContract}
+                  label="Group by Contract"
+                />
+              </>
+            ) : null}
           </div>
         </FiltersDropdown>
       </div>

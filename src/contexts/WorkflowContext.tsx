@@ -35,7 +35,11 @@ export interface WorkflowRules {
     engineer: string;
     manager: string;
   };
-  attachmentCategories: { id: string; label: string }[];
+  attachmentCategories: {
+    id: string;
+    label: string;
+    aiParseEnabled?: boolean;
+  }[];
   attachmentCategoryDefaults: Record<string, string>;
   checklistItems: ChecklistItem[];
   returnReasons: string[];
@@ -173,10 +177,14 @@ const defaultRules: WorkflowRules = {
     manager: "Manager",
   },
   attachmentCategories: [
-    { id: "order_documents", label: "Order documents" },
-    { id: "technical_docs", label: "Technical documentation" },
-    { id: "photos", label: "Site photos" },
-    { id: "other", label: "Other" },
+    { id: "order_documents", label: "Order documents", aiParseEnabled: false },
+    {
+      id: "technical_docs",
+      label: "Technical documentation",
+      aiParseEnabled: true,
+    },
+    { id: "photos", label: "Site photos", aiParseEnabled: false },
+    { id: "other", label: "Other", aiParseEnabled: false },
   ],
   attachmentCategoryDefaults: {
     Sales: "order_documents",
@@ -207,6 +215,27 @@ const defaultRules: WorkflowRules = {
     { id: "ext-approved", status: "approved", minAttachments: 1 },
     { id: "ext-cancelled", status: "cancelled", minAttachments: 0 },
   ],
+};
+
+const normalizeAttachmentCategories = (
+  categories:
+    | {
+        id: string;
+        label: string;
+        aiParseEnabled?: boolean;
+      }[]
+    | null
+    | undefined,
+) => {
+  const source =
+    categories && categories.length > 0
+      ? categories
+      : defaultRules.attachmentCategories;
+  return source.map((item) => ({
+    id: item.id,
+    label: item.label,
+    aiParseEnabled: Boolean(item.aiParseEnabled),
+  }));
 };
 
 const mergeOrderStatusConfig = (
@@ -422,8 +451,9 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
             ...defaultRules.assignmentLabels,
             ...(cached.assignmentLabels ?? {}),
           },
-          attachmentCategories:
-            cached.attachmentCategories ?? defaultRules.attachmentCategories,
+          attachmentCategories: normalizeAttachmentCategories(
+            cached.attachmentCategories,
+          ),
           attachmentCategoryDefaults: {
             ...defaultRules.attachmentCategoryDefaults,
             ...(cached.attachmentCategoryDefaults ?? {}),
@@ -528,9 +558,11 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           ...prev.assignmentLabels,
           ...(rulesData?.assignment_labels ?? {}),
         },
-        attachmentCategories:
-          (rulesData?.attachment_categories as { id: string; label: string }[] | null) ??
-          prev.attachmentCategories,
+        attachmentCategories: normalizeAttachmentCategories(
+          (rulesData?.attachment_categories as
+            | { id: string; label: string; aiParseEnabled?: boolean }[]
+            | null) ?? prev.attachmentCategories,
+        ),
         attachmentCategoryDefaults: {
           ...prev.attachmentCategoryDefaults,
           ...(rulesData?.attachment_category_defaults ?? {}),
@@ -637,7 +669,9 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         externalJobStatusLabels,
         assignmentLabels: patch.assignmentLabels ?? prev.assignmentLabels,
         attachmentCategories:
-          patch.attachmentCategories ?? prev.attachmentCategories,
+          normalizeAttachmentCategories(
+            patch.attachmentCategories ?? prev.attachmentCategories,
+          ),
         attachmentCategoryDefaults:
           patch.attachmentCategoryDefaults ?? prev.attachmentCategoryDefaults,
       };

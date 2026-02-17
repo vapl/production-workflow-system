@@ -7,6 +7,7 @@ import {
   PaperclipIcon,
   PencilIcon,
   Trash2Icon,
+  UserCheckIcon,
 } from "lucide-react";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Order } from "@/types/orders";
@@ -22,6 +23,7 @@ interface OrderRowProps {
   order: Order;
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
+  onTakeOrder?: (order: Order) => void;
   levels: HierarchyLevel[];
   dueSoonDays?: number;
   dueIndicatorEnabled?: boolean;
@@ -32,6 +34,7 @@ export function OrderRow({
   order,
   onEdit,
   onDelete,
+  onTakeOrder,
   levels,
   dueSoonDays = 5,
   dueIndicatorEnabled = true,
@@ -101,6 +104,10 @@ export function OrderRow({
       job.dueDate < today &&
       !["delivered", "approved", "cancelled"].includes(job.status),
   );
+  const canTakeOrderQuick =
+    !!onTakeOrder &&
+    order.status === "ready_for_engineering" &&
+    !order.assignedEngineerId;
 
   const engineerInitials = order.assignedEngineerName
     ? order.assignedEngineerName
@@ -280,12 +287,25 @@ export function OrderRow({
             <MessageCircleIcon className="h-3.5 w-3.5" />
             <span>{order.commentCount ?? order.comments?.length ?? 0}</span>
           </div>
-          <div className="pointer-events-none absolute -right-2 top-1/2 hidden h-9 w-20 -translate-y-1/2 bg-gradient-to-l from-background via-background/80 to-transparent md:group-hover:block" />
           <div className="absolute right-0 top-1/2 hidden -translate-y-1/2 items-center gap-1 rounded-full border border-border bg-background/90 p-0.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur md:flex md:opacity-0 md:group-hover:opacity-100">
+            {canTakeOrderQuick ? (
+              <button
+                type="button"
+                className="flex h-7 w-7 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onTakeOrder(order);
+                }}
+                title="Take order"
+                aria-label="Take order"
+              >
+                <UserCheckIcon className="h-4 w-4" />
+              </button>
+            ) : null}
             {onEdit ? (
               <button
                 type="button"
-                className="flex h-6 w-6 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
+                className="flex h-7 w-7 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
                 onClick={(event) => {
                   event.stopPropagation();
                   onEdit(order);
@@ -293,13 +313,13 @@ export function OrderRow({
                 title="Edit"
                 aria-label="Edit"
               >
-                <PencilIcon className="h-3 w-3" />
+                <PencilIcon className="h-4 w-4" />
               </button>
             ) : null}
             {onDelete ? (
               <button
                 type="button"
-                className="flex h-6 w-6 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
+                className="flex h-7 w-7 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
                 onClick={(event) => {
                   event.stopPropagation();
                   onDelete(order);
@@ -307,7 +327,7 @@ export function OrderRow({
                 title="Delete"
                 aria-label="Delete"
               >
-                <Trash2Icon className="h-3 w-3" />
+                <Trash2Icon className="h-4 w-4" />
               </button>
             ) : null}
           </div>
@@ -353,6 +373,19 @@ export function OrderRow({
                     >
                       <PencilIcon className="h-4 w-4" />
                       Edit
+                    </button>
+                  )}
+                  {canTakeOrderQuick && (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm leading-none text-foreground hover:bg-muted/50"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onTakeOrder(order);
+                      }}
+                    >
+                      <UserCheckIcon className="h-4 w-4" />
+                      Take order
                     </button>
                   )}
                   {onDelete && (

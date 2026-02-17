@@ -84,6 +84,7 @@ export interface ExternalJobStatusEntry {
 export interface OrderComment {
   id: string;
   message: string;
+  authorId?: string;
   author: string;
   authorRole?: string;
   createdAt: string;

@@ -36,13 +36,8 @@ import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 import { Input } from "@/components/ui/Input";
 
 export default function OrdersPage() {
-  const {
-    orders,
-    addOrder,
-    updateOrder,
-    removeOrder,
-    error,
-  } = useOrders();
+  const filtersStorageKey = "pws-orders-filters-v1";
+  const { orders, addOrder, updateOrder, removeOrder, error } = useOrders();
   const { nodes, levels } = useHierarchy();
   const user = useCurrentUser();
   const { hasPermission } = useRbac();
@@ -116,6 +111,9 @@ export default function OrdersPage() {
   const [assignmentFilter, setAssignmentFilter] = useState<"queue" | "my">(
     "queue",
   );
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [blockedOnly, setBlockedOnly] = useState(false);
+  const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [visibleOrders, setVisibleOrders] = useState<Order[]>([]);
   const [totalOrders, setTotalOrders] = useState(0);
   const [isListLoading, setIsListLoading] = useState(false);
@@ -363,13 +361,89 @@ export default function OrdersPage() {
   }, [isMobileActionsOpen, isMobileSearchOpen, isMobileFiltersOpen]);
 
   useEffect(() => {
-    setStatusFilter(defaultStatusFilter);
-  }, [defaultStatusFilter]);
+    const isValid = roleStatusOptions.some(
+      (item) => item.value === statusFilter,
+    );
+    if (!isValid) {
+      setStatusFilter(defaultStatusFilter);
+    }
+  }, [defaultStatusFilter, roleStatusOptions, statusFilter]);
   useEffect(() => {
     if (isEngineeringUser) {
       setAssignmentFilter("queue");
     }
   }, [isEngineeringUser]);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const raw = window.localStorage.getItem(filtersStorageKey);
+    if (!raw) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as Partial<{
+        statusFilter: OrderStatus | "all";
+        groupByContract: boolean;
+        partnerGroupFilter: string;
+        assignmentFilter: "queue" | "my";
+        overdueOnly: boolean;
+        blockedOnly: boolean;
+        unassignedOnly: boolean;
+      }>;
+      if (parsed.statusFilter) {
+        setStatusFilter(parsed.statusFilter);
+      }
+      if (typeof parsed.groupByContract === "boolean") {
+        setGroupByContract(parsed.groupByContract);
+      }
+      if (typeof parsed.partnerGroupFilter === "string") {
+        setPartnerGroupFilter(parsed.partnerGroupFilter);
+      }
+      if (
+        parsed.assignmentFilter === "queue" ||
+        parsed.assignmentFilter === "my"
+      ) {
+        setAssignmentFilter(parsed.assignmentFilter);
+      }
+      if (typeof parsed.overdueOnly === "boolean") {
+        setOverdueOnly(parsed.overdueOnly);
+      }
+      if (typeof parsed.blockedOnly === "boolean") {
+        setBlockedOnly(parsed.blockedOnly);
+      }
+      if (typeof parsed.unassignedOnly === "boolean") {
+        setUnassignedOnly(parsed.unassignedOnly);
+      }
+    } catch {
+      // Ignore invalid filter snapshots.
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      filtersStorageKey,
+      JSON.stringify({
+        statusFilter,
+        groupByContract,
+        partnerGroupFilter,
+        assignmentFilter,
+        overdueOnly,
+        blockedOnly,
+        unassignedOnly,
+      }),
+    );
+  }, [
+    assignmentFilter,
+    blockedOnly,
+    groupByContract,
+    overdueOnly,
+    partnerGroupFilter,
+    statusFilter,
+    unassignedOnly,
+  ]);
 
   const [statusCounts, setStatusCounts] = useState<
     Partial<Record<OrderStatus | "all", number>>
@@ -379,6 +453,9 @@ export default function OrdersPage() {
     () => levels.find((level) => level.key === "contract"),
     [levels],
   );
+  const canGroupByContract = Boolean(
+    contractLevel?.isActive && contractLevel?.showInTable,
+  );
   const contractLabelMap = useMemo(() => {
     const map = new Map<string, string>();
     nodes.forEach((node) => {
@@ -387,7 +464,7 @@ export default function OrdersPage() {
     return map;
   }, [nodes]);
   const groupedOrders = useMemo(() => {
-    if (!groupByContract || !contractLevel) {
+    if (!groupByContract || !canGroupByContract || !contractLevel) {
       return [];
     }
     const groups = new Map<string, Order[]>();
@@ -406,9 +483,37 @@ export default function OrdersPage() {
       label,
       orders,
     }));
-  }, [contractLabelMap, contractLevel, visibleOrders, groupByContract]);
+  }, [
+    canGroupByContract,
+    contractLabelMap,
+    contractLevel,
+    visibleOrders,
+    groupByContract,
+  ]);
+
+  useEffect(() => {
+    if (!canGroupByContract && groupByContract) {
+      setGroupByContract(false);
+    }
+  }, [canGroupByContract, groupByContract]);
+
+  async function handleQuickTakeOrder(order: Order) {
+    if (!isEngineeringUser || order.status !== "ready_for_engineering") {
+      return;
+    }
+    if (order.assignedEngineerId) {
+      return;
+    }
+    const now = new Date().toISOString();
+    await updateOrder(order.id, {
+      assignedEngineerId: user.id,
+      assignedEngineerName: user.name,
+      assignedEngineerAt: now,
+    });
+  }
 
   const getLocalFilteredOrders = (source: Order[]) => {
+    const todayIso = new Date().toISOString().slice(0, 10);
     let filtered = source;
     if (isEngineeringUser) {
       filtered = filtered.filter((order) =>
@@ -419,6 +524,17 @@ export default function OrdersPage() {
     }
     if (statusFilter !== "all") {
       filtered = filtered.filter((order) => order.status === statusFilter);
+    }
+    if (isEngineeringUser && blockedOnly) {
+      filtered = filtered.filter(
+        (order) => order.status === "engineering_blocked",
+      );
+    }
+    if (isEngineeringUser && unassignedOnly) {
+      filtered = filtered.filter((order) => !order.assignedEngineerId);
+    }
+    if (overdueOnly) {
+      filtered = filtered.filter((order) => order.dueDate < todayIso);
     }
     const q = searchQuery.trim().toLowerCase();
     if (q.length > 0) {
@@ -523,12 +639,24 @@ export default function OrdersPage() {
         if (statusFilter !== "all") {
           query.eq("status", statusFilter);
         }
+        if (isEngineeringUser && blockedOnly) {
+          query.eq("status", "engineering_blocked");
+        }
         if (isEngineeringUser) {
           if (assignmentFilter === "queue") {
             query.is("assigned_engineer_id", null);
           } else {
             query.eq("assigned_engineer_id", user.id);
           }
+          if (unassignedOnly) {
+            query.is("assigned_engineer_id", null);
+          }
+        } else if (unassignedOnly) {
+          query.is("assigned_engineer_id", null);
+        }
+        if (overdueOnly) {
+          const todayIso = new Date().toISOString().slice(0, 10);
+          query.lt("due_date", todayIso);
         }
         if (searchQuery.trim().length > 0) {
           const q = `%${searchQuery.trim()}%`;
@@ -623,11 +751,14 @@ export default function OrdersPage() {
   }, [
     orders,
     assignmentFilter,
+    blockedOnly,
     partnerGroupFilter,
     partners,
+    overdueOnly,
     searchQuery,
     roleStatusOptions,
     statusFilter,
+    unassignedOnly,
     user.isAuthenticated,
     user.loading,
     user.tenantId,
@@ -832,6 +963,30 @@ export default function OrdersPage() {
               }))}
             />
           </div>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Quick filters</div>
+            <div className="flex flex-wrap gap-2">
+              <Checkbox
+                checked={overdueOnly}
+                onChange={() => setOverdueOnly((prev) => !prev)}
+                label="Overdue only"
+              />
+              {isEngineeringUser ? (
+                <Checkbox
+                  checked={blockedOnly}
+                  onChange={() => setBlockedOnly((prev) => !prev)}
+                  label="Blocked only"
+                />
+              ) : null}
+              {isEngineeringUser ? (
+                <Checkbox
+                  checked={unassignedOnly}
+                  onChange={() => setUnassignedOnly((prev) => !prev)}
+                  label="Unassigned only"
+                />
+              ) : null}
+            </div>
+          </div>
           {isEngineeringUser ? (
             <div>
               <FilterOptionSelector
@@ -847,11 +1002,13 @@ export default function OrdersPage() {
               />
             </div>
           ) : null}
-          <Checkbox
-            checked={groupByContract}
-            onChange={() => setGroupByContract((prev) => !prev)}
-            label="Group by Contract"
-          />
+          {canGroupByContract ? (
+            <Checkbox
+              checked={groupByContract}
+              onChange={() => setGroupByContract((prev) => !prev)}
+              label="Group by Contract"
+            />
+          ) : null}
         </div>
       </BottomSheet>
 
@@ -900,6 +1057,7 @@ export default function OrdersPage() {
               onToggleGroupByContract={() =>
                 setGroupByContract((prev) => !prev)
               }
+              showGroupByContract={canGroupByContract}
               statusCounts={statusCounts}
               statusOptions={roleStatusOptions}
               partnerGroupOptions={activeGroups.map((group) => ({
@@ -914,6 +1072,12 @@ export default function OrdersPage() {
               onAssignmentChange={
                 isEngineeringUser ? setAssignmentFilter : undefined
               }
+              overdueOnly={overdueOnly}
+              onToggleOverdueOnly={() => setOverdueOnly((prev) => !prev)}
+              blockedOnly={blockedOnly}
+              onToggleBlockedOnly={() => setBlockedOnly((prev) => !prev)}
+              unassignedOnly={unassignedOnly}
+              onToggleUnassignedOnly={() => setUnassignedOnly((prev) => !prev)}
               viewMode={viewMode}
               onViewModeChange={setViewMode}
             />
@@ -921,7 +1085,7 @@ export default function OrdersPage() {
           {viewMode === "cards" ? (
             <OrdersCards
               orders={visibleOrders}
-              groups={groupByContract ? groupedOrders : undefined}
+              groups={groupByContract && canGroupByContract ? groupedOrders : undefined}
               dueSoonDays={rules.dueSoonDays}
               dueIndicatorEnabled={rules.dueIndicatorEnabled}
               dueIndicatorStatuses={rules.dueIndicatorStatuses}
@@ -942,11 +1106,12 @@ export default function OrdersPage() {
                     }
                   : undefined
               }
+              onTakeOrder={isEngineeringUser ? handleQuickTakeOrder : undefined}
             />
           ) : (
             <OrdersTable
               orders={visibleOrders}
-              groups={groupByContract ? groupedOrders : undefined}
+              groups={groupByContract && canGroupByContract ? groupedOrders : undefined}
               dueSoonDays={rules.dueSoonDays}
               dueIndicatorEnabled={rules.dueIndicatorEnabled}
               dueIndicatorStatuses={rules.dueIndicatorStatuses}
@@ -967,6 +1132,7 @@ export default function OrdersPage() {
                     }
                   : undefined
               }
+              onTakeOrder={isEngineeringUser ? handleQuickTakeOrder : undefined}
             />
           )}
           {isListLoading ? (
@@ -1015,12 +1181,24 @@ export default function OrdersPage() {
                       if (statusFilter !== "all") {
                         query.eq("status", statusFilter);
                       }
+                      if (isEngineeringUser && blockedOnly) {
+                        query.eq("status", "engineering_blocked");
+                      }
                       if (isEngineeringUser) {
                         if (assignmentFilter === "queue") {
                           query.is("assigned_engineer_id", null);
                         } else {
                           query.eq("assigned_engineer_id", user.id);
                         }
+                        if (unassignedOnly) {
+                          query.is("assigned_engineer_id", null);
+                        }
+                      } else if (unassignedOnly) {
+                        query.is("assigned_engineer_id", null);
+                      }
+                      if (overdueOnly) {
+                        const todayIso = new Date().toISOString().slice(0, 10);
+                        query.lt("due_date", todayIso);
                       }
                       if (searchQuery.trim().length > 0) {
                         const q = `%${searchQuery.trim()}%`;

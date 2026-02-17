@@ -8,6 +8,7 @@ import {
   PaperclipIcon,
   PencilIcon,
   Trash2Icon,
+  UserCheckIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -23,6 +24,7 @@ interface OrdersCardsProps {
   orders: Order[];
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
+  onTakeOrder?: (order: Order) => void;
   groups?: {
     label: string;
     orders: Order[];
@@ -39,6 +41,7 @@ function OrderCard({
   activeLevels,
   onEdit,
   onDelete,
+  onTakeOrder,
   dueSoonDays = 5,
   dueIndicatorEnabled = true,
   dueIndicatorStatuses,
@@ -49,6 +52,7 @@ function OrderCard({
   activeLevels: { id: string; name: string }[];
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
+  onTakeOrder?: (order: Order) => void;
   dueSoonDays?: number;
   dueIndicatorEnabled?: boolean;
   dueIndicatorStatuses?: Order["status"][];
@@ -138,6 +142,10 @@ function OrderCard({
       job.dueDate < today &&
       !["delivered", "approved", "cancelled"].includes(job.status),
   );
+  const canTakeOrderQuick =
+    !!onTakeOrder &&
+    order.status === "ready_for_engineering" &&
+    !order.assignedEngineerId;
   const hierarchyItems = activeLevels
     .map((level) => {
       const value = order.hierarchy?.[level.id];
@@ -299,12 +307,25 @@ function OrderCard({
             {order.commentCount ?? order.comments?.length ?? 0}
           </span>
         </div>
-        <div className="pointer-events-none absolute -right-2 top-1/2 hidden h-10 w-20 -translate-y-1/2 bg-linear-to-l from-background via-background/80 to-transparent md:group-hover:block" />
         <div className="absolute right-3 top-3 hidden items-center gap-1 rounded-full border border-border bg-background/90 p-0.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur md:flex md:opacity-0 md:group-hover:opacity-100">
+          {canTakeOrderQuick ? (
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
+              onClick={(event) => {
+                event.stopPropagation();
+                onTakeOrder(order);
+              }}
+              title="Take order"
+              aria-label="Take order"
+            >
+              <UserCheckIcon className="h-4 w-4" />
+            </button>
+          ) : null}
           {onEdit ? (
             <button
               type="button"
-              className="flex h-6 w-6 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
               onClick={(event) => {
                 event.stopPropagation();
                 onEdit(order);
@@ -312,13 +333,13 @@ function OrderCard({
               title="Edit"
               aria-label="Edit"
             >
-              <PencilIcon className="h-3 w-3" />
+              <PencilIcon className="h-4 w-4" />
             </button>
           ) : null}
           {onDelete ? (
             <button
               type="button"
-              className="flex h-6 w-6 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
               onClick={(event) => {
                 event.stopPropagation();
                 onDelete(order);
@@ -326,7 +347,7 @@ function OrderCard({
               title="Delete"
               aria-label="Delete"
             >
-              <Trash2Icon className="h-3 w-3" />
+              <Trash2Icon className="h-4 w-4" />
             </button>
           ) : null}
         </div>
@@ -375,6 +396,19 @@ function OrderCard({
                     Edit
                   </button>
                 )}
+                {canTakeOrderQuick && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm leading-none text-foreground hover:bg-muted/50"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onTakeOrder(order);
+                    }}
+                  >
+                    <UserCheckIcon className="h-4 w-4" />
+                    Take order
+                  </button>
+                )}
                 {onDelete && (
                   <button
                     type="button"
@@ -401,6 +435,7 @@ export function OrdersCards({
   orders,
   onEdit,
   onDelete,
+  onTakeOrder,
   groups,
   dueSoonDays,
   dueIndicatorEnabled,
@@ -460,6 +495,7 @@ export function OrdersCards({
                       activeLevels={activeLevels}
                       onEdit={onEdit}
                       onDelete={onDelete}
+                      onTakeOrder={onTakeOrder}
                       dueSoonDays={dueSoonDays}
                       dueIndicatorEnabled={dueIndicatorEnabled}
                       dueIndicatorStatuses={dueIndicatorStatuses}
@@ -485,6 +521,7 @@ export function OrdersCards({
               activeLevels={activeLevels}
               onEdit={onEdit}
               onDelete={onDelete}
+              onTakeOrder={onTakeOrder}
               dueSoonDays={dueSoonDays}
               dueIndicatorEnabled={dueIndicatorEnabled}
               dueIndicatorStatuses={dueIndicatorStatuses}

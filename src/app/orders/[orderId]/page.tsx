@@ -169,6 +169,7 @@ export default function OrderDetailPage() {
 
   const {
     orders,
+    refreshOrders,
     updateOrder,
     addOrderAttachment,
     removeOrderAttachment,
@@ -181,7 +182,14 @@ export default function OrderDetailPage() {
     removeExternalJobAttachment,
   } = useOrders();
   const { levels, nodes } = useHierarchy();
-  const { role, isAdmin, name, id: userId, tenantId } = useCurrentUser();
+  const {
+    role,
+    isAdmin,
+    isOwner,
+    name,
+    id: userId,
+    tenantId,
+  } = useCurrentUser();
   const { hasPermission } = useRbac();
   const { confirm, dialog } = useConfirmDialog();
   const { rules } = useWorkflowRules();
@@ -284,8 +292,6 @@ export default function OrderDetailPage() {
     [],
   );
   const [selectedEngineerId, setSelectedEngineerId] = useState("");
-  const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
-  const [selectedManagerId, setSelectedManagerId] = useState("");
   const [checklistState, setChecklistState] = useState<Record<string, boolean>>(
     {},
   );
@@ -386,13 +392,9 @@ export default function OrderDetailPage() {
     role === "Sales" && orderState?.status === "draft";
   const canStartEngineering =
     role === "Engineering" && orderState?.status === "ready_for_engineering";
-  const canBlockEngineering =
-    role === "Engineering" && orderState?.status === "in_engineering";
   const canSendToProduction =
     role === "Engineering" && orderState?.status === "in_engineering";
   const canAssignEngineer = role === "Sales" || isAdmin;
-  const canAssignManager =
-    (role === "Sales" || isAdmin) && role !== "Engineering";
   const canSendBack =
     (role === "Sales" &&
       (orderState?.status === "ready_for_engineering" ||
@@ -433,6 +435,69 @@ export default function OrderDetailPage() {
   const visibleStatusHistory = showAllHistory
     ? statusHistory
     : statusHistory.slice(0, 5);
+  const engineeringTiming = useMemo(() => {
+    if (!orderState) {
+      return null;
+    }
+    const timeline = [...(orderState.statusHistory ?? [])].sort(
+      (a, b) =>
+        new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime(),
+    );
+    let activeStartAt: string | null = null;
+    let firstStartedAt: string | null = null;
+    let lastCompletedAt: string | null = null;
+    let totalMs = 0;
+    let completedCycles = 0;
+    timeline.forEach((entry) => {
+      if (entry.status === "in_engineering") {
+        if (!activeStartAt) {
+          activeStartAt = entry.changedAt;
+          firstStartedAt = firstStartedAt ?? entry.changedAt;
+        }
+      }
+      if (entry.status === "ready_for_production" && activeStartAt) {
+        const startMs = new Date(activeStartAt).getTime();
+        const endMs = new Date(entry.changedAt).getTime();
+        if (
+          Number.isFinite(startMs) &&
+          Number.isFinite(endMs) &&
+          endMs >= startMs
+        ) {
+          totalMs += endMs - startMs;
+          completedCycles += 1;
+          lastCompletedAt = entry.changedAt;
+        }
+        activeStartAt = null;
+      }
+    });
+    if (!firstStartedAt) {
+      return null;
+    }
+
+    const inProgress =
+      Boolean(activeStartAt) &&
+      (orderState.status === "in_engineering" ||
+        orderState.status === "engineering_blocked");
+    if (inProgress && activeStartAt) {
+      const startMs = new Date(activeStartAt).getTime();
+      const nowMs = Date.now();
+      if (Number.isFinite(startMs) && nowMs >= startMs) {
+        totalMs += nowMs - startMs;
+      }
+    }
+    if (totalMs <= 0) {
+      return null;
+    }
+    const durationMinutes = Math.round(totalMs / 60000);
+    return {
+      startedAt: firstStartedAt,
+      completedAt: lastCompletedAt,
+      activeStartedAt: activeStartAt,
+      inProgress,
+      durationMinutes,
+      completedCycles,
+    };
+  }, [orderState]);
   const visibleExternalJobs = useMemo(
     () => uniqueExternalJobsById(orderState?.externalJobs ?? []),
     [orderState?.externalJobs],
@@ -445,14 +510,6 @@ export default function OrderDetailPage() {
     }
     setSelectedEngineerId(orderState.assignedEngineerId);
   }, [orderState?.assignedEngineerId]);
-
-  useEffect(() => {
-    if (!orderState?.assignedManagerId) {
-      setSelectedManagerId("");
-      return;
-    }
-    setSelectedManagerId(orderState.assignedManagerId);
-  }, [orderState?.assignedManagerId]);
 
   useEffect(() => {
     const sb = supabase;
@@ -496,49 +553,60 @@ export default function OrderDetailPage() {
   }, [engineerLabel, tenantId]);
 
   useEffect(() => {
-    const sb = supabase;
-    if (!sb) {
-      setManagers([
-        { id: "mgr-1", name: `${managerLabel} 1` },
-        { id: "mgr-2", name: `${managerLabel} 2` },
-      ]);
-      return;
-    }
-
-    let isMounted = true;
-    const fetchManagers = async () => {
-      const query = sb.from("profiles").select("id, full_name, role");
-      query.in("role", ["Sales"]);
-      if (tenantId) {
-        query.eq("tenant_id", tenantId);
-      }
-      const { data, error } = await query;
-      if (!isMounted) {
-        return;
-      }
-      if (error) {
-        setManagers([]);
-        return;
-      }
-      setManagers(
-        (data ?? []).map((row) => ({
-          id: row.id,
-          name: row.full_name ?? managerLabel,
-        })),
-      );
-    };
-
-    fetchManagers();
-    return () => {
-      isMounted = false;
-    };
-  }, [managerLabel, tenantId]);
-
-  useEffect(() => {
     setOrderState(order);
     setIsLoadingOrder(false);
     setChecklistState(order?.checklist ?? {});
   }, [order]);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb || !orderState?.id) {
+      return;
+    }
+    const channel = sb
+      .channel(`order-live-${orderState.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+          filter: `id=eq.${orderState.id}`,
+        },
+        () => {
+          void refreshOrders();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "order_comments",
+          filter: `order_id=eq.${orderState.id}`,
+        },
+        () => {
+          void refreshOrders();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "order_status_history",
+          filter: `order_id=eq.${orderState.id}`,
+        },
+        () => {
+          void refreshOrders();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
+  }, [orderState?.id, refreshOrders]);
 
   useEffect(() => {
     const sb = supabase;
@@ -765,6 +833,41 @@ export default function OrderDetailPage() {
   ]);
 
   const attachments = orderState?.attachments ?? [];
+  const defaultAiAttachmentCategoryIds = useMemo(() => {
+    const ids = new Set<string>();
+    const engineeringDefault = rules.attachmentCategoryDefaults?.Engineering;
+    const productionDefault = rules.attachmentCategoryDefaults?.Production;
+    if (engineeringDefault) {
+      ids.add(engineeringDefault);
+    }
+    if (productionDefault) {
+      ids.add(productionDefault);
+    }
+    return ids;
+  }, [rules.attachmentCategoryDefaults]);
+  const aiEnabledAttachmentCategoryIds = useMemo(
+    () =>
+      new Set(
+        attachmentCategories
+          .filter((item) => item.aiParseEnabled)
+          .map((item) => item.id),
+      ),
+    [attachmentCategories],
+  );
+  const effectiveAiAttachmentCategoryIds = useMemo(
+    () =>
+      aiEnabledAttachmentCategoryIds.size > 0
+        ? aiEnabledAttachmentCategoryIds
+        : defaultAiAttachmentCategoryIds,
+    [aiEnabledAttachmentCategoryIds, defaultAiAttachmentCategoryIds],
+  );
+  const aiAttachmentCategoryLabels = useMemo(() => {
+    const labels = Array.from(effectiveAiAttachmentCategoryIds)
+      .map((id) => attachmentCategoryLabels[id] ?? id)
+      .filter(Boolean);
+    return labels.length > 0 ? labels : ["Production documentation"];
+  }, [attachmentCategoryLabels, effectiveAiAttachmentCategoryIds]);
+  const aiAttachmentCategoryHint = aiAttachmentCategoryLabels.join(", ");
   const productionDocumentationParseAttachments = useMemo(
     () =>
       attachments.filter((attachment) => {
@@ -773,7 +876,11 @@ export default function OrderDetailPage() {
             attachment.category)
           : "";
         const normalizedCategory = categoryLabel.trim().toLowerCase();
+        const isConfiguredAiCategory = attachment.category
+          ? effectiveAiAttachmentCategoryIds.has(attachment.category)
+          : false;
         const isProductionDocumentation =
+          isConfiguredAiCategory ||
           normalizedCategory === "production documentation";
         const nameLower = attachment.name.toLowerCase();
         const mimeLower = (attachment.mimeType ?? "").toLowerCase();
@@ -786,9 +893,13 @@ export default function OrderDetailPage() {
           mimeLower.includes("spreadsheet");
         return isProductionDocumentation && isSupported;
       }),
-    [attachments, attachmentCategoryLabels],
+    [attachments, attachmentCategoryLabels, effectiveAiAttachmentCategoryIds],
   );
   const comments = orderState?.comments ?? [];
+  const canManageAllComments =
+    isAdmin || isOwner || hasPermission("orders.manage");
+  const canRemoveComment = (comment: OrderComment) =>
+    canManageAllComments || comment.authorId === userId;
   useEffect(() => {
     const sb = supabase;
     if (!sb) {
@@ -923,14 +1034,19 @@ export default function OrderDetailPage() {
         }),
     [orderInputFields],
   );
-  const hasRequiredOrderInputs = activeOrderInputFields
-    .filter((field) => field.isRequired)
-    .every((field) =>
+  const requiredOrderInputFields = activeOrderInputFields.filter(
+    (field) => field.isRequired,
+  );
+  const completedRequiredOrderInputCount = requiredOrderInputFields.filter(
+    (field) =>
       shouldPersistOrderInputValue(
         field,
         normalizeOrderInputValue(field, orderInputValues[field.id]),
       ),
-    );
+  ).length;
+  const hasRequiredOrderInputs =
+    completedRequiredOrderInputCount === requiredOrderInputFields.length;
+  const hasAssignedEngineer = Boolean(orderState?.assignedEngineerId);
   const canAdvanceToEngineering =
     meetsEngineeringChecklist &&
     meetsEngineeringAttachments &&
@@ -940,7 +1056,99 @@ export default function OrderDetailPage() {
     meetsProductionChecklist &&
     meetsProductionAttachments &&
     meetsProductionComment &&
-    (!rules.requireOrderInputsForProduction || hasRequiredOrderInputs);
+    (!rules.requireOrderInputsForProduction || hasRequiredOrderInputs) &&
+    hasAssignedEngineer;
+  const engineeringGateItems = [
+    ...(requiredForEngineering.length > 0
+      ? [
+          {
+            label: "Checklist",
+            ok: meetsEngineeringChecklist,
+            value: `${requiredForEngineering.filter((item) => checklistState[item.id]).length}/${requiredForEngineering.length}`,
+          },
+        ]
+      : []),
+    ...(rules.minAttachmentsForEngineering > 0
+      ? [
+          {
+            label: "Attachments",
+            ok: meetsEngineeringAttachments,
+            value: `${Math.min(attachments.length, rules.minAttachmentsForEngineering)}/${rules.minAttachmentsForEngineering}`,
+          },
+        ]
+      : []),
+    ...(rules.requireCommentForEngineering
+      ? [
+          {
+            label: "Comments",
+            ok: meetsEngineeringComment,
+            value: `${Math.min(comments.length, 1)}/1`,
+          },
+        ]
+      : []),
+    ...(rules.requireOrderInputsForEngineering
+      ? [
+          {
+            label: "Inputs",
+            ok: hasRequiredOrderInputs,
+            value: hasRequiredOrderInputs ? "yes" : "no",
+          },
+        ]
+      : []),
+  ];
+  const productionGateItems = [
+    {
+      label: "Engineer",
+      ok: hasAssignedEngineer,
+      value: hasAssignedEngineer ? "assigned" : "missing",
+    },
+    ...(requiredForProduction.length > 0
+      ? [
+          {
+            label: "Checklist",
+            ok: meetsProductionChecklist,
+            value: `${requiredForProduction.filter((item) => checklistState[item.id]).length}/${requiredForProduction.length}`,
+          },
+        ]
+      : []),
+    ...(rules.minAttachmentsForProduction > 0
+      ? [
+          {
+            label: "Attachments",
+            ok: meetsProductionAttachments,
+            value: `${Math.min(attachments.length, rules.minAttachmentsForProduction)}/${rules.minAttachmentsForProduction}`,
+          },
+        ]
+      : []),
+    ...(rules.requireCommentForProduction
+      ? [
+          {
+            label: "Comments",
+            ok: meetsProductionComment,
+            value: `${Math.min(comments.length, 1)}/1`,
+          },
+        ]
+      : []),
+    ...(rules.requireOrderInputsForProduction
+      ? [
+          {
+            label: "Inputs",
+            ok: hasRequiredOrderInputs,
+            value: hasRequiredOrderInputs ? "yes" : "no",
+          },
+        ]
+      : []),
+  ];
+  const activeGateItems = canSendToEngineering
+    ? engineeringGateItems
+    : canSendToProduction
+      ? productionGateItems
+      : [];
+  const activeGateLabel = canSendToEngineering
+    ? "Send to engineering checks"
+    : canSendToProduction
+      ? "Send to production checks"
+      : "";
   const manualExternalJobFields = useMemo(
     () =>
       externalJobFields
@@ -1452,12 +1660,19 @@ export default function OrderDetailPage() {
     if (field.fieldType !== "table") {
       return;
     }
+    const availableParseAttachments = productionDocumentationParseAttachments;
+    if (availableParseAttachments.length === 0) {
+      setTableImportNotices((prev) => ({
+        ...prev,
+        [field.id]: `No supported files (PDF/XLSX/XLS) found in Files & Comments categories: ${aiAttachmentCategoryHint}.`,
+      }));
+      return;
+    }
     const attachmentId = tableImportAttachmentIds[field.id];
     if (!attachmentId) {
       setTableImportNotices((prev) => ({
         ...prev,
-        [field.id]:
-          "Choose a file from Files & Comments (Production documentation).",
+        [field.id]: `Choose a file from Files & Comments (${aiAttachmentCategoryHint}).`,
       }));
       return;
     }
@@ -1733,6 +1948,8 @@ export default function OrderDetailPage() {
         "Add with AI reads the selected Production documentation file and appends detected rows into this table. Available on Pro subscription.";
       const importNotice = tableImportNotices[field.id] ?? "";
       const isParsingThisField = isParsingTableFieldId === field.id;
+      const showAiReviewNotice =
+        isParsingThisField || importNotice.startsWith("AI added ");
       const selectedRows = tableRowSelections[field.id] ?? [];
       const allSelected =
         rows.length > 0 && selectedRows.length === rows.length;
@@ -1804,80 +2021,93 @@ export default function OrderDetailPage() {
         <div key={field.id} className="md:col-span-2 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-medium">{label}</div>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-start gap-2">
               {canUseAiOrderInputImport && (
-                <Select
-                  value={selectedAttachmentId || "__none__"}
-                  onValueChange={(value) => {
-                    const nextId = value === "__none__" ? "" : value;
-                    setTableImportAttachmentIds((prev) => ({
-                      ...prev,
-                      [field.id]: nextId,
-                    }));
-                    setTableImportNotices((prev) => ({
-                      ...prev,
-                      [field.id]: nextId ? "" : "Choose a PDF first.",
-                    }));
-                  }}
-                  disabled={!canEditOrderInputs || isParsingThisField}
-                >
-                  <SelectTrigger className="h-9 w-65 max-w-full min-w-0">
-                    <SelectValue
-                      placeholder="Choose PDF/XLSX from Production documentation"
-                      className="block max-w-50 truncate text-left"
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Choose file</SelectItem>
-                    {availableParseAttachments.map((attachment) => (
-                      <SelectItem
-                        key={attachment.id}
-                        value={attachment.id}
-                        className="max-w-105"
-                      >
-                        {attachment.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              {canUseAiOrderInputImport ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleParseTableFieldWithAi(field)}
-                  disabled={!canEditOrderInputs || isParsingThisField}
-                >
-                  {isParsingThisField ? (
-                    <>
-                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                      Adding...
-                    </>
-                  ) : (
-                    <>
-                      <SparklesIcon className="h-4 w-4 text-sky-500" />
-                      Add with AI
-                    </>
-                  )}
-                </Button>
-              ) : (
-                <Tooltip
-                  content={aiButtonTooltipBasic}
-                  className="max-w-[320px] text-xs"
-                >
-                  <span className="inline-flex">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleParseTableFieldWithAi(field)}
-                      disabled
+                <div className="flex min-w-0 flex-col gap-1.5">
+                  <div className="flex flex-wrap gap-2">
+                    <Select
+                      value={selectedAttachmentId || "__none__"}
+                      onValueChange={(value) => {
+                        const nextId = value === "__none__" ? "" : value;
+                        setTableImportAttachmentIds((prev) => ({
+                          ...prev,
+                          [field.id]: nextId,
+                        }));
+                        setTableImportNotices((prev) => ({
+                          ...prev,
+                          [field.id]: nextId ? "" : "Choose a PDF first.",
+                        }));
+                      }}
+                      disabled={!canEditOrderInputs || isParsingThisField}
                     >
-                      <SparklesIcon className="h-4 w-4 text-sky-500" />
-                      Add with AI
-                    </Button>
-                  </span>
-                </Tooltip>
+                      <SelectTrigger className="h-9 w-65 max-w-full min-w-0">
+                        <SelectValue
+                          placeholder="Choose PDF/XLSX from Production documentation"
+                          className="block max-w-50 truncate text-left"
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Choose file</SelectItem>
+                        {availableParseAttachments.map((attachment) => (
+                          <SelectItem
+                            key={attachment.id}
+                            value={attachment.id}
+                            className="max-w-105"
+                          >
+                            {attachment.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {canUseAiOrderInputImport ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleParseTableFieldWithAi(field)}
+                        disabled={!canEditOrderInputs || isParsingThisField}
+                      >
+                        {isParsingThisField ? (
+                          <>
+                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            Adding...
+                          </>
+                        ) : (
+                          <>
+                            <SparklesIcon className="h-4 w-4 text-sky-500" />
+                            Add with AI
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <div className="inline-flex items-center gap-2">
+                        <Tooltip
+                          content={aiButtonTooltipBasic}
+                          className="max-w-[320px] text-xs"
+                        >
+                          <span className="inline-flex">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleParseTableFieldWithAi(field)}
+                              disabled
+                            >
+                              <SparklesIcon className="h-4 w-4 text-sky-500" />
+                              Add with AI
+                            </Button>
+                          </span>
+                        </Tooltip>
+                        <span className="text-xs text-amber-700">
+                          Locked on {subscription.planCode}. Upgrade to Pro.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Use files from: {aiAttachmentCategoryHint} (PDF/XLSX/XLS).
+                  </div>
+                </div>
               )}
+
               <Button
                 size="sm"
                 variant="outline"
@@ -1904,19 +2134,12 @@ export default function OrderDetailPage() {
               Source: {selectedAttachment.name}
             </div>
           )}
-          {canUseAiOrderInputImport &&
-            availableParseAttachments.length === 0 && (
-              <div className="text-xs text-muted-foreground">
-                No supported files (PDF/XLSX/XLS) found in Files & Comments
-                category &quot;Production documentation&quot;.
-              </div>
-            )}
           {!canUseAiOrderInputImport && (
             <div className="text-xs text-muted-foreground">
               AI PDF import is available on Pro plan.
             </div>
           )}
-          {canUseAiOrderInputImport && (
+          {canUseAiOrderInputImport && showAiReviewNotice && (
             <div className="text-xs text-amber-700">
               AI-generated results may contain errors. Always review and verify
               values before saving inputs.
@@ -2110,7 +2333,7 @@ export default function OrderDetailPage() {
                                     event.target.value,
                                   )
                                 }
-                                className="h-9 w-full rounded-md border border-border bg-input-background px-2 text-sm"
+                                className="h-9 w-full px-2 text-sm"
                               />
                               {column.fieldType !== "number" &&
                                 typeof cellValue === "string" &&
@@ -2243,7 +2466,7 @@ export default function OrderDetailPage() {
               [field.id]: event.target.value,
             }))
           }
-          className="h-10 rounded-lg border border-border bg-input-background px-3 text-sm"
+          className="h-10 px-3 text-sm"
         />
       </label>
     );
@@ -2281,6 +2504,15 @@ export default function OrderDetailPage() {
 
   async function handleRemoveComment(commentId: string) {
     if (!orderState) {
+      return;
+    }
+    const targetComment = comments.find((comment) => comment.id === commentId);
+    if (!targetComment || !canRemoveComment(targetComment)) {
+      notify({
+        title: "Comment not removed",
+        description: "You can only remove your own comments.",
+        variant: "error",
+      });
       return;
     }
     if (
@@ -2773,6 +3005,56 @@ export default function OrderDetailPage() {
       return;
     }
     const now = new Date().toISOString();
+    if (!supabase) {
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              assignedEngineerId: userId,
+              assignedEngineerName: name,
+              assignedEngineerAt: now,
+            }
+          : prev,
+      );
+      await updateOrder(orderState.id, {
+        assignedEngineerId: userId,
+        assignedEngineerName: name,
+        assignedEngineerAt: now,
+      });
+      return;
+    }
+
+    const { data, error: claimError } = await supabase
+      .from("orders")
+      .update({
+        assigned_engineer_id: userId,
+        assigned_engineer_name: name,
+        assigned_engineer_at: now,
+      })
+      .eq("id", orderState.id)
+      .eq("status", "ready_for_engineering")
+      .is("assigned_engineer_id", null)
+      .select("id")
+      .maybeSingle();
+
+    if (claimError) {
+      notify({
+        title: "Order not updated",
+        description: claimError.message,
+        variant: "error",
+      });
+      return;
+    }
+    if (!data) {
+      notify({
+        title: "Order already taken",
+        description: "Another engineer already took this order.",
+        variant: "error",
+      });
+      await refreshOrders();
+      return;
+    }
+
     setOrderState((prev) =>
       prev
         ? {
@@ -2783,11 +3065,7 @@ export default function OrderDetailPage() {
           }
         : prev,
     );
-    await updateOrder(orderState.id, {
-      assignedEngineerId: userId,
-      assignedEngineerName: name,
-      assignedEngineerAt: now,
-    });
+    await refreshOrders();
   }
 
   async function handleReturnToQueue() {
@@ -2920,51 +3198,6 @@ export default function OrderDetailPage() {
       assignedEngineerId: "",
       assignedEngineerName: "",
       assignedEngineerAt: "",
-    });
-  }
-
-  async function handleAssignManager() {
-    if (!orderState || !selectedManagerId) {
-      return;
-    }
-    const manager = managers.find((item) => item.id === selectedManagerId);
-    const now = new Date().toISOString();
-    setOrderState((prev) =>
-      prev
-        ? {
-            ...prev,
-            assignedManagerId: selectedManagerId,
-            assignedManagerName: manager?.name ?? prev.assignedManagerName,
-            assignedManagerAt: now,
-          }
-        : prev,
-    );
-    await updateOrder(orderState.id, {
-      assignedManagerId: selectedManagerId,
-      assignedManagerName: manager?.name ?? orderState.assignedManagerName,
-      assignedManagerAt: now,
-    });
-  }
-
-  async function handleClearManager() {
-    if (!orderState) {
-      return;
-    }
-    setSelectedManagerId("");
-    setOrderState((prev) =>
-      prev
-        ? {
-            ...prev,
-            assignedManagerId: undefined,
-            assignedManagerName: undefined,
-            assignedManagerAt: undefined,
-          }
-        : prev,
-    );
-    await updateOrder(orderState.id, {
-      assignedManagerId: "",
-      assignedManagerName: "",
-      assignedManagerAt: "",
     });
   }
 
@@ -3122,7 +3355,7 @@ export default function OrderDetailPage() {
               { value: "overview", label: "Overview" },
               { value: "files", label: "Files & Comments" },
               { value: "details", label: "Order details" },
-              { value: "workflow", label: "Workflow" },
+              { value: "workflow", label: "Process" },
               { value: "external", label: "External Jobs" },
             ].map((section) => {
               const isActive = activeTab === section.value;
@@ -3179,7 +3412,7 @@ export default function OrderDetailPage() {
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="files">Files & Comments</TabsTrigger>
                 <TabsTrigger value="details">Order details</TabsTrigger>
-                <TabsTrigger value="workflow">Workflow</TabsTrigger>
+                <TabsTrigger value="workflow">Process</TabsTrigger>
                 <TabsTrigger value="external">External Jobs</TabsTrigger>
               </TabsList>
             </div>
@@ -3367,89 +3600,9 @@ export default function OrderDetailPage() {
             >
               <Card className="lg:sticky lg:top-6">
                 <CardHeader>
-                  <CardTitle>Workflow</CardTitle>
+                  <CardTitle>Process</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4 text-sm">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={priorityVariant}>
-                      {orderState.priority}
-                    </Badge>
-                    <Badge variant={statusVariant}>
-                      {statusLabel(displayStatus)}
-                    </Badge>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    {canSendToEngineering && (
-                      <Button
-                        size="sm"
-                        disabled={!canAdvanceToEngineering}
-                        onClick={() =>
-                          handleStatusChange("ready_for_engineering")
-                        }
-                      >
-                        Send to engineering
-                      </Button>
-                    )}
-                    {canStartEngineering && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleStatusChange("in_engineering")}
-                      >
-                        Start engineering
-                      </Button>
-                    )}
-                    {canBlockEngineering && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          handleStatusChange("engineering_blocked")
-                        }
-                      >
-                        Block engineering
-                      </Button>
-                    )}
-                    {canSendToProduction && (
-                      <Button
-                        size="sm"
-                        disabled={!canAdvanceToProduction}
-                        onClick={() =>
-                          handleStatusChange("ready_for_production")
-                        }
-                      >
-                        {statusLabel("ready_for_production")}
-                      </Button>
-                    )}
-                    {canSendBack && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setIsReturnOpen(true)}
-                      >
-                        Send back
-                      </Button>
-                    )}
-                    {canTakeOrder && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleTakeOrder}
-                      >
-                        Take order
-                      </Button>
-                    )}
-                    {canReturnToQueue && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleReturnToQueue}
-                      >
-                        Return to queue
-                      </Button>
-                    )}
-                  </div>
-
                   <div className="space-y-2 text-xs text-muted-foreground">
                     {orderState.assignedManagerName && (
                       <div className="flex items-center gap-2">
@@ -3459,53 +3612,6 @@ export default function OrderDetailPage() {
                         <span>
                           {managerLabel}: {orderState.assignedManagerName}
                         </span>
-                      </div>
-                    )}
-                    {canAssignManager && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Select
-                          value={selectedManagerId || "__none__"}
-                          onValueChange={(value) =>
-                            setSelectedManagerId(
-                              value === "__none__" ? "" : value,
-                            )
-                          }
-                        >
-                          <SelectTrigger className="h-8 w-55 rounded-md text-xs">
-                            <SelectValue
-                              placeholder={`Assign ${managerLabel.toLowerCase()}...`}
-                            />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">
-                              Assign {managerLabel.toLowerCase()}...
-                            </SelectItem>
-                            {managers
-                              .filter((manager) => manager.id)
-                              .map((manager) => (
-                                <SelectItem key={manager.id} value={manager.id}>
-                                  {manager.name}
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleAssignManager}
-                          disabled={!selectedManagerId}
-                        >
-                          Assign
-                        </Button>
-                        {orderState.assignedManagerId && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleClearManager}
-                          >
-                            Clear
-                          </Button>
-                        )}
                       </div>
                     )}
                     {orderState.assignedEngineerName && (
@@ -3579,6 +3685,101 @@ export default function OrderDetailPage() {
                           : ""}
                         {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
                       </div>
+                    )}
+                    {engineeringTiming && (
+                      <div>
+                        Engineering time (total):{" "}
+                        {formatDuration(engineeringTiming.durationMinutes)}
+                        {engineeringTiming.completedCycles > 0
+                          ? `, cycles: ${engineeringTiming.completedCycles}`
+                          : ""}
+                        {engineeringTiming.inProgress &&
+                        engineeringTiming.activeStartedAt
+                          ? `, in progress since ${formatDateTime(engineeringTiming.activeStartedAt)}`
+                          : engineeringTiming.completedAt
+                            ? ` (last completed ${formatDateTime(engineeringTiming.completedAt)})`
+                            : ""}
+                      </div>
+                    )}
+                  </div>
+                  {activeGateItems.length > 0 && (
+                    <div className="space-y-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+                      <p className="text-[11px] font-medium text-muted-foreground">
+                        {activeGateLabel}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {activeGateItems.map((item) => (
+                          <span
+                            key={item.label}
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
+                              item.ok
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-amber-200 bg-amber-50 text-amber-700"
+                            }`}
+                          >
+                            {item.label}: {item.value}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {canSendToEngineering && (
+                      <Button
+                        size="sm"
+                        disabled={!canAdvanceToEngineering}
+                        onClick={() =>
+                          handleStatusChange("ready_for_engineering")
+                        }
+                      >
+                        Send to engineering
+                      </Button>
+                    )}
+                    {canStartEngineering && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleStatusChange("in_engineering")}
+                      >
+                        Start engineering
+                      </Button>
+                    )}
+                    {canSendToProduction && (
+                      <Button
+                        size="sm"
+                        disabled={!canAdvanceToProduction}
+                        onClick={() =>
+                          handleStatusChange("ready_for_production")
+                        }
+                      >
+                        {statusLabel("ready_for_production")}
+                      </Button>
+                    )}
+                    {canSendBack && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setIsReturnOpen(true)}
+                      >
+                        Send back
+                      </Button>
+                    )}
+                    {canTakeOrder && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleTakeOrder}
+                      >
+                        Take order
+                      </Button>
+                    )}
+                    {canReturnToQueue && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleReturnToQueue}
+                      >
+                        Return to queue
+                      </Button>
                     )}
                   </div>
                 </CardContent>
@@ -3918,15 +4119,17 @@ export default function OrderDetailPage() {
                           - {formatDate(comment.createdAt.slice(0, 10))}
                         </div>
                         <div className="mt-1">{comment.message}</div>
-                        <div className="mt-2 flex justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveComment(comment.id)}
-                          >
-                            Remove
-                          </Button>
-                        </div>
+                        {canRemoveComment(comment) && (
+                          <div className="mt-2 flex justify-end">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveComment(comment.id)}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -4207,7 +4410,7 @@ export default function OrderDetailPage() {
                                     [field.id]: event.target.value,
                                   }))
                                 }
-                                className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
+                                className="h-10 w-full px-3 text-sm"
                               />
                             </label>
                           );

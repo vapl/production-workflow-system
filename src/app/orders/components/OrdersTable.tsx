@@ -15,6 +15,7 @@ interface OrdersTableProps {
   orders: Order[];
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
+  onTakeOrder?: (order: Order) => void;
   groups?: {
     label: string;
     orders: Order[];
@@ -30,6 +31,7 @@ export function OrdersTable({
   orders,
   onEdit,
   onDelete,
+  onTakeOrder,
   groups,
   dueSoonDays,
   dueIndicatorEnabled,
@@ -122,6 +124,7 @@ export function OrdersTable({
                         order={order}
                         onEdit={onEdit}
                         onDelete={onDelete}
+                        onTakeOrder={onTakeOrder}
                         levels={activeLevels}
                         dueSoonDays={dueSoonDays}
                         dueIndicatorEnabled={dueIndicatorEnabled}
@@ -147,6 +150,7 @@ export function OrdersTable({
                 order={order}
                 onEdit={onEdit}
                 onDelete={onDelete}
+                onTakeOrder={onTakeOrder}
                 levels={activeLevels}
                 dueSoonDays={dueSoonDays}
                 dueIndicatorEnabled={dueIndicatorEnabled}

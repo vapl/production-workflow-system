@@ -230,12 +230,14 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
   const mapComment = (row: {
     id: string;
     message: string;
+    author?: string | null;
     author_name?: string | null;
     author_role?: string | null;
     created_at: string;
   }): OrderComment => ({
     id: row.id,
     message: row.message,
+    authorId: row.author ?? undefined,
     author: row.author_name ?? "Unknown",
     authorRole: row.author_role ?? undefined,
     createdAt: row.created_at,
@@ -362,6 +364,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     order_comments?: Array<{
       id: string;
       message: string;
+      author?: string | null;
       author_name?: string | null;
       author_role?: string | null;
       created_at: string;
@@ -490,6 +493,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         order_comments (
           id,
           message,
+          author,
           author_name,
           author_role,
           created_at
@@ -955,6 +959,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         order_comments (
           id,
           message,
+          author,
           author_name,
           author_role,
           created_at
@@ -1021,6 +1026,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
               order_id: mapped.id,
               tenant_id: user.tenantId,
               message: order.notes.trim(),
+              author: user.id ?? null,
               author_name: order.authorName ?? "System",
               author_role: order.authorRole ?? null,
             })
@@ -1028,6 +1034,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
               `
               id,
               message,
+              author,
               author_name,
               author_role,
               created_at
@@ -1112,28 +1119,37 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           updatePayload.status_changed_by_role = patch.statusChangedByRole;
         }
         if (patch.statusChangedAt !== undefined) {
-          updatePayload.status_changed_at = patch.statusChangedAt;
+          updatePayload.status_changed_at =
+            patch.statusChangedAt === "" ? null : patch.statusChangedAt;
         }
         if (patch.checklist !== undefined) {
           updatePayload.checklist = patch.checklist;
         }
         if (patch.assignedEngineerId !== undefined) {
-          updatePayload.assigned_engineer_id = patch.assignedEngineerId;
+          updatePayload.assigned_engineer_id =
+            patch.assignedEngineerId === "" ? null : patch.assignedEngineerId;
         }
         if (patch.assignedEngineerName !== undefined) {
-          updatePayload.assigned_engineer_name = patch.assignedEngineerName;
+          updatePayload.assigned_engineer_name =
+            patch.assignedEngineerName === ""
+              ? null
+              : patch.assignedEngineerName;
         }
         if (patch.assignedEngineerAt !== undefined) {
-          updatePayload.assigned_engineer_at = patch.assignedEngineerAt;
+          updatePayload.assigned_engineer_at =
+            patch.assignedEngineerAt === "" ? null : patch.assignedEngineerAt;
         }
         if (patch.assignedManagerId !== undefined) {
-          updatePayload.assigned_manager_id = patch.assignedManagerId;
+          updatePayload.assigned_manager_id =
+            patch.assignedManagerId === "" ? null : patch.assignedManagerId;
         }
         if (patch.assignedManagerName !== undefined) {
-          updatePayload.assigned_manager_name = patch.assignedManagerName;
+          updatePayload.assigned_manager_name =
+            patch.assignedManagerName === "" ? null : patch.assignedManagerName;
         }
         if (patch.assignedManagerAt !== undefined) {
-          updatePayload.assigned_manager_at = patch.assignedManagerAt;
+          updatePayload.assigned_manager_at =
+            patch.assignedManagerAt === "" ? null : patch.assignedManagerAt;
         }
         if (existingOrder?.source === "accounting") {
           updatePayload.source = "manual";
@@ -1188,6 +1204,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         order_comments (
           id,
           message,
+          author,
           author_name,
           author_role,
           created_at
@@ -1402,6 +1419,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (!supabase) {
           const fallback: OrderComment = {
             ...comment,
+            authorId: user.id ?? undefined,
             id: `cmt-${Date.now()}`,
             createdAt: new Date().toISOString(),
           };
@@ -1427,6 +1445,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             order_id: orderId,
             tenant_id: user.tenantId,
             message: comment.message,
+            author: user.id ?? null,
             author_name: comment.author,
             author_role: comment.authorRole ?? null,
           })
@@ -1434,6 +1453,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             `
             id,
             message,
+            author,
             author_name,
             author_role,
             created_at
@@ -1458,6 +1478,14 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         return mapped;
       },
       removeOrderComment: async (orderId, commentId) => {
+        const order = orders.find((item) => item.id === orderId);
+        const comment = order?.comments?.find((item) => item.id === commentId);
+        const canRemove =
+          user.isAdmin || user.isOwner || comment?.authorId === user.id;
+        if (!canRemove) {
+          setError("You can only remove your own comments.");
+          return false;
+        }
         if (!supabase) {
           setOrders((prev) =>
             prev.map((order) =>

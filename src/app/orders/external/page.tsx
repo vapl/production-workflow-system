@@ -425,12 +425,16 @@ export default function ExternalJobsPage() {
     const planned =
       explicitPlanned ??
       externalListFields.find(
-        (field) => inferPriceRole({ key: field.key, label: field.label }) === "planned_price",
+        (field) =>
+          inferPriceRole({ key: field.key, label: field.label }) ===
+          "planned_price",
       );
     const invoice =
       explicitInvoice ??
       externalListFields.find(
-        (field) => inferPriceRole({ key: field.key, label: field.label }) === "invoice_price",
+        (field) =>
+          inferPriceRole({ key: field.key, label: field.label }) ===
+          "invoice_price",
       );
     return { planned, invoice };
   }, [externalListFields]);
@@ -440,7 +444,11 @@ export default function ExternalJobsPage() {
       priceReconciliationEnabled &&
       Boolean(priceFieldsByRole.planned) &&
       Boolean(priceFieldsByRole.invoice),
-    [priceFieldsByRole.invoice, priceFieldsByRole.planned, priceReconciliationEnabled],
+    [
+      priceFieldsByRole.invoice,
+      priceFieldsByRole.planned,
+      priceReconciliationEnabled,
+    ],
   );
 
   const tableColumnDefs = useMemo(() => {
@@ -464,7 +472,8 @@ export default function ExternalJobsPage() {
     return defs;
   }, [externalListFields, showPriceDifferenceColumn]);
   const externalFieldById = useMemo(
-    () => Object.fromEntries(externalListFields.map((field) => [field.id, field])),
+    () =>
+      Object.fromEntries(externalListFields.map((field) => [field.id, field])),
     [externalListFields],
   );
 
@@ -486,8 +495,9 @@ export default function ExternalJobsPage() {
             visible: config.visible !== false,
           };
         })
-        .filter((item): item is { id: string; label: string; visible: boolean } =>
-          Boolean(item),
+        .filter(
+          (item): item is { id: string; label: string; visible: boolean } =>
+            Boolean(item),
         );
     const missing = tableColumnDefs
       .filter((column) => !ordered.some((item) => item.id === column.id))
@@ -575,15 +585,19 @@ export default function ExternalJobsPage() {
       const deduped = list
         .filter((field) => field.showInTable ?? true)
         .filter((field, index, all) => {
-        if (field.semantic === "other") {
-          return true;
-        }
-        return all.findIndex((candidate) => {
-          if (candidate.semantic !== field.semantic) {
-            return false;
+          if (field.semantic === "other") {
+            return true;
           }
-          return (candidate.fieldRole ?? "none") === (field.fieldRole ?? "none");
-        }) === index;
+          return (
+            all.findIndex((candidate) => {
+              if (candidate.semantic !== field.semantic) {
+                return false;
+              }
+              return (
+                (candidate.fieldRole ?? "none") === (field.fieldRole ?? "none")
+              );
+            }) === index
+          );
         });
       setExternalListFields(deduped);
     };
@@ -605,9 +619,7 @@ export default function ExternalJobsPage() {
     const loadTenantPricing = async () => {
       const { data } = await sb
         .from("tenant_settings")
-        .select(
-          "external_price_reconciliation_enabled, external_table_columns",
-        )
+        .select("external_price_reconciliation_enabled, external_table_columns")
         .eq("tenant_id", user.tenantId)
         .maybeSingle();
       if (!isMounted) {
@@ -628,8 +640,7 @@ export default function ExternalJobsPage() {
               ) {
                 return {
                   id: (item as { id: string }).id,
-                  visible:
-                    (item as { visible?: unknown }).visible !== false,
+                  visible: (item as { visible?: unknown }).visible !== false,
                   label:
                     typeof (item as { label?: unknown }).label === "string"
                       ? (item as { label: string }).label
@@ -638,8 +649,8 @@ export default function ExternalJobsPage() {
               }
               return null;
             })
-            .filter(
-              (item): item is ExternalTableColumnSetting => Boolean(item),
+            .filter((item): item is ExternalTableColumnSetting =>
+              Boolean(item),
             ),
         );
       } else {
@@ -1048,14 +1059,14 @@ export default function ExternalJobsPage() {
 
       <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
         <MobilePageTitle
-          title="Partner Orders"
+          title="Outsource Orders"
           showCompact={showCompactMobileTitle}
           subtitle="Track outsourced partner orders, delivery dates, and receive flow."
           className="pt-6 pb-6"
         />
         <DesktopPageHeader
           sticky
-          title="Partner Orders"
+          title="Outsource Orders"
           subtitle="Track outsourced partner orders, delivery dates, and receive flow."
           className="md:z-20"
           actions={

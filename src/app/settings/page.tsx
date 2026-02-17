@@ -867,9 +867,13 @@ export default function SettingsPage() {
     assignmentLabelDrafts.manager.trim() !==
       (rules.assignmentLabels?.manager ?? "Manager");
   const hasAttachmentCategoryChanges = useMemo(() => {
-    const normalize = (items: { id: string; label: string }[]) =>
+    const normalize = (
+      items: { id: string; label: string; aiParseEnabled?: boolean }[],
+    ) =>
       items
-        .map((item) => `${item.id}:${item.label}`)
+        .map(
+          (item) => `${item.id}:${item.label}:${item.aiParseEnabled ? 1 : 0}`,
+        )
         .sort()
         .join("|");
     return (
@@ -1400,7 +1404,7 @@ export default function SettingsPage() {
     }
     const nextCategories = [
       ...attachmentCategoryDrafts,
-      { id: nextId, label: trimmed },
+      { id: nextId, label: trimmed, aiParseEnabled: false },
     ];
     setAttachmentCategoryDrafts(nextCategories);
     if (!attachmentDefaultDrafts.Sales) {
@@ -6860,7 +6864,7 @@ export default function SettingsPage() {
                         {attachmentCategoryDrafts.map((category) => (
                           <div
                             key={category.id}
-                            className="flex items-center gap-2"
+                            className="flex items-center gap-3"
                           >
                             <Input
                               value={category.label}
@@ -6878,6 +6882,25 @@ export default function SettingsPage() {
                               }
                               className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                             />
+                            <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
+                              <Checkbox
+                                checked={Boolean(category.aiParseEnabled)}
+                                onChange={(event) =>
+                                  setAttachmentCategoryDrafts((prev) =>
+                                    prev.map((item) =>
+                                      item.id === category.id
+                                        ? {
+                                            ...item,
+                                            aiParseEnabled:
+                                              event.target.checked,
+                                          }
+                                        : item,
+                                    ),
+                                  )
+                                }
+                              />
+                              Use for AI parsing
+                            </label>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -6959,6 +6982,10 @@ export default function SettingsPage() {
                       <p className="text-xs text-muted-foreground">
                         New uploads will default to the selected category for
                         each role.
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        AI Order Input parsing uses categories marked as
+                        &quot;Use for AI parsing&quot;.
                       </p>
                     </div>
                   </div>
