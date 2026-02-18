@@ -51,12 +51,15 @@ import type {
 import Link from "next/link";
 import {
   ArrowLeftIcon,
+  Copy,
+  CopyIcon,
   FileIcon,
   FileTextIcon,
   ImageIcon,
   PanelRightIcon,
   PencilIcon,
   SparklesIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { OrderModal } from "@/app/orders/components/OrderModal";
@@ -1240,7 +1243,7 @@ export default function OrderDetailPage() {
     });
     return groups;
   }, [activeOrderInputFields]);
-  const canEditOrderInputs = hasPermission("orders.manage");
+  const canEditOrderInputs = role === "Engineering" || isAdmin || isOwner;
   const normalizeOrderInputValue = (field: OrderInputField, value: unknown) => {
     if (field.fieldType === "table") {
       return Array.isArray(value) ? value : [];
@@ -2017,14 +2020,43 @@ export default function OrderDetailPage() {
         }));
         setTableRowSelections((prev) => ({ ...prev, [field.id]: [] }));
       };
+      const resolveColumnWidth = (column: OrderInputTableColumn) => {
+        const token = `${column.key} ${column.label}`.toLowerCase();
+        if (
+          token.includes("krāsa") ||
+          token.includes("krasa") ||
+          token.includes("color")
+        ) {
+          return "480px";
+        }
+        if (
+          token.includes("izmērs") ||
+          token.includes("izmers") ||
+          token.includes("size")
+        ) {
+          return "480px";
+        }
+        if (
+          token.includes("skaits") ||
+          token.includes("gab") ||
+          token.includes("qty") ||
+          token.includes("quantity")
+        ) {
+          return "96px";
+        }
+        return "150px";
+      };
       return (
-        <div key={field.id} className="md:col-span-2 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+        <div
+          key={field.id}
+          className="min-w-0 max-w-full space-y-3 md:col-span-2"
+        >
+          <div className="flex min-w-0 max-w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm font-medium">{label}</div>
-            <div className="flex min-w-0 flex-wrap items-start gap-2">
+            <div className="flex min-w-0 max-w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-end">
               {canUseAiOrderInputImport && (
-                <div className="flex min-w-0 flex-col gap-1.5">
-                  <div className="flex flex-wrap gap-2">
+                <div className="flex min-w-0 max-w-full flex-col gap-1.5">
+                  <div className="flex min-w-0 max-w-full flex-col gap-2 sm:flex-row sm:flex-wrap">
                     <Select
                       value={selectedAttachmentId || "__none__"}
                       onValueChange={(value) => {
@@ -2040,7 +2072,7 @@ export default function OrderDetailPage() {
                       }}
                       disabled={!canEditOrderInputs || isParsingThisField}
                     >
-                      <SelectTrigger className="h-9 w-65 max-w-full min-w-0">
+                      <SelectTrigger className="h-9 w-full min-w-0 sm:w-65">
                         <SelectValue
                           placeholder="Choose PDF/XLSX from Production documentation"
                           className="block max-w-50 truncate text-left"
@@ -2065,6 +2097,7 @@ export default function OrderDetailPage() {
                         variant="outline"
                         onClick={() => handleParseTableFieldWithAi(field)}
                         disabled={!canEditOrderInputs || isParsingThisField}
+                        className="w-full sm:w-auto"
                       >
                         {isParsingThisField ? (
                           <>
@@ -2102,7 +2135,7 @@ export default function OrderDetailPage() {
                       </div>
                     )}
                   </div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className="wrap-break-word text-xs text-muted-foreground">
                     Use files from: {aiAttachmentCategoryHint} (PDF/XLSX/XLS).
                   </div>
                 </div>
@@ -2113,6 +2146,7 @@ export default function OrderDetailPage() {
                 variant="outline"
                 onClick={removeSelectedRows}
                 disabled={!canEditOrderInputs || selectedRows.length === 0}
+                className="w-full sm:w-auto"
               >
                 Remove selected
               </Button>
@@ -2121,6 +2155,7 @@ export default function OrderDetailPage() {
                 variant="outline"
                 onClick={addRow}
                 disabled={!canEditOrderInputs}
+                className="w-full sm:w-auto"
               >
                 Add row
               </Button>
@@ -2150,7 +2185,7 @@ export default function OrderDetailPage() {
               No columns configured for this table field.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-border">
+            <div className="w-full max-w-full overflow-x-auto md:overflow-x-hidden rounded-lg border border-border">
               {isParsingThisField && (
                 <LoadingSpinner
                   className="justify-start border-b border-border px-3 py-2"
@@ -2158,15 +2193,27 @@ export default function OrderDetailPage() {
                 />
               )}
               <table className="w-full text-sm">
+                <colgroup>
+                  {columns.map((column) => (
+                    <col
+                      key={`col-${column.key}`}
+                      style={{ width: resolveColumnWidth(column) }}
+                    />
+                  ))}
+                  <col style={{ width: "130px" }} />
+                </colgroup>
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
                     {columns.map((column) => (
-                      <th key={column.key} className="px-3 py-2 text-left">
+                      <th
+                        key={column.key}
+                        className="whitespace-nowrap px-3 py-2 text-left"
+                      >
                         {column.label}
                         {column.unit ? ` (${column.unit})` : ""}
                       </th>
                     ))}
-                    <th className="px-3 py-2 text-right">
+                    <th className="whitespace-nowrap px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <span>Actions</span>
                         <Checkbox
@@ -2215,6 +2262,7 @@ export default function OrderDetailPage() {
                               : typeof cellValue === "string" && cellValue
                                 ? [cellValue]
                                 : [];
+                            const isMultiSelect = maxSelect > 1;
                             const canAddMore = currentValues.length < maxSelect;
                             const handleAddValue = (value: string) => {
                               if (!value) {
@@ -2245,50 +2293,53 @@ export default function OrderDetailPage() {
                                 return { ...prev, [field.id]: nextRows };
                               });
                             };
-                            const handleRemoveValue = (value: string) => {
-                              const nextValues = currentValues.filter(
-                                (item) => item !== value,
-                              );
-                              setOrderInputValues((prev) => {
-                                const nextRows = [...rows];
-                                const currentRow =
-                                  typeof nextRows[rowIndex] === "object" &&
-                                  nextRows[rowIndex]
-                                    ? {
-                                        ...(nextRows[rowIndex] as Record<
-                                          string,
-                                          unknown
-                                        >),
-                                      }
-                                    : {};
-                                currentRow[column.key] =
-                                  maxSelect === 1
-                                    ? (nextValues[0] ?? "")
-                                    : nextValues;
-                                nextRows[rowIndex] = currentRow;
-                                return { ...prev, [field.id]: nextRows };
-                              });
-                            };
                             return (
-                              <td key={column.key} className="px-3 py-2">
+                              <td
+                                key={column.key}
+                                className="px-3 py-2 align-top"
+                              >
                                 <Select
-                                  value="__none__"
-                                  disabled={!canEditOrderInputs || !canAddMore}
+                                  value={
+                                    isMultiSelect
+                                      ? "__none__"
+                                      : (currentValues[0] ?? "__none__")
+                                  }
+                                  disabled={
+                                    !canEditOrderInputs ||
+                                    (isMultiSelect && !canAddMore)
+                                  }
                                   onValueChange={(value) => {
-                                    if (value === "__none__") return;
-                                    handleAddValue(value);
+                                    if (value === "__none__") {
+                                      if (!isMultiSelect) {
+                                        updateRow(rowIndex, column.key, "");
+                                      }
+                                      return;
+                                    }
+                                    if (isMultiSelect) {
+                                      handleAddValue(value);
+                                      return;
+                                    }
+                                    updateRow(rowIndex, column.key, value);
                                   }}
                                 >
                                   <SelectTrigger className="h-9 w-full rounded-md">
                                     <SelectValue
                                       placeholder={
-                                        canAddMore ? "Select" : "Max selected"
+                                        isMultiSelect
+                                          ? canAddMore
+                                            ? "Select"
+                                            : "Max selected"
+                                          : "Select"
                                       }
                                     />
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem value="__none__">
-                                      {canAddMore ? "Select" : "Max selected"}
+                                      {isMultiSelect
+                                        ? canAddMore
+                                          ? "Select"
+                                          : "Max selected"
+                                        : "Select"}
                                     </SelectItem>
                                     {(column.options ?? []).map((option) => (
                                       <SelectItem key={option} value={option}>
@@ -2297,13 +2348,42 @@ export default function OrderDetailPage() {
                                     ))}
                                   </SelectContent>
                                 </Select>
-                                {currentValues.length > 0 && (
+                                {isMultiSelect && currentValues.length > 0 && (
                                   <div className="mt-2 flex flex-wrap gap-1">
                                     {currentValues.map((chip) => (
                                       <button
                                         key={chip}
                                         type="button"
-                                        onClick={() => handleRemoveValue(chip)}
+                                        onClick={() => {
+                                          const nextValues =
+                                            currentValues.filter(
+                                              (item) => item !== chip,
+                                            );
+                                          setOrderInputValues((prev) => {
+                                            const nextRows = [...rows];
+                                            const currentRow =
+                                              typeof nextRows[rowIndex] ===
+                                                "object" && nextRows[rowIndex]
+                                                ? {
+                                                    ...(nextRows[
+                                                      rowIndex
+                                                    ] as Record<
+                                                      string,
+                                                      unknown
+                                                    >),
+                                                  }
+                                                : {};
+                                            currentRow[column.key] =
+                                              maxSelect === 1
+                                                ? (nextValues[0] ?? "")
+                                                : nextValues;
+                                            nextRows[rowIndex] = currentRow;
+                                            return {
+                                              ...prev,
+                                              [field.id]: nextRows,
+                                            };
+                                          });
+                                        }}
                                         disabled={!canEditOrderInputs}
                                         className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
                                       >
@@ -2317,7 +2397,10 @@ export default function OrderDetailPage() {
                             );
                           }
                           return (
-                            <td key={column.key} className="px-3 py-2">
+                            <td
+                              key={column.key}
+                              className="px-3 py-2 align-top"
+                            >
                               <Input
                                 type={
                                   column.fieldType === "number"
@@ -2358,8 +2441,8 @@ export default function OrderDetailPage() {
                             </td>
                           );
                         })}
-                        <td className="px-3 py-2 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                        <td className="px-3 py-2 align-top text-right">
+                          <div className="flex items-start justify-end gap-2">
                             <Button
                               size="sm"
                               variant="outline"
@@ -2372,7 +2455,7 @@ export default function OrderDetailPage() {
                               }}
                               disabled={!canEditOrderInputs}
                             >
-                              Copy
+                              <CopyIcon className="h-4 w-4" />
                             </Button>
                             <Button
                               size="sm"
@@ -2380,7 +2463,7 @@ export default function OrderDetailPage() {
                               onClick={() => removeRow(rowIndex)}
                               disabled={!canEditOrderInputs}
                             >
-                              Remove
+                              <Trash2Icon className="h-4 w-4" />
                             </Button>
                             <Checkbox
                               variant="box"
@@ -3570,7 +3653,7 @@ export default function OrderDetailPage() {
                 <div className="flex items-center justify-between gap-3">
                   {!canEditOrderInputs && (
                     <span className="text-xs text-muted-foreground">
-                      Only Sales and Admin can edit these fields.
+                      Only Engineering and Admin can edit these fields.
                     </span>
                   )}
                   <Button
@@ -3600,7 +3683,7 @@ export default function OrderDetailPage() {
             >
               <Card className="lg:sticky lg:top-6">
                 <CardHeader>
-                  <CardTitle>Process</CardTitle>
+                  <CardTitle>Engineering process</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4 text-sm">
                   <div className="space-y-2 text-xs text-muted-foreground">
@@ -4004,7 +4087,7 @@ export default function OrderDetailPage() {
                           size="sm"
                           onClick={() => handleRemovePendingFile(index)}
                         >
-                          Remove
+                          <Trash2Icon className="h-4 w-4" />
                         </Button>
                       </div>
                     ))}
@@ -4035,13 +4118,13 @@ export default function OrderDetailPage() {
                             key={attachment.id}
                             className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
                           >
-                            <div className="flex items-center gap-3">
+                            <div className="flex min-w-0 items-center gap-3">
                               {renderAttachmentPreview(
                                 attachment,
                                 resolveAttachmentUrl(attachment),
                               )}
-                              <div>
-                                <div className="font-medium">
+                              <div className="min-w-0">
+                                <div className="break-all font-medium">
                                   {attachment.name}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
@@ -4074,7 +4157,7 @@ export default function OrderDetailPage() {
                                   handleRemoveAttachment(attachment.id)
                                 }
                               >
-                                Remove
+                                <Trash2Icon className="h-4 w-4" />
                               </Button>
                             </div>
                           </div>
@@ -4126,7 +4209,7 @@ export default function OrderDetailPage() {
                               size="sm"
                               onClick={() => handleRemoveComment(comment.id)}
                             >
-                              Remove
+                              <Trash2Icon className="h-4 w-4" />
                             </Button>
                           </div>
                         )}
@@ -4494,7 +4577,7 @@ export default function OrderDetailPage() {
                                   )
                                 }
                               >
-                                Remove
+                                <Trash2Icon className="h-4 w-4" />
                               </Button>
                             </div>
                           ))}
@@ -4710,7 +4793,7 @@ export default function OrderDetailPage() {
                                 size="sm"
                                 onClick={() => handleRemoveExternalJob(job.id)}
                               >
-                                Remove
+                                <Trash2Icon className="h-4 w-4" />
                               </Button>
                             </div>
                           </div>
@@ -4788,7 +4871,7 @@ export default function OrderDetailPage() {
                                         }))
                                       }
                                     >
-                                      Remove
+                                      <Trash2Icon className="h-4 w-4" />
                                     </Button>
                                   </div>
                                 ))}
@@ -4841,7 +4924,7 @@ export default function OrderDetailPage() {
                                           )
                                         }
                                       >
-                                        Remove
+                                        <Trash2Icon className="h-4 w-4" />
                                       </Button>
                                     </div>
                                   </div>
