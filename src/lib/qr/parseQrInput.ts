@@ -13,6 +13,11 @@ export function parseQrInput(rawValue: string): ParsedQrInput {
     return { ok: true, token: tokenFromUrl };
   }
 
+  const tokenFromText = tryParseTokenFromText(value);
+  if (tokenFromText) {
+    return { ok: true, token: tokenFromText };
+  }
+
   const compact = value.replace(/^\/+|\/+$/g, "");
   if (isLikelyToken(compact)) {
     return { ok: true, token: compact };
@@ -41,6 +46,43 @@ function tryParseTokenFromUrl(value: string) {
     return null;
   } catch {
     return null;
+  }
+}
+
+function tryParseTokenFromText(value: string) {
+  const cleaned = value.trim();
+  const tokenQueryMatch = cleaned.match(/[?&]token=([^&#\s]+)/i);
+  if (tokenQueryMatch?.[1]) {
+    const decoded = safeDecode(tokenQueryMatch[1]).replace(/^\/+|\/+$/g, "");
+    if (isLikelyToken(decoded)) {
+      return decoded;
+    }
+  }
+
+  const qrPathMatch = cleaned.match(/\/qr\/([^/?#\s]+)/i);
+  if (qrPathMatch?.[1]) {
+    const decoded = safeDecode(qrPathMatch[1]).replace(/^\/+|\/+$/g, "");
+    if (isLikelyToken(decoded)) {
+      return decoded;
+    }
+  }
+
+  const externalPathMatch = cleaned.match(/\/external-jobs\/respond\/([^/?#\s]+)/i);
+  if (externalPathMatch?.[1]) {
+    const decoded = safeDecode(externalPathMatch[1]).replace(/^\/+|\/+$/g, "");
+    if (isLikelyToken(decoded)) {
+      return decoded;
+    }
+  }
+
+  return null;
+}
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
   }
 }
 

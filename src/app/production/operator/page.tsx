@@ -1504,12 +1504,9 @@ export default function OperatorProductionPage() {
       return false;
     }
     setScannerError("");
-    if (
-      currentUser.role === "Production worker" &&
-      result.targetRoute.startsWith("/qr/")
-    ) {
+    if (result.targetRoute.startsWith("/qr/")) {
       const message =
-        "QR code is not linked to an order yet. Contact production manager.";
+        "QR code is not linked to an order in this queue.";
       setScannerError(message);
       if (sb && currentUser.tenantId) {
         await sb.from("qr_scan_events").insert({

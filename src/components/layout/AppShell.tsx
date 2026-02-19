@@ -188,6 +188,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (window.innerWidth >= 768 || isMobileDrawerOpen || isPullRefreshing) {
         return;
       }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[role="dialog"]')) {
+        return;
+      }
       if (window.scrollY > 0) {
         return;
       }
@@ -200,6 +204,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const handleTouchMove = (event: TouchEvent) => {
       const startY = pullStartYRef.current;
       if (startY == null || isPullRefreshing) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[role="dialog"]')) {
         return;
       }
       const touch = event.touches[0];
@@ -226,8 +234,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setIsPullRefreshing(true);
       router.refresh();
       window.setTimeout(() => {
-        window.location.reload();
-      }, 120);
+        setIsPullRefreshing(false);
+      }, 600);
     };
 
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
