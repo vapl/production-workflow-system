@@ -13,7 +13,9 @@ import {
 type QrScannerModalProps = {
   open: boolean;
   onClose: () => void;
-  onResolved: (result: ResolveScanTargetResult) => Promise<void> | void;
+  onResolved: (
+    result: ResolveScanTargetResult,
+  ) => Promise<boolean | void> | boolean | void;
   title?: string;
 };
 
@@ -57,7 +59,9 @@ export function QrScannerModal({
   const rafRef = useRef<number | null>(null);
   const detectorRef = useRef<DetectorLike | null>(null);
   const html5ScannerRef = useRef<Html5QrcodeLike | null>(null);
-  const scannerRegionIdRef = useRef(`qr-scanner-${Math.random().toString(36).slice(2, 10)}`);
+  const scannerRegionIdRef = useRef(
+    `qr-scanner-${Math.random().toString(36).slice(2, 10)}`,
+  );
   const resolvingRef = useRef(false);
   const keyboardBufferRef = useRef("");
   const keyboardLastTimeRef = useRef(0);
@@ -66,7 +70,6 @@ export function QrScannerModal({
   const [cameraError, setCameraError] = useState("");
   const [isResolving, setIsResolving] = useState(false);
   const [manualValue, setManualValue] = useState("");
-  const [isDesktop, setIsDesktop] = useState(false);
 
   const cameraSupport = useMemo(() => {
     if (typeof window === "undefined") {
@@ -147,8 +150,8 @@ export function QrScannerModal({
     setIsResolving(true);
     try {
       const result = await resolveScanTarget(rawValue);
-      await onResolved(result);
-      if (result.ok) {
+      const shouldClose = await onResolved(result);
+      if (result.ok && shouldClose !== false) {
         onClose();
       }
     } finally {
@@ -156,17 +159,6 @@ export function QrScannerModal({
       setIsResolving(false);
     }
   };
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const media = window.matchMedia("(min-width: 768px)");
-    const apply = () => setIsDesktop(media.matches);
-    apply();
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
-  }, []);
 
   useEffect(() => {
     if (!open || scanEngine === "unsupported") {
@@ -191,8 +183,9 @@ export function QrScannerModal({
       }
       video.srcObject = stream;
       await video.play();
-      const DetectorClass = (window as Window & { BarcodeDetector?: DetectorCtor })
-        .BarcodeDetector;
+      const DetectorClass = (
+        window as Window & { BarcodeDetector?: DetectorCtor }
+      ).BarcodeDetector;
       if (!DetectorClass) {
         throw new Error("BarcodeDetector unavailable");
       }
@@ -274,7 +267,7 @@ export function QrScannerModal({
       resetCapture();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, scanEngine, isDesktop]);
+  }, [open, scanEngine]);
 
   useEffect(() => {
     if (!open) {
@@ -291,7 +284,12 @@ export function QrScannerModal({
         }
         return;
       }
-      if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) {
+      if (
+        event.key.length !== 1 ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey
+      ) {
         return;
       }
       const target = event.target as HTMLElement | null;
@@ -299,7 +297,10 @@ export function QrScannerModal({
         return;
       }
       const now = Date.now();
-      if (keyboardLastTimeRef.current && now - keyboardLastTimeRef.current > 120) {
+      if (
+        keyboardLastTimeRef.current &&
+        now - keyboardLastTimeRef.current > 120
+      ) {
         keyboardBufferRef.current = "";
       }
       keyboardLastTimeRef.current = now;
@@ -386,41 +387,26 @@ export function QrScannerModal({
         USB scanner is supported. Scan and press Enter.
       </div>
       {isResolving ? (
-        <div className="text-xs text-muted-foreground">Resolving QR target...</div>
+        <div className="text-xs text-muted-foreground">
+          Resolving QR target...
+        </div>
       ) : null}
     </div>
   );
 
-  if (!isDesktop) {
-    return (
-      <BottomSheet
-        open={open}
-        onClose={onClose}
-        ariaLabel={title}
-        title={title}
-        closeButtonLabel="Close scanner"
-        panelClassName="max-h-[86dvh] pb-[calc(3.5rem+env(safe-area-inset-bottom))]"
-        keyboardAware
-      >
-        <div className="overflow-y-auto px-4 pb-4 pt-3">{content}</div>
-      </BottomSheet>
-    );
-  }
-
   return (
-    <div
-      className={`fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
-      aria-hidden={!open}
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      ariaLabel={title}
+      title={title}
+      closeButtonLabel="Close scanner"
+      panelClassName="max-h-[86dvh] md:inset-x-auto md:left-1/2 md:w-full md:max-w-xl md:-translate-x-1/2 md:rounded-2xl md:border md:border-border md:pb-6"
+      keyboardAware
+      showOnDesktop
+      enableSwipeToClose
     >
-      <div className="w-full max-w-xl rounded-2xl border border-border bg-card p-4 shadow-2xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-        {content}
-      </div>
-    </div>
+      <div className="overflow-y-auto px-4 pb-4 pt-3">{content}</div>
+    </BottomSheet>
   );
 }

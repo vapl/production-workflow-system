@@ -61,7 +61,7 @@ export async function resolveScanTarget(
 
   const orderId = data.order_id ?? null;
   const targetRoute = orderId
-    ? `/production/operator?order=${encodeURIComponent(orderId)}`
+    ? `/orders/${encodeURIComponent(orderId)}`
     : `/qr/${encodeURIComponent(data.token)}`;
 
   return {

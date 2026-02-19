@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -8,6 +9,8 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Input } from "@/components/ui/Input";
+import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
+import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { SelectField } from "@/components/ui/SelectField";
 import { TextAreaField } from "@/components/ui/TextAreaField";
 import {
@@ -18,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { QrScannerModal } from "@/components/qr/QrScannerModal";
-import { useCurrentUser } from "@/contexts/UserContext";
+import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { formatDate } from "@/lib/domain/formatters";
 import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
 import {
@@ -28,13 +31,20 @@ import {
 } from "@/lib/domain/workingCalendar";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import {
-  FilterIcon,
   FileIcon,
   FileTextIcon,
   ImageIcon,
+  LogOutIcon,
   QrCodeIcon,
+  SearchIcon,
+  SettingsIcon,
+  SlidersHorizontalIcon,
+  UserCircle2Icon,
   ChevronDownIcon,
   ChevronUpIcon,
+  Clock3Icon,
+  ActivityIcon,
+  XIcon,
 } from "lucide-react";
 
 type Priority = "low" | "normal" | "high" | "urgent";
@@ -248,6 +258,7 @@ function renderAttachmentIcon(
 
 export default function OperatorProductionPage() {
   const currentUser = useCurrentUser();
+  const { signOut } = useAuthActions();
   const today = new Date().toISOString().slice(0, 10);
   const router = useRouter();
   const pathname = usePathname();
@@ -267,8 +278,11 @@ export default function OperatorProductionPage() {
     searchParams.get("blocked") === "1",
   );
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
+  const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const cacheKey =
     currentUser.id && selectedDate
       ? `pws_operator_cache_${currentUser.id}_${selectedDate}`
@@ -306,6 +320,8 @@ export default function OperatorProductionPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [activityEvents, setActivityEvents] = useState<StatusEventRow[]>([]);
   const [activityError, setActivityError] = useState("");
+  const [todayWorkedMinutes, setTodayWorkedMinutes] = useState(0);
+  const [weekWorkedMinutes, setWeekWorkedMinutes] = useState(0);
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
     "Production manager",
     "Admin",
@@ -338,13 +354,26 @@ export default function OperatorProductionPage() {
 
   useEffect(() => {
     setSelectedDate(selectedDateParam);
-    const nextStatus = (searchParams.get("status") as QueueStatusFilter) || "all";
+    const nextStatus =
+      (searchParams.get("status") as QueueStatusFilter) || "all";
     setStatusFilter(nextStatus);
-    const nextPriority = (searchParams.get("priority") as "all" | Priority) || "all";
+    const nextPriority =
+      (searchParams.get("priority") as "all" | Priority) || "all";
     setPriorityFilter(nextPriority);
     setSearchQuery(searchParams.get("q") || "");
     setOnlyBlocked(searchParams.get("blocked") === "1");
   }, [searchParams, selectedDateParam]);
+
+  useEffect(() => {
+    const onScroll = () => {
+      setShowCompactMobileTitle(window.scrollY > 48);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, []);
 
   useEffect(() => {
     const sb = supabase;
@@ -587,7 +616,10 @@ export default function OperatorProductionPage() {
     let isMounted = true;
     const loadActivity = async () => {
       setActivityError("");
-      const from = `${today}T00:00:00.000Z`;
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - 6);
+      weekStart.setHours(0, 0, 0, 0);
+      const from = weekStart.toISOString();
       const { data, error } = await sb
         .from("production_status_events")
         .select(
@@ -607,7 +639,40 @@ export default function OperatorProductionPage() {
         }
         return;
       }
-      setActivityEvents((data ?? []) as StatusEventRow[]);
+      const events = (data ?? []) as StatusEventRow[];
+      setActivityEvents(events);
+      const doneItemIds = Array.from(
+        new Set(
+          events
+            .filter(
+              (row) =>
+                row.to_status === "done" &&
+                typeof row.production_item_id === "string",
+            )
+            .map((row) => row.production_item_id as string),
+        ),
+      );
+      if (doneItemIds.length === 0) {
+        setTodayWorkedMinutes(0);
+        setWeekWorkedMinutes(0);
+        return;
+      }
+      const { data: doneItems, error: doneItemsError } = await sb
+        .from("production_items")
+        .select("id, duration_minutes, done_at")
+        .in("id", doneItemIds);
+      if (!isMounted || doneItemsError || !doneItems) {
+        return;
+      }
+      const todayMinutes = doneItems
+        .filter((item) => item.done_at?.slice(0, 10) === today)
+        .reduce((sum, item) => sum + Number(item.duration_minutes ?? 0), 0);
+      const weeklyMinutes = doneItems.reduce(
+        (sum, item) => sum + Number(item.duration_minutes ?? 0),
+        0,
+      );
+      setTodayWorkedMinutes(todayMinutes);
+      setWeekWorkedMinutes(weeklyMinutes);
     };
     void loadActivity();
     return () => {
@@ -927,7 +992,10 @@ export default function OperatorProductionPage() {
         if (priorityFilter !== "all" && item.priority !== priorityFilter) {
           return false;
         }
-        if (onlyBlocked && !item.items.some((row) => row.status === "blocked")) {
+        if (
+          onlyBlocked &&
+          !item.items.some((row) => row.status === "blocked")
+        ) {
           return false;
         }
         if (!query) {
@@ -953,17 +1021,32 @@ export default function OperatorProductionPage() {
   ]);
 
   const activitySummary = useMemo(() => {
-    const started = activityEvents.filter((row) => row.to_status === "in_progress")
-      .length;
-    const done = activityEvents.filter((row) => row.to_status === "done").length;
-    const blocked = activityEvents.filter((row) => row.to_status === "blocked")
-      .length;
-    const minutes = productionItems.reduce(
-      (sum, row) => sum + Number(row.duration_minutes ?? 0),
-      0,
+    const todayEvents = activityEvents.filter(
+      (row) => row.created_at.slice(0, 10) === today,
     );
+    const started = todayEvents.filter(
+      (row) => row.to_status === "in_progress",
+    ).length;
+    const done = todayEvents.filter((row) => row.to_status === "done").length;
+    const blocked = todayEvents.filter(
+      (row) => row.to_status === "blocked",
+    ).length;
+    const minutes = todayWorkedMinutes;
     return { started, done, blocked, minutes };
-  }, [activityEvents, productionItems]);
+  }, [activityEvents, today, todayWorkedMinutes]);
+
+  const weeklySummary = useMemo(() => {
+    const started = activityEvents.filter(
+      (row) => row.to_status === "in_progress",
+    ).length;
+    const done = activityEvents.filter(
+      (row) => row.to_status === "done",
+    ).length;
+    const blocked = activityEvents.filter(
+      (row) => row.to_status === "blocked",
+    ).length;
+    return { started, done, blocked, minutes: weekWorkedMinutes };
+  }, [activityEvents, weekWorkedMinutes]);
 
   const filteredItemsCount = useMemo(
     () =>
@@ -1044,7 +1127,10 @@ export default function OperatorProductionPage() {
         )
         .maybeSingle();
       if (!eventInsertError && eventInsertData) {
-        setActivityEvents((prev) => [eventInsertData as StatusEventRow, ...prev]);
+        setActivityEvents((prev) => [
+          eventInsertData as StatusEventRow,
+          ...prev,
+        ]);
       }
     }
 
@@ -1372,7 +1458,7 @@ export default function OperatorProductionPage() {
           target_route: null,
         });
       }
-      return;
+      return false;
     }
     setScannerError("");
     if (sb && currentUser.tenantId) {
@@ -1387,52 +1473,151 @@ export default function OperatorProductionPage() {
       });
     }
     router.push(result.targetRoute);
+    return true;
   };
+
+  const userInitials = useMemo(() => {
+    return currentUser.name
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+  }, [currentUser.name]);
+
+  const userRoleLabel = currentUser.isOwner
+    ? `${currentUser.role} / Owner`
+    : currentUser.role;
 
   if (!currentUser.isAuthenticated) {
     return null;
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold">Station queue</h2>
-          <p className="text-sm text-muted-foreground">
-            All my stations - Planned {formatDate(selectedDate)}
-          </p>
-        </div>
-        <div className="text-sm text-muted-foreground">{currentUser.name}</div>
+  const headerSubtitle = `All my stations - Planned ${formatDate(selectedDate)}`;
+  const closeBlockedDialog = () => {
+    setBlockedRunId(null);
+    setBlockedItemId(null);
+  };
+  const blockedDialogContent = (
+    <div className="space-y-3 text-sm">
+      <SelectField
+        label="Reason template"
+        labelClassName="text-xs text-muted-foreground"
+        value={blockedReasonId || "__none__"}
+        onValueChange={(value) =>
+          setBlockedReasonId(value === "__none__" ? "" : value)
+        }
+      >
+        <Select
+          value={blockedReasonId || "__none__"}
+          onValueChange={(value) =>
+            setBlockedReasonId(value === "__none__" ? "" : value)
+          }
+        >
+          <SelectTrigger className="h-9 w-full">
+            <SelectValue placeholder="Select reason..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">Select reason...</SelectItem>
+            {stopReasons.map((reason) => (
+              <SelectItem key={reason.id} value={reason.id}>
+                {reason.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SelectField>
+      <TextAreaField
+        label="Manual note"
+        labelClassName="text-xs text-muted-foreground"
+        value={blockedReasonText}
+        onChange={(event) => setBlockedReasonText(event.target.value)}
+        placeholder="Type a custom reason..."
+        className="min-h-22.5"
+      />
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" type="button" onClick={closeBlockedDialog}>
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          onClick={handleConfirmBlocked}
+          disabled={
+            blockedItemId ? isActionLoading(blockedItemId, "blocked") : false
+          }
+          className="gap-2"
+        >
+          {blockedItemId && isActionLoading(blockedItemId, "blocked") ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+          ) : null}
+          Save
+        </Button>
       </div>
+    </div>
+  );
 
-      <div className="rounded-xl border border-border bg-card p-3 md:p-4">
-        <div className="flex flex-wrap items-center gap-2 md:hidden">
-          <Button
+  return (
+    <section className="relative pt-16 md:pt-0">
+      <MobilePageTitle
+        title="Station queue"
+        subtitle={headerSubtitle}
+        showCompact={showCompactMobileTitle}
+        className="pt-6 pb-6"
+        rightAction={
+          <button
             type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setIsFiltersOpen(true)}
-            className="h-9 gap-2"
+            onClick={() => setIsProfilePanelOpen(true)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+            aria-label="Open profile panel"
           >
-            <FilterIcon className="h-4 w-4" />
-            Filters
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setIsScannerOpen(true)}
-            className="h-9 gap-2"
-          >
-            <QrCodeIcon className="h-4 w-4" />
-            Scan QR
-          </Button>
-          <div className="ml-auto text-xs text-muted-foreground">
-            {formatDate(selectedDate)}
-          </div>
-        </div>
+            {currentUser.avatarUrl ? (
+              <img
+                src={currentUser.avatarUrl}
+                alt={currentUser.name}
+                className="h-9 w-9 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
+                {userInitials || "U"}
+              </div>
+            )}
+          </button>
+        }
+      />
 
-        <div className="mt-3 md:mt-0">
+      <DesktopPageHeader
+        sticky
+        title="Station queue"
+        subtitle={headerSubtitle}
+        actions={
+          <button
+            type="button"
+            onClick={() => setIsProfilePanelOpen(true)}
+            className="hidden items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-muted/40 md:inline-flex"
+          >
+            {currentUser.avatarUrl ? (
+              <img
+                src={currentUser.avatarUrl}
+                alt={currentUser.name}
+                className="h-7 w-7 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
+                {userInitials || "U"}
+              </div>
+            )}
+            <span className="max-w-56 truncate font-medium">
+              {currentUser.name} ({userRoleLabel})
+            </span>
+            <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
+          </button>
+        }
+        className="top-0!"
+      />
+
+      <div className="hidden rounded-xl border border-border bg-card p-3 md:block md:p-4">
+        <div>
           <Input
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
@@ -1448,7 +1633,7 @@ export default function OperatorProductionPage() {
           />
         </div>
 
-        <div className="mt-3 hidden grid-cols-1 gap-3 md:grid md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
           <DatePicker
             label="Date"
             value={selectedDate}
@@ -1549,12 +1734,14 @@ export default function OperatorProductionPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardContent className="flex items-center justify-between py-4">
             <div>
               <div className="text-xs text-muted-foreground">Started</div>
-              <div className="text-xl font-semibold">{activitySummary.started}</div>
+              <div className="text-xl font-semibold">
+                {activitySummary.started}
+              </div>
             </div>
             <Badge variant="status-in_engineering">Today</Badge>
           </CardContent>
@@ -1563,7 +1750,9 @@ export default function OperatorProductionPage() {
           <CardContent className="flex items-center justify-between py-4">
             <div>
               <div className="text-xs text-muted-foreground">Done</div>
-              <div className="text-xl font-semibold">{activitySummary.done}</div>
+              <div className="text-xl font-semibold">
+                {activitySummary.done}
+              </div>
             </div>
             <Badge variant="status-ready_for_production">Today</Badge>
           </CardContent>
@@ -1572,7 +1761,9 @@ export default function OperatorProductionPage() {
           <CardContent className="flex items-center justify-between py-4">
             <div>
               <div className="text-xs text-muted-foreground">Blocked</div>
-              <div className="text-xl font-semibold">{activitySummary.blocked}</div>
+              <div className="text-xl font-semibold">
+                {activitySummary.blocked}
+              </div>
             </div>
             <Badge variant="status-blocked">Today</Badge>
           </CardContent>
@@ -2128,6 +2319,60 @@ export default function OperatorProductionPage() {
       </div>
 
       <BottomSheet
+        open={isMobileSearchOpen}
+        onClose={() => setIsMobileSearchOpen(false)}
+        ariaLabel="Search station queue"
+        closeButtonLabel="Close search"
+        title="Search"
+        enableSwipeToClose
+        keyboardAware
+      >
+        <div className="px-4 pt-3">
+          <label className="ui-field">
+            <span className="sr-only">Search</span>
+            <Input
+              type="search"
+              icon="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  applyFiltersToUrl({ q: searchQuery });
+                  setIsMobileSearchOpen(false);
+                }
+              }}
+              placeholder="Search order, batch or customer..."
+              className="text-[16px] md:text-sm"
+              endAdornment={
+                searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    aria-label="Clear search"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </button>
+                ) : null
+              }
+            />
+          </label>
+          <div className="mt-3 pb-3">
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => {
+                applyFiltersToUrl({ q: searchQuery });
+                setIsMobileSearchOpen(false);
+              }}
+            >
+              Apply search
+            </Button>
+          </div>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
         open={isFiltersOpen}
         onClose={() => setIsFiltersOpen(false)}
         ariaLabel="Operator filters"
@@ -2233,90 +2478,255 @@ export default function OperatorProductionPage() {
         </div>
       ) : null}
 
+      <BottomSheet
+        open={isProfilePanelOpen}
+        onClose={() => setIsProfilePanelOpen(false)}
+        ariaLabel="Operator profile"
+        closeButtonLabel="Close profile"
+        title="My profile"
+        enableSwipeToClose
+        keyboardAware
+      >
+        <div className="space-y-4 px-4 pb-4 pt-3">
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
+            {currentUser.avatarUrl ? (
+              <img
+                src={currentUser.avatarUrl}
+                alt={currentUser.name}
+                className="h-12 w-12 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
+                {userInitials || "U"}
+              </div>
+            )}
+            <div className="min-w-0">
+              <div className="truncate font-semibold">{currentUser.name}</div>
+              <div className="text-sm text-muted-foreground">
+                {userRoleLabel}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-border px-3 py-2">
+              <div className="text-[11px] text-muted-foreground">
+                Today done
+              </div>
+              <div className="text-lg font-semibold">
+                {activitySummary.done}
+              </div>
+            </div>
+            <div className="rounded-lg border border-border px-3 py-2">
+              <div className="text-[11px] text-muted-foreground">
+                Today time
+              </div>
+              <div className="text-lg font-semibold">
+                {formatDuration(activitySummary.minutes)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-border px-3 py-2">
+              <div className="text-[11px] text-muted-foreground">7d done</div>
+              <div className="text-lg font-semibold">{weeklySummary.done}</div>
+            </div>
+            <div className="rounded-lg border border-border px-3 py-2">
+              <div className="text-[11px] text-muted-foreground">7d time</div>
+              <div className="text-lg font-semibold">
+                {formatDuration(weeklySummary.minutes)}
+              </div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Link
+              href="/profile"
+              onClick={() => setIsProfilePanelOpen(false)}
+              className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
+            >
+              <UserCircle2Icon className="h-4 w-4" />
+              Open profile
+            </Link>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
+              onClick={() => {
+                setIsProfilePanelOpen(false);
+                void signOut();
+              }}
+            >
+              <LogOutIcon className="h-4 w-4" />
+              Sign out
+            </button>
+          </div>
+        </div>
+      </BottomSheet>
+
+      <div
+        className={`fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex ${isProfilePanelOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        aria-hidden={!isProfilePanelOpen}
+      >
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">My profile</h3>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsProfilePanelOpen(false)}
+            >
+              Close
+            </Button>
+          </div>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
+              {currentUser.avatarUrl ? (
+                <img
+                  src={currentUser.avatarUrl}
+                  alt={currentUser.name}
+                  className="h-12 w-12 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
+                  {userInitials || "U"}
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="truncate font-semibold">{currentUser.name}</div>
+                <div className="text-sm text-muted-foreground">
+                  {userRoleLabel}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">
+                  <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
+                  Today done
+                </div>
+                <div className="text-lg font-semibold">
+                  {activitySummary.done}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">
+                  <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
+                  Today time
+                </div>
+                <div className="text-lg font-semibold">
+                  {formatDuration(activitySummary.minutes)}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">
+                  <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
+                  7d done
+                </div>
+                <div className="text-lg font-semibold">
+                  {weeklySummary.done}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">
+                  <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
+                  7d time
+                </div>
+                <div className="text-lg font-semibold">
+                  {formatDuration(weeklySummary.minutes)}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Link href="/profile" className="flex-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={() => setIsProfilePanelOpen(false)}
+                >
+                  <SettingsIcon className="h-4 w-4" />
+                  Open profile
+                </Button>
+              </Link>
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2"
+                onClick={() => {
+                  setIsProfilePanelOpen(false);
+                  void signOut();
+                }}
+              >
+                <LogOutIcon className="h-4 w-4" />
+                Sign out
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 md:hidden">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-12 w-12 rounded-full bg-card shadow-lg"
+              onClick={() => setIsFiltersOpen(true)}
+              aria-label="Open filters"
+            >
+              <SlidersHorizontalIcon className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-12 w-12 rounded-full bg-card shadow-lg"
+              onClick={() => setIsMobileSearchOpen(true)}
+              aria-label="Open search"
+            >
+              <SearchIcon className="h-5 w-5" />
+            </Button>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-12 w-12 rounded-full bg-card shadow-lg"
+            onClick={() => setIsScannerOpen(true)}
+            aria-label="Scan QR"
+          >
+            <QrCodeIcon className="h-5 w-5" />
+          </Button>
+        </div>
+      </div>
+
+      <BottomSheet
+        open={Boolean(blockedRunId)}
+        onClose={closeBlockedDialog}
+        ariaLabel="Mark as blocked"
+        closeButtonLabel="Close blocked dialog"
+        title="Mark as blocked"
+        keyboardAware
+      >
+        <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3 md:hidden">
+          {blockedDialogContent}
+        </div>
+      </BottomSheet>
+
       {blockedRunId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 px-4 md:flex">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">Mark as blocked</h3>
               <button
                 type="button"
                 className="text-sm text-muted-foreground"
-                onClick={() => {
-                  setBlockedRunId(null);
-                  setBlockedItemId(null);
-                }}
+                onClick={closeBlockedDialog}
               >
                 Close
               </button>
             </div>
-            <div className="mt-4 space-y-3 text-sm">
-              <SelectField
-                label="Reason template"
-                labelClassName="text-xs text-muted-foreground"
-                value={blockedReasonId || "__none__"}
-                onValueChange={(value) =>
-                  setBlockedReasonId(value === "__none__" ? "" : value)
-                }
-              >
-                <Select
-                  value={blockedReasonId || "__none__"}
-                  onValueChange={(value) =>
-                    setBlockedReasonId(value === "__none__" ? "" : value)
-                  }
-                >
-                  <SelectTrigger className="h-9 w-full">
-                    <SelectValue placeholder="Select reason..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Select reason...</SelectItem>
-                    {stopReasons.map((reason) => (
-                      <SelectItem key={reason.id} value={reason.id}>
-                        {reason.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </SelectField>
-              <TextAreaField
-                label="Manual note"
-                labelClassName="text-xs text-muted-foreground"
-                value={blockedReasonText}
-                onChange={(event) => setBlockedReasonText(event.target.value)}
-                placeholder="Type a custom reason..."
-                className="min-h-22.5"
-              />
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  type="button"
-                  onClick={() => {
-                    setBlockedRunId(null);
-                    setBlockedItemId(null);
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleConfirmBlocked}
-                  disabled={
-                    blockedItemId
-                      ? isActionLoading(blockedItemId, "blocked")
-                      : false
-                  }
-                  className="gap-2"
-                >
-                  {blockedItemId &&
-                  isActionLoading(blockedItemId, "blocked") ? (
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                  ) : null}
-                  Save
-                </Button>
-              </div>
-            </div>
+            <div className="mt-4">{blockedDialogContent}</div>
           </div>
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }

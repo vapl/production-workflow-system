@@ -23,6 +23,7 @@ type BottomSheetProps = {
   showCloseButton?: boolean;
   enableSwipeToClose?: boolean;
   keyboardAware?: boolean;
+  showOnDesktop?: boolean;
 };
 
 export function BottomSheet({
@@ -39,6 +40,7 @@ export function BottomSheet({
   showCloseButton = true,
   enableSwipeToClose = false,
   keyboardAware = false,
+  showOnDesktop = false,
 }: BottomSheetProps) {
   const panelRef = useRef<HTMLElement | null>(null);
   const pointerIdRef = useRef<number | null>(null);
@@ -201,7 +203,8 @@ export function BottomSheet({
         type="button"
         aria-label={closeButtonLabel}
         className={cn(
-          "fixed inset-0 z-40 h-dvh w-screen appearance-none border-0 bg-black/45 p-0 outline-none backdrop-blur-[1.5px] transition-[opacity,backdrop-filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] md:hidden",
+          "fixed inset-0 z-40 h-dvh w-screen appearance-none border-0 bg-black/45 p-0 outline-none backdrop-blur-[1.5px] transition-[opacity,backdrop-filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          showOnDesktop ? "" : "md:hidden",
           open
             ? "pointer-events-auto opacity-100"
             : "pointer-events-none opacity-0",
@@ -218,7 +221,8 @@ export function BottomSheet({
         aria-label={ariaLabel}
         aria-hidden={!open}
         className={cn(
-          "fixed flex max-h-[78dvh] flex-col inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-card pb-[calc(4rem+env(safe-area-inset-bottom))] shadow-2xl will-change-transform transition-[transform,opacity] duration-350 ease-[cubic-bezier(0.22,1,0.36,1)] md:hidden",
+          "fixed flex max-h-[78dvh] flex-col inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-card pb-[calc(4rem+env(safe-area-inset-bottom))] shadow-2xl will-change-transform transition-[transform,opacity] duration-350 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          showOnDesktop ? "" : "md:hidden",
           open
             ? "translate-y-0 opacity-100 pointer-events-auto"
             : "translate-y-[105%] opacity-0 pointer-events-none",

@@ -1085,7 +1085,11 @@ export default function OrdersPage() {
           {viewMode === "cards" ? (
             <OrdersCards
               orders={visibleOrders}
-              groups={groupByContract && canGroupByContract ? groupedOrders : undefined}
+              groups={
+                groupByContract && canGroupByContract
+                  ? groupedOrders
+                  : undefined
+              }
               dueSoonDays={rules.dueSoonDays}
               dueIndicatorEnabled={rules.dueIndicatorEnabled}
               dueIndicatorStatuses={rules.dueIndicatorStatuses}
@@ -1111,7 +1115,11 @@ export default function OrdersPage() {
           ) : (
             <OrdersTable
               orders={visibleOrders}
-              groups={groupByContract && canGroupByContract ? groupedOrders : undefined}
+              groups={
+                groupByContract && canGroupByContract
+                  ? groupedOrders
+                  : undefined
+              }
               dueSoonDays={rules.dueSoonDays}
               dueIndicatorEnabled={rules.dueIndicatorEnabled}
               dueIndicatorStatuses={rules.dueIndicatorStatuses}
