@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
@@ -328,6 +328,7 @@ export default function OperatorProductionPage() {
     "Admin",
     "Owner",
   ]);
+  const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
@@ -375,6 +376,33 @@ export default function OperatorProductionPage() {
       window.removeEventListener("scroll", onScroll);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isMobileSearchOpen) {
+      return;
+    }
+    const tryFocus = () => {
+      const input = mobileSearchInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus({ preventScroll: true });
+      input.select();
+    };
+    const frame1 = window.requestAnimationFrame(() => {
+      tryFocus();
+      window.requestAnimationFrame(() => {
+        tryFocus();
+      });
+    });
+    const timer = window.setTimeout(() => {
+      tryFocus();
+    }, 180);
+    return () => {
+      window.cancelAnimationFrame(frame1);
+      window.clearTimeout(timer);
+    };
+  }, [isMobileSearchOpen]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1444,6 +1472,20 @@ export default function OperatorProductionPage() {
     });
   };
 
+  const openMobileSearch = () => {
+    setIsMobileSearchOpen(true);
+    window.requestAnimationFrame(() => {
+      mobileSearchInputRef.current?.focus({ preventScroll: true });
+      mobileSearchInputRef.current?.select();
+    });
+  };
+
+  const closeMobileSearch = () => {
+    setIsMobileSearchOpen(false);
+    const active = document.activeElement as HTMLElement | null;
+    active?.blur();
+  };
+
   const handleScannerResolved = async (result: ResolveScanTargetResult) => {
     const sb = supabase;
     if (!result.ok) {
@@ -2339,59 +2381,46 @@ export default function OperatorProductionPage() {
         })}
       </div>
 
-      <BottomSheet
-        open={isMobileSearchOpen}
-        onClose={() => setIsMobileSearchOpen(false)}
-        ariaLabel="Search station queue"
-        closeButtonLabel="Close search"
-        title="Search"
-        enableSwipeToClose
-        keyboardAware
-      >
-        <div className="px-4 pt-3">
-          <label className="ui-field">
-            <span className="sr-only">Search</span>
-            <Input
-              type="search"
-              icon="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  applyFiltersToUrl({ q: searchQuery });
-                  setIsMobileSearchOpen(false);
-                }
-              }}
-              placeholder="Search order, batch or customer..."
-              className="text-[16px] md:text-sm"
-              endAdornment={
-                searchQuery ? (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery("")}
-                    aria-label="Clear search"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
-                  >
-                    <XIcon className="h-4 w-4" />
-                  </button>
-                ) : null
-              }
-            />
-          </label>
-          <div className="mt-3 pb-3">
-            <Button
-              type="button"
-              className="w-full"
-              onClick={() => {
-                applyFiltersToUrl({ q: searchQuery });
-                setIsMobileSearchOpen(false);
-              }}
-            >
-              Apply search
-            </Button>
+      {isMobileSearchOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/45 backdrop-blur-[1.5px] md:hidden">
+          <div className="w-full px-4 pb-[calc(env(safe-area-inset-bottom)-2px)]">
+            <div className="flex items-center gap-2">
+              <Input
+                ref={mobileSearchInputRef}
+                type="search"
+                autoFocus
+                icon="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    applyFiltersToUrl({ q: searchQuery });
+                    closeMobileSearch();
+                  }
+                }}
+                placeholder="Search"
+                enterKeyHint="search"
+                className="h-12 text-[16px]"
+                wrapperClassName="rounded-full border-border bg-background shadow-lg"
+              />
+              <button
+                type="button"
+                onClick={closeMobileSearch}
+                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg"
+                aria-label="Close search"
+              >
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
           </div>
+          <button
+            type="button"
+            className="fixed inset-0 -z-10 h-full w-full"
+            aria-label="Close search overlay"
+            onClick={closeMobileSearch}
+          />
         </div>
-      </BottomSheet>
+      ) : null}
 
       <BottomSheet
         open={isFiltersOpen}
@@ -2708,7 +2737,7 @@ export default function OperatorProductionPage() {
               variant="outline"
               size="icon"
               className="h-12 w-12 rounded-full bg-card shadow-lg"
-              onClick={() => setIsMobileSearchOpen(true)}
+              onClick={openMobileSearch}
               aria-label="Open search"
             >
               <SearchIcon className="h-5 w-5" />
