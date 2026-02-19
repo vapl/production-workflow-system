@@ -310,7 +310,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function ensureProfileSetup(
-    sessionUser: { id: string; email?: string | null },
+    sessionUser: {
+      id: string;
+      email?: string | null;
+      user_metadata?: Record<string, unknown> | null;
+    },
     profile: {
       role: UserRole;
       isAdmin: boolean;
@@ -460,6 +464,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setUser(fallbackUser);
       return;
     }
+    const sb = supabase;
 
     let isMounted = true;
 
@@ -478,7 +483,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     async function hydrate() {
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await sb.auth.getSession();
         const sessionUser = data.session?.user;
         if (!isMounted) {
           return;
@@ -587,7 +592,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     hydrate();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
+    const { data: authListener } = sb.auth.onAuthStateChange(
       async (_event, session) => {
         try {
         const sessionUser = session?.user;
@@ -692,10 +697,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       signOut: async () => {
-        if (!supabase) {
+        const sb = supabase;
+        if (!sb) {
           return;
         }
-        await supabase.auth.signOut();
+        await sb.auth.signOut();
       },
     }),
     [user],

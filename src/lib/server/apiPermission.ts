@@ -5,7 +5,7 @@ import {
 } from "@/lib/server/rbac";
 import type { PermissionKey } from "@/lib/auth/permissions";
 
-type AdminClient = {
+export type PermissionAdminClient = {
   auth: {
     getUser: (jwt: string) => Promise<{
       data: {
@@ -66,7 +66,7 @@ export function getBearerToken(request: Request) {
 
 export async function requirePermissionForRequest(
   request: Request,
-  admin: AdminClient,
+  admin: PermissionAdminClient,
   permission: PermissionKey,
 ) {
   const bearer = getBearerToken(request);

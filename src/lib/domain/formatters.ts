@@ -2,6 +2,10 @@ import type { OrderStatus } from "@/types/orders";
 import type { BatchStatus } from "@/types/batch";
 import type { ActivityStatus } from "@/types/activity";
 
+function assertNever(value: never): never {
+  throw new Error(`Unexpected value: ${String(value)}`);
+}
+
 const defaultDateFormatter = new Intl.DateTimeFormat("lv-LV", {
   day: "2-digit",
   month: "2-digit",
@@ -53,7 +57,7 @@ export function formatOrderStatus(status: OrderStatus): string {
     case "done":
       return "Done";
     default:
-      return status.replace(/_/g, " ");
+      return assertNever(status);
   }
 }
 
@@ -62,5 +66,5 @@ export function formatBatchStatus(status: BatchStatus): string {
 }
 
 export function formatActivityStatus(status: ActivityStatus): string {
-  return status.replace("_", " ");
+  return (status as string).replace(/_/g, " ");
 }

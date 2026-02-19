@@ -304,7 +304,7 @@ export default function ExternalJobsReceivePage() {
           isRequired: row.is_required ?? false,
           aiMatchOnly: row.ai_match_only ?? false,
           aiAliases: (row.ai_aliases ?? []).filter(
-            (alias): alias is string => typeof alias === "string",
+            (alias: unknown): alias is string => typeof alias === "string",
           ),
         })),
       );

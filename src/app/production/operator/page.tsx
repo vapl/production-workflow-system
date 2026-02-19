@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { DatePicker } from "@/components/ui/DatePicker";
+import { Input } from "@/components/ui/Input";
 import { SelectField } from "@/components/ui/SelectField";
 import { TextAreaField } from "@/components/ui/TextAreaField";
 import {
@@ -14,8 +17,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
+import { QrScannerModal } from "@/components/qr/QrScannerModal";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { formatDate } from "@/lib/domain/formatters";
+import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
 import {
   computeWorkingMinutes,
   parseWorkingCalendar,
@@ -23,9 +28,11 @@ import {
 } from "@/lib/domain/workingCalendar";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import {
+  FilterIcon,
   FileIcon,
   FileTextIcon,
   ImageIcon,
+  QrCodeIcon,
   ChevronDownIcon,
   ChevronUpIcon,
 } from "lucide-react";
@@ -112,6 +119,19 @@ type QueueItem = {
 type PendingAction = {
   itemId: string;
   action: "in_progress" | "done" | "blocked";
+};
+
+type QueueStatusFilter = "all" | BatchRunRow["status"];
+
+type StatusEventRow = {
+  id: string;
+  production_item_id: string | null;
+  order_id: string | null;
+  batch_run_id: string | null;
+  from_status: string | null;
+  to_status: string | null;
+  reason: string | null;
+  created_at: string;
 };
 
 function priorityBadge(priority: Priority) {
@@ -229,9 +249,30 @@ function renderAttachmentIcon(
 export default function OperatorProductionPage() {
   const currentUser = useCurrentUser();
   const today = new Date().toISOString().slice(0, 10);
-  const cacheKey = currentUser.id ? `pws_operator_cache_${currentUser.id}` : "";
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  const selectedDateParam = searchParams.get("date") || today;
   const stationFilter = searchParams.get("station");
+  const orderFilter = searchParams.get("order");
+  const [selectedDate, setSelectedDate] = useState(selectedDateParam);
+  const [statusFilter, setStatusFilter] = useState<QueueStatusFilter>(
+    (searchParams.get("status") as QueueStatusFilter) || "all",
+  );
+  const [priorityFilter, setPriorityFilter] = useState<"all" | Priority>(
+    (searchParams.get("priority") as "all" | Priority) || "all",
+  );
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
+  const [onlyBlocked, setOnlyBlocked] = useState(
+    searchParams.get("blocked") === "1",
+  );
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerError, setScannerError] = useState("");
+  const cacheKey =
+    currentUser.id && selectedDate
+      ? `pws_operator_cache_${currentUser.id}_${selectedDate}`
+      : "";
   const [stations, setStations] = useState<Station[]>([]);
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
   const [stationDependencies, setStationDependencies] = useState<
@@ -263,6 +304,8 @@ export default function OperatorProductionPage() {
   );
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [activityEvents, setActivityEvents] = useState<StatusEventRow[]>([]);
+  const [activityError, setActivityError] = useState("");
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
     "Production manager",
     "Admin",
@@ -272,6 +315,36 @@ export default function OperatorProductionPage() {
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
     : "";
+
+  const setQueryParams = (
+    updates: Record<string, string | null | undefined>,
+    replace = true,
+  ) => {
+    const next = new URLSearchParams(searchParams.toString());
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value == null || value === "") {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+    });
+    const url = next.toString() ? `${pathname}?${next.toString()}` : pathname;
+    if (replace) {
+      router.replace(url, { scroll: false });
+      return;
+    }
+    router.push(url, { scroll: false });
+  };
+
+  useEffect(() => {
+    setSelectedDate(selectedDateParam);
+    const nextStatus = (searchParams.get("status") as QueueStatusFilter) || "all";
+    setStatusFilter(nextStatus);
+    const nextPriority = (searchParams.get("priority") as "all" | Priority) || "all";
+    setPriorityFilter(nextPriority);
+    setSearchQuery(searchParams.get("q") || "");
+    setOnlyBlocked(searchParams.get("blocked") === "1");
+  }, [searchParams, selectedDateParam]);
 
   useEffect(() => {
     const sb = supabase;
@@ -293,11 +366,13 @@ export default function OperatorProductionPage() {
             productionItems: ProductionItemRow[];
             attachments: OrderAttachmentRow[];
             tenantId?: string | null;
+            date?: string;
           };
           if (
             cached &&
             Date.now() - cached.cachedAt < 15000 &&
-            cached.tenantId === currentUser.tenantId
+            cached.tenantId === currentUser.tenantId &&
+            cached.date === selectedDate
           ) {
             setStations(cached.stations ?? []);
             setBatchRuns(cached.batchRuns ?? []);
@@ -360,7 +435,7 @@ export default function OperatorProductionPage() {
             "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
           )
           .in("station_id", stationIds)
-          .eq("planned_date", today)
+          .eq("planned_date", selectedDate)
           .order("created_at", { ascending: false }),
         sb
           .from("station_dependencies")
@@ -458,6 +533,7 @@ export default function OperatorProductionPage() {
               productionItems: allItems,
               attachments: attachmentsResult.data ?? [],
               tenantId: currentUser.tenantId ?? null,
+              date: selectedDate,
             }),
           );
         } catch {
@@ -469,7 +545,7 @@ export default function OperatorProductionPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentUser.id, currentUser.tenantId, cacheKey]);
+  }, [currentUser.id, currentUser.tenantId, cacheKey, selectedDate]);
 
   useEffect(() => {
     const sb = supabase;
@@ -502,6 +578,42 @@ export default function OperatorProductionPage() {
       isMounted = false;
     };
   }, [currentUser.tenantId]);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb || !currentUser.id) {
+      return;
+    }
+    let isMounted = true;
+    const loadActivity = async () => {
+      setActivityError("");
+      const from = `${today}T00:00:00.000Z`;
+      const { data, error } = await sb
+        .from("production_status_events")
+        .select(
+          "id, production_item_id, order_id, batch_run_id, from_status, to_status, reason, created_at",
+        )
+        .eq("actor_user_id", currentUser.id)
+        .gte("created_at", from)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setActivityEvents([]);
+        if (error.code !== "42P01") {
+          setActivityError("Failed to load activity history.");
+        }
+        return;
+      }
+      setActivityEvents((data ?? []) as StatusEventRow[]);
+    };
+    void loadActivity();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.id, today]);
 
   useEffect(() => {
     const sb = supabase;
@@ -800,6 +912,68 @@ export default function OperatorProductionPage() {
     return map;
   }, [batchRuns, productionItems, visibleStations, attachmentsByOrder]);
 
+  const filteredQueueByStation = useMemo(() => {
+    const map = new Map<string, QueueItem[]>();
+    const query = searchQuery.trim().toLowerCase();
+    visibleStations.forEach((station) => {
+      const list = queueByStation.get(station.id) ?? [];
+      const filtered = list.filter((item) => {
+        if (orderFilter && item.orderId !== orderFilter) {
+          return false;
+        }
+        if (statusFilter !== "all" && item.status !== statusFilter) {
+          return false;
+        }
+        if (priorityFilter !== "all" && item.priority !== priorityFilter) {
+          return false;
+        }
+        if (onlyBlocked && !item.items.some((row) => row.status === "blocked")) {
+          return false;
+        }
+        if (!query) {
+          return true;
+        }
+        return (
+          item.orderNumber.toLowerCase().includes(query) ||
+          item.batchCode.toLowerCase().includes(query) ||
+          item.customerName.toLowerCase().includes(query)
+        );
+      });
+      map.set(station.id, filtered);
+    });
+    return map;
+  }, [
+    queueByStation,
+    visibleStations,
+    searchQuery,
+    statusFilter,
+    priorityFilter,
+    onlyBlocked,
+    orderFilter,
+  ]);
+
+  const activitySummary = useMemo(() => {
+    const started = activityEvents.filter((row) => row.to_status === "in_progress")
+      .length;
+    const done = activityEvents.filter((row) => row.to_status === "done").length;
+    const blocked = activityEvents.filter((row) => row.to_status === "blocked")
+      .length;
+    const minutes = productionItems.reduce(
+      (sum, row) => sum + Number(row.duration_minutes ?? 0),
+      0,
+    );
+    return { started, done, blocked, minutes };
+  }, [activityEvents, productionItems]);
+
+  const filteredItemsCount = useMemo(
+    () =>
+      Array.from(filteredQueueByStation.values()).reduce(
+        (sum, list) => sum + list.length,
+        0,
+      ),
+    [filteredQueueByStation],
+  );
+
   const updateItemStatus = async (
     itemId: string,
     runId: string,
@@ -848,6 +1022,30 @@ export default function OperatorProductionPage() {
     if (error) {
       setDataError("Failed to update item status.");
       return;
+    }
+
+    if (currentUser.tenantId) {
+      const eventPayload = {
+        tenant_id: currentUser.tenantId,
+        order_id: run.order_id,
+        batch_run_id: run.id,
+        production_item_id: targetItem.id,
+        from_status: targetItem.status,
+        to_status: status,
+        reason: extra?.blockedReason ?? null,
+        reason_id: extra?.blockedReasonId ?? null,
+        actor_user_id: currentUser.id,
+      };
+      const { data: eventInsertData, error: eventInsertError } = await sb
+        .from("production_status_events")
+        .insert(eventPayload)
+        .select(
+          "id, production_item_id, order_id, batch_run_id, from_status, to_status, reason, created_at",
+        )
+        .maybeSingle();
+      if (!eventInsertError && eventInsertData) {
+        setActivityEvents((prev) => [eventInsertData as StatusEventRow, ...prev]);
+      }
     }
 
     if (status === "blocked" && currentUser.tenantId) {
@@ -1101,6 +1299,8 @@ export default function OperatorProductionPage() {
     updates.forEach((update) => {
       updateItemStatus(update.itemId, update.runId, update.status);
     });
+    // `updateItemStatus` intentionally omitted to avoid recreating this side-effect loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     supabase,
     productionItems,
@@ -1134,6 +1334,61 @@ export default function OperatorProductionPage() {
     setBlockedReasonText("");
   };
 
+  const applyFiltersToUrl = (next?: {
+    date?: string;
+    status?: QueueStatusFilter;
+    priority?: "all" | Priority;
+    q?: string;
+    blocked?: boolean;
+  }) => {
+    const dateValue = next?.date ?? selectedDate;
+    const statusValue = next?.status ?? statusFilter;
+    const priorityValue = next?.priority ?? priorityFilter;
+    const queryValue = (next?.q ?? searchQuery).trim();
+    const blockedValue = next?.blocked ?? onlyBlocked;
+    setQueryParams({
+      date: dateValue || today,
+      status: statusValue === "all" ? null : statusValue,
+      priority: priorityValue === "all" ? null : priorityValue,
+      q: queryValue || null,
+      blocked: blockedValue ? "1" : null,
+      order: orderFilter ?? null,
+      station: stationFilter ?? null,
+    });
+  };
+
+  const handleScannerResolved = async (result: ResolveScanTargetResult) => {
+    const sb = supabase;
+    if (!result.ok) {
+      setScannerError(result.error);
+      if (sb && currentUser.tenantId) {
+        await sb.from("qr_scan_events").insert({
+          tenant_id: currentUser.tenantId,
+          user_id: currentUser.id,
+          raw_value: result.rawValue,
+          token: result.token ?? null,
+          result: "error",
+          message: result.error,
+          target_route: null,
+        });
+      }
+      return;
+    }
+    setScannerError("");
+    if (sb && currentUser.tenantId) {
+      await sb.from("qr_scan_events").insert({
+        tenant_id: currentUser.tenantId,
+        user_id: currentUser.id,
+        raw_value: result.rawValue,
+        token: result.token,
+        result: "success",
+        message: null,
+        target_route: result.targetRoute,
+      });
+    }
+    router.push(result.targetRoute);
+  };
+
   if (!currentUser.isAuthenticated) {
     return null;
   }
@@ -1144,10 +1399,195 @@ export default function OperatorProductionPage() {
         <div>
           <h2 className="text-2xl font-semibold">Station queue</h2>
           <p className="text-sm text-muted-foreground">
-            All my stations - Planned {formatDate(today)}
+            All my stations - Planned {formatDate(selectedDate)}
           </p>
         </div>
         <div className="text-sm text-muted-foreground">{currentUser.name}</div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-3 md:p-4">
+        <div className="flex flex-wrap items-center gap-2 md:hidden">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIsFiltersOpen(true)}
+            className="h-9 gap-2"
+          >
+            <FilterIcon className="h-4 w-4" />
+            Filters
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIsScannerOpen(true)}
+            className="h-9 gap-2"
+          >
+            <QrCodeIcon className="h-4 w-4" />
+            Scan QR
+          </Button>
+          <div className="ml-auto text-xs text-muted-foreground">
+            {formatDate(selectedDate)}
+          </div>
+        </div>
+
+        <div className="mt-3 md:mt-0">
+          <Input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onBlur={() => applyFiltersToUrl({ q: searchQuery })}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                applyFiltersToUrl({ q: searchQuery });
+              }
+            }}
+            placeholder="Search order, batch or customer"
+            icon="search"
+            className="h-10"
+          />
+        </div>
+
+        <div className="mt-3 hidden grid-cols-1 gap-3 md:grid md:grid-cols-2 xl:grid-cols-5">
+          <DatePicker
+            label="Date"
+            value={selectedDate}
+            onChange={(value) => applyFiltersToUrl({ date: value || today })}
+          />
+
+          <SelectField
+            label="Status"
+            value={statusFilter}
+            onValueChange={(value) =>
+              applyFiltersToUrl({ status: value as QueueStatusFilter })
+            }
+          >
+            <Select
+              value={statusFilter}
+              onValueChange={(value) =>
+                applyFiltersToUrl({ status: value as QueueStatusFilter })
+              }
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="queued">Queued</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="in_progress">In progress</SelectItem>
+                <SelectItem value="blocked">Blocked</SelectItem>
+                <SelectItem value="done">Done</SelectItem>
+              </SelectContent>
+            </Select>
+          </SelectField>
+
+          <SelectField
+            label="Priority"
+            value={priorityFilter}
+            onValueChange={(value) =>
+              applyFiltersToUrl({ priority: value as "all" | Priority })
+            }
+          >
+            <Select
+              value={priorityFilter}
+              onValueChange={(value) =>
+                applyFiltersToUrl({ priority: value as "all" | Priority })
+              }
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="All priorities" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All priorities</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+              </SelectContent>
+            </Select>
+          </SelectField>
+
+          <div className="flex items-end gap-2">
+            <Button
+              type="button"
+              variant={onlyBlocked ? "secondary" : "outline"}
+              className="h-10 flex-1"
+              onClick={() => applyFiltersToUrl({ blocked: !onlyBlocked })}
+            >
+              {onlyBlocked ? "Blocked only: on" : "Blocked only"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 gap-2"
+              onClick={() => setIsScannerOpen(true)}
+            >
+              <QrCodeIcon className="h-4 w-4" />
+              Scan
+            </Button>
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-10 self-end"
+            onClick={() =>
+              setQueryParams({
+                date: today,
+                station: stationFilter ?? null,
+                order: null,
+                status: null,
+                priority: null,
+                q: null,
+                blocked: null,
+              })
+            }
+          >
+            Reset filters
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardContent className="flex items-center justify-between py-4">
+            <div>
+              <div className="text-xs text-muted-foreground">Started</div>
+              <div className="text-xl font-semibold">{activitySummary.started}</div>
+            </div>
+            <Badge variant="status-in_engineering">Today</Badge>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center justify-between py-4">
+            <div>
+              <div className="text-xs text-muted-foreground">Done</div>
+              <div className="text-xl font-semibold">{activitySummary.done}</div>
+            </div>
+            <Badge variant="status-ready_for_production">Today</Badge>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center justify-between py-4">
+            <div>
+              <div className="text-xs text-muted-foreground">Blocked</div>
+              <div className="text-xl font-semibold">{activitySummary.blocked}</div>
+            </div>
+            <Badge variant="status-blocked">Today</Badge>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center justify-between py-4">
+            <div>
+              <div className="text-xs text-muted-foreground">Work time</div>
+              <div className="text-xl font-semibold">
+                {formatDuration(activitySummary.minutes)}
+              </div>
+            </div>
+            <Badge variant="status-draft">Accumulated</Badge>
+          </CardContent>
+        </Card>
       </div>
 
       {dataError ? (
@@ -1169,9 +1609,50 @@ export default function OperatorProductionPage() {
         </div>
       ) : null}
 
+      {activityError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-3 text-sm text-destructive">
+          {activityError}
+        </div>
+      ) : null}
+
+      {activityEvents.length > 0 ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">My recent activity</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {activityEvents.slice(0, 8).map((event) => (
+              <div
+                key={event.id}
+                className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-xs"
+              >
+                <div className="text-muted-foreground">
+                  {event.from_status ?? "queued"} -&gt;{" "}
+                  <span className="font-medium text-foreground">
+                    {event.to_status ?? "unknown"}
+                  </span>
+                  {event.reason ? (
+                    <span className="ml-1 text-rose-600">({event.reason})</span>
+                  ) : null}
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  {new Date(event.created_at).toLocaleTimeString()}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isLoading && visibleStations.length > 0 && filteredItemsCount === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+          No queue items match selected filters.
+        </div>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {visibleStations.map((station) => {
-          const queue = queueByStation.get(station.id) ?? [];
+          const queue = filteredQueueByStation.get(station.id) ?? [];
           const stationTotalMinutes = queue.reduce((sum, item) => {
             const itemMinutes = item.items.reduce(
               (rowSum, row) => rowSum + Number(row.duration_minutes ?? 0),
@@ -1645,6 +2126,113 @@ export default function OperatorProductionPage() {
           );
         })}
       </div>
+
+      <BottomSheet
+        open={isFiltersOpen}
+        onClose={() => setIsFiltersOpen(false)}
+        ariaLabel="Operator filters"
+        title="Filters"
+        closeButtonLabel="Close filters"
+        keyboardAware
+      >
+        <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3">
+          <DatePicker
+            label="Date"
+            value={selectedDate}
+            onChange={(value) => applyFiltersToUrl({ date: value || today })}
+          />
+          <SelectField
+            label="Status"
+            value={statusFilter}
+            onValueChange={(value) =>
+              applyFiltersToUrl({ status: value as QueueStatusFilter })
+            }
+          >
+            <Select
+              value={statusFilter}
+              onValueChange={(value) =>
+                applyFiltersToUrl({ status: value as QueueStatusFilter })
+              }
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="queued">Queued</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="in_progress">In progress</SelectItem>
+                <SelectItem value="blocked">Blocked</SelectItem>
+                <SelectItem value="done">Done</SelectItem>
+              </SelectContent>
+            </Select>
+          </SelectField>
+          <SelectField
+            label="Priority"
+            value={priorityFilter}
+            onValueChange={(value) =>
+              applyFiltersToUrl({ priority: value as "all" | Priority })
+            }
+          >
+            <Select
+              value={priorityFilter}
+              onValueChange={(value) =>
+                applyFiltersToUrl({ priority: value as "all" | Priority })
+              }
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="All priorities" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All priorities</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+              </SelectContent>
+            </Select>
+          </SelectField>
+          <Button
+            type="button"
+            variant={onlyBlocked ? "secondary" : "outline"}
+            className="w-full"
+            onClick={() => applyFiltersToUrl({ blocked: !onlyBlocked })}
+          >
+            {onlyBlocked ? "Blocked only: on" : "Blocked only"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full"
+            onClick={() => {
+              setIsFiltersOpen(false);
+              setQueryParams({
+                date: today,
+                station: stationFilter ?? null,
+                order: null,
+                status: null,
+                priority: null,
+                q: null,
+                blocked: null,
+              });
+            }}
+          >
+            Reset filters
+          </Button>
+        </div>
+      </BottomSheet>
+
+      <QrScannerModal
+        open={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onResolved={handleScannerResolved}
+      />
+      {scannerError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-3 text-sm text-destructive">
+          {scannerError}
+        </div>
+      ) : null}
+
       {blockedRunId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg">

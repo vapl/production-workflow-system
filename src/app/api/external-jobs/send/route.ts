@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 import { sendResendEmail } from "@/lib/server/externalJobEmails";
-import { requirePermissionForRequest } from "@/lib/server/apiPermission";
+import {
+  requirePermissionForRequest,
+  type PermissionAdminClient,
+} from "@/lib/server/apiPermission";
 
 function getOrigin(request: Request) {
   const origin = request.headers.get("origin");
@@ -58,7 +61,7 @@ export async function POST(request: Request) {
 
   const authCheck = await requirePermissionForRequest(
     request,
-    admin,
+    admin as unknown as PermissionAdminClient,
     "orders.manage",
   );
   if (authCheck.response) {

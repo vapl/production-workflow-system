@@ -241,26 +241,25 @@ export default function AuthPage() {
     if (!supabase) {
       return;
     }
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event) => {
-        if (event !== "PASSWORD_RECOVERY") {
-          return;
-        }
-        setRecoveryMode(true);
-        setIsRecoveryLink(true);
-        setUrlHasRecovery(true);
-        setRecoverySessionReady(false);
-        setRecoverySessionError("");
-        setStatus("idle");
-        setMessage("");
-        try {
-          window.history.replaceState({}, document.title, "/auth?recovery=1");
-        } catch {
-          // ignore history errors
-        }
-        setAuthModeChecked(true);
-      },
-    );
+    const sb = supabase;
+    const { data: authListener } = sb.auth.onAuthStateChange((event) => {
+      if (event !== "PASSWORD_RECOVERY") {
+        return;
+      }
+      setRecoveryMode(true);
+      setIsRecoveryLink(true);
+      setUrlHasRecovery(true);
+      setRecoverySessionReady(false);
+      setRecoverySessionError("");
+      setStatus("idle");
+      setMessage("");
+      try {
+        window.history.replaceState({}, document.title, "/auth?recovery=1");
+      } catch {
+        // ignore history errors
+      }
+      setAuthModeChecked(true);
+    });
     return () => {
       authListener.subscription.unsubscribe();
     };
@@ -455,8 +454,7 @@ export default function AuthPage() {
       setMessage("Access check timed out. Continuing sign in...");
     }
 
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     if (tab === "signup") {
       const { error } = await withTimeout(
         supabase.auth.signUp({
@@ -571,7 +569,9 @@ export default function AuthPage() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data?.error_description || data?.message || "Reset failed.");
+        throw new Error(
+          data?.error_description || data?.message || "Reset failed.",
+        );
       }
     };
 
@@ -599,8 +599,7 @@ export default function AuthPage() {
         if (!data.session?.user) {
           setStatus("error");
           setMessage(
-            recoverySessionError ||
-              "Open the reset link again to continue.",
+            recoverySessionError || "Open the reset link again to continue.",
           );
           return;
         }
@@ -720,8 +719,7 @@ export default function AuthPage() {
       setMessage("Invite accepted. Redirecting...");
       router.replace("/orders");
     } catch (err) {
-      const messageText =
-        err instanceof Error ? err.message : "Invite failed.";
+      const messageText = err instanceof Error ? err.message : "Invite failed.";
       setInviteError(messageText);
       setStatus("error");
     }
@@ -931,7 +929,9 @@ export default function AuthPage() {
                       type="password"
                       icon="lock"
                       value={confirmPassword}
-                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      onChange={(event) =>
+                        setConfirmPassword(event.target.value)
+                      }
                       placeholder="Repeat password"
                       className="h-11 text-sm"
                       required

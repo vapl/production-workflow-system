@@ -29,11 +29,13 @@ export function usePartners() {
     let isMounted = true;
     const fetchPartners = async () => {
       setIsLoading(true);
-      const groupsQuery = supabase
+      if (!supabase) return null;
+      const sb = supabase;
+      const groupsQuery = sb
         .from("partner_groups")
         .select("id, name, is_active")
         .order("created_at", { ascending: true });
-      const partnersQuery = supabase
+      const partnersQuery = sb
         .from("partners")
         .select("id, name, group_id, email, phone, is_active")
         .order("created_at", { ascending: true });

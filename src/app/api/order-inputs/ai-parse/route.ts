@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
-import { requirePermissionForRequest } from "@/lib/server/apiPermission";
+import {
+  requirePermissionForRequest,
+  type PermissionAdminClient,
+} from "@/lib/server/apiPermission";
 
 type TableColumnType = "text" | "number" | "select";
 
@@ -124,7 +127,9 @@ async function uploadOpenAiFileWithTimeout(
       form.append("purpose", "user_data");
       form.append(
         "file",
-        new Blob([file.bytes], { type: file.mimeType || "application/pdf" }),
+        new Blob([new Uint8Array(file.bytes)], {
+          type: file.mimeType || "application/pdf",
+        }),
         file.name || "document.pdf",
       );
       const response = await fetch("https://api.openai.com/v1/files", {
@@ -473,8 +478,10 @@ function heuristicRowsFromOcrText(text: string, columns: ParseColumn[]) {
 
 async function extractPdfText(bytes: Buffer) {
   try {
-    const pdf = (await import("pdf-parse")).default;
-    const data = await pdf(bytes);
+    const { PDFParse } = await import("pdf-parse");
+    const parser = new PDFParse({ data: bytes });
+    const data = await parser.getText();
+    await parser.destroy();
     return (data.text ?? "").trim();
   } catch (err) {
     console.error("PDF parse failed:", err);
@@ -1445,7 +1452,7 @@ export async function POST(request: Request) {
 
   const authCheck = await requirePermissionForRequest(
     request,
-    admin,
+    admin as unknown as PermissionAdminClient,
     "orders.manage",
   );
   if (authCheck.response) {
@@ -1607,7 +1614,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const candidateRows = parsed.rows ?? [];
+  const candidateRows = (parsed.rows ?? []).filter(
+    (row): row is Record<string, unknown> =>
+      Boolean(row) && typeof row === "object" && !Array.isArray(row),
+  );
   const sanitizedRows = sanitizeRowsWithPositionAnchors(
     candidateRows,
     validColumns,

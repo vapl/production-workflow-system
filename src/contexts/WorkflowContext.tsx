@@ -412,7 +412,8 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (!supabase || user.loading || !user.isAuthenticated) {
+    const sb = supabase;
+    if (!sb || user.loading || !user.isAuthenticated) {
       return;
     }
     let isMounted = true;
@@ -471,24 +472,24 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
         { data: reasonsData },
         { data: externalRulesData },
       ] = await Promise.all([
-          supabase
+          sb
             .from("workflow_rules")
             .select(
               "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, require_order_inputs_engineering, require_order_inputs_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, external_job_status_labels, order_status_config, external_job_status_config, assignment_labels, attachment_categories, attachment_category_defaults",
             )
             .eq("tenant_id", user.tenantId)
             .maybeSingle(),
-          supabase
+          sb
             .from("workflow_checklist_items")
             .select("id, label, required_for, is_active")
             .eq("tenant_id", user.tenantId)
             .order("created_at", { ascending: true }),
-          supabase
+          sb
             .from("return_reasons")
             .select("label, is_active")
             .eq("tenant_id", user.tenantId)
             .order("label", { ascending: true }),
-          supabase
+          sb
             .from("external_job_rules")
             .select("id, status, min_attachments")
             .eq("tenant_id", user.tenantId)
@@ -590,7 +591,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (!rulesData) {
-        await supabase.from("workflow_rules").insert({
+        await sb.from("workflow_rules").insert({
           tenant_id: user.tenantId,
           min_attachments_engineering: defaultRules.minAttachmentsForEngineering,
           min_attachments_production: defaultRules.minAttachmentsForProduction,
@@ -614,7 +615,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!externalRulesData || externalRulesData.length === 0) {
-        await supabase.from("external_job_rules").insert(
+        await sb.from("external_job_rules").insert(
           defaultRules.externalJobRules.map((rule) => ({
             tenant_id: user.tenantId,
             status: rule.status,

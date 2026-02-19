@@ -147,12 +147,13 @@ export function Header() {
   }, []);
 
   useEffect(() => {
-    if (!supabase || !user.isAuthenticated || !user.tenantId) {
+    const sb = supabase;
+    if (!sb || !user.isAuthenticated || !user.tenantId) {
       return;
     }
     let isMounted = true;
     const loadUnread = async () => {
-      const { count } = await supabase
+      const { count } = await sb
         .from("notifications")
         .select("id", { count: "exact", head: true })
         .eq("tenant_id", user.tenantId)
@@ -166,7 +167,7 @@ export function Header() {
       }
     };
     void loadUnread();
-    const channel = supabase
+    const channel = sb
       .channel(`notifications:${user.tenantId}`)
       .on(
         "postgres_changes",
@@ -204,7 +205,7 @@ export function Header() {
       .subscribe();
     return () => {
       isMounted = false;
-      supabase.removeChannel(channel);
+      sb.removeChannel(channel);
     };
   }, [
     user.id,
@@ -213,7 +214,8 @@ export function Header() {
   ]);
 
   useEffect(() => {
-    if (!supabase || !user.isAuthenticated || !user.tenantId) {
+    const sb = supabase;
+    if (!sb || !user.isAuthenticated || !user.tenantId) {
       return;
     }
     if (!notificationsOpen) {
@@ -221,7 +223,7 @@ export function Header() {
     }
     let isMounted = true;
     const loadNotifications = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("notifications")
         .select("id, type, title, body, created_at, read_at")
         .order("created_at", { ascending: false })

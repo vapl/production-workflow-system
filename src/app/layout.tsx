@@ -32,7 +32,6 @@ export const metadata: Metadata = {
   title: "Production Workflow System",
   description: "Production workflow dashboard",
   manifest: "/manifest.webmanifest",
-  themeColor: "#0b0f14",
   icons: {
     icon: [
       { url: "/pwa/icon.svg", type: "image/svg+xml", sizes: "any" },
@@ -54,11 +53,13 @@ const appViewport: Viewport = DISABLE_MOBILE_ZOOM
       maximumScale: 1,
       userScalable: false,
       viewportFit: "cover",
+      themeColor: "#0b0f14",
     }
   : {
       width: "device-width",
       initialScale: 1,
       viewportFit: "cover",
+      themeColor: "#0b0f14",
     };
 
 export const viewport: Viewport = appViewport;

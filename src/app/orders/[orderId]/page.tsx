@@ -852,7 +852,13 @@ export default function OrderDetailPage() {
     () =>
       new Set(
         attachmentCategories
-          .filter((item) => item.aiParseEnabled)
+          .filter(
+            (item) =>
+              "aiParseEnabled" in item &&
+              Boolean(
+                (item as { aiParseEnabled?: boolean | null }).aiParseEnabled,
+              ),
+          )
           .map((item) => item.id),
       ),
     [attachmentCategories],

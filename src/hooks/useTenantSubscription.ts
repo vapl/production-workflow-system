@@ -28,10 +28,11 @@ export function useTenantSubscription() {
     if (!canLoadSubscription || !supabase || !user.tenantId) {
       return;
     }
+    const sb = supabase;
     let isMounted = true;
     const fetchSubscription = async () => {
       setIsLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await sb
         .from("tenant_subscriptions")
         .select("plan_code, status")
         .eq("tenant_id", user.tenantId)

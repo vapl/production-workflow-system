@@ -54,12 +54,13 @@ export function TabsNav() {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    if (!supabase || !user.isAuthenticated || !user.tenantId) {
+    const sb = supabase;
+    if (!sb || !user.isAuthenticated || !user.tenantId) {
       return;
     }
     let isMounted = true;
     const loadUnread = async () => {
-      const { count } = await supabase
+      const { count } = await sb
         .from("notifications")
         .select("id", { count: "exact", head: true })
         .eq("tenant_id", user.tenantId)
@@ -72,7 +73,7 @@ export function TabsNav() {
     };
 
     void loadUnread();
-    const channel = supabase
+    const channel = sb
       .channel(`notifications-mobile:${user.tenantId}:${user.id}`)
       .on(
         "postgres_changes",
@@ -90,7 +91,7 @@ export function TabsNav() {
 
     return () => {
       isMounted = false;
-      supabase.removeChannel(channel);
+      sb.removeChannel(channel);
     };
   }, [user.id, user.isAuthenticated, user.tenantId]);
 
