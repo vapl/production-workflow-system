@@ -194,6 +194,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ? "/"
         : pathname.startsWith("/settings")
           ? "/settings"
+          : pathname.startsWith("/qr/")
+            ? "/orders"
           : pathname.startsWith("/production/operator")
             ? "/production/operator"
             : pathname.startsWith("/production")

@@ -11,6 +11,7 @@ import { DatePicker } from "@/components/ui/DatePicker";
 import { Input } from "@/components/ui/Input";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { SelectField } from "@/components/ui/SelectField";
 import { TextAreaField } from "@/components/ui/TextAreaField";
 import {
@@ -1461,6 +1462,26 @@ export default function OperatorProductionPage() {
       return false;
     }
     setScannerError("");
+    if (
+      currentUser.role === "Production worker" &&
+      result.targetRoute.startsWith("/qr/")
+    ) {
+      const message =
+        "QR code is not linked to an order yet. Contact production manager.";
+      setScannerError(message);
+      if (sb && currentUser.tenantId) {
+        await sb.from("qr_scan_events").insert({
+          tenant_id: currentUser.tenantId,
+          user_id: currentUser.id,
+          raw_value: result.rawValue,
+          token: result.token,
+          result: "error",
+          message,
+          target_route: result.targetRoute,
+        });
+      }
+      return false;
+    }
     if (sb && currentUser.tenantId) {
       await sb.from("qr_scan_events").insert({
         tenant_id: currentUser.tenantId,
@@ -2537,6 +2558,10 @@ export default function OperatorProductionPage() {
             </div>
           </div>
           <div className="space-y-2">
+            <ThemeToggle
+              variant="menu"
+              className="rounded-lg border border-border px-3 py-2 hover:bg-muted/40"
+            />
             <Link
               href="/profile"
               onClick={() => setIsProfilePanelOpen(false)}
@@ -2634,6 +2659,10 @@ export default function OperatorProductionPage() {
                 </div>
               </div>
             </div>
+            <ThemeToggle
+              variant="menu"
+              className="rounded-lg border border-border px-3 py-2 hover:bg-muted/40"
+            />
             <div className="flex gap-2">
               <Link href="/profile" className="flex-1">
                 <Button

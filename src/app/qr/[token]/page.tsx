@@ -117,100 +117,108 @@ export default function QrTokenPage({
     const load = async () => {
       setIsLoading(true);
       setError(null);
-      const { data: qrData, error: qrError } = await sb
-        .from("production_qr_codes")
-        .select("order_id, field_id, row_index, token")
-        .eq("token", params.token)
-        .maybeSingle();
-      if (!isMounted) {
-        return;
-      }
-      if (qrError || !qrData) {
-        setError(qrError?.message ?? "QR code not found.");
-        setIsLoading(false);
-        return;
-      }
-      setQrRow(qrData);
-
-      const { data: orderData } = await sb
-        .from("orders")
-        .select("id, order_number, customer_name, due_date, priority")
-        .eq("id", qrData.order_id)
-        .maybeSingle();
-      if (!isMounted) {
-        return;
-      }
-      setOrder(orderData ?? null);
-
-      const { data: fieldData } = await sb
-        .from("order_input_fields")
-        .select("id, label, options")
-        .eq("id", qrData.field_id)
-        .maybeSingle();
-      if (!isMounted) {
-        return;
-      }
-      setField(fieldData ?? null);
-
-      const { data: valueData } = await sb
-        .from("order_input_values")
-        .select("value")
-        .eq("order_id", qrData.order_id)
-        .eq("field_id", qrData.field_id)
-        .maybeSingle();
-      if (!isMounted) {
-        return;
-      }
-      const values = Array.isArray(valueData?.value) ? valueData?.value : [];
-      const rawRow =
-        typeof values[qrData.row_index] === "object" &&
-        values[qrData.row_index] !== null
-          ? (values[qrData.row_index] as Record<string, unknown>)
-          : null;
-      setRowData(rawRow);
-
-      const { data: attachmentData } = await sb
-        .from("order_attachments")
-        .select("id, name, url, created_at")
-        .eq("order_id", qrData.order_id)
-        .eq("category", productionAttachmentCategory)
-        .order("created_at", { ascending: false });
-      if (!isMounted) {
-        return;
-      }
-      setAttachments(attachmentData ?? []);
-
-      const { data: assignments } = await sb
-        .from("operator_station_assignments")
-        .select("station_id")
-        .eq("user_id", user.id)
-        .eq("is_active", true);
-      const stationIds = (assignments ?? [])
-        .map((row) => row.station_id)
-        .filter(Boolean);
-
-      if (stationIds.length > 0) {
-        const { data: items } = await sb
-          .from("production_items")
-          .select("id, item_name, qty, status, station_id, meta")
-          .eq("order_id", qrData.order_id)
-          .in("station_id", stationIds);
+      try {
+        const { data: qrData, error: qrError } = await sb
+          .from("production_qr_codes")
+          .select("order_id, field_id, row_index, token")
+          .eq("token", params.token)
+          .maybeSingle();
         if (!isMounted) {
           return;
         }
-        const filtered = (items ?? []).filter((item) => {
-          const rowIndex =
-            typeof item.meta?.rowIndex === "number"
-              ? item.meta?.rowIndex
-              : typeof item.meta?.rowIndex === "string"
-                ? Number(item.meta?.rowIndex)
-                : null;
-          return rowIndex === qrData.row_index;
-        });
-        setProductionItems(filtered);
-      }
+        if (qrError || !qrData) {
+          setError(qrError?.message ?? "QR code not found.");
+          return;
+        }
+        setQrRow(qrData);
 
-      setIsLoading(false);
+        const { data: orderData } = await sb
+          .from("orders")
+          .select("id, order_number, customer_name, due_date, priority")
+          .eq("id", qrData.order_id)
+          .maybeSingle();
+        if (!isMounted) {
+          return;
+        }
+        setOrder(orderData ?? null);
+
+        const { data: fieldData } = await sb
+          .from("order_input_fields")
+          .select("id, label, options")
+          .eq("id", qrData.field_id)
+          .maybeSingle();
+        if (!isMounted) {
+          return;
+        }
+        setField(fieldData ?? null);
+
+        const { data: valueData } = await sb
+          .from("order_input_values")
+          .select("value")
+          .eq("order_id", qrData.order_id)
+          .eq("field_id", qrData.field_id)
+          .maybeSingle();
+        if (!isMounted) {
+          return;
+        }
+        const values = Array.isArray(valueData?.value) ? valueData?.value : [];
+        const rawRow =
+          typeof values[qrData.row_index] === "object" &&
+          values[qrData.row_index] !== null
+            ? (values[qrData.row_index] as Record<string, unknown>)
+            : null;
+        setRowData(rawRow);
+
+        const { data: attachmentData } = await sb
+          .from("order_attachments")
+          .select("id, name, url, created_at")
+          .eq("order_id", qrData.order_id)
+          .eq("category", productionAttachmentCategory)
+          .order("created_at", { ascending: false });
+        if (!isMounted) {
+          return;
+        }
+        setAttachments(attachmentData ?? []);
+
+        const { data: assignments } = await sb
+          .from("operator_station_assignments")
+          .select("station_id")
+          .eq("user_id", user.id)
+          .eq("is_active", true);
+        const stationIds = (assignments ?? [])
+          .map((row) => row.station_id)
+          .filter(Boolean);
+
+        if (stationIds.length > 0) {
+          const { data: items } = await sb
+            .from("production_items")
+            .select("id, item_name, qty, status, station_id, meta")
+            .eq("order_id", qrData.order_id)
+            .in("station_id", stationIds);
+          if (!isMounted) {
+            return;
+          }
+          const filtered = (items ?? []).filter((item) => {
+            const rowIndex =
+              typeof item.meta?.rowIndex === "number"
+                ? item.meta?.rowIndex
+                : typeof item.meta?.rowIndex === "string"
+                  ? Number(item.meta?.rowIndex)
+                  : null;
+            return rowIndex === qrData.row_index;
+          });
+          setProductionItems(filtered);
+        }
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+        setError("Failed to load QR details.");
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
     };
     void load();
     return () => {
