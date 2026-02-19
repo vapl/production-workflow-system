@@ -2379,6 +2379,7 @@ export default function OperatorProductionPage() {
         title="Filters"
         closeButtonLabel="Close filters"
         keyboardAware
+        enableSwipeToClose
       >
         <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3">
           <DatePicker
