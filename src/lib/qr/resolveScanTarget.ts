@@ -21,6 +21,17 @@ export type ResolveScanTargetResult = ResolveOk | ResolveError;
 export async function resolveScanTarget(
   rawValue: string,
 ): Promise<ResolveScanTargetResult> {
+  const directRoute = tryResolveDirectRoute(rawValue);
+  if (directRoute) {
+    return {
+      ok: true,
+      token: directRoute.token,
+      orderId: null,
+      targetRoute: directRoute.route,
+      rawValue,
+    };
+  }
+
   const parsed = parseQrInput(rawValue);
   if (!parsed.ok) {
     return { ok: false, error: parsed.error, rawValue };
@@ -38,10 +49,12 @@ export async function resolveScanTarget(
     .maybeSingle();
 
   if (error || !data) {
+    // Soft fallback: open QR route directly and let the dedicated page resolve details.
     return {
-      ok: false,
-      error: "QR code was not found.",
+      ok: true,
       token: parsed.token,
+      orderId: null,
+      targetRoute: `/qr/${encodeURIComponent(parsed.token)}`,
       rawValue,
     };
   }
@@ -58,4 +71,32 @@ export async function resolveScanTarget(
     targetRoute,
     rawValue,
   };
+}
+
+function tryResolveDirectRoute(rawValue: string) {
+  const value = rawValue.trim();
+  if (!value.startsWith("http://") && !value.startsWith("https://")) {
+    return null;
+  }
+  try {
+    const parsed = new URL(value);
+    const cleanPath = parsed.pathname.replace(/\/+$/, "");
+    if (cleanPath.startsWith("/qr/")) {
+      const token = cleanPath.slice("/qr/".length).trim();
+      if (!token) {
+        return null;
+      }
+      return { token, route: `${cleanPath}${parsed.search}` };
+    }
+    if (cleanPath.startsWith("/external-jobs/respond/")) {
+      const token = cleanPath.slice("/external-jobs/respond/".length).trim();
+      if (!token) {
+        return null;
+      }
+      return { token, route: `${cleanPath}${parsed.search}` };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
