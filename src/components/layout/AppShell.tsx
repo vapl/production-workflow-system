@@ -32,8 +32,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
   const swipeStartX = useRef<number | null>(null);
   const swipeStartY = useRef<number | null>(null);
+  const pullStartYRef = useRef<number | null>(null);
   const isAuthRoute = pathname?.startsWith("/auth");
   const isExternalJobRespondRoute = pathname?.startsWith(
     "/external-jobs/respond/",
@@ -175,6 +178,71 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [hideHeader, isMobileDrawerOpen]);
 
   useEffect(() => {
+    const threshold = 72;
+    const maxDistance = 96;
+    const reset = () => {
+      pullStartYRef.current = null;
+      setPullDistance(0);
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      if (window.innerWidth >= 768 || isMobileDrawerOpen || isPullRefreshing) {
+        return;
+      }
+      if (window.scrollY > 0) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+      pullStartYRef.current = touch.clientY;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const startY = pullStartYRef.current;
+      if (startY == null || isPullRefreshing) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+      const delta = touch.clientY - startY;
+      if (delta <= 0) {
+        setPullDistance(0);
+        return;
+      }
+      const damped = Math.min(maxDistance, delta * 0.55);
+      setPullDistance(damped);
+      if (delta > 8 && event.cancelable) {
+        event.preventDefault();
+      }
+    };
+    const handleTouchEnd = () => {
+      const shouldRefresh = pullDistance >= threshold;
+      reset();
+      if (!shouldRefresh || isPullRefreshing) {
+        return;
+      }
+      setIsPullRefreshing(true);
+      router.refresh();
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 120);
+    };
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, [isMobileDrawerOpen, isPullRefreshing, pullDistance, router]);
+
+  useEffect(() => {
     if (!user.loading && !user.isAuthenticated && !isPublicRoute) {
       router.replace("/auth");
     }
@@ -282,8 +350,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         .join("")
         .toUpperCase()
     : "U";
+  const pullProgress = Math.min(1, pullDistance / 72);
   return (
     <>
+      {pullDistance > 0 || isPullRefreshing ? (
+        <div
+          className="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top)+0.4rem)] z-50 -translate-x-1/2 md:hidden"
+          style={{
+            opacity: isPullRefreshing ? 1 : pullProgress,
+            transform: `translate(-50%, ${isPullRefreshing ? 0 : (1 - pullProgress) * -8}px)`,
+          }}
+        >
+          <div className="rounded-full border border-border bg-card/95 px-3 py-1 text-xs text-muted-foreground shadow-md backdrop-blur supports-backdrop-filter:bg-card/80">
+            {isPullRefreshing
+              ? "Refreshing..."
+              : pullDistance >= 72
+                ? "Release to refresh"
+                : "Pull to refresh"}
+          </div>
+        </div>
+      ) : null}
       {hideHeader ? null : (
         <div className="hidden md:block">
           <Header />
