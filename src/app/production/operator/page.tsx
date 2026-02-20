@@ -285,7 +285,7 @@ export default function OperatorProductionPage() {
   const [scannerError, setScannerError] = useState("");
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const cacheKey =
-    currentUser.id && selectedDate
+    currentUser.id && selectedDate && !orderFilter
       ? `pws_operator_cache_${currentUser.id}_${selectedDate}`
       : "";
   const [stations, setStations] = useState<Station[]>([]);
@@ -480,6 +480,19 @@ export default function OperatorProductionPage() {
         }
         return;
       }
+      let runsQuery = sb
+        .from("batch_runs")
+        .select(
+          "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
+        )
+        .in("station_id", stationIds)
+        .order("created_at", { ascending: false });
+      if (orderFilter) {
+        runsQuery = runsQuery.eq("order_id", orderFilter);
+      } else {
+        runsQuery = runsQuery.eq("planned_date", selectedDate);
+      }
+
       const [stationsResult, runsResult, depsResult] = await Promise.all([
         sb
           .from("workstations")
@@ -487,14 +500,7 @@ export default function OperatorProductionPage() {
           .in("id", stationIds)
           .order("sort_order", { ascending: true })
           .order("name", { ascending: true }),
-        sb
-          .from("batch_runs")
-          .select(
-            "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
-          )
-          .in("station_id", stationIds)
-          .eq("planned_date", selectedDate)
-          .order("created_at", { ascending: false }),
+        runsQuery,
         sb
           .from("station_dependencies")
           .select("id, station_id, depends_on_station_id")
@@ -603,7 +609,7 @@ export default function OperatorProductionPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentUser.id, currentUser.tenantId, cacheKey, selectedDate]);
+  }, [currentUser.id, currentUser.tenantId, cacheKey, selectedDate, orderFilter]);
 
   useEffect(() => {
     const sb = supabase;
