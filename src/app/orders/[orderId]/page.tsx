@@ -621,7 +621,7 @@ export default function OrderDetailPage() {
       const { data, error } = await sb
         .from("order_input_fields")
         .select(
-          "id, key, label, group_key, field_type, unit, options, is_required, is_active, sort_order",
+          "id, key, label, group_key, field_type, unit, options, is_required, is_active, show_in_production, sort_order",
         )
         .order("group_key", { ascending: true })
         .order("sort_order", { ascending: true })
@@ -646,6 +646,7 @@ export default function OrderDetailPage() {
         columns: row.options?.columns ?? undefined,
         isRequired: row.is_required ?? false,
         isActive: row.is_active ?? true,
+        showInProduction: row.show_in_production ?? false,
         sortOrder: row.sort_order ?? 0,
       }));
       setOrderInputFields(mapped);
@@ -1008,8 +1009,6 @@ export default function OrderDetailPage() {
   );
   const meetsEngineeringAttachments =
     attachments.length >= rules.minAttachmentsForEngineering;
-  const meetsProductionAttachments =
-    attachments.length >= rules.minAttachmentsForProduction;
   const meetsEngineeringComment =
     !rules.requireCommentForEngineering || comments.length > 0;
   const meetsProductionComment =
@@ -1046,6 +1045,9 @@ export default function OrderDetailPage() {
   const requiredOrderInputFields = activeOrderInputFields.filter(
     (field) => field.isRequired,
   );
+  const requiredProductionOrderInputFields = requiredOrderInputFields.filter(
+    (field) => field.showInProduction || field.groupKey === "production_scope",
+  );
   const completedRequiredOrderInputCount = requiredOrderInputFields.filter(
     (field) =>
       shouldPersistOrderInputValue(
@@ -1053,8 +1055,27 @@ export default function OrderDetailPage() {
         normalizeOrderInputValue(field, orderInputValues[field.id]),
       ),
   ).length;
+  const completedRequiredProductionOrderInputCount =
+    requiredProductionOrderInputFields.filter((field) =>
+      shouldPersistOrderInputValue(
+        field,
+        normalizeOrderInputValue(field, orderInputValues[field.id]),
+      ),
+    ).length;
   const hasRequiredOrderInputs =
     completedRequiredOrderInputCount === requiredOrderInputFields.length;
+  const hasRequiredProductionOrderInputs =
+    completedRequiredProductionOrderInputCount ===
+    requiredProductionOrderInputFields.length;
+  const engineeringAttachmentCategoryId =
+    rules.attachmentCategoryDefaults?.Engineering ?? null;
+  const engineeringScopedAttachments = engineeringAttachmentCategoryId
+    ? attachments.filter(
+        (attachment) =>
+          attachment.category === engineeringAttachmentCategoryId ||
+          attachment.addedByRole === "Engineering",
+      )
+    : attachments;
   const hasAssignedEngineer = Boolean(orderState?.assignedEngineerId);
   const canAdvanceToEngineering =
     meetsEngineeringChecklist &&
@@ -1063,9 +1084,9 @@ export default function OrderDetailPage() {
     (!rules.requireOrderInputsForEngineering || hasRequiredOrderInputs);
   const canAdvanceToProduction =
     meetsProductionChecklist &&
-    meetsProductionAttachments &&
+    (engineeringScopedAttachments.length >= rules.minAttachmentsForProduction) &&
     meetsProductionComment &&
-    (!rules.requireOrderInputsForProduction || hasRequiredOrderInputs) &&
+    (!rules.requireOrderInputsForProduction || hasRequiredProductionOrderInputs) &&
     hasAssignedEngineer;
   const engineeringGateItems = [
     ...(requiredForEngineering.length > 0
@@ -1124,8 +1145,10 @@ export default function OrderDetailPage() {
       ? [
           {
             label: "Attachments",
-            ok: meetsProductionAttachments,
-            value: `${Math.min(attachments.length, rules.minAttachmentsForProduction)}/${rules.minAttachmentsForProduction}`,
+            ok:
+              engineeringScopedAttachments.length >=
+              rules.minAttachmentsForProduction,
+            value: `${Math.min(engineeringScopedAttachments.length, rules.minAttachmentsForProduction)}/${rules.minAttachmentsForProduction}`,
           },
         ]
       : []),
@@ -1142,8 +1165,8 @@ export default function OrderDetailPage() {
       ? [
           {
             label: "Inputs",
-            ok: hasRequiredOrderInputs,
-            value: hasRequiredOrderInputs ? "yes" : "no",
+            ok: hasRequiredProductionOrderInputs,
+            value: hasRequiredProductionOrderInputs ? "yes" : "no",
           },
         ]
       : []),
@@ -3169,6 +3192,17 @@ export default function OrderDetailPage() {
         notify({
           title: "Order state changed",
           description: "Order is no longer in Ready for engineering status.",
+          variant: "error",
+        });
+      } else if (
+        latestOrder &&
+        latestOrder.status === "ready_for_engineering" &&
+        !latestOrder.assigned_engineer_id
+      ) {
+        notify({
+          title: "No permission",
+          description:
+            "Your role is not allowed to take this order. Contact Admin.",
           variant: "error",
         });
       } else {
