@@ -1154,7 +1154,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (existingOrder?.source === "accounting") {
           updatePayload.source = "manual";
         }
-        const { data, error: updateError } = await supabase
+        const { data: updatedRows, error: updateError } = await supabase
           .from("orders")
           .update(updatePayload)
           .eq("id", orderId)
@@ -1253,12 +1253,22 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         )
       `,
           )
-          .single();
         if (updateError) {
           setError(updateError.message);
           notify({
             title: "Order not updated",
             description: updateError.message,
+            variant: "error",
+          });
+          return null;
+        }
+        const data = updatedRows?.[0] ?? null;
+        if (!data) {
+          const description = "Order was not found or no access to update.";
+          setError(description);
+          notify({
+            title: "Order not updated",
+            description,
             variant: "error",
           });
           return null;

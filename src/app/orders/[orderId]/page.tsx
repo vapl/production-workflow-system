@@ -3113,7 +3113,7 @@ export default function OrderDetailPage() {
       return;
     }
 
-    const { data, error: claimError } = await supabase
+    const { data: claimRows, error: claimError } = await supabase
       .from("orders")
       .update({
         assigned_engineer_id: userId,
@@ -3123,8 +3123,7 @@ export default function OrderDetailPage() {
       .eq("id", orderState.id)
       .eq("status", "ready_for_engineering")
       .is("assigned_engineer_id", null)
-      .select("id")
-      .maybeSingle();
+      .select("id");
 
     if (claimError) {
       notify({
@@ -3134,7 +3133,7 @@ export default function OrderDetailPage() {
       });
       return;
     }
-    if (!data) {
+    if (!claimRows || claimRows.length === 0) {
       notify({
         title: "Order already taken",
         description: "Another engineer already took this order.",
