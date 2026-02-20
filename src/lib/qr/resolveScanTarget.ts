@@ -22,7 +22,7 @@ export async function resolveScanTarget(
   rawValue: string,
 ): Promise<ResolveScanTargetResult> {
   const directRoute = tryResolveDirectRoute(rawValue);
-  if (directRoute) {
+  if (directRoute?.kind === "external-job") {
     return {
       ok: true,
       token: directRoute.token,
@@ -31,11 +31,11 @@ export async function resolveScanTarget(
       rawValue,
     };
   }
-
-  const parsed = parseQrInput(rawValue);
-  if (!parsed.ok) {
-    return { ok: false, error: parsed.error, rawValue };
-  }
+  const parsedToken =
+    directRoute?.kind === "qr-link" ? directRoute.token : null;
+  const parsed =
+    parsedToken !== null ? { ok: true as const, token: parsedToken } : parseQrInput(rawValue);
+  if (!parsed.ok) return { ok: false, error: parsed.error, rawValue };
 
   const sb = supabase;
   if (!sb) {
@@ -86,14 +86,18 @@ function tryResolveDirectRoute(rawValue: string) {
       if (!token) {
         return null;
       }
-      return { token, route: `${cleanPath}${parsed.search}` };
+      return { kind: "qr-link" as const, token, route: `${cleanPath}${parsed.search}` };
     }
     if (cleanPath.startsWith("/external-jobs/respond/")) {
       const token = cleanPath.slice("/external-jobs/respond/".length).trim();
       if (!token) {
         return null;
       }
-      return { token, route: `${cleanPath}${parsed.search}` };
+      return {
+        kind: "external-job" as const,
+        token,
+        route: `${cleanPath}${parsed.search}`,
+      };
     }
     return null;
   } catch {
