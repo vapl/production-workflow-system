@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 import {
+  getBearerToken,
   requirePermissionForRequest,
   type PermissionAdminClient,
 } from "@/lib/server/apiPermission";
@@ -1455,10 +1456,30 @@ export async function POST(request: Request) {
     admin as unknown as PermissionAdminClient,
     "orders.manage",
   );
+  let tenantId: string;
   if (authCheck.response) {
-    return authCheck.response;
+    const bearer = getBearerToken(request);
+    if (!bearer) {
+      return authCheck.response;
+    }
+    const { data: authData, error: authError } = await admin.auth.getUser(
+      bearer,
+    );
+    if (authError || !authData.user) {
+      return authCheck.response;
+    }
+    const { data: actorProfile } = await admin
+      .from("profiles")
+      .select("id, tenant_id, role, is_admin, is_owner")
+      .eq("id", authData.user.id)
+      .maybeSingle();
+    if (!actorProfile?.tenant_id || actorProfile.role !== "Engineering") {
+      return authCheck.response;
+    }
+    tenantId = actorProfile.tenant_id;
+  } else {
+    tenantId = authCheck.actor.tenantId;
   }
-  const { tenantId } = authCheck.actor;
 
   const { data: subscription } = await admin
     .from("tenant_subscriptions")

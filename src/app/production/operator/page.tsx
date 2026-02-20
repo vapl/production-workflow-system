@@ -1505,8 +1505,7 @@ export default function OperatorProductionPage() {
     }
     setScannerError("");
     if (result.targetRoute.startsWith("/qr/")) {
-      const message =
-        "QR code is not linked to an order in this queue.";
+      const message = "QR code is not linked to an order in this queue.";
       setScannerError(message);
       if (sb && currentUser.tenantId) {
         await sb.from("qr_scan_events").insert({
@@ -1618,7 +1617,7 @@ export default function OperatorProductionPage() {
   );
 
   return (
-    <section className="relative pt-16 md:pt-0">
+    <section className="relative flex flex-col gap-3 pt-16 md:pt-0">
       <MobilePageTitle
         title="Station queue"
         subtitle={headerSubtitle}

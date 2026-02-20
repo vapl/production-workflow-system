@@ -1065,6 +1065,9 @@ export default function OrderDetailPage() {
   const requiredOrderInputFields = activeOrderInputFields.filter(
     (field) => field.isRequired,
   );
+  const productionScopedOrderInputFields = activeOrderInputFields.filter(
+    (field) => field.showInProduction || field.groupKey === "production_scope",
+  );
   const requiredProductionOrderInputFields = requiredOrderInputFields.filter(
     (field) => field.showInProduction || field.groupKey === "production_scope",
   );
@@ -1082,12 +1085,21 @@ export default function OrderDetailPage() {
         normalizeOrderInputValue(field, orderInputValues[field.id]),
       ),
     ).length;
+  const persistedProductionOrderInputCount = productionScopedOrderInputFields
+    .filter((field) =>
+      shouldPersistOrderInputValue(
+        field,
+        normalizeOrderInputValue(field, orderInputValues[field.id]),
+      ),
+    )
+    .length;
   const hasRequiredOrderInputs =
     completedRequiredOrderInputCount === requiredOrderInputFields.length;
   const hasRequiredProductionOrderInputs =
-    requiredProductionOrderInputFields.length > 0 &&
-    completedRequiredProductionOrderInputCount ===
-      requiredProductionOrderInputFields.length;
+    requiredProductionOrderInputFields.length > 0
+      ? completedRequiredProductionOrderInputCount ===
+        requiredProductionOrderInputFields.length
+      : persistedProductionOrderInputCount > 0;
   const engineeringAttachmentCategoryId =
     rules.attachmentCategoryDefaults?.Engineering ?? null;
   const engineeringScopedAttachments = engineeringAttachmentCategoryId
@@ -1294,7 +1306,7 @@ export default function OrderDetailPage() {
     return groups;
   }, [activeOrderInputFields]);
   const canEditOrderInputs = role === "Engineering" || isAdmin || isOwner;
-  const normalizeOrderInputValue = (field: OrderInputField, value: unknown) => {
+  function normalizeOrderInputValue(field: OrderInputField, value: unknown) {
     if (field.fieldType === "table") {
       return Array.isArray(value) ? value : [];
     }
@@ -1324,11 +1336,11 @@ export default function OrderDetailPage() {
       return typeof value === "string" ? value : "";
     }
     return typeof value === "string" ? value : (value ?? "");
-  };
-  const shouldPersistOrderInputValue = (
+  }
+  function shouldPersistOrderInputValue(
     field: OrderInputField,
     value: unknown,
-  ) => {
+  ) {
     const normalized = normalizeOrderInputValue(field, value);
     if (field.fieldType === "table") {
       const rows = normalized as Array<Record<string, unknown>>;
@@ -1350,7 +1362,7 @@ export default function OrderDetailPage() {
       return Boolean(normalized);
     }
     return Boolean(String(normalized ?? "").trim());
-  };
+  }
   const normalizeAiCellValue = (
     value: unknown,
     column: OrderInputTableColumn,
