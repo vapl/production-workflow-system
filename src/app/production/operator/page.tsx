@@ -1501,7 +1501,7 @@ export default function OperatorProductionPage() {
           target_route: null,
         });
       }
-      return false;
+      return true;
     }
     setScannerError("");
     if (result.targetRoute.startsWith("/qr/")) {
@@ -1518,8 +1518,12 @@ export default function OperatorProductionPage() {
           target_route: result.targetRoute,
         });
       }
-      return false;
+      return true;
     }
+    const targetRoute =
+      currentUser.role === "Production worker" && result.orderId
+        ? `/production/operator?date=${encodeURIComponent(selectedDate)}&order=${encodeURIComponent(result.orderId)}`
+        : result.targetRoute;
     if (sb && currentUser.tenantId) {
       await sb.from("qr_scan_events").insert({
         tenant_id: currentUser.tenantId,
@@ -1528,10 +1532,10 @@ export default function OperatorProductionPage() {
         token: result.token,
         result: "success",
         message: null,
-        target_route: result.targetRoute,
+        target_route: targetRoute,
       });
     }
-    router.push(result.targetRoute);
+    router.push(targetRoute);
     return true;
   };
 
