@@ -1449,7 +1449,7 @@ export default function OrderDetailPage() {
       <section className="space-y-3">
         <h1 className="text-xl font-semibold">Loading order...</h1>
         <p className="text-sm text-muted-foreground">Fetching order details.</p>
-        <LoadingSpinner size="sm" label="Loading..." />
+        <LoadingSpinner label="Loading..." />
       </section>
     );
   }
