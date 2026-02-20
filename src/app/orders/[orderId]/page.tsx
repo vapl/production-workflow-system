@@ -3134,11 +3134,50 @@ export default function OrderDetailPage() {
       return;
     }
     if (!claimRows || claimRows.length === 0) {
-      notify({
-        title: "Order already taken",
-        description: "Another engineer already took this order.",
-        variant: "error",
-      });
+      const { data: latestOrder } = await supabase
+        .from("orders")
+        .select(
+          "id, status, assigned_engineer_id, assigned_engineer_name, assigned_engineer_at",
+        )
+        .eq("id", orderState.id)
+        .maybeSingle();
+      if (latestOrder?.assigned_engineer_id === userId) {
+        setOrderState((prev) =>
+          prev
+            ? {
+                ...prev,
+                assignedEngineerId: latestOrder.assigned_engineer_id ?? userId,
+                assignedEngineerName:
+                  latestOrder.assigned_engineer_name ?? name,
+                assignedEngineerAt: latestOrder.assigned_engineer_at ?? now,
+              }
+            : prev,
+        );
+        notify({
+          title: "Order taken",
+          variant: "success",
+        });
+      } else if (latestOrder?.assigned_engineer_id) {
+        notify({
+          title: "Order already taken",
+          description: latestOrder.assigned_engineer_name
+            ? `Already taken by ${latestOrder.assigned_engineer_name}.`
+            : "Another engineer already took this order.",
+          variant: "error",
+        });
+      } else if (latestOrder && latestOrder.status !== "ready_for_engineering") {
+        notify({
+          title: "Order state changed",
+          description: "Order is no longer in Ready for engineering status.",
+          variant: "error",
+        });
+      } else {
+        notify({
+          title: "Order not updated",
+          description: "Could not take order. Please refresh and try again.",
+          variant: "error",
+        });
+      }
       await refreshOrders();
       return;
     }
