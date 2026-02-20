@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/Input";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { SideDrawer } from "@/components/ui/SideDrawer";
 import { SelectField } from "@/components/ui/SelectField";
 import { TextAreaField } from "@/components/ui/TextAreaField";
 import {
@@ -82,6 +83,7 @@ type BatchRunRow = {
   status: "queued" | "pending" | "in_progress" | "blocked" | "done";
   blocked_reason?: string | null;
   blocked_reason_id?: string | null;
+  planned_date?: string | null;
   started_at: string | null;
   done_at: string | null;
   duration_minutes?: number | null;
@@ -118,6 +120,7 @@ type QueueItem = {
   dueDate: string;
   priority: Priority;
   status: BatchRunRow["status"];
+  plannedDate: string | null;
   batchCode: string;
   totalQty: number;
   material: string;
@@ -158,6 +161,12 @@ function statusBadge(status: BatchRunRow["status"]) {
   if (status === "in_progress") return "status-in_engineering";
   if (status === "done") return "status-ready_for_production";
   return "status-draft";
+}
+
+function isFuturePlannedDate(plannedDate: string | null | undefined) {
+  if (!plannedDate) return false;
+  const today = new Date().toISOString().slice(0, 10);
+  return plannedDate > today;
 }
 
 function getItemGroupKey(item: ProductionItemRow) {
@@ -282,6 +291,10 @@ export default function OperatorProductionPage() {
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
+  const [quickActionOrderId, setQuickActionOrderId] = useState<string | null>(
+    null,
+  );
+  const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const cacheKey =
@@ -483,7 +496,7 @@ export default function OperatorProductionPage() {
       let runsQuery = sb
         .from("batch_runs")
         .select(
-          "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
+          "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
         )
         .in("station_id", stationIds)
         .order("created_at", { ascending: false });
@@ -999,6 +1012,7 @@ export default function OperatorProductionPage() {
         dueDate,
         priority,
         status: computeRunStatus(items),
+        plannedDate: run.planned_date ?? null,
         batchCode: run.batch_code,
         totalQty,
         material,
@@ -1054,6 +1068,22 @@ export default function OperatorProductionPage() {
     onlyBlocked,
     orderFilter,
   ]);
+
+  const queueItemByOrderId = useMemo(() => {
+    const map = new Map<string, QueueItem>();
+    Array.from(queueByStation.values())
+      .flat()
+      .forEach((item) => {
+        if (!map.has(item.orderId)) {
+          map.set(item.orderId, item);
+        }
+      });
+    return map;
+  }, [queueByStation]);
+
+  const quickActionItem = quickActionOrderId
+    ? (queueItemByOrderId.get(quickActionOrderId) ?? null)
+    : null;
 
   const activitySummary = useMemo(() => {
     const todayEvents = activityEvents.filter(
@@ -1455,6 +1485,11 @@ export default function OperatorProductionPage() {
     setBlockedReasonText("");
   };
 
+  const closeQuickAction = () => {
+    setIsQuickActionOpen(false);
+    setQuickActionOrderId(null);
+  };
+
   const applyFiltersToUrl = (next?: {
     date?: string;
     status?: QueueStatusFilter;
@@ -1491,6 +1526,18 @@ export default function OperatorProductionPage() {
     const active = document.activeElement as HTMLElement | null;
     active?.blur();
   };
+
+  useEffect(() => {
+    if (!quickActionOrderId || !quickActionItem) {
+      return;
+    }
+    setExpandedOrderItems((prev) => {
+      const next = new Set(prev);
+      next.add(quickActionItem.id);
+      return next;
+    });
+    setIsQuickActionOpen(true);
+  }, [quickActionOrderId, quickActionItem]);
 
   const handleScannerResolved = async (result: ResolveScanTargetResult) => {
     const sb = supabase;
@@ -1540,6 +1587,20 @@ export default function OperatorProductionPage() {
         message: null,
         target_route: targetRoute,
       });
+    }
+    if (currentUser.role === "Production worker" && result.orderId) {
+      setQuickActionOrderId(result.orderId);
+      setIsQuickActionOpen(true);
+      setQueryParams({
+        date: selectedDate,
+        status: statusFilter === "all" ? null : statusFilter,
+        priority: priorityFilter === "all" ? null : priorityFilter,
+        q: searchQuery.trim() || null,
+        blocked: onlyBlocked ? "1" : null,
+        order: result.orderId,
+        station: stationFilter ?? null,
+      });
+      return true;
     }
     router.push(targetRoute);
     return true;
@@ -1803,7 +1864,7 @@ export default function OperatorProductionPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 grid-cols-2 xl:grid-cols-4">
+      <div className="hidden gap-3 md:grid md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardContent className="flex items-center justify-between py-4">
             <div>
@@ -1876,7 +1937,7 @@ export default function OperatorProductionPage() {
       ) : null}
 
       {activityEvents.length > 0 ? (
-        <Card>
+        <Card className="hidden md:block">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">My recent activity</CardTitle>
           </CardHeader>
@@ -2192,10 +2253,16 @@ export default function OperatorProductionPage() {
                                                 Boolean(prodItem.started_at) ||
                                                 prodItem.status ===
                                                   "in_progress";
-                                              const isDone =
-                                                prodItem.status === "done";
                                               const isBlocked =
                                                 prodItem.status === "blocked";
+                                              const startLockedByDate =
+                                                !hasStarted &&
+                                                !isBlocked &&
+                                                isFuturePlannedDate(
+                                                  item.plannedDate,
+                                                );
+                                              const isDone =
+                                                prodItem.status === "done";
                                               const isStarting =
                                                 isActionLoading(
                                                   prodItem.id,
@@ -2216,6 +2283,7 @@ export default function OperatorProductionPage() {
                                                       isDone ||
                                                       (hasStarted &&
                                                         !isBlocked) ||
+                                                      startLockedByDate ||
                                                       (!isBlocked &&
                                                         hasBlockingDependencies) ||
                                                       isStarting
@@ -2235,6 +2303,15 @@ export default function OperatorProductionPage() {
                                                       ? "Resume"
                                                       : "Start"}
                                                   </Button>
+                                                  {startLockedByDate &&
+                                                  item.plannedDate ? (
+                                                    <span className="self-center text-[10px] text-amber-600">
+                                                      Available on{" "}
+                                                      {formatDate(
+                                                        item.plannedDate,
+                                                      )}
+                                                    </span>
+                                                  ) : null}
                                                   <Button
                                                     variant="outline"
                                                     size="sm"
@@ -2536,89 +2613,234 @@ export default function OperatorProductionPage() {
       ) : null}
 
       <BottomSheet
+        open={isQuickActionOpen}
+        onClose={closeQuickAction}
+        ariaLabel="Quick order actions"
+        title={quickActionItem ? `${quickActionItem.orderNumber} / ${quickActionItem.batchCode}` : "Quick actions"}
+        closeButtonLabel="Close quick actions"
+        keyboardAware
+        enableSwipeToClose
+      >
+        <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3">
+          {quickActionItem ? (
+            <>
+              <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <div>{quickActionItem.customerName}</div>
+                <div className="mt-1">
+                  {quickActionItem.totalQty} pcs
+                  {quickActionItem.material
+                    ? ` · ${quickActionItem.material}`
+                    : ""}
+                  {quickActionItem.plannedDate
+                    ? ` · Planned ${formatDate(quickActionItem.plannedDate)}`
+                    : ""}
+                </div>
+              </div>
+              {quickActionItem.items.map((prodItem) => {
+                const hasStarted =
+                  Boolean(prodItem.started_at) ||
+                  prodItem.status === "in_progress";
+                const isBlocked = prodItem.status === "blocked";
+                const isDone = prodItem.status === "done";
+                const startLockedByDate =
+                  !hasStarted &&
+                  !isBlocked &&
+                  isFuturePlannedDate(quickActionItem.plannedDate);
+                const isStarting = isActionLoading(prodItem.id, "in_progress");
+                const isCompleting = isActionLoading(prodItem.id, "done");
+                return (
+                  <div
+                    key={prodItem.id}
+                    className="rounded-md border border-border bg-background px-3 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs text-muted-foreground">
+                        {prodItem.item_name}
+                      </div>
+                      <Badge variant={statusBadge(prodItem.status)}>
+                        {String(prodItem.status ?? "queued").replace("_", " ")}
+                      </Badge>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Qty: {prodItem.qty}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        disabled={
+                          isDone || (hasStarted && !isBlocked) || startLockedByDate || isStarting
+                        }
+                        onClick={() =>
+                          handleUserStatusUpdate(
+                            prodItem.id,
+                            quickActionItem.id,
+                            "in_progress",
+                          )
+                        }
+                      >
+                        {isBlocked ? "Resume" : "Start"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!hasStarted || isDone || isBlocked || isCompleting}
+                        onClick={() =>
+                          handleUserStatusUpdate(
+                            prodItem.id,
+                            quickActionItem.id,
+                            "done",
+                          )
+                        }
+                      >
+                        Done
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={isDone}
+                        onClick={() =>
+                          handleOpenBlocked(quickActionItem.id, prodItem.id)
+                        }
+                      >
+                        Blocked
+                      </Button>
+                    </div>
+                    {startLockedByDate && quickActionItem.plannedDate ? (
+                      <div className="mt-1 text-[11px] text-amber-600">
+                        Available on {formatDate(quickActionItem.plannedDate)}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+              Order not found in your queue.
+            </div>
+          )}
+        </div>
+      </BottomSheet>
+
+      <SideDrawer
         open={isProfilePanelOpen}
         onClose={() => setIsProfilePanelOpen(false)}
         ariaLabel="Operator profile"
-        closeButtonLabel="Close profile"
-        title="My profile"
-        enableSwipeToClose
-        keyboardAware
+        closeButtonLabel="Close profile panel"
+        side="right"
       >
-        <div className="space-y-4 px-4 pb-4 pt-3">
-          <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
-            {currentUser.avatarUrl ? (
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.name}
-                className="h-12 w-12 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
-                {userInitials || "U"}
-              </div>
-            )}
-            <div className="min-w-0">
-              <div className="truncate font-semibold">{currentUser.name}</div>
-              <div className="text-sm text-muted-foreground">
-                {userRoleLabel}
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg border border-border px-3 py-2">
-              <div className="text-[11px] text-muted-foreground">
-                Today done
-              </div>
-              <div className="text-lg font-semibold">
-                {activitySummary.done}
-              </div>
-            </div>
-            <div className="rounded-lg border border-border px-3 py-2">
-              <div className="text-[11px] text-muted-foreground">
-                Today time
-              </div>
-              <div className="text-lg font-semibold">
-                {formatDuration(activitySummary.minutes)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-border px-3 py-2">
-              <div className="text-[11px] text-muted-foreground">7d done</div>
-              <div className="text-lg font-semibold">{weeklySummary.done}</div>
-            </div>
-            <div className="rounded-lg border border-border px-3 py-2">
-              <div className="text-[11px] text-muted-foreground">7d time</div>
-              <div className="text-lg font-semibold">
-                {formatDuration(weeklySummary.minutes)}
-              </div>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <ThemeToggle
-              variant="menu"
-              className="rounded-lg border border-border px-3 py-2 hover:bg-muted/40"
-            />
-            <Link
-              href="/profile"
-              onClick={() => setIsProfilePanelOpen(false)}
-              className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
-            >
-              <UserCircle2Icon className="h-4 w-4" />
-              Open profile
-            </Link>
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <h3 className="text-sm font-semibold">My profile</h3>
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
-              onClick={() => {
-                setIsProfilePanelOpen(false);
-                void signOut();
-              }}
+              className="text-sm text-muted-foreground"
+              onClick={() => setIsProfilePanelOpen(false)}
             >
-              <LogOutIcon className="h-4 w-4" />
-              Sign out
+              Close
             </button>
           </div>
+          <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
+              {currentUser.avatarUrl ? (
+                <img
+                  src={currentUser.avatarUrl}
+                  alt={currentUser.name}
+                  className="h-12 w-12 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
+                  {userInitials || "U"}
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="truncate font-semibold">{currentUser.name}</div>
+                <div className="text-sm text-muted-foreground">
+                  {userRoleLabel}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">
+                  Today done
+                </div>
+                <div className="text-lg font-semibold">
+                  {activitySummary.done}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">
+                  Today time
+                </div>
+                <div className="text-lg font-semibold">
+                  {formatDuration(activitySummary.minutes)}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">7d done</div>
+                <div className="text-lg font-semibold">{weeklySummary.done}</div>
+              </div>
+              <div className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">7d time</div>
+                <div className="text-lg font-semibold">
+                  {formatDuration(weeklySummary.minutes)}
+                </div>
+              </div>
+            </div>
+            {activityEvents.length > 0 ? (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-muted-foreground">
+                  Recent activity
+                </div>
+                {activityEvents.slice(0, 8).map((event) => (
+                  <div
+                    key={event.id}
+                    className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-xs"
+                  >
+                    <div className="text-muted-foreground">
+                      {event.from_status ?? "queued"} -&gt;{" "}
+                      <span className="font-medium text-foreground">
+                        {event.to_status ?? "unknown"}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {new Date(event.created_at).toLocaleTimeString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div className="space-y-2 pb-2">
+              <ThemeToggle
+                variant="menu"
+                className="rounded-lg border border-border px-3 py-2 hover:bg-muted/40"
+              />
+              <Link
+                href="/profile"
+                onClick={() => setIsProfilePanelOpen(false)}
+                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
+              >
+                <UserCircle2Icon className="h-4 w-4" />
+                Open profile
+              </Link>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
+                onClick={() => {
+                  setIsProfilePanelOpen(false);
+                  void signOut();
+                }}
+              >
+                <LogOutIcon className="h-4 w-4" />
+                Sign out
+              </button>
+            </div>
+          </div>
         </div>
-      </BottomSheet>
+      </SideDrawer>
 
       <div
         className={`fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex ${isProfilePanelOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
