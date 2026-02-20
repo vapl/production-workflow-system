@@ -172,6 +172,7 @@ export default function OrderDetailPage() {
 
   const {
     orders,
+    isLoading: isOrdersLoading,
     refreshOrders,
     updateOrder,
     addOrderAttachment,
@@ -291,6 +292,7 @@ export default function OrderDetailPage() {
   const [activeTab, setActiveTab] = useState("overview");
   const [commentMessage, setCommentMessage] = useState("");
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
+  const [showNotFound, setShowNotFound] = useState(false);
   const [engineers, setEngineers] = useState<{ id: string; name: string }[]>(
     [],
   );
@@ -557,9 +559,27 @@ export default function OrderDetailPage() {
 
   useEffect(() => {
     setOrderState(order);
-    setIsLoadingOrder(false);
     setChecklistState(order?.checklist ?? {});
   }, [order]);
+
+  useEffect(() => {
+    if (isOrdersLoading) {
+      setIsLoadingOrder(true);
+      setShowNotFound(false);
+      return;
+    }
+    if (order) {
+      setIsLoadingOrder(false);
+      setShowNotFound(false);
+      return;
+    }
+    setIsLoadingOrder(true);
+    const timer = window.setTimeout(() => {
+      setIsLoadingOrder(false);
+      setShowNotFound(true);
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [isOrdersLoading, order]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1423,11 +1443,12 @@ export default function OrderDetailPage() {
       }),
     [activeOrderInputFields, orderInputInitialValues, orderInputValues],
   );
-  if (!orderState && isLoadingOrder) {
+  if (!orderState && (isLoadingOrder || isOrdersLoading || !showNotFound)) {
     return (
       <section className="space-y-3">
         <h1 className="text-xl font-semibold">Loading order...</h1>
         <p className="text-sm text-muted-foreground">Fetching order details.</p>
+        <LoadingSpinner size="sm" label="Loading..." />
       </section>
     );
   }
