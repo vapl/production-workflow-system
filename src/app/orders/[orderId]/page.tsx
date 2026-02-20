@@ -1085,8 +1085,9 @@ export default function OrderDetailPage() {
   const hasRequiredOrderInputs =
     completedRequiredOrderInputCount === requiredOrderInputFields.length;
   const hasRequiredProductionOrderInputs =
+    requiredProductionOrderInputFields.length > 0 &&
     completedRequiredProductionOrderInputCount ===
-    requiredProductionOrderInputFields.length;
+      requiredProductionOrderInputFields.length;
   const engineeringAttachmentCategoryId =
     rules.attachmentCategoryDefaults?.Engineering ?? null;
   const engineeringScopedAttachments = engineeringAttachmentCategoryId
