@@ -44,6 +44,7 @@ import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { useHierarchy } from "./HierarchyContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
 import {
+  formatUserRoleLabel,
   normalizeUserRole,
   useCurrentUser,
   type UserRole,
@@ -4666,15 +4667,15 @@ export default function SettingsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-                    {[
-                      "Production manager",
-                      "Admin",
-                      "Owner",
-                      "Production",
-                      "Engineering",
-                      "Sales",
-                    ].map((role) => (
+                <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                  {[
+                    "Production manager",
+                    "Admin",
+                    "Owner",
+                    "Production",
+                    "Engineering",
+                    "Sales",
+                  ].map((role) => (
                       <label
                         key={role}
                         className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
@@ -4690,7 +4691,7 @@ export default function SettingsPage() {
                             });
                           }}
                         />
-                        {role}
+                        {role === "Owner" ? role : formatUserRoleLabel(role)}
                       </label>
                     ))}
                   </div>
@@ -5995,7 +5996,7 @@ export default function SettingsPage() {
                       <SelectContent>
                         {assignableRoleOptions.map((roleOption) => (
                           <SelectItem key={roleOption} value={roleOption}>
-                            {roleOption}
+                            {formatUserRoleLabel(roleOption)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -6089,7 +6090,7 @@ export default function SettingsPage() {
                             <SelectItem key={roleOption} value={roleOption}>
                               {roleOption === "Admin"
                                 ? "Admin (legacy)"
-                                : roleOption}
+                                : formatUserRoleLabel(roleOption)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -6936,7 +6937,7 @@ export default function SettingsPage() {
                         {attachmentRoles.map((role) => (
                           <SelectField
                             key={role}
-                            label={role}
+                            label={formatUserRoleLabel(role)}
                             value={
                               attachmentDefaultDrafts[role] ??
                               attachmentCategoryDrafts[0]?.id ??

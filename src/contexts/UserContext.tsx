@@ -26,6 +26,19 @@ export const userRoleOptions: UserRole[] = [
   "Production",
 ];
 
+export function formatUserRoleLabel(role: UserRole | string) {
+  switch (role) {
+    case "Production manager":
+      return "Production planner";
+    case "Production worker":
+      return "Operator";
+    case "Production":
+      return "Warehouse";
+    default:
+      return role;
+  }
+}
+
 export function normalizeUserRole(value?: string | null): UserRole {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -40,9 +53,12 @@ export function normalizeUserRole(value?: string | null): UserRole {
   if (normalized === "sales") return "Sales";
   if (normalized === "engineering") return "Engineering";
   if (normalized === "production manager") return "Production manager";
+  if (normalized === "production planner") return "Production manager";
   if (normalized === "production worker") return "Production worker";
+  if (normalized === "operator") return "Production worker";
   if (normalized === "dealer") return "Dealer";
   if (normalized === "production") return "Production";
+  if (normalized === "warehouse") return "Production";
   return "Sales";
 }
 

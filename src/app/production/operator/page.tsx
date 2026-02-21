@@ -622,7 +622,13 @@ export default function OperatorProductionPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentUser.id, currentUser.tenantId, cacheKey, selectedDate, orderFilter]);
+  }, [
+    currentUser.id,
+    currentUser.tenantId,
+    cacheKey,
+    selectedDate,
+    orderFilter,
+  ]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1146,10 +1152,20 @@ export default function OperatorProductionPage() {
         ? (targetItem.started_at ?? now)
         : targetItem.started_at;
     const nextDoneAt = status === "done" ? now : targetItem.done_at;
-    const nextDurationMinutes =
+    let nextDurationMinutes =
       status === "done"
         ? computeWorkingMinutes(nextStartedAt ?? now, now, workingCalendar)
         : (targetItem.duration_minutes ?? null);
+    if (status === "done" && (nextDurationMinutes ?? 0) <= 0 && nextStartedAt) {
+      const startMs = Date.parse(nextStartedAt);
+      const endMs = Date.parse(now);
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+        nextDurationMinutes = Math.max(
+          1,
+          Math.round((endMs - startMs) / 60000),
+        );
+      }
+    }
     const nextMeta = {
       ...(targetItem.meta ?? {}),
       blocked_reason: isBlocked ? (extra?.blockedReason ?? null) : null,
@@ -1298,7 +1314,16 @@ export default function OperatorProductionPage() {
     );
     const stationItems = productionItems
       .map((item) =>
-        item.id === itemId ? { ...item, status, meta: nextMeta } : item,
+        item.id === itemId
+          ? {
+              ...item,
+              status,
+              meta: nextMeta,
+              started_at: nextStartedAt ?? item.started_at ?? null,
+              done_at: nextDoneAt ?? item.done_at ?? null,
+              duration_minutes: nextDurationMinutes,
+            }
+          : item,
       )
       .filter(
         (item) =>
@@ -1356,7 +1381,16 @@ export default function OperatorProductionPage() {
     if (nextRunStatus === "done") {
       const orderItems = productionItems
         .map((item) =>
-          item.id === itemId ? { ...item, status, meta: nextMeta } : item,
+          item.id === itemId
+            ? {
+                ...item,
+                status,
+                meta: nextMeta,
+                started_at: nextStartedAt ?? item.started_at ?? null,
+                done_at: nextDoneAt ?? item.done_at ?? null,
+                duration_minutes: nextDurationMinutes,
+              }
+            : item,
         )
         .filter((item) => item.order_id === run.order_id);
       if (
@@ -2616,7 +2650,11 @@ export default function OperatorProductionPage() {
         open={isQuickActionOpen}
         onClose={closeQuickAction}
         ariaLabel="Quick order actions"
-        title={quickActionItem ? `${quickActionItem.orderNumber} / ${quickActionItem.batchCode}` : "Quick actions"}
+        title={
+          quickActionItem
+            ? `${quickActionItem.orderNumber} / ${quickActionItem.batchCode}`
+            : "Quick actions"
+        }
         closeButtonLabel="Close quick actions"
         keyboardAware
         enableSwipeToClose
@@ -2670,7 +2708,10 @@ export default function OperatorProductionPage() {
                         size="sm"
                         className="gap-2"
                         disabled={
-                          isDone || (hasStarted && !isBlocked) || startLockedByDate || isStarting
+                          isDone ||
+                          (hasStarted && !isBlocked) ||
+                          startLockedByDate ||
+                          isStarting
                         }
                         onClick={() =>
                           handleUserStatusUpdate(
@@ -2685,7 +2726,9 @@ export default function OperatorProductionPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={!hasStarted || isDone || isBlocked || isCompleting}
+                        disabled={
+                          !hasStarted || isDone || isBlocked || isCompleting
+                        }
                         onClick={() =>
                           handleUserStatusUpdate(
                             prodItem.id,
@@ -2781,7 +2824,9 @@ export default function OperatorProductionPage() {
               </div>
               <div className="rounded-lg border border-border px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">7d done</div>
-                <div className="text-lg font-semibold">{weeklySummary.done}</div>
+                <div className="text-lg font-semibold">
+                  {weeklySummary.done}
+                </div>
               </div>
               <div className="rounded-lg border border-border px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">7d time</div>
@@ -2949,7 +2994,7 @@ export default function OperatorProductionPage() {
         </div>
       </div>
 
-      <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 md:hidden">
+      <div className="fixed inset-x-4 bottom-[calc(2.75rem+env(safe-area-inset-bottom))] z-30 md:hidden">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Button

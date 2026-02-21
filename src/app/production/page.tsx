@@ -171,6 +171,7 @@ type QueueItem = {
   batchCode: string;
   totalQty: number;
   material: string;
+  plannedDate?: string | null;
   startedAt?: string | null;
   doneAt?: string | null;
   durationMinutes?: number | null;
@@ -272,9 +273,7 @@ export default function ProductionPage() {
   const { rules } = useWorkflowRules();
   const [selectedBatchKeys, setSelectedBatchKeys] = useState<string[]>([]);
   const [selectedRouteKey, setSelectedRouteKey] = useState("default");
-  const [plannedDate, setPlannedDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [plannedDate] = useState(new Date().toISOString().slice(0, 10));
   const [viewDate, setViewDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
@@ -368,31 +367,28 @@ export default function ProductionPage() {
   const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
   const [isMobilePlanningRouteOpen, setIsMobilePlanningRouteOpen] =
     useState(false);
-  const [isMobilePlanningDateOpen, setIsMobilePlanningDateOpen] =
-    useState(false);
   const [isMobileQueueFiltersOpen, setIsMobileQueueFiltersOpen] =
     useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const [removingQueueId, setRemovingQueueId] = useState<string | null>(null);
-  const [splitRows, setSplitRows] = useState<
-    Array<{
-      id: string;
-      orderId: string;
-      orderNumber: string;
-      customerName: string;
-      batchCode: string;
-      priority: Priority;
-      fieldLabel: string;
-      itemName: string;
-      qty: number;
-      material: string;
-      rowIndex: number;
-      rawRow: Record<string, unknown>;
-    }>
-  >([]);
+  const [selectedQueueRunIds, setSelectedQueueRunIds] = useState<string[]>([]);
+  const [queueActionDate, setQueueActionDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [isQueueBulkApplying, setIsQueueBulkApplying] = useState(false);
+  const [queueRemoveChoice, setQueueRemoveChoice] = useState<{
+    runId: string;
+    orderLabel: string;
+    stationName: string;
+  } | null>(null);
+  const [splitRows, setSplitRows] = useState<SplitRow[]>([]);
   const [splitSelections, setSplitSelections] = useState<
     Record<string, string[]>
   >({});
+  const [splitPlannedDates, setSplitPlannedDates] = useState<
+    Record<string, string>
+  >({});
+  const [splitGlobalPlannedDate, setSplitGlobalPlannedDate] = useState("");
   const planningSwipeStartXRef = useRef<number | null>(null);
   const planningSwipeStartYRef = useRef<number | null>(null);
   const planningSwipeLastXRef = useRef(0);
@@ -1356,11 +1352,9 @@ export default function ProductionPage() {
     routes.find((route) => route.key === selectedRouteKey) ?? routes[0];
   const routeStations = useMemo(() => [...stations], [stations]);
 
-  const plannedDateValid = Boolean(plannedDate);
   const canRelease =
     selectedBatchKeys.length > 0 &&
-    routeStations.length > 0 &&
-    plannedDateValid;
+    routeStations.length > 0;
 
   const formatTableRow = (
     field: OrderInputField,
@@ -1639,11 +1633,20 @@ export default function ProductionPage() {
     }
     const rows = buildSplitRows(nextGroups);
     const defaults: Record<string, string[]> = {};
+    const dateDefaults: Record<string, string> = {};
     rows.forEach((row) => {
       defaults[row.id] = routeStations.map((station) => station.id);
+      dateDefaults[row.id] = rowPlannedDateMap.get(row.id) ?? plannedDate;
     });
+    const dateValues = Array.from(new Set(Object.values(dateDefaults))).filter(
+      Boolean,
+    );
+    const initialGlobalDate =
+      dateValues.length === 1 ? dateValues[0] : plannedDate;
     setSplitRows(rows);
     setSplitSelections(defaults);
+    setSplitPlannedDates(dateDefaults);
+    setSplitGlobalPlannedDate(initialGlobalDate);
     setIsSplitOpen(true);
   };
 
@@ -1665,24 +1668,104 @@ export default function ProductionPage() {
     const selectedRows = splitRows.filter(
       (row) => (splitSelections[row.id] ?? []).length > 0,
     );
+    if (selectedRows.length === 0) {
+      setDataError("Select at least one construction row.");
+      setIsCreatingWorkOrders(false);
+      return;
+    }
+
+    const effectiveDatesByRow = new Map<string, string>();
+    for (const row of selectedRows) {
+      const date = splitPlannedDates[row.id] ?? plannedDate;
+      if (!date) {
+        setDataError("Planned date is required for selected constructions.");
+        setIsCreatingWorkOrders(false);
+        return;
+      }
+      effectiveDatesByRow.set(row.id, date);
+    }
+
+    const usedCodesByOrder = new Map<string, Set<string>>();
+    const registerCode = (orderId: string, code: string) => {
+      if (!usedCodesByOrder.has(orderId)) {
+        usedCodesByOrder.set(orderId, new Set());
+      }
+      usedCodesByOrder.get(orderId)?.add(code);
+    };
+    batchRuns.forEach((run) => registerCode(run.order_id, run.batch_code));
+    productionItems.forEach((item) =>
+      registerCode(item.order_id, item.batch_code || "B1"),
+    );
+    const nextBatchCode = (orderId: string, preferred?: string) => {
+      const used = usedCodesByOrder.get(orderId) ?? new Set<string>();
+      if (!usedCodesByOrder.has(orderId)) {
+        usedCodesByOrder.set(orderId, used);
+      }
+      if (preferred && !used.has(preferred)) {
+        used.add(preferred);
+        return preferred;
+      }
+      let max = 0;
+      used.forEach((code) => {
+        const match = /^B(\d+)$/i.exec(code.trim());
+        if (match?.[1]) {
+          max = Math.max(max, Number(match[1]));
+        }
+      });
+      const generated = `B${Math.max(1, max + 1)}`;
+      used.add(generated);
+      return generated;
+    };
+
+    const batchCodeByOrderDate = new Map<string, string>();
+    const selectedRowsByOrder = new Map<string, SplitRow[]>();
+    selectedRows.forEach((row) => {
+      if (!selectedRowsByOrder.has(row.orderId)) {
+        selectedRowsByOrder.set(row.orderId, []);
+      }
+      selectedRowsByOrder.get(row.orderId)?.push(row);
+    });
+    selectedRowsByOrder.forEach((rows, orderId) => {
+      const uniqueDates = Array.from(
+        new Set(
+          rows.map((row) => effectiveDatesByRow.get(row.id) ?? plannedDate),
+        ),
+      ).sort();
+      rows.sort((a, b) => a.id.localeCompare(b.id));
+      uniqueDates.forEach((date, index) => {
+        const firstRow = rows.find(
+          (row) => (effectiveDatesByRow.get(row.id) ?? plannedDate) === date,
+        );
+        const preferred = index === 0 ? firstRow?.batchCode : undefined;
+        const code = nextBatchCode(orderId, preferred);
+        batchCodeByOrderDate.set(`${orderId}:${date}`, code);
+      });
+    });
+
     const productionRows = selectedRows.flatMap((row) =>
-      (splitSelections[row.id] ?? []).map((stationId) => ({
-        order_id: row.orderId,
-        batch_code: row.batchCode,
-        item_name: row.itemName,
-        qty: row.qty,
-        material: row.material || null,
-        priority: row.priority,
-        status: "queued",
-        station_id: stationId,
-        meta: {
-          fieldLabel: row.fieldLabel,
-          rowIndex: row.rowIndex,
-          rowKey: row.id,
-          plannedDate,
-          row: row.rawRow,
-        },
-      })),
+      (splitSelections[row.id] ?? []).map((stationId) => {
+        const rowDate = effectiveDatesByRow.get(row.id) ?? plannedDate;
+        const batchCode =
+          batchCodeByOrderDate.get(`${row.orderId}:${rowDate}`) ??
+          row.batchCode;
+        return {
+          order_id: row.orderId,
+          batch_code: batchCode,
+          item_name: row.itemName,
+          qty: row.qty,
+          material: row.material || null,
+          priority: row.priority,
+          status: "queued",
+          station_id: stationId,
+          meta: {
+            fieldLabel: row.fieldLabel,
+            rowIndex: row.rowIndex,
+            rowKey: row.id,
+            plannedDate: rowDate,
+            row: row.rawRow,
+          },
+        };
+      }),
     );
     if (productionRows.length > 0) {
       const { data, error } = await supabase
@@ -1704,17 +1787,27 @@ export default function ProductionPage() {
       );
       setProductionItems((prev) => [...normalizedInsertedItems, ...prev]);
     }
-    const insertRows = nextGroups.flatMap((group) =>
-      routeStations.map((station, index) => ({
-        order_id: group.orderId,
-        batch_code: group.batchCode,
+    const runsByOrderDate = new Map<string, { orderId: string; date: string }>();
+    selectedRows.forEach((row) => {
+      const date = effectiveDatesByRow.get(row.id) ?? plannedDate;
+      const key = `${row.orderId}:${date}`;
+      if (!runsByOrderDate.has(key)) {
+        runsByOrderDate.set(key, { orderId: row.orderId, date });
+      }
+    });
+    const insertRows = Array.from(runsByOrderDate.values()).flatMap((entry) => {
+      const batchCode =
+        batchCodeByOrderDate.get(`${entry.orderId}:${entry.date}`) ?? "B1";
+      return routeStations.map((station, index) => ({
+        order_id: entry.orderId,
+        batch_code: batchCode,
         station_id: station.id,
         route_key: activeRoute.key,
         step_index: index,
         status: "queued",
-        planned_date: plannedDate,
-      })),
-    );
+        planned_date: entry.date,
+      }));
+    });
     const { data: inserted, error } = await supabase
       .from("batch_runs")
       .insert(insertRows)
@@ -1729,7 +1822,7 @@ export default function ProductionPage() {
     await supabase
       .from("orders")
       .update({ status: "in_production" })
-      .in("id", Array.from(new Set(nextGroups.map((group) => group.orderId))));
+      .in("id", Array.from(new Set(selectedRows.map((row) => row.orderId))));
     const normalizedInsertedRuns: BatchRunRow[] = (inserted ?? []).map(
       (row) => ({
         ...(row as Omit<BatchRunRow, "orders">),
@@ -1738,6 +1831,8 @@ export default function ProductionPage() {
     );
     setBatchRuns((prev) => [...normalizedInsertedRuns, ...prev]);
     setSelectedBatchKeys([]);
+    setSplitPlannedDates({});
+    setSplitGlobalPlannedDate("");
     setIsSplitOpen(false);
     setIsCreatingWorkOrders(false);
   };
@@ -1792,6 +1887,7 @@ export default function ProductionPage() {
         batchCode: run.batch_code,
         totalQty,
         material,
+        plannedDate: run.planned_date ?? null,
         startedAt: run.started_at,
         doneAt: run.done_at,
         durationMinutes: run.duration_minutes ?? null,
@@ -1809,48 +1905,102 @@ export default function ProductionPage() {
       ),
     [queueByStation],
   );
+  const visibleQueueRunIds = useMemo(
+    () =>
+      Array.from(queueByStation.values())
+        .flat()
+        .map((item) => item.id),
+    [queueByStation],
+  );
+  const allVisibleQueueSelected =
+    visibleQueueRunIds.length > 0 &&
+    visibleQueueRunIds.every((id) => selectedQueueRunIds.includes(id));
 
-  const removeFromQueue = async (id: string) => {
-    if (!supabase) {
+  useEffect(() => {
+    const visibleSet = new Set(visibleQueueRunIds);
+    setSelectedQueueRunIds((prev) => prev.filter((id) => visibleSet.has(id)));
+  }, [visibleQueueRunIds]);
+
+  const canManageQueue =
+    user.isAdmin || user.isOwner || user.role === "Production manager";
+
+  const canRunBeRemoved = (run: BatchRunRow) => {
+    const stationItems = productionItems.filter(
+      (item) =>
+        item.order_id === run.order_id &&
+        item.batch_code === run.batch_code &&
+        item.station_id === run.station_id,
+    );
+    return !stationItems.some(
+      (row) =>
+        row.started_at || row.status === "in_progress" || row.status === "done",
+    );
+  };
+
+  const removeQueueRuns = async (runIds: string[]) => {
+    if (!supabase || runIds.length === 0) {
       return;
     }
-    const run = batchRuns.find((item) => item.id === id);
-    if (!run) {
+    const runsToRemove = batchRuns.filter((run) => runIds.includes(run.id));
+    if (runsToRemove.length === 0) {
       return;
     }
-    const { error } = await supabase
-      .from("batch_runs")
-      .delete()
-      .eq("id", run.id);
-    if (error) {
-      setDataError("Failed to remove from queue.");
-      return;
+
+    let hadError = false;
+    for (const run of runsToRemove) {
+      const { error } = await supabase
+        .from("batch_runs")
+        .delete()
+        .eq("id", run.id);
+      if (error) {
+        hadError = true;
+        continue;
+      }
+      const { error: itemsError } = await supabase
+        .from("production_items")
+        .delete()
+        .eq("order_id", run.order_id)
+        .eq("batch_code", run.batch_code)
+        .eq("station_id", run.station_id);
+      if (itemsError) {
+        hadError = true;
+      }
     }
-    const { error: itemsError } = await supabase
-      .from("production_items")
-      .delete()
-      .eq("order_id", run.order_id)
-      .eq("batch_code", run.batch_code)
-      .eq("station_id", run.station_id);
-    if (itemsError) {
-      setDataError("Removed queue entry, but failed to remove station items.");
-    } else {
-      setProductionItems((prev) =>
-        prev.filter(
-          (item) =>
-            !(
+
+    const removedIdSet = new Set(runsToRemove.map((run) => run.id));
+    setBatchRuns((prev) => prev.filter((run) => !removedIdSet.has(run.id)));
+    setProductionItems((prev) =>
+      prev.filter(
+        (item) =>
+          !runsToRemove.some(
+            (run) =>
               item.order_id === run.order_id &&
               item.batch_code === run.batch_code &&
-              item.station_id === run.station_id
-            ),
-        ),
-      );
+              item.station_id === run.station_id,
+          ),
+      ),
+    );
+    setSelectedQueueRunIds((prev) =>
+      prev.filter((id) => !removedIdSet.has(id)),
+    );
+
+    const remainingRuns = batchRuns.filter((run) => !removedIdSet.has(run.id));
+    const affectedOrderIds = Array.from(
+      new Set(runsToRemove.map((run) => run.order_id)),
+    );
+    for (const orderId of affectedOrderIds) {
+      const hasAnyRuns = remainingRuns.some((run) => run.order_id === orderId);
+      if (!hasAnyRuns) {
+        await supabase
+          .from("orders")
+          .update({ status: "ready_for_production" })
+          .eq("id", orderId);
+      }
     }
-    setBatchRuns((prev) => prev.filter((item) => item.id !== run.id));
-    await supabase
-      .from("orders")
-      .update({ status: "ready_for_production" })
-      .eq("id", run.order_id);
+
+    if (hadError) {
+      setDataError("Some queue entries could not be removed.");
+    }
   };
 
   const handleRemoveFromQueue = async (
@@ -1882,9 +2032,152 @@ export default function ProductionPage() {
     if (!ok) {
       return;
     }
+    if (!canManageQueue) {
+      setDataError("Missing permission to edit station queue.");
+      return;
+    }
     setRemovingQueueId(id);
-    await removeFromQueue(id);
+    await removeQueueRuns([id]);
     setRemovingQueueId(null);
+  };
+
+  const openQueueRemoveChoice = (
+    runId: string,
+    orderLabel: string,
+    stationName: string,
+  ) => {
+    setQueueRemoveChoice({ runId, orderLabel, stationName });
+  };
+
+  const closeQueueRemoveChoice = () => {
+    setQueueRemoveChoice(null);
+  };
+
+  const handleClearAllStationsForRun = async (
+    runId: string,
+    orderLabel?: string,
+  ) => {
+    if (!canManageQueue) {
+      setDataError("Missing permission to edit station queue.");
+      return;
+    }
+    const run = batchRuns.find((item) => item.id === runId);
+    if (!run) {
+      return;
+    }
+    const relatedRuns = batchRuns.filter(
+      (candidate) =>
+        candidate.order_id === run.order_id &&
+        candidate.batch_code === run.batch_code,
+    );
+    const removableRuns = relatedRuns.filter(canRunBeRemoved);
+    if (removableRuns.length === 0) {
+      setDataError("Cannot clear: work has already started on these stations.");
+      return;
+    }
+    const fallbackLabel = run.orders?.order_number
+      ? `${run.orders.order_number} / ${run.batch_code}`
+      : run.batch_code;
+    const label = orderLabel ?? fallbackLabel;
+    const ok = await confirm({
+      title: "Clear from all stations?",
+      description: `This will remove ${label} from ${removableRuns.length} station queue item(s).`,
+      confirmLabel: "Clear all",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!ok) return;
+    setRemovingQueueId(run.id);
+    await removeQueueRuns(removableRuns.map((run) => run.id));
+    setRemovingQueueId(null);
+  };
+
+  const handleMoveSelectedQueueDate = async () => {
+    if (!supabase || selectedQueueRunIds.length === 0) {
+      return;
+    }
+    if (!canManageQueue) {
+      setDataError("Missing permission to edit station queue.");
+      return;
+    }
+    const runs = batchRuns.filter((run) =>
+      selectedQueueRunIds.includes(run.id),
+    );
+    const movable = runs.filter(
+      (run) =>
+        run.status === "queued" ||
+        run.status === "pending" ||
+        run.status === "blocked",
+    );
+    if (movable.length === 0) {
+      setDataError("Selected items cannot be moved by date.");
+      return;
+    }
+    const skipped = runs.length - movable.length;
+    const ok = await confirm({
+      title: "Move selected queue items?",
+      description:
+        skipped > 0
+          ? `Move ${movable.length} item(s) to ${formatDateInput(queueActionDate)}. ${skipped} item(s) will be skipped.`
+          : `Move ${movable.length} item(s) to ${formatDateInput(queueActionDate)}.`,
+      confirmLabel: "Move date",
+      cancelLabel: "Cancel",
+    });
+    if (!ok) {
+      return;
+    }
+    setIsQueueBulkApplying(true);
+    const { error } = await supabase
+      .from("batch_runs")
+      .update({ planned_date: queueActionDate })
+      .in(
+        "id",
+        movable.map((run) => run.id),
+      );
+    setIsQueueBulkApplying(false);
+    if (error) {
+      setDataError("Failed to move selected queue date.");
+      return;
+    }
+    setBatchRuns((prev) =>
+      prev.map((run) =>
+        movable.some((item) => item.id === run.id)
+          ? { ...run, planned_date: queueActionDate }
+          : run,
+      ),
+    );
+  };
+
+  const handleClearSelectedQueue = async () => {
+    if (!canManageQueue) {
+      setDataError("Missing permission to edit station queue.");
+      return;
+    }
+    const runs = batchRuns.filter((run) =>
+      selectedQueueRunIds.includes(run.id),
+    );
+    const removable = runs.filter(canRunBeRemoved);
+    if (removable.length === 0) {
+      setDataError("Cannot clear: selected items already started.");
+      return;
+    }
+    const skipped = runs.length - removable.length;
+    const ok = await confirm({
+      title: "Clear selected queue items?",
+      description:
+        skipped > 0
+          ? `Clear ${removable.length} selected item(s). ${skipped} item(s) will be skipped.`
+          : `Clear ${removable.length} selected item(s) from station queues.`,
+      confirmLabel: "Clear selected",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!ok) {
+      return;
+    }
+    setIsQueueBulkApplying(true);
+    await removeQueueRuns(removable.map((run) => run.id));
+    setIsQueueBulkApplying(false);
   };
 
   const handleRemoveHintStart = (id: string) => {
@@ -2133,23 +2426,20 @@ export default function ProductionPage() {
       {showMobilePlanningActions ? (
         <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-40 md:hidden">
           <div className="flex items-center justify-between gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 rounded-full px-3 text-xs"
-              onClick={() => setIsMobilePlanningDateOpen(true)}
-            >
-              <CalendarIcon className="h-4 w-4" />
-              {plannedDate ? formatDateInput(plannedDate) : "Planned date"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 rounded-full px-3 text-xs"
-              onClick={() => setIsMobilePlanningRouteOpen(true)}
-            >
-              Route
-            </Button>
+            {routes.length > 1 ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 rounded-full px-3 text-xs"
+                onClick={() => setIsMobilePlanningRouteOpen(true)}
+              >
+                Route
+              </Button>
+            ) : (
+              <div className="h-11 rounded-full border border-border bg-muted/20 px-3 text-xs text-muted-foreground inline-flex items-center">
+                {routes[0]?.label ?? "Default route"}
+              </div>
+            )}
             <Button
               type="button"
               className="h-11 rounded-full px-4 text-sm"
@@ -2290,29 +2580,6 @@ export default function ProductionPage() {
           </div>
         </BottomSheet>
         <BottomSheet
-          open={isMobilePlanningDateOpen}
-          onClose={() => setIsMobilePlanningDateOpen(false)}
-          ariaLabel="Planned date"
-          closeButtonLabel="Close planned date"
-          title="Planned date"
-          enableSwipeToClose
-        >
-          <div className="space-y-3 px-4 pt-3">
-            <DatePicker
-              value={plannedDate}
-              onChange={(value) => {
-                setPlannedDate(value);
-                setIsMobilePlanningDateOpen(false);
-              }}
-              min={todayIso}
-              className="space-y-1 text-xs text-muted-foreground"
-            />
-            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              Planning date affects new work orders only.
-            </div>
-          </div>
-        </BottomSheet>
-        <BottomSheet
           open={isMobileQueueFiltersOpen}
           onClose={() => setIsMobileQueueFiltersOpen(false)}
           ariaLabel="Queue filters"
@@ -2355,6 +2622,123 @@ export default function ProductionPage() {
             </div>
           </div>
         </BottomSheet>
+        <BottomSheet
+          open={Boolean(queueRemoveChoice)}
+          onClose={closeQueueRemoveChoice}
+          ariaLabel="Queue remove options"
+          closeButtonLabel="Close remove options"
+          title="Remove from queue"
+          enableSwipeToClose
+        >
+          <div className="space-y-3 px-4 pb-4 pt-3 md:hidden">
+            <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              {queueRemoveChoice
+                ? `${queueRemoveChoice.orderLabel} · ${queueRemoveChoice.stationName}`
+                : ""}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => {
+                if (!queueRemoveChoice) return;
+                const payload = queueRemoveChoice;
+                closeQueueRemoveChoice();
+                void handleRemoveFromQueue(
+                  payload.runId,
+                  payload.orderLabel,
+                  payload.stationName,
+                );
+              }}
+            >
+              Clear current station
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => {
+                if (!queueRemoveChoice) return;
+                const payload = queueRemoveChoice;
+                closeQueueRemoveChoice();
+                void handleClearAllStationsForRun(
+                  payload.runId,
+                  payload.orderLabel,
+                );
+              }}
+            >
+              Clear all stations
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={closeQueueRemoveChoice}
+            >
+              Cancel
+            </Button>
+          </div>
+        </BottomSheet>
+        {queueRemoveChoice ? (
+          <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 px-4 md:flex">
+            <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Remove from queue</h3>
+                <button
+                  type="button"
+                  className="text-sm text-muted-foreground"
+                  onClick={closeQueueRemoveChoice}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="mt-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                {`${queueRemoveChoice.orderLabel} · ${queueRemoveChoice.stationName}`}
+              </div>
+              <div className="mt-4 space-y-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    const payload = queueRemoveChoice;
+                    closeQueueRemoveChoice();
+                    void handleRemoveFromQueue(
+                      payload.runId,
+                      payload.orderLabel,
+                      payload.stationName,
+                    );
+                  }}
+                >
+                  Clear current station
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    const payload = queueRemoveChoice;
+                    closeQueueRemoveChoice();
+                    void handleClearAllStationsForRun(
+                      payload.runId,
+                      payload.orderLabel,
+                    );
+                  }}
+                >
+                  Clear all stations
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full"
+                  onClick={closeQueueRemoveChoice}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </>
 
       <Tabs
@@ -2480,7 +2864,7 @@ export default function ProductionPage() {
                           onChange={(event) =>
                             setReadySearch(event.target.value)
                           }
-                          placeholder="Order, customer, batch..."
+                          placeholder="Order, customer..."
                           className="h-9 text-sm text-foreground"
                         />
                       </label>
@@ -2568,7 +2952,7 @@ export default function ProductionPage() {
                           <div className="flex-1">
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-medium">
-                                {group.orderNumber} / {group.batchCode}
+                                {group.orderNumber}
                               </span>
                               <div className="flex items-center gap-2">
                                 <Link
@@ -2704,7 +3088,7 @@ export default function ProductionPage() {
                           Release to production
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          Unit of work: Batch (e.g. AL-1042 / B1)
+                          Unit of work: Selected construction rows
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground">
@@ -2713,14 +3097,14 @@ export default function ProductionPage() {
                           : "No selection"}
                       </div>
                     </div>
-                    <SelectField
-                      label="Route"
-                      labelClassName="text-xs text-muted-foreground"
-                      value={selectedRouteKey}
-                      onValueChange={setSelectedRouteKey}
-                      className="hidden space-y-1 md:block"
-                    >
-                      {routes.length > 1 ? (
+                    {routes.length > 1 ? (
+                      <SelectField
+                        label="Route"
+                        labelClassName="text-xs text-muted-foreground"
+                        value={selectedRouteKey}
+                        onValueChange={setSelectedRouteKey}
+                        className="hidden space-y-1 md:block"
+                      >
                         <Select
                           value={selectedRouteKey}
                           onValueChange={setSelectedRouteKey}
@@ -2736,50 +3120,24 @@ export default function ProductionPage() {
                             ))}
                           </SelectContent>
                         </Select>
-                      ) : (
-                        <div className="h-9 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
-                          {routes[0]?.label ?? "Default route"}
+                        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+                          {routeStations.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {routeStations.map((station, index) => (
+                                <span
+                                  key={station.id}
+                                  className="rounded-full border border-border bg-background px-2 py-0.5 text-xs"
+                                >
+                                  {index + 1}. {station.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            "No matching stations for default route."
+                          )}
                         </div>
-                      )}
-                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
-                        {routeStations.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {routeStations.map((station, index) => (
-                              <span
-                                key={station.id}
-                                className="rounded-full border border-border bg-background px-2 py-0.5 text-xs"
-                              >
-                                {index + 1}. {station.name}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          "No matching stations for default route."
-                        )}
-                      </div>
-                    </SelectField>
-                    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground md:hidden">
-                      <div className="font-medium text-foreground">
-                        Route: {activeRoute?.label ?? "Default route"}
-                      </div>
-                      <div className="mt-1">
-                        Planned date:{" "}
-                        {plannedDate ? formatDateInput(plannedDate) : "-"}
-                      </div>
-                    </div>
-                    <div className="hidden md:block">
-                      <DatePicker
-                        label="Planned date"
-                        value={plannedDate}
-                        onChange={setPlannedDate}
-                        className="space-y-1 text-xs text-muted-foreground"
-                        min={todayIso}
-                      />
-                    </div>
-                    <div className="rounded-lg border border-border bg-muted/30 mt-2 px-3 py-2 text-xs text-muted-foreground">
-                      Planning date affects new work orders only. Use the queue
-                      view controls to switch days.
-                    </div>
+                      </SelectField>
+                    ) : null}
                     <div className="hidden items-center justify-between gap-2 md:flex">
                       <Button onClick={handleOpenSplit} disabled={!canRelease}>
                         {releaseButtonLabel}
@@ -2817,13 +3175,13 @@ export default function ProductionPage() {
               >
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
                   <span>Station queues</span>
-                <div className="hidden flex-wrap items-center gap-2 text-sm font-normal text-muted-foreground md:flex">
-                  <DatePicker
-                    label="View date"
-                    value={viewDate}
-                    onChange={setViewDate}
-                    className="flex items-center gap-2 whitespace-nowrap text-sm"
-                  />
+                  <div className="hidden flex-wrap items-center gap-2 text-sm font-normal text-muted-foreground md:flex">
+                    <DatePicker
+                      label="View date"
+                      value={viewDate}
+                      onChange={setViewDate}
+                      className="flex items-center gap-2 whitespace-nowrap text-sm"
+                    />
                     <SelectField
                       label="Range"
                       labelClassName="text-sm font-normal text-muted-foreground"
@@ -2854,6 +3212,112 @@ export default function ProductionPage() {
                   <div className="text-xs font-normal text-muted-foreground md:hidden">
                     {formatDateInput(viewDate)} - {plannedRangeDays} day
                     {plannedRangeDays === 1 ? "" : "s"}
+                  </div>
+                </div>
+                <div className="hidden flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/10 px-3 py-2 md:flex">
+                  <span className="text-xs text-muted-foreground">
+                    {selectedQueueRunIds.length > 0
+                      ? `${selectedQueueRunIds.length} selected`
+                      : "No selection"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setSelectedQueueRunIds(
+                        allVisibleQueueSelected ? [] : visibleQueueRunIds,
+                      )
+                    }
+                  >
+                    {allVisibleQueueSelected
+                      ? "Clear selected"
+                      : "Select all visible"}
+                  </Button>
+                  <DatePicker
+                    label="Move date"
+                    value={queueActionDate}
+                    onChange={(value) =>
+                      setQueueActionDate(value || queueActionDate)
+                    }
+                    className="text-xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      selectedQueueRunIds.length === 0 || isQueueBulkApplying
+                    }
+                    onClick={() => void handleMoveSelectedQueueDate()}
+                  >
+                    Move selected
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      selectedQueueRunIds.length === 0 || isQueueBulkApplying
+                    }
+                    onClick={() => void handleClearSelectedQueue()}
+                  >
+                    Clear selected
+                  </Button>
+                </div>
+                <div className="space-y-2 rounded-lg border border-border bg-muted/10 px-3 py-2 md:hidden">
+                  <div className="text-xs text-muted-foreground">
+                    {selectedQueueRunIds.length > 0
+                      ? `${selectedQueueRunIds.length} selected`
+                      : "No selection"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() =>
+                        setSelectedQueueRunIds(
+                          allVisibleQueueSelected ? [] : visibleQueueRunIds,
+                        )
+                      }
+                    >
+                      {allVisibleQueueSelected ? "Clear" : "Select all"}
+                    </Button>
+                    <DatePicker
+                      value={queueActionDate}
+                      onChange={(value) =>
+                        setQueueActionDate(value || queueActionDate)
+                      }
+                      className="text-xs"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      disabled={
+                        selectedQueueRunIds.length === 0 || isQueueBulkApplying
+                      }
+                      onClick={() => void handleMoveSelectedQueueDate()}
+                    >
+                      Move selected
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      disabled={
+                        selectedQueueRunIds.length === 0 || isQueueBulkApplying
+                      }
+                      onClick={() => void handleClearSelectedQueue()}
+                    >
+                      Clear selected
+                    </Button>
                   </div>
                 </div>
                 {isQueuesLoading ? (
@@ -2919,12 +3383,13 @@ export default function ProductionPage() {
                               >
                                 {" "}
                                 {(() => {
-                                  const canRemove = !item.items.some(
-                                    (row) =>
-                                      row.started_at ||
-                                      row.status === "in_progress" ||
-                                      row.status === "done",
-                                  );
+                                  const canRemove =
+                                    !item.items.some(
+                                      (row) =>
+                                        row.started_at ||
+                                        row.status === "in_progress" ||
+                                        row.status === "done",
+                                    ) && canManageQueue;
                                   return (
                                     <button
                                       type="button"
@@ -2938,7 +3403,7 @@ export default function ProductionPage() {
                                       }`}
                                       onClick={() =>
                                         canRemove
-                                          ? handleRemoveFromQueue(
+                                          ? openQueueRemoveChoice(
                                               item.id,
                                               `${item.orderNumber} / ${item.batchCode}`,
                                               station.name,
@@ -2954,6 +3419,35 @@ export default function ProductionPage() {
                                     </button>
                                   );
                                 })()}
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <Checkbox
+                                    variant="box"
+                                    checked={selectedQueueRunIds.includes(
+                                      item.id,
+                                    )}
+                                    onChange={(event) => {
+                                      const isChecked =
+                                        event.currentTarget.checked;
+                                      setSelectedQueueRunIds((prev) => {
+                                        if (isChecked) {
+                                          if (prev.includes(item.id))
+                                            return prev;
+                                          return [...prev, item.id];
+                                        }
+                                        return prev.filter(
+                                          (id) => id !== item.id,
+                                        );
+                                      });
+                                    }}
+                                  />
+                                  <div className="flex items-center gap-1">
+                                    {item.plannedDate ? (
+                                      <Badge variant="status-draft">
+                                        {formatDateInput(item.plannedDate)}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                </div>
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="space-y-2">
                                     <div>
@@ -3219,7 +3713,11 @@ export default function ProductionPage() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => setIsSplitOpen(false)}
+                    onClick={() => {
+                      setIsSplitOpen(false);
+                      setSplitPlannedDates({});
+                      setSplitGlobalPlannedDate("");
+                    }}
                     aria-label="Close split"
                   >
                     <XIcon className="h-4 w-4" />
@@ -3255,6 +3753,27 @@ export default function ProductionPage() {
                   >
                     Clear all
                   </Button>
+                  <div className="w-full max-w-56">
+                    <DatePicker
+                      label="Common planned date"
+                      labelClassName="text-[11px] text-muted-foreground"
+                      value={splitGlobalPlannedDate || plannedDate}
+                      onChange={(value) => {
+                        const nextDate = value || plannedDate;
+                        setSplitGlobalPlannedDate(nextDate);
+                        setSplitPlannedDates((prev) => {
+                          const next: Record<string, string> = { ...prev };
+                          splitRows.forEach((row) => {
+                            next[row.id] = nextDate;
+                          });
+                          return next;
+                        });
+                      }}
+                      min={todayIso}
+                      className="space-y-1"
+                      triggerClassName="h-8 text-xs"
+                    />
+                  </div>
                 </div>
 
                 <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto">
@@ -3292,6 +3811,22 @@ export default function ProductionPage() {
                                 {row.fieldLabel}
                               </div>
                               <div className="font-medium">{row.itemName}</div>
+                              <div className="mt-2 max-w-56">
+                                <DatePicker
+                                  label="Planned date"
+                                  labelClassName="text-[11px] text-muted-foreground"
+                                  value={splitPlannedDates[row.id] ?? plannedDate}
+                                  onChange={(value) =>
+                                    setSplitPlannedDates((prev) => ({
+                                      ...prev,
+                                      [row.id]: value || plannedDate,
+                                    }))
+                                  }
+                                  min={todayIso}
+                                  className="space-y-1"
+                                  triggerClassName="h-8 text-xs"
+                                />
+                              </div>
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {routeStations.map((station) => {
                                   const selected =
@@ -3343,7 +3878,10 @@ export default function ProductionPage() {
                 <div className="mt-4 flex items-center justify-end gap-2">
                   <Button
                     variant="outline"
-                    onClick={() => setIsSplitOpen(false)}
+                    onClick={() => {
+                      setIsSplitOpen(false);
+                      setSplitPlannedDates({});
+                    }}
                   >
                     Cancel
                   </Button>
@@ -3858,9 +4396,7 @@ export default function ProductionPage() {
                   label="Range"
                   labelClassName="text-xs font-medium text-muted-foreground"
                   value={String(plannedRangeDays)}
-                  onValueChange={(value) =>
-                    setPlannedRangeDays(Number(value))
-                  }
+                  onValueChange={(value) => setPlannedRangeDays(Number(value))}
                   className="flex items-center gap-2"
                 >
                   <Select
@@ -4063,7 +4599,11 @@ export default function ProductionPage() {
             </div>
             <div className="grid h-[calc(90vh-72px)] gap-6 overflow-hidden px-6 py-4 lg:grid-cols-[320px_1fr]">
               <div className="space-y-4 overflow-y-auto pr-2">
-                <SelectField label="Label size" value={qrSize} onValueChange={setQrSize}>
+                <SelectField
+                  label="Label size"
+                  value={qrSize}
+                  onValueChange={setQrSize}
+                >
                   <Select value={qrSize} onValueChange={setQrSize}>
                     <SelectTrigger className="h-10 w-full">
                       <SelectValue />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { OrdersTable } from "./components/OrdersTable";
 import { OrdersCards } from "./components/OrdersCards";
@@ -56,6 +56,7 @@ export default function OrdersPage() {
       "engineering_blocked",
       "ready_for_production",
       "in_production",
+      "done",
     ];
     const salesStatuses: OrderStatus[] = [
       "draft",
@@ -119,6 +120,16 @@ export default function OrdersPage() {
   const [isListLoading, setIsListLoading] = useState(false);
   const [listOffset, setListOffset] = useState(0);
   const pageSize = 20;
+
+  const getEffectiveStatus = useCallback(
+    (order: Order): OrderStatus => order.statusDisplay ?? order.status,
+    [],
+  );
+
+  const isProductionStatus = (status: OrderStatus) =>
+    status === "ready_for_production" || status === "in_production";
+  const isEngineeringAlwaysVisibleStatus = (status: OrderStatus) =>
+    isProductionStatus(status) || status === "done";
 
   const getStoragePathFromUrl = (url: string, bucket: string) => {
     if (!url) {
@@ -517,13 +528,17 @@ export default function OrdersPage() {
     let filtered = source;
     if (isEngineeringUser) {
       filtered = filtered.filter((order) =>
-        assignmentFilter === "queue"
-          ? !order.assignedEngineerId
-          : order.assignedEngineerId === user.id,
+        isEngineeringAlwaysVisibleStatus(getEffectiveStatus(order))
+          ? true
+          : assignmentFilter === "queue"
+            ? !order.assignedEngineerId
+            : order.assignedEngineerId === user.id,
       );
     }
     if (statusFilter !== "all") {
-      filtered = filtered.filter((order) => order.status === statusFilter);
+      filtered = filtered.filter(
+        (order) => getEffectiveStatus(order) === statusFilter,
+      );
     }
     if (isEngineeringUser && blockedOnly) {
       filtered = filtered.filter(
@@ -593,7 +608,7 @@ export default function OrdersPage() {
           return;
         }
         fallbackCounts[option.value] = localFiltered.filter(
-          (order) => order.status === option.value,
+          (order) => getEffectiveStatus(order) === option.value,
         ).length;
       });
       setStatusCounts(fallbackCounts);
@@ -636,7 +651,9 @@ export default function OrdersPage() {
         if (user.tenantId) {
           query.eq("tenant_id", user.tenantId);
         }
-        if (statusFilter !== "all") {
+        if (statusFilter === "in_production") {
+          query.in("status", ["ready_for_production", "in_production"]);
+        } else if (statusFilter !== "all") {
           query.eq("status", statusFilter);
         }
         if (isEngineeringUser && blockedOnly) {
@@ -644,9 +661,13 @@ export default function OrdersPage() {
         }
         if (isEngineeringUser) {
           if (assignmentFilter === "queue") {
-            query.is("assigned_engineer_id", null);
+            query.or(
+              "assigned_engineer_id.is.null,status.in.(ready_for_production,in_production),status.eq.done",
+            );
           } else {
-            query.eq("assigned_engineer_id", user.id);
+            query.or(
+              `assigned_engineer_id.eq.${user.id},status.in.(ready_for_production,in_production),status.eq.done`,
+            );
           }
           if (unassignedOnly) {
             query.is("assigned_engineer_id", null);
@@ -725,16 +746,17 @@ export default function OrdersPage() {
         })) as Order[];
         const withProduction = await applyProductionStatus(mapped);
         const enriched = await resolveOrderAvatars(withProduction);
-        if (!append && enriched.length === 0 && orders.length > 0) {
+        const finalRows = getLocalFilteredOrders(enriched);
+        if (!append && finalRows.length === 0 && orders.length > 0) {
           const fallback = getLocalFilteredOrders(orders);
           setVisibleOrders(fallback);
           setTotalOrders(fallback.length);
           return;
         }
         setVisibleOrders((prev) =>
-          append ? [...prev, ...enriched] : enriched,
+          append ? [...prev, ...finalRows] : finalRows,
         );
-        setTotalOrders(count ?? mapped.length);
+        setTotalOrders(count ?? finalRows.length);
       } finally {
         if (isMounted) {
           setIsListLoading(false);
@@ -764,6 +786,7 @@ export default function OrdersPage() {
     user.tenantId,
     isEngineeringUser,
     user.id,
+    getEffectiveStatus,
   ]);
 
   useEffect(() => {
@@ -774,34 +797,42 @@ export default function OrdersPage() {
     let isMounted = true;
 
     const fetchCounts = async () => {
-      const baseQuery = sb.from("orders");
-      const counts: Partial<Record<OrderStatus | "all", number>> = {};
-      const tasks = roleStatusOptions.map(async (option) => {
-        if (option.value === "all") {
-          let query = baseQuery
-            .select("id", { count: "exact", head: true })
-            .order("created_at", { ascending: false });
-          if (user.tenantId) {
-            query = query.eq("tenant_id", user.tenantId);
-          }
-          const { count } = await query;
-          counts.all = count ?? 0;
-          return;
-        }
-        let query = baseQuery
-          .select("id", { count: "exact", head: true })
-          .eq("status", option.value);
-        if (user.tenantId) {
-          query = query.eq("tenant_id", user.tenantId);
-        }
-        const { count } = await query;
-        counts[option.value] = count ?? 0;
-      });
-
-      await Promise.all(tasks);
+      let query = sb
+        .from("orders")
+        .select(
+          "id, order_number, customer_name, due_date, priority, status, assigned_engineer_id",
+        )
+        .order("created_at", { ascending: false });
+      if (user.tenantId) {
+        query = query.eq("tenant_id", user.tenantId);
+      }
+      const { data, error } = await query;
+      if (!isMounted || error || !data) {
+        return;
+      }
+      const mapped = data.map((row) => ({
+        id: row.id,
+        orderNumber: row.order_number,
+        customerName: row.customer_name,
+        dueDate: row.due_date,
+        priority: row.priority,
+        status: row.status,
+        assignedEngineerId: row.assigned_engineer_id ?? undefined,
+      })) as Order[];
+      const withProduction = await applyProductionStatus(mapped);
       if (!isMounted) {
         return;
       }
+      const counts: Partial<Record<OrderStatus | "all", number>> = {};
+      roleStatusOptions.forEach((option) => {
+        if (option.value === "all") {
+          counts.all = withProduction.length;
+          return;
+        }
+        counts[option.value] = withProduction.filter(
+          (order) => getEffectiveStatus(order) === option.value,
+        ).length;
+      });
       setStatusCounts(counts);
     };
 
@@ -810,7 +841,13 @@ export default function OrdersPage() {
     return () => {
       isMounted = false;
     };
-  }, [roleStatusOptions, user.isAuthenticated, user.loading, user.tenantId]);
+  }, [
+    roleStatusOptions,
+    user.isAuthenticated,
+    user.loading,
+    user.tenantId,
+    getEffectiveStatus,
+  ]);
 
   async function handleCreateOrder(values: {
     orderNumber: string;
@@ -1186,7 +1223,12 @@ export default function OrdersPage() {
                       if (user.tenantId) {
                         query.eq("tenant_id", user.tenantId);
                       }
-                      if (statusFilter !== "all") {
+                      if (statusFilter === "in_production") {
+                        query.in("status", [
+                          "ready_for_production",
+                          "in_production",
+                        ]);
+                      } else if (statusFilter !== "all") {
                         query.eq("status", statusFilter);
                       }
                       if (isEngineeringUser && blockedOnly) {
@@ -1194,9 +1236,13 @@ export default function OrdersPage() {
                       }
                       if (isEngineeringUser) {
                         if (assignmentFilter === "queue") {
-                          query.is("assigned_engineer_id", null);
+                          query.or(
+                            "assigned_engineer_id.is.null,status.in.(ready_for_production,in_production),status.eq.done",
+                          );
                         } else {
-                          query.eq("assigned_engineer_id", user.id);
+                          query.or(
+                            `assigned_engineer_id.eq.${user.id},status.in.(ready_for_production,in_production),status.eq.done`,
+                          );
                         }
                         if (unassignedOnly) {
                           query.is("assigned_engineer_id", null);
@@ -1269,7 +1315,8 @@ export default function OrdersPage() {
                         await applyProductionStatus(mapped);
                       const enriched =
                         await resolveOrderAvatars(withProduction);
-                      setVisibleOrders((prev) => [...prev, ...enriched]);
+                      const finalRows = getLocalFilteredOrders(enriched);
+                      setVisibleOrders((prev) => [...prev, ...finalRows]);
                     } finally {
                       setIsListLoading(false);
                     }
