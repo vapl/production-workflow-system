@@ -337,7 +337,7 @@ export default function OperatorProductionPage() {
   const [todayWorkedMinutes, setTodayWorkedMinutes] = useState(0);
   const [weekWorkedMinutes, setWeekWorkedMinutes] = useState(0);
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
-    "Production manager",
+    "Production planner",
     "Admin",
     "Owner",
   ]);
@@ -1228,7 +1228,7 @@ export default function OperatorProductionPage() {
       const roles =
         notificationRoles.length > 0
           ? notificationRoles
-          : ["Production manager", "Admin", "Owner"];
+          : ["Production planner", "Admin", "Owner"];
       await sb.from("notifications").insert({
         tenant_id: currentUser.tenantId,
         user_id: null,
@@ -1255,7 +1255,7 @@ export default function OperatorProductionPage() {
       const roles =
         notificationRoles.length > 0
           ? notificationRoles
-          : ["Production manager", "Admin", "Owner"];
+          : ["Production planner", "Admin", "Owner"];
       await sb.from("notifications").insert({
         tenant_id: currentUser.tenantId,
         user_id: null,
@@ -1281,7 +1281,7 @@ export default function OperatorProductionPage() {
       const roles =
         notificationRoles.length > 0
           ? notificationRoles
-          : ["Production manager", "Admin", "Owner"];
+          : ["Production planner", "Admin", "Owner"];
       await sb.from("notifications").insert({
         tenant_id: currentUser.tenantId,
         user_id: null,
@@ -1608,7 +1608,7 @@ export default function OperatorProductionPage() {
       return true;
     }
     const targetRoute =
-      currentUser.role === "Production worker" && result.orderId
+      currentUser.role === "Operator" && result.orderId
         ? `/production/operator?date=${encodeURIComponent(selectedDate)}&order=${encodeURIComponent(result.orderId)}`
         : result.targetRoute;
     if (sb && currentUser.tenantId) {
@@ -1622,7 +1622,7 @@ export default function OperatorProductionPage() {
         target_route: targetRoute,
       });
     }
-    if (currentUser.role === "Production worker" && result.orderId) {
+    if (currentUser.role === "Operator" && result.orderId) {
       setQuickActionOrderId(result.orderId);
       setIsQuickActionOpen(true);
       setQueryParams({
@@ -1968,35 +1968,6 @@ export default function OperatorProductionPage() {
         <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-3 text-sm text-destructive">
           {activityError}
         </div>
-      ) : null}
-
-      {activityEvents.length > 0 ? (
-        <Card className="hidden md:block">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">My recent activity</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {activityEvents.slice(0, 8).map((event) => (
-              <div
-                key={event.id}
-                className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-xs"
-              >
-                <div className="text-muted-foreground">
-                  {event.from_status ?? "queued"} -&gt;{" "}
-                  <span className="font-medium text-foreground">
-                    {event.to_status ?? "unknown"}
-                  </span>
-                  {event.reason ? (
-                    <span className="ml-1 text-rose-600">({event.reason})</span>
-                  ) : null}
-                </div>
-                <div className="text-[11px] text-muted-foreground">
-                  {new Date(event.created_at).toLocaleTimeString()}
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
       ) : null}
 
       {!isLoading && visibleStations.length > 0 && filteredItemsCount === 0 ? (
@@ -2835,29 +2806,6 @@ export default function OperatorProductionPage() {
                 </div>
               </div>
             </div>
-            {activityEvents.length > 0 ? (
-              <div className="space-y-2">
-                <div className="text-xs font-semibold text-muted-foreground">
-                  Recent activity
-                </div>
-                {activityEvents.slice(0, 8).map((event) => (
-                  <div
-                    key={event.id}
-                    className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-xs"
-                  >
-                    <div className="text-muted-foreground">
-                      {event.from_status ?? "queued"} -&gt;{" "}
-                      <span className="font-medium text-foreground">
-                        {event.to_status ?? "unknown"}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {new Date(event.created_at).toLocaleTimeString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
             <div className="space-y-2 pb-2">
               <ThemeToggle
                 variant="menu"

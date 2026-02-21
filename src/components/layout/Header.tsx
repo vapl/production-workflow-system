@@ -82,6 +82,7 @@ export function Header() {
   const [notificationItems, setNotificationItems] = useState<NotificationItem[]>(
     [],
   );
+  const [canViewNotifications, setCanViewNotifications] = useState(true);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -152,6 +153,44 @@ export function Header() {
       return;
     }
     let isMounted = true;
+    const loadNotificationAccess = async () => {
+      const { data } = await sb
+        .from("tenant_settings")
+        .select("notification_roles")
+        .eq("tenant_id", user.tenantId)
+        .maybeSingle();
+      if (!isMounted) {
+        return;
+      }
+      const roles = Array.isArray(data?.notification_roles)
+        ? data.notification_roles.filter(
+            (role): role is string => typeof role === "string",
+          )
+        : [];
+      if (roles.length === 0) {
+        setCanViewNotifications(true);
+        return;
+      }
+      setCanViewNotifications(roles.includes(user.role));
+    };
+    void loadNotificationAccess();
+    return () => {
+      isMounted = false;
+    };
+  }, [user.isAuthenticated, user.role, user.tenantId]);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (
+      !sb ||
+      !user.isAuthenticated ||
+      !user.tenantId ||
+      !canViewNotifications
+    ) {
+      setUnreadCount(0);
+      return;
+    }
+    let isMounted = true;
     const loadUnread = async () => {
       const { count } = await sb
         .from("notifications")
@@ -207,15 +246,15 @@ export function Header() {
       isMounted = false;
       sb.removeChannel(channel);
     };
-  }, [
-    user.id,
-    user.isAuthenticated,
-    user.tenantId,
-  ]);
+  }, [canViewNotifications, user.id, user.isAuthenticated, user.tenantId]);
 
   useEffect(() => {
     const sb = supabase;
     if (!sb || !user.isAuthenticated || !user.tenantId) {
+      return;
+    }
+    if (!canViewNotifications) {
+      setNotificationItems([]);
       return;
     }
     if (!notificationsOpen) {
@@ -240,7 +279,7 @@ export function Header() {
     return () => {
       isMounted = false;
     };
-  }, [notificationsOpen, user.isAuthenticated, user.tenantId]);
+  }, [canViewNotifications, notificationsOpen, user.isAuthenticated, user.tenantId]);
 
   const handleMarkAllRead = async () => {
     if (!supabase || !user.tenantId) {
@@ -358,23 +397,24 @@ export function Header() {
               >
                 <SearchIcon className="h-4 w-4" />
               </Button>
-              <div className="relative" ref={notificationsRef}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-full"
-                  aria-label="Notifications"
-                  onClick={() => setNotificationsOpen((prev) => !prev)}
-                >
-                  <BellIcon className="h-4 w-4" />
-                </Button>
-                {unreadCount > 0 ? (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">
-                    {unreadCount > 9 ? "9+" : unreadCount}
-                  </span>
-                ) : null}
-                {notificationsOpen ? (
-                  <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-card p-2 shadow-lg">
+              {canViewNotifications ? (
+                <div className="relative" ref={notificationsRef}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full"
+                    aria-label="Notifications"
+                    onClick={() => setNotificationsOpen((prev) => !prev)}
+                  >
+                    <BellIcon className="h-4 w-4" />
+                  </Button>
+                  {unreadCount > 0 ? (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  ) : null}
+                  {notificationsOpen ? (
+                    <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-card p-2 shadow-lg">
                     <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
                       <span>Notifications</span>
                       <button
@@ -441,9 +481,10 @@ export function Header() {
                         View all
                       </Link>
                     </div>
-                  </div>
-                ) : null}
-              </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <Button
                 variant="ghost"
                 size="icon"

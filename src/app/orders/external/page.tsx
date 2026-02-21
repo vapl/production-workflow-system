@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { ArrowLeftIcon, SearchIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { usePartners } from "@/hooks/usePartners";
@@ -35,6 +36,10 @@ import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatDate } from "@/lib/domain/formatters";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
+import {
+  canReceiveExternalOrders,
+  canViewExternalOrders,
+} from "@/lib/auth/permissions";
 
 const defaultExternalStatusLabels: Record<ExternalJobStatus, string> = {
   requested: "Requested",
@@ -198,9 +203,17 @@ function isEmptyValue(value: unknown) {
 }
 
 export default function ExternalJobsPage() {
+  const pathname = usePathname();
   const { orders } = useOrders();
   const { activeGroups, activePartners } = usePartners();
   const user = useCurrentUser();
+  const canOpenExternalPage = canViewExternalOrders(user);
+  const canOpenReceivePage = canReceiveExternalOrders(user);
+  const inWarehouseModule = pathname.startsWith("/warehouse");
+  const receiveHref = inWarehouseModule
+    ? "/warehouse/receive"
+    : "/orders/external/receive";
+  const backOrdersHref = inWarehouseModule ? "/warehouse/queue" : "/orders";
   const { rules } = useWorkflowRules();
   const externalStatusLabels = useMemo(
     () => ({
@@ -984,11 +997,32 @@ export default function ExternalJobsPage() {
     </div>
   );
 
+  if (!canOpenExternalPage) {
+    return (
+      <section className="space-y-4 pt-16 md:pt-0">
+        <DesktopPageHeader
+          sticky
+          title="Outsource Orders"
+          subtitle="Track outsourced partner orders, delivery dates, and receive flow."
+          className="md:z-20"
+          actions={
+            <Link href={backOrdersHref}>
+              <Button variant="outline">Back to Orders</Button>
+            </Link>
+          }
+        />
+        <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          You do not have access to partner orders.
+        </div>
+      </section>
+    );
+  }
+
   return (
     <>
       <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+0.75rem)] z-40 md:hidden">
         <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
-          <Link href="/orders">
+          <Link href={backOrdersHref}>
             <Button variant="ghost" size="icon" aria-label="Back to orders">
               <ArrowLeftIcon className="h-4 w-4" />
             </Button>
@@ -1018,11 +1052,13 @@ export default function ExternalJobsPage() {
               <SearchIcon className="h-5 w-5" />
             </Button>
           </div>
-          <Link href="/orders/external/receive">
-            <Button className="h-12 rounded-full px-5 text-sm shadow-lg">
-              Receive
-            </Button>
-          </Link>
+          {canOpenReceivePage ? (
+            <Link href={receiveHref}>
+              <Button className="h-12 rounded-full px-5 text-sm shadow-lg">
+                Receive
+              </Button>
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -1071,10 +1107,12 @@ export default function ExternalJobsPage() {
           className="md:z-20"
           actions={
             <div className="hidden items-center gap-2 md:flex">
-              <Link href="/orders/external/receive">
-                <Button>Receive</Button>
-              </Link>
-              <Link href="/orders">
+              {canOpenReceivePage ? (
+                <Link href={receiveHref}>
+                  <Button>Receive</Button>
+                </Link>
+              ) : null}
+              <Link href={backOrdersHref}>
                 <Button variant="outline">Back to Orders</Button>
               </Link>
             </div>

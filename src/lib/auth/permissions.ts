@@ -51,12 +51,12 @@ export const defaultPermissionRoles: PermissionRoleMap = {
   "dashboard.view": ["Admin"],
   "settings.view": ["Admin"],
   "settings.manage": ["Admin"],
-  "production.view": ["Admin", "Production manager", "Production"],
+  "production.view": ["Admin", "Production planner", "Warehouse"],
   "production.operator.view": [
     "Admin",
-    "Production manager",
-    "Production worker",
-    "Production",
+    "Production planner",
+    "Operator",
+    "Warehouse",
   ],
   "orders.manage": ["Admin", "Sales"],
 };
@@ -64,6 +64,7 @@ export const defaultPermissionRoles: PermissionRoleMap = {
 type AppRoute =
   | "/"
   | "/orders"
+  | "/warehouse"
   | "/production"
   | "/production/operator"
   | "/settings"
@@ -119,7 +120,7 @@ export function isAdminLike(
 }
 
 export function isProductionWorker(user: Pick<CurrentUser, "role">) {
-  return user.role === "Production worker";
+  return user.role === "Operator";
 }
 
 export function hasPermission(
@@ -148,6 +149,12 @@ export function canAccessRoute(
     return hasPermission(user, "production.view", roleMap);
   if (route === "/production/operator")
     return hasPermission(user, "production.operator.view", roleMap);
+  if (route === "/warehouse") {
+    return (
+      hasPermission(user, "production.operator.view", roleMap) ||
+      hasPermission(user, "production.view", roleMap)
+    );
+  }
   if (route === "/company") return isAdminLike(user);
   return true;
 }
@@ -161,4 +168,26 @@ export function isProductionRole(
     hasPermission(user, "production.operator.view", roleMap) ||
     user.role === "Engineering"
   );
+}
+
+export function canViewExternalOrders(
+  user: Pick<CurrentUser, "role" | "isAdmin" | "isOwner">,
+) {
+  if (isAdminLike(user)) {
+    return true;
+  }
+  return (
+    user.role === "Sales" ||
+    user.role === "Warehouse" ||
+    user.role === "Production planner"
+  );
+}
+
+export function canReceiveExternalOrders(
+  user: Pick<CurrentUser, "role" | "isAdmin" | "isOwner">,
+) {
+  if (isAdminLike(user)) {
+    return true;
+  }
+  return user.role === "Warehouse" || user.role === "Production planner";
 }

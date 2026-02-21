@@ -44,6 +44,15 @@ export default function AuthPage() {
   const [inviteConfirmPassword, setInviteConfirmPassword] = useState("");
   const [inviteError, setInviteError] = useState("");
 
+  const requiresInviteSetup = (metadata: unknown) => {
+    if (!metadata || typeof metadata !== "object") {
+      return false;
+    }
+    return Boolean(
+      (metadata as { require_password_setup?: boolean }).require_password_setup,
+    );
+  };
+
   const withTimeout = async <T,>(promise: Promise<T>, ms = 12000) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
@@ -81,6 +90,7 @@ export default function AuthPage() {
     })();
     if (
       user.isAuthenticated &&
+      !user.requiresPasswordSetup &&
       !recoveryMode &&
       !isRecoveryLink &&
       !urlHasRecovery &&
@@ -91,6 +101,7 @@ export default function AuthPage() {
     }
   }, [
     user.isAuthenticated,
+    user.requiresPasswordSetup,
     recoveryMode,
     isRecoveryLink,
     urlHasRecovery,
@@ -110,6 +121,7 @@ export default function AuthPage() {
     if (!supabase) {
       return;
     }
+    const sb = supabase;
     const url = new URL(window.location.href);
     const errorDescription =
       url.searchParams.get("error_description") ??
@@ -148,14 +160,17 @@ export default function AuthPage() {
     if (code) {
       setStatus("sending");
       setMessage("Signing you in...");
-      supabase.auth
+      sb.auth
         .exchangeCodeForSession(code)
-        .then(({ error }) => {
+        .then(async ({ error }) => {
           if (error) {
             setStatus("error");
             setMessage(error.message);
             return;
           }
+          const { data: userData } = await sb.auth.getUser();
+          const shouldShowInviteSetup =
+            isInvite || requiresInviteSetup(userData.user?.user_metadata);
           if (isRecovery) {
             setRecoveryMode(true);
             setIsRecoveryLink(true);
@@ -168,7 +183,7 @@ export default function AuthPage() {
             setAuthModeChecked(true);
             return;
           }
-          if (isInvite) {
+          if (shouldShowInviteSetup) {
             setInviteMode(true);
             setStatus("idle");
             setMessage("");
@@ -210,15 +225,18 @@ export default function AuthPage() {
       }
       setStatus("sending");
       setMessage("Signing you in...");
-      supabase.auth
+      sb.auth
         .setSession({ access_token: accessToken, refresh_token: refreshToken })
-        .then(({ error }) => {
+        .then(async ({ error }) => {
           if (error) {
             setStatus("error");
             setMessage(error.message);
             return;
           }
-          if (isInvite) {
+          const { data: userData } = await sb.auth.getUser();
+          const shouldShowInviteSetup =
+            isInvite || requiresInviteSetup(userData.user?.user_metadata);
+          if (shouldShowInviteSetup) {
             setInviteMode(true);
             setStatus("idle");
             setMessage("");
@@ -684,6 +702,10 @@ export default function AuthPage() {
 
       const { error: passwordError } = await supabase.auth.updateUser({
         password: invitePassword,
+        data: {
+          ...(authUser.user_metadata ?? {}),
+          require_password_setup: false,
+        },
       });
       if (passwordError) {
         setInviteError(passwordError.message);

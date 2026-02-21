@@ -27,6 +27,7 @@ import { supabase, supabaseAvatarBucket } from "@/lib/supabaseClient";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatOrderStatus } from "@/lib/domain/formatters";
 import { useRbac } from "@/contexts/RbacContext";
+import { canViewExternalOrders } from "@/lib/auth/permissions";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
@@ -44,6 +45,7 @@ export default function OrdersPage() {
   const { rules } = useWorkflowRules();
   const { activeGroups, partners } = usePartners();
   const canEditOrDeleteOrders = hasPermission("orders.manage");
+  const canOpenExternalOrders = canViewExternalOrders(user);
   const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
   const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
   const isEngineeringUser = user.role.toLowerCase().startsWith("engineer");
@@ -69,6 +71,7 @@ export default function OrdersPage() {
     const productionStatuses: OrderStatus[] = [
       "ready_for_production",
       "in_production",
+      "done",
     ];
     const build = (statuses: OrderStatus[]): StatusOption[] =>
       statuses
@@ -81,8 +84,8 @@ export default function OrdersPage() {
     if (isEngineeringUser) {
       return [{ value: "all", label: "All" }, ...build(engineeringStatuses)];
     }
-    if (user.role === "Production") {
-      return build(productionStatuses);
+    if (user.role === "Warehouse") {
+      return [{ value: "all", label: "All" }, ...build(productionStatuses)];
     }
     if (user.role === "Sales") {
       return [{ value: "all", label: "All" }, ...build(salesStatuses)];
@@ -924,14 +927,16 @@ export default function OrdersPage() {
       >
         <div className="flex-1 overflow-y-auto p-3">
           <div className="space-y-2">
-            <Link
-              href="/orders/external"
-              onClick={() => setIsMobileActionsOpen(false)}
-              className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
-            >
-              <ExternalLinkIcon className="h-4 w-4" />
-              Partner Orders
-            </Link>
+            {canOpenExternalOrders ? (
+              <Link
+                href="/orders/external"
+                onClick={() => setIsMobileActionsOpen(false)}
+                className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
+              >
+                <ExternalLinkIcon className="h-4 w-4" />
+                Partner Orders
+              </Link>
+            ) : null}
             <div className="pt-2">
               <div className="mb-2 text-xs font-medium text-muted-foreground">
                 View mode
@@ -1056,12 +1061,14 @@ export default function OrdersPage() {
         className="md:z-20"
         actions={
           <div className="hidden items-center gap-2 md:flex">
-            <Link href="/orders/external">
-              <Button variant="outline" className="gap-2">
-                <ExternalLinkIcon className="h-4 w-4" />
-                Partner Orders
-              </Button>
-            </Link>
+            {canOpenExternalOrders ? (
+              <Link href="/orders/external">
+                <Button variant="outline" className="gap-2">
+                  <ExternalLinkIcon className="h-4 w-4" />
+                  Partner Orders
+                </Button>
+              </Link>
+            ) : null}
             <Button
               className="gap-2"
               onClick={() => {

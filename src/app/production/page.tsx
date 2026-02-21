@@ -268,6 +268,14 @@ function formatDateInput(value: string) {
   return `${day}.${month}.${year}`;
 }
 
+function rowKeyForProductionItem(item: ProductionItemRow) {
+  return typeof item.meta?.rowKey === "string"
+    ? item.meta.rowKey
+    : `${item.order_id}:fallback:${
+        typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
+      }`;
+}
+
 export default function ProductionPage() {
   const user = useCurrentUser();
   const { rules } = useWorkflowRules();
@@ -354,6 +362,7 @@ export default function ProductionPage() {
     new Set(),
   );
   const [isSplitOpen, setIsSplitOpen] = useState(false);
+  const [splitMode, setSplitMode] = useState<"release" | "replan">("release");
   const [isCreatingWorkOrders, setIsCreatingWorkOrders] = useState(false);
   const [activeProductionTab, setActiveProductionTab] = useState<
     "planning" | "list" | "calendar"
@@ -372,6 +381,8 @@ export default function ProductionPage() {
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const [removingQueueId, setRemovingQueueId] = useState<string | null>(null);
   const [selectedQueueRunIds, setSelectedQueueRunIds] = useState<string[]>([]);
+  const [queueConstructionSelections, setQueueConstructionSelections] =
+    useState<Record<string, string[]>>({});
   const [queueActionDate, setQueueActionDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
@@ -1025,16 +1036,30 @@ export default function ProductionPage() {
   const rowPlannedDateMap = useMemo(() => {
     const map = new Map<string, string>();
     productionItems.forEach((item) => {
-      const rowKey =
-        typeof item.meta?.rowKey === "string"
-          ? item.meta.rowKey
-          : `${item.order_id}:fallback:${
-              typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
-            }`;
+      const rowKey = rowKeyForProductionItem(item);
       const plannedDate =
         typeof item.meta?.plannedDate === "string" ? item.meta.plannedDate : "";
       if (plannedDate && !map.has(rowKey)) {
         map.set(rowKey, plannedDate);
+      }
+    });
+    return map;
+  }, [productionItems]);
+
+  const replanLockedRowMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    productionItems.forEach((item) => {
+      const rowKey = rowKeyForProductionItem(item);
+      const key = `${item.order_id}:${item.batch_code}:${rowKey}`;
+      const isLocked =
+        Boolean(item.started_at) ||
+        Boolean(item.done_at) ||
+        item.status === "in_progress" ||
+        item.status === "done";
+      if (isLocked) {
+        map.set(key, true);
+      } else if (!map.has(key)) {
+        map.set(key, false);
       }
     });
     return map;
@@ -1352,9 +1377,7 @@ export default function ProductionPage() {
     routes.find((route) => route.key === selectedRouteKey) ?? routes[0];
   const routeStations = useMemo(() => [...stations], [stations]);
 
-  const canRelease =
-    selectedBatchKeys.length > 0 &&
-    routeStations.length > 0;
+  const canRelease = selectedBatchKeys.length > 0 && routeStations.length > 0;
 
   const formatTableRow = (
     field: OrderInputField,
@@ -1647,6 +1670,86 @@ export default function ProductionPage() {
     setSplitSelections(defaults);
     setSplitPlannedDates(dateDefaults);
     setSplitGlobalPlannedDate(initialGlobalDate);
+    setSplitMode("release");
+    setIsSplitOpen(true);
+  };
+
+  const handleOpenQueueReplan = (item: QueueItem) => {
+    if (!canManageQueue) {
+      return;
+    }
+    const selectedRowKeys = new Set(queueConstructionSelections[item.id] ?? []);
+    if (selectedRowKeys.size === 0) {
+      setDataError("Select at least one construction row to replan.");
+      return;
+    }
+    const selectedRows = item.items
+      .map((row) => {
+        const rowKey = rowKeyForProductionItem(row);
+        if (!selectedRowKeys.has(rowKey)) {
+          return null;
+        }
+        const locked =
+          replanLockedRowMap.get(
+            `${item.orderId}:${item.batchCode}:${rowKey}`,
+          ) ?? false;
+        if (locked) {
+          return null;
+        }
+        const parts = rowKey.split(":");
+        const fieldId = parts[1] ?? "fallback";
+        const rowIndexRaw = Number(parts[2] ?? row.meta?.rowIndex ?? 0);
+        const rowIndex = Number.isFinite(rowIndexRaw) ? rowIndexRaw : 0;
+        return {
+          id: rowKey,
+          orderId: item.orderId,
+          orderNumber: item.orderNumber,
+          customerName: item.customerName,
+          dueDate: item.dueDate,
+          batchCode: item.batchCode,
+          priority: item.priority,
+          fieldId,
+          fieldLabel:
+            typeof row.meta?.fieldLabel === "string"
+              ? row.meta.fieldLabel
+              : "Order",
+          itemName: row.item_name,
+          qty: Number(row.qty ?? 1),
+          material: row.material ?? item.material ?? "",
+          rowIndex,
+          rawRow:
+            typeof row.meta?.row === "object" && row.meta?.row !== null
+              ? (row.meta.row as Record<string, unknown>)
+              : {},
+        } satisfies SplitRow;
+      })
+      .filter((row): row is SplitRow => Boolean(row));
+
+    if (selectedRows.length === 0) {
+      setDataError(
+        "Selected constructions cannot be replanned because work has already started.",
+      );
+      return;
+    }
+
+    const defaults: Record<string, string[]> = {};
+    const dateDefaults: Record<string, string> = {};
+    selectedRows.forEach((row) => {
+      defaults[row.id] = routeStations.map((station) => station.id);
+      dateDefaults[row.id] =
+        rowPlannedDateMap.get(row.id) ?? item.plannedDate ?? viewDate;
+    });
+    const dateValues = Array.from(new Set(Object.values(dateDefaults))).filter(
+      Boolean,
+    );
+    const initialGlobalDate =
+      dateValues.length === 1 ? dateValues[0] : item.plannedDate ?? viewDate;
+
+    setSplitRows(selectedRows);
+    setSplitSelections(defaults);
+    setSplitPlannedDates(dateDefaults);
+    setSplitGlobalPlannedDate(initialGlobalDate);
+    setSplitMode("replan");
     setIsSplitOpen(true);
   };
 
@@ -1767,6 +1870,7 @@ export default function ProductionPage() {
         };
       }),
     );
+    let normalizedInsertedItems: ProductionItemRow[] = [];
     if (productionRows.length > 0) {
       const { data, error } = await supabase
         .from("production_items")
@@ -1779,15 +1883,17 @@ export default function ProductionPage() {
         setIsCreatingWorkOrders(false);
         return;
       }
-      const normalizedInsertedItems: ProductionItemRow[] = (data ?? []).map(
+      normalizedInsertedItems = (data ?? []).map(
         (row) => ({
           ...(row as Omit<ProductionItemRow, "orders">),
           orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
         }),
       );
-      setProductionItems((prev) => [...normalizedInsertedItems, ...prev]);
     }
-    const runsByOrderDate = new Map<string, { orderId: string; date: string }>();
+    const runsByOrderDate = new Map<
+      string,
+      { orderId: string; date: string }
+    >();
     selectedRows.forEach((row) => {
       const date = effectiveDatesByRow.get(row.id) ?? plannedDate;
       const key = `${row.orderId}:${date}`;
@@ -1829,10 +1935,101 @@ export default function ProductionPage() {
         orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
       }),
     );
-    setBatchRuns((prev) => [...normalizedInsertedRuns, ...prev]);
+    const selectedRowKeySet = new Set(selectedRows.map((row) => row.id));
+    let removedItemIds = new Set<string>();
+    let removedRunIds = new Set<string>();
+    if (splitMode === "replan" && selectedRows.length > 0) {
+      const sourceOrderId = selectedRows[0]?.orderId;
+      const sourceBatchCode = selectedRows[0]?.batchCode;
+      const sourceItems = productionItems.filter(
+        (item) =>
+          item.order_id === sourceOrderId &&
+          item.batch_code === sourceBatchCode &&
+          selectedRowKeySet.has(rowKeyForProductionItem(item)),
+      );
+      if (sourceItems.length > 0) {
+        const sourceItemIds = sourceItems.map((item) => item.id);
+        const { error: removeItemsError } = await supabase
+          .from("production_items")
+          .delete()
+          .in("id", sourceItemIds);
+        if (removeItemsError) {
+          setDataError(
+            removeItemsError.message ??
+              "Failed to remove old construction rows from source batch.",
+          );
+          setIsCreatingWorkOrders(false);
+          return;
+        }
+        removedItemIds = new Set(sourceItemIds);
+
+        const affectedStationIds = new Set(
+          sourceItems
+            .map((item) => item.station_id)
+            .filter((id): id is string => Boolean(id)),
+        );
+        const remainingSourceItems = productionItems.filter(
+          (item) =>
+            item.order_id === sourceOrderId &&
+            item.batch_code === sourceBatchCode &&
+            !selectedRowKeySet.has(rowKeyForProductionItem(item)),
+        );
+        const stationIdsWithRemaining = new Set(
+          remainingSourceItems
+            .map((item) => item.station_id)
+            .filter((id): id is string => Boolean(id)),
+        );
+        const sourceRunIdsToDelete = batchRuns
+          .filter(
+            (run) =>
+              run.order_id === sourceOrderId &&
+              run.batch_code === sourceBatchCode &&
+              Boolean(run.station_id) &&
+              affectedStationIds.has(run.station_id as string) &&
+              !stationIdsWithRemaining.has(run.station_id as string),
+          )
+          .map((run) => run.id);
+        if (sourceRunIdsToDelete.length > 0) {
+          const { error: removeRunsError } = await supabase
+            .from("batch_runs")
+            .delete()
+            .in("id", sourceRunIdsToDelete);
+          if (removeRunsError) {
+            setDataError(
+              removeRunsError.message ??
+                "Failed to clean up empty source batch runs.",
+            );
+            setIsCreatingWorkOrders(false);
+            return;
+          }
+          removedRunIds = new Set(sourceRunIdsToDelete);
+        }
+      }
+    }
+    setProductionItems((prev) => [
+      ...normalizedInsertedItems,
+      ...prev.filter((item) => !removedItemIds.has(item.id)),
+    ]);
+    setBatchRuns((prev) => [
+      ...normalizedInsertedRuns,
+      ...prev.filter((run) => !removedRunIds.has(run.id)),
+    ]);
+    if (splitMode === "replan" && selectedRowKeySet.size > 0) {
+      setQueueConstructionSelections((prev) => {
+        const next: Record<string, string[]> = {};
+        Object.entries(prev).forEach(([runId, rowKeys]) => {
+          const filtered = rowKeys.filter((key) => !selectedRowKeySet.has(key));
+          if (filtered.length > 0) {
+            next[runId] = filtered;
+          }
+        });
+        return next;
+      });
+    }
     setSelectedBatchKeys([]);
     setSplitPlannedDates({});
     setSplitGlobalPlannedDate("");
+    setSplitMode("release");
     setIsSplitOpen(false);
     setIsCreatingWorkOrders(false);
   };
@@ -1921,8 +2118,39 @@ export default function ProductionPage() {
     setSelectedQueueRunIds((prev) => prev.filter((id) => visibleSet.has(id)));
   }, [visibleQueueRunIds]);
 
+  useEffect(() => {
+    const queueItemMap = new Map<string, QueueItem>();
+    Array.from(queueByStation.values())
+      .flat()
+      .forEach((item) => {
+        queueItemMap.set(item.id, item);
+      });
+    setQueueConstructionSelections((prev) => {
+      const next: Record<string, string[]> = {};
+      let changed = false;
+      Object.entries(prev).forEach(([runId, rowKeys]) => {
+        const queueItem = queueItemMap.get(runId);
+        if (!queueItem) {
+          changed = true;
+          return;
+        }
+        const validRowKeys = new Set(
+          queueItem.items.map((row) => rowKeyForProductionItem(row)),
+        );
+        const filtered = rowKeys.filter((rowKey) => validRowKeys.has(rowKey));
+        if (filtered.length > 0) {
+          next[runId] = filtered;
+        }
+        if (filtered.length !== rowKeys.length) {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [queueByStation]);
+
   const canManageQueue =
-    user.isAdmin || user.isOwner || user.role === "Production manager";
+    user.isAdmin || user.isOwner || user.role === "Production planner";
 
   const canRunBeRemoved = (run: BatchRunRow) => {
     const stationItems = productionItems.filter(
@@ -3214,56 +3442,60 @@ export default function ProductionPage() {
                     {plannedRangeDays === 1 ? "" : "s"}
                   </div>
                 </div>
-                <div className="hidden flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/10 px-3 py-2 md:flex">
-                  <span className="text-xs text-muted-foreground">
-                    {selectedQueueRunIds.length > 0
-                      ? `${selectedQueueRunIds.length} selected`
-                      : "No selection"}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setSelectedQueueRunIds(
-                        allVisibleQueueSelected ? [] : visibleQueueRunIds,
-                      )
-                    }
-                  >
-                    {allVisibleQueueSelected
-                      ? "Clear selected"
-                      : "Select all visible"}
-                  </Button>
-                  <DatePicker
-                    label="Move date"
-                    value={queueActionDate}
-                    onChange={(value) =>
-                      setQueueActionDate(value || queueActionDate)
-                    }
-                    className="text-xs"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={
-                      selectedQueueRunIds.length === 0 || isQueueBulkApplying
-                    }
-                    onClick={() => void handleMoveSelectedQueueDate()}
-                  >
-                    Move selected
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={
-                      selectedQueueRunIds.length === 0 || isQueueBulkApplying
-                    }
-                    onClick={() => void handleClearSelectedQueue()}
-                  >
-                    Clear selected
-                  </Button>
+                <div className="hidden items-end justify-between gap-3 rounded-lg border border-border bg-muted/10 px-3 py-2 md:flex">
+                  <div className="flex items-end gap-3">
+                    <DatePicker
+                      label="Move date"
+                      value={queueActionDate}
+                      onChange={(value) =>
+                        setQueueActionDate(value || queueActionDate)
+                      }
+                      className="w-42 text-xs"
+                    />
+                    <span className="mb-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground">
+                      {selectedQueueRunIds.length > 0
+                        ? `${selectedQueueRunIds.length} selected`
+                        : "No selection"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setSelectedQueueRunIds(
+                          allVisibleQueueSelected ? [] : visibleQueueRunIds,
+                        )
+                      }
+                    >
+                      {allVisibleQueueSelected
+                        ? "Unselect all visible"
+                        : "Select all visible"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        selectedQueueRunIds.length === 0 || isQueueBulkApplying
+                      }
+                      onClick={() => void handleMoveSelectedQueueDate()}
+                    >
+                      Move selected
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        selectedQueueRunIds.length === 0 || isQueueBulkApplying
+                      }
+                      onClick={() => void handleClearSelectedQueue()}
+                    >
+                      Clear selected
+                    </Button>
+                  </div>
                 </div>
                 <div className="space-y-2 rounded-lg border border-border bg-muted/10 px-3 py-2 md:hidden">
                   <div className="text-xs text-muted-foreground">
@@ -3622,29 +3854,93 @@ export default function ProductionPage() {
                                 {expandedQueueItems.has(item.id) &&
                                   item.items.length > 0 && (
                                     <div className="mt-2 space-y-2">
+                                      <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/10 px-2 py-1.5">
+                                        <span className="text-[11px] text-muted-foreground">
+                                          {(queueConstructionSelections[item.id] ?? [])
+                                            .length}{" "}
+                                          selected
+                                        </span>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 px-2 text-[11px]"
+                                          disabled={
+                                            !canManageQueue ||
+                                            (queueConstructionSelections[item.id] ??
+                                              []).length === 0
+                                          }
+                                          onClick={() =>
+                                            handleOpenQueueReplan(item)
+                                          }
+                                        >
+                                          Replan selected rows
+                                        </Button>
+                                      </div>
                                       {item.items.map((row) => {
                                         const rowKey =
-                                          typeof row.meta?.rowKey === "string"
-                                            ? row.meta.rowKey
-                                            : `${row.order_id}:fallback:${
-                                                typeof row.meta?.rowIndex ===
-                                                "number"
-                                                  ? row.meta.rowIndex
-                                                  : 0
-                                              }`;
+                                          rowKeyForProductionItem(row);
                                         const stationStatuses =
                                           stationStatusMap.get(rowKey);
                                         const entry = stationStatuses?.get(
                                           station.id,
                                         );
+                                        const isLockedForReplan =
+                                          replanLockedRowMap.get(
+                                            `${item.orderId}:${item.batchCode}:${rowKey}`,
+                                          ) ?? false;
+                                        const isSelected =
+                                          queueConstructionSelections[
+                                            item.id
+                                          ]?.includes(rowKey) ?? false;
                                         return (
                                           <div
                                             key={row.id}
                                             className="rounded-md border border-border bg-muted/20 px-2 py-2"
                                           >
                                             <div className="flex items-start justify-between gap-2">
-                                              <div className="text-[11px] text-muted-foreground">
-                                                {row.item_name}
+                                              <div className="flex items-start gap-2">
+                                                <Checkbox
+                                                  variant="box"
+                                                  checked={isSelected}
+                                                  disabled={
+                                                    isLockedForReplan ||
+                                                    !canManageQueue
+                                                  }
+                                                  onChange={(event) => {
+                                                    const checked =
+                                                      event.currentTarget
+                                                        .checked;
+                                                    setQueueConstructionSelections(
+                                                      (prev) => {
+                                                        const current = new Set(
+                                                          prev[item.id] ?? [],
+                                                        );
+                                                        if (checked) {
+                                                          current.add(rowKey);
+                                                        } else {
+                                                          current.delete(
+                                                            rowKey,
+                                                          );
+                                                        }
+                                                        return {
+                                                          ...prev,
+                                                          [item.id]:
+                                                            Array.from(current),
+                                                        };
+                                                      },
+                                                    );
+                                                  }}
+                                                />
+                                                <div className="text-[11px] text-muted-foreground">
+                                                  {row.item_name}
+                                                  {isLockedForReplan ? (
+                                                    <div className="text-[10px] text-amber-700">
+                                                      Started/done rows cannot
+                                                      be replanned
+                                                    </div>
+                                                  ) : null}
+                                                </div>
                                               </div>
                                               {entry?.status ? (
                                                 <div className="relative flex items-center justify-center gap-2">
@@ -3704,10 +4000,15 @@ export default function ProductionPage() {
               <div className="w-full max-w-3xl rounded-2xl bg-card p-6 shadow-xl">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold">Split by stations</h2>
+                    <h2 className="text-lg font-semibold">
+                      {splitMode === "replan"
+                        ? "Replan constructions"
+                        : "Split by stations"}
+                    </h2>
                     <p className="text-sm text-muted-foreground">
-                      Select which stations should process each construction
-                      row.
+                      {splitMode === "replan"
+                        ? "Move selected construction rows into a new batch and date."
+                        : "Select which stations should process each construction row."}
                     </p>
                   </div>
                   <Button
@@ -3717,6 +4018,7 @@ export default function ProductionPage() {
                       setIsSplitOpen(false);
                       setSplitPlannedDates({});
                       setSplitGlobalPlannedDate("");
+                      setSplitMode("release");
                     }}
                     aria-label="Close split"
                   >
@@ -3815,7 +4117,9 @@ export default function ProductionPage() {
                                 <DatePicker
                                   label="Planned date"
                                   labelClassName="text-[11px] text-muted-foreground"
-                                  value={splitPlannedDates[row.id] ?? plannedDate}
+                                  value={
+                                    splitPlannedDates[row.id] ?? plannedDate
+                                  }
                                   onChange={(value) =>
                                     setSplitPlannedDates((prev) => ({
                                       ...prev,
@@ -3881,6 +4185,8 @@ export default function ProductionPage() {
                     onClick={() => {
                       setIsSplitOpen(false);
                       setSplitPlannedDates({});
+                      setSplitGlobalPlannedDate("");
+                      setSplitMode("release");
                     }}
                   >
                     Cancel
@@ -3892,7 +4198,9 @@ export default function ProductionPage() {
                     {isCreatingWorkOrders && (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                     )}
-                    Create work orders
+                    {splitMode === "replan"
+                      ? "Replan selected rows"
+                      : "Create work orders"}
                   </Button>
                 </div>
               </div>

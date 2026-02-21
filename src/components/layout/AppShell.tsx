@@ -42,53 +42,84 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     "/external-jobs/respond/",
   );
   const isPublicRoute = isAuthRoute || isExternalJobRespondRoute;
+  const isWarehouseUser = user.role === "Warehouse";
   const hideTabsNav =
     isExternalJobRespondRoute ||
     pathname?.startsWith("/profile") ||
     pathname?.startsWith("/company") ||
-    pathname?.startsWith("/production/operator");
+    (pathname?.startsWith("/production/operator") && !isWarehouseUser);
   const hideHeader =
     isExternalJobRespondRoute || pathname?.startsWith("/production/operator");
   const canViewDashboard = hasPermission("dashboard.view");
   const canViewProduction = hasPermission("production.view");
+  const canViewProductionOperator = hasPermission("production.operator.view");
   const canViewSettings = hasPermission("settings.view");
   const canViewCompany = user.isAdmin;
 
   const drawerNavItems = useMemo(
     () =>
-      [
-        canViewDashboard
-          ? {
-              href: "/",
-              label: "Dashboard",
-              icon: LayoutDashboardIcon,
-            }
-          : null,
-        {
-          href: "/orders",
-          label: "Orders",
-          icon: PackageIcon,
-        },
-        canViewProduction
-          ? {
-              href: "/production",
-              label: "Production",
+      isWarehouseUser
+        ? ([
+            {
+              href: "/orders",
+              label: "Orders",
+              icon: PackageIcon,
+            },
+            {
+              href: "/warehouse/queue",
+              label: "Warehouse",
               icon: FactoryIcon,
-            }
-          : null,
-        canViewSettings
-          ? {
-              href: "/settings",
-              label: "Settings",
-              icon: SettingsIcon,
-            }
-          : null,
-      ].filter(Boolean) as Array<{
-        href: string;
-        label: string;
-        icon: React.ComponentType<{ className?: string }>;
-      }>,
-    [canViewDashboard, canViewProduction, canViewSettings],
+            },
+          ] as Array<{
+            href: string;
+            label: string;
+            icon: React.ComponentType<{ className?: string }>;
+          }>)
+        : ([
+            canViewDashboard
+              ? {
+                  href: "/",
+                  label: "Dashboard",
+                  icon: LayoutDashboardIcon,
+                }
+              : null,
+            {
+              href: "/orders",
+              label: "Orders",
+              icon: PackageIcon,
+            },
+            canViewProduction
+              ? {
+                  href: "/production",
+                  label: "Production",
+                  icon: FactoryIcon,
+                }
+              : canViewProductionOperator
+                ? {
+                    href: "/production/operator",
+                    label: "Production",
+                    icon: FactoryIcon,
+                  }
+              : null,
+            canViewSettings
+              ? {
+                  href: "/settings",
+                  label: "Settings",
+                  icon: SettingsIcon,
+                }
+              : null,
+          ].filter(Boolean) as Array<{
+            href: string;
+            label: string;
+            icon: React.ComponentType<{ className?: string }>;
+          }>),
+    [
+      canViewDashboard,
+      canViewProduction,
+      canViewProductionOperator,
+      canViewSettings,
+      isWarehouseUser,
+    ],
   );
 
   useEffect(() => {
@@ -257,6 +288,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [user.loading, user.isAuthenticated, isPublicRoute, router]);
 
   useEffect(() => {
+    if (
+      user.loading ||
+      !user.isAuthenticated ||
+      user.tenantId ||
+      !user.requiresPasswordSetup
+    ) {
+      return;
+    }
+    if (!isAuthRoute) {
+      router.replace("/auth?invite=1");
+    }
+  }, [
+    isAuthRoute,
+    router,
+    user.isAuthenticated,
+    user.loading,
+    user.requiresPasswordSetup,
+    user.tenantId,
+  ]);
+
+  useEffect(() => {
     if (user.loading || !user.isAuthenticated || isPublicRoute || !pathname) {
       return;
     }
@@ -276,6 +328,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ? "/production/operator"
             : pathname.startsWith("/production")
               ? "/production"
+              : pathname.startsWith("/warehouse")
+                ? "/warehouse"
               : pathname.startsWith("/company")
                 ? "/company"
                 : pathname.startsWith("/orders")
@@ -285,9 +339,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
     if (!canAccessRoute(route, authUser, permissions)) {
-      const fallbackRoute = isProductionWorker(authUser)
-        ? "/production/operator"
-        : "/orders";
+      const canUseOperatorFallback = canAccessRoute(
+        "/production/operator",
+        authUser,
+        permissions,
+      );
+      const fallbackRoute =
+        isWarehouseUser
+          ? "/warehouse/queue"
+          : isProductionWorker(authUser) || canUseOperatorFallback
+            ? "/production/operator"
+          : "/orders";
       if (pathname !== fallbackRoute) {
         router.replace(fallbackRoute);
       }
@@ -297,6 +359,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname,
     permissions,
     router,
+    isWarehouseUser,
     user.isAuthenticated,
     user.isAdmin,
     user.isOwner,
@@ -329,6 +392,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   if (user.isAuthenticated && !user.tenantId) {
+    if (user.requiresPasswordSetup) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <LoadingSpinner label="Redirecting to invite setup..." />
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="max-w-md rounded-2xl border border-border bg-card p-6 text-center">

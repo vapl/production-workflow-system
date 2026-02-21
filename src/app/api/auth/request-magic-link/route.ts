@@ -87,16 +87,37 @@ export async function POST(request: Request) {
           tenant_id: invite.tenant_id,
           full_name: invite.full_name,
           role: invite.role,
+          require_password_setup: true,
         },
         redirectTo: origin ? `${origin}/auth` : undefined,
       });
 
       if (error) {
-        console.error("Invite send failed", error);
-        return NextResponse.json(
-          { error: error.message ?? "Failed to send invite." },
-          { status: 500 },
+        const message = (error.message ?? "").toLowerCase();
+        const alreadyRegistered =
+          message.includes("already been registered") ||
+          message.includes("already registered") ||
+          message.includes("already exists");
+        if (!alreadyRegistered) {
+          console.error("Invite send failed", error);
+          return NextResponse.json(
+            { error: error.message ?? "Failed to send invite." },
+            { status: 500 },
+          );
+        }
+        const { error: fallbackError } = await admin.auth.resetPasswordForEmail(
+          email,
+          {
+            redirectTo: origin ? `${origin}/auth?invite=1` : undefined,
+          },
         );
+        if (fallbackError) {
+          console.error("Invite resend fallback failed", fallbackError);
+          return NextResponse.json(
+            { error: fallbackError.message ?? "Failed to resend invite." },
+            { status: 500 },
+          );
+        }
       }
 
       return NextResponse.json({ success: true });

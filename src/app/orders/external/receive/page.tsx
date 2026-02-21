@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { ArrowLeftIcon, SearchIcon, SparklesIcon } from "lucide-react";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useCurrentUser } from "@/contexts/UserContext";
@@ -28,6 +29,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { uploadExternalJobAttachment } from "@/lib/uploadExternalJobAttachment";
 import type { ExternalJobStatus } from "@/types/orders";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { canReceiveExternalOrders } from "@/lib/auth/permissions";
 
 type ReceiveJob = {
   id: string;
@@ -96,8 +98,14 @@ const statusVariant = (status: ExternalJobStatus) => {
 };
 
 export default function ExternalJobsReceivePage() {
+  const pathname = usePathname();
   const { updateExternalJob, addExternalJobAttachment } = useOrders();
   const user = useCurrentUser();
+  const canOpenReceivePage = canReceiveExternalOrders(user);
+  const inWarehouseModule = pathname.startsWith("/warehouse");
+  const externalListHref = inWarehouseModule
+    ? "/warehouse/external"
+    : "/orders/external";
   const [search, setSearch] = useState("");
   const [jobs, setJobs] = useState<ReceiveJob[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -719,11 +727,32 @@ export default function ExternalJobsReceivePage() {
     });
   };
 
+  if (!canOpenReceivePage) {
+    return (
+      <section className="space-y-4 pt-16 md:pt-0">
+        <DesktopPageHeader
+          sticky
+          title="Partner Orders - Receive"
+          subtitle="Mark delivered items as In Stock and attach delivery notes."
+          className="md:z-20"
+          actions={
+            <Link href={externalListHref}>
+              <Button variant="outline">Back to Partner Orders</Button>
+            </Link>
+          }
+        />
+        <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          You do not have access to receive partner orders.
+        </div>
+      </section>
+    );
+  }
+
   return (
     <>
       <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+0.75rem)] z-40 md:hidden">
         <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
-          <Link href="/orders/external">
+          <Link href={externalListHref}>
             <Button
               variant="ghost"
               size="icon"
@@ -776,7 +805,6 @@ export default function ExternalJobsReceivePage() {
           subtitle="Mark delivered items as In Stock and attach delivery notes."
           className="pt-6 pb-6"
         />
-
         <DesktopPageHeader
           sticky
           title="Partner Orders - Receive"
@@ -784,7 +812,7 @@ export default function ExternalJobsReceivePage() {
           className="md:z-20"
           actions={
             <div className="hidden items-center gap-2 md:flex">
-              <Link href="/orders/external">
+              <Link href={externalListHref}>
                 <Button variant="outline" size="lg">
                   Back to Partner Orders
                 </Button>

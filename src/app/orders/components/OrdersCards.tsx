@@ -146,6 +146,7 @@ function OrderCard({
     !!onTakeOrder &&
     order.status === "ready_for_engineering" &&
     !order.assignedEngineerId;
+  const hasAnyCardAction = Boolean(onEdit || onDelete || canTakeOrderQuick);
   const hierarchyItems = activeLevels
     .map((level) => {
       const value = order.hierarchy?.[level.id];
@@ -351,24 +352,26 @@ function OrderCard({
             </button>
           ) : null}
         </div>
-        <div className="absolute right-2 top-2 md:hidden">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            ref={triggerRef}
-            onClick={(event) => {
-              event.stopPropagation();
-              setMenuOpen((prev) => !prev);
-            }}
-          >
-            <MoreVerticalIcon className="h-4 w-4" />
-          </Button>
-        </div>
+        {hasAnyCardAction ? (
+          <div className="absolute right-2 top-2 md:hidden">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              ref={triggerRef}
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen((prev) => !prev);
+              }}
+            >
+              <MoreVerticalIcon className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : null}
       </div>
 
-      {menuOpen && menuPosition
+      {hasAnyCardAction && menuOpen && menuPosition
         ? createPortal(
             <div
               className="fixed inset-0 z-50"

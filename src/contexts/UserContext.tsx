@@ -11,32 +11,23 @@ export type UserRole =
   | "Admin"
   | "Sales"
   | "Engineering"
-  | "Production manager"
-  | "Production worker"
+  | "Production planner"
+  | "Operator"
   | "Dealer"
-  | "Production";
+  | "Warehouse";
 
 export const userRoleOptions: UserRole[] = [
   "Admin",
   "Sales",
   "Engineering",
-  "Production manager",
-  "Production worker",
+  "Production planner",
+  "Operator",
   "Dealer",
-  "Production",
+  "Warehouse",
 ];
 
 export function formatUserRoleLabel(role: UserRole | string) {
-  switch (role) {
-    case "Production manager":
-      return "Production planner";
-    case "Production worker":
-      return "Operator";
-    case "Production":
-      return "Warehouse";
-    default:
-      return role;
-  }
+  return role;
 }
 
 export function normalizeUserRole(value?: string | null): UserRole {
@@ -52,13 +43,13 @@ export function normalizeUserRole(value?: string | null): UserRole {
   if (normalized === "admin") return "Admin";
   if (normalized === "sales") return "Sales";
   if (normalized === "engineering") return "Engineering";
-  if (normalized === "production manager") return "Production manager";
-  if (normalized === "production planner") return "Production manager";
-  if (normalized === "production worker") return "Production worker";
-  if (normalized === "operator") return "Production worker";
+  if (normalized === "production manager") return "Production planner";
+  if (normalized === "production planner") return "Production planner";
+  if (normalized === "production worker") return "Operator";
+  if (normalized === "operator") return "Operator";
   if (normalized === "dealer") return "Dealer";
-  if (normalized === "production") return "Production";
-  if (normalized === "warehouse") return "Production";
+  if (normalized === "production") return "Warehouse";
+  if (normalized === "warehouse") return "Warehouse";
   return "Sales";
 }
 
@@ -74,6 +65,7 @@ export interface CurrentUser {
   tenantName?: string | null;
   tenantLogoUrl?: string | null;
   avatarUrl?: string | null;
+  requiresPasswordSetup?: boolean;
   isAuthenticated: boolean;
   loading: boolean;
 }
@@ -93,6 +85,7 @@ const fallbackUser: CurrentUser = {
   tenantId: null,
   tenantLogoUrl: null,
   avatarUrl: null,
+  requiresPasswordSetup: false,
   isAuthenticated: false,
   loading: false,
 };
@@ -387,7 +380,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             tenant_id?: string;
             full_name?: string;
             role?: string;
+            require_password_setup?: boolean;
           };
+          if (metadata.require_password_setup) {
+            return nextProfile;
+          }
           const tenantId = metadata.tenant_id ?? null;
           if (tenantId) {
             const fullName =
@@ -413,6 +410,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             };
           }
         } else if (sessionUser.email) {
+          const metadata = sessionUser.user_metadata as {
+            require_password_setup?: boolean;
+          };
+          if (metadata?.require_password_setup) {
+            return nextProfile;
+          }
           const { data: invite } = await supabase
             .from("user_invites")
             .select("id, tenant_id, role, full_name")
@@ -508,6 +511,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           setUser({ ...fallbackUser, loading: false });
           return;
         }
+        const requiresPasswordSetup = Boolean(
+          (
+            sessionUser.user_metadata as
+              | { require_password_setup?: boolean }
+              | undefined
+          )?.require_password_setup,
+        );
         const cached = readCachedProfile(sessionUser.id);
         if (cached) {
           setUser({
@@ -522,6 +532,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             avatarUrl: cached.avatarUrl ?? null,
             tenantName: cached.tenantName ?? null,
             tenantLogoUrl: cached.tenantLogoUrl ?? null,
+            requiresPasswordSetup,
             isAuthenticated: true,
             loading: false,
           });
@@ -551,6 +562,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 avatarUrl: null,
                 tenantName: null,
                 tenantLogoUrl: null,
+                requiresPasswordSetup,
                 isAuthenticated: true,
                 loading: false,
               });
@@ -575,6 +587,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             avatarUrl: ensuredProfile.avatarUrl ?? null,
             tenantName: ensuredProfile.tenantName ?? null,
             tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
+            requiresPasswordSetup,
             isAuthenticated: true,
             loading: false,
           });
@@ -594,6 +607,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             avatarUrl: null,
             tenantName: null,
             tenantLogoUrl: null,
+            requiresPasswordSetup,
             isAuthenticated: true,
             loading: false,
           });
@@ -616,6 +630,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           setUser({ ...fallbackUser, loading: false });
           return;
         }
+        const requiresPasswordSetup = Boolean(
+          (
+            sessionUser.user_metadata as
+              | { require_password_setup?: boolean }
+              | undefined
+          )?.require_password_setup,
+        );
         const cached = readCachedProfile(sessionUser.id);
         if (cached) {
           setUser({
@@ -630,6 +651,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             avatarUrl: cached.avatarUrl ?? null,
             tenantName: cached.tenantName ?? null,
             tenantLogoUrl: cached.tenantLogoUrl ?? null,
+            requiresPasswordSetup,
             isAuthenticated: true,
             loading: false,
           });
@@ -656,6 +678,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 avatarUrl: null,
                 tenantName: null,
                 tenantLogoUrl: null,
+                requiresPasswordSetup,
                 isAuthenticated: true,
                 loading: false,
               });
@@ -677,6 +700,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               avatarUrl: ensuredProfile.avatarUrl ?? null,
               tenantName: ensuredProfile.tenantName ?? null,
               tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
+              requiresPasswordSetup,
               isAuthenticated: true,
               loading: false,
             });
@@ -693,6 +717,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               avatarUrl: null,
               tenantName: null,
               tenantLogoUrl: null,
+              requiresPasswordSetup,
               isAuthenticated: true,
               loading: false,
             });

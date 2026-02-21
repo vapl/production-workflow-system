@@ -52,10 +52,53 @@ export function TabsNav() {
   const { hasPermission } = useRbac();
   const user = useCurrentUser();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [canViewNotifications, setCanViewNotifications] = useState(true);
+
+  const canViewProductionPlanner = hasPermission("production.view");
+  const canViewProductionOperator = hasPermission("production.operator.view");
+  const isWarehouseUser = user.role === "Warehouse";
 
   useEffect(() => {
     const sb = supabase;
     if (!sb || !user.isAuthenticated || !user.tenantId) {
+      return;
+    }
+    let isMounted = true;
+    const loadNotificationAccess = async () => {
+      const { data } = await sb
+        .from("tenant_settings")
+        .select("notification_roles")
+        .eq("tenant_id", user.tenantId)
+        .maybeSingle();
+      if (!isMounted) {
+        return;
+      }
+      const roles = Array.isArray(data?.notification_roles)
+        ? data.notification_roles.filter(
+            (role): role is string => typeof role === "string",
+          )
+        : [];
+      if (roles.length === 0) {
+        setCanViewNotifications(true);
+        return;
+      }
+      setCanViewNotifications(roles.includes(user.role));
+    };
+    void loadNotificationAccess();
+    return () => {
+      isMounted = false;
+    };
+  }, [user.isAuthenticated, user.role, user.tenantId]);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (
+      !sb ||
+      !user.isAuthenticated ||
+      !user.tenantId ||
+      !canViewNotifications
+    ) {
+      setUnreadCount(0);
       return;
     }
     let isMounted = true;
@@ -93,29 +136,62 @@ export function TabsNav() {
       isMounted = false;
       sb.removeChannel(channel);
     };
-  }, [user.id, user.isAuthenticated, user.tenantId]);
+  }, [canViewNotifications, user.id, user.isAuthenticated, user.tenantId]);
 
-  const visibleMainTabs = mainTabs.filter((tab) => {
-    if (tab.value === "dashboard") {
-      return hasPermission("dashboard.view");
-    }
-    if (tab.value === "production") {
-      return hasPermission("production.view");
-    }
-    return true;
-  });
+  const warehouseTabs = [
+    { value: "orders", href: "/orders", label: "Orders", icon: PackageIcon },
+    {
+      value: "warehouse",
+      href: "/warehouse/queue",
+      label: "Warehouse",
+      icon: FactoryIcon,
+    },
+  ];
+
+  const visibleMainTabs = isWarehouseUser
+    ? warehouseTabs
+    : mainTabs
+        .map((tab) => {
+          if (tab.value !== "production") {
+            return tab;
+          }
+          return {
+            ...tab,
+            href: canViewProductionPlanner
+              ? "/production"
+              : "/production/operator",
+          };
+        })
+        .filter((tab) => {
+          if (tab.value === "dashboard") {
+            return hasPermission("dashboard.view");
+          }
+          if (tab.value === "production") {
+            return canViewProductionPlanner || canViewProductionOperator;
+          }
+          return true;
+        });
   const showSettings = hasPermission("settings.view");
   const desktopTabs = showSettings
     ? [...visibleMainTabs, settingsTab]
     : visibleMainTabs;
-  const mobileTabs = showSettings
-    ? [...visibleMainTabs, notificationsTab, settingsTab]
-    : [...visibleMainTabs, notificationsTab];
+  const mobileTabs = isWarehouseUser
+    ? visibleMainTabs
+    : showSettings
+      ? canViewNotifications
+        ? [...visibleMainTabs, notificationsTab, settingsTab]
+        : [...visibleMainTabs, settingsTab]
+      : canViewNotifications
+        ? [...visibleMainTabs, notificationsTab]
+        : visibleMainTabs;
 
   const activeDesktopTab =
-    desktopTabs.find((t) =>
-      t.href === "/" ? pathname === "/" : pathname.startsWith(t.href),
-    )?.value ??
+    desktopTabs.find((t) => {
+      if (t.value === "warehouse") {
+        return pathname.startsWith("/warehouse");
+      }
+      return t.href === "/" ? pathname === "/" : pathname.startsWith(t.href);
+    })?.value ??
     visibleMainTabs[0]?.value ??
     settingsTab.value;
 
@@ -159,7 +235,11 @@ export function TabsNav() {
           >
             {mobileTabs.map(({ value, href, label, icon: Icon }) => {
               const isActive =
-                href === "/" ? pathname === "/" : pathname.startsWith(href);
+                value === "warehouse"
+                  ? pathname.startsWith("/warehouse")
+                  : href === "/"
+                    ? pathname === "/"
+                    : pathname.startsWith(href);
               return (
                 <li key={value}>
                   <button

@@ -6,6 +6,7 @@ import {
   CopyIcon,
   FactoryIcon,
   GitBranchIcon,
+  InfoIcon,
   NetworkIcon,
   PanelRightIcon,
   PencilIcon,
@@ -39,6 +40,7 @@ import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { DataTable } from "@/components/ui/DataTable";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { useHierarchy } from "./HierarchyContext";
@@ -562,6 +564,10 @@ export default function SettingsPage() {
   const [isTenantProfileLoading, setIsTenantProfileLoading] = useState(false);
   const [isTenantSettingsLoading, setIsTenantSettingsLoading] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null);
+  const [deactivatingUserId, setDeactivatingUserId] = useState<string | null>(
+    null,
+  );
   const [operatorAssignments, setOperatorAssignments] = useState<
     { id: string; userId: string; stationId: string; isActive: boolean }[]
   >([]);
@@ -581,7 +587,7 @@ export default function SettingsPage() {
   >("idle");
   const [qrSettingsMessage, setQrSettingsMessage] = useState("");
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
-    "Production manager",
+    "Production planner",
     "Admin",
     "Owner",
   ]);
@@ -786,6 +792,13 @@ export default function SettingsPage() {
     }[]
   >([]);
   const [isInvitesLoading, setIsInvitesLoading] = useState(false);
+  const [resendingInviteEmail, setResendingInviteEmail] = useState<
+    string | null
+  >(null);
+  const [inviteListState, setInviteListState] = useState<
+    "idle" | "sent" | "error"
+  >("idle");
+  const [inviteListMessage, setInviteListMessage] = useState("");
   const canManageRolePermissions = hasPermission("settings.manage");
   const privilegedSessionTtlMs = 5 * 60 * 1000;
   const {
@@ -843,10 +856,10 @@ export default function SettingsPage() {
     "Admin",
     "Sales",
     "Engineering",
-    "Production manager",
-    "Production worker",
+    "Production planner",
+    "Operator",
     "Dealer",
-    "Production",
+    "Warehouse",
   ];
   const hasStatusLabelChanges = useMemo(
     () =>
@@ -896,8 +909,7 @@ export default function SettingsPage() {
   const editablePermissionRoles = useMemo(
     () =>
       userRoleOptions.filter(
-        (role) =>
-          !inactiveRoleOptions.has(role) && role !== "Production worker",
+        (role) => !inactiveRoleOptions.has(role) && role !== "Operator",
       ),
     [],
   );
@@ -1253,15 +1265,30 @@ export default function SettingsPage() {
       setInviteMessage(insertError.message);
       return;
     }
-    const response = await fetch("/api/auth/request-magic-link", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email: trimmed, mode: "invite" }),
-    });
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/request-magic-link", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: trimmed, mode: "invite" }),
+      });
+    } catch {
+      await supabase
+        .from("user_invites")
+        .delete()
+        .eq("id", inviteRow.id);
+      setInviteState("error");
+      setInviteMessage("Failed to send invite.");
+      return;
+    }
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
+      await supabase
+        .from("user_invites")
+        .delete()
+        .eq("id", inviteRow.id);
       setInviteState("error");
       setInviteMessage(data.error ?? "Failed to send invite.");
       return;
@@ -1357,19 +1384,28 @@ export default function SettingsPage() {
   }
 
   async function handleResendInvite(email: string) {
-    const response = await fetch("/api/auth/request-magic-link", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, mode: "invite" }),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      setInviteMessage(data.error ?? "Failed to resend invite.");
-      return;
+    setResendingInviteEmail(email);
+    setInviteListState("idle");
+    setInviteListMessage("");
+    try {
+      const response = await fetch("/api/auth/request-magic-link", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, mode: "invite" }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setInviteListState("error");
+        setInviteListMessage(data.error ?? "Failed to resend invite.");
+        return;
+      }
+      setInviteListState("sent");
+      setInviteListMessage(`Invite resent to ${email}.`);
+    } finally {
+      setResendingInviteEmail(null);
     }
-    setInviteMessage("Invite sent.");
   }
 
   async function handleCancelInvite(inviteId: string) {
@@ -1853,6 +1889,148 @@ export default function SettingsPage() {
     await runPrivilegedAction(() =>
       handleUpdateUserOwnerInternal(userId, isOwner),
     );
+  }
+
+  async function handleRemoveUserFromWorkspaceInternal(userId: string) {
+    if (!supabase) {
+      return;
+    }
+    if (userId === currentUser.id) {
+      setUsersError("You cannot remove your own account from workspace.");
+      return;
+    }
+    const targetUser = users.find((user) => user.id === userId);
+    if (!targetUser) {
+      return;
+    }
+    if (targetUser.isOwner) {
+      setUsersError("Owner cannot be removed from workspace.");
+      return;
+    }
+
+    setRemovingUserId(userId);
+    setUsersError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        setUsersError("Session expired. Please sign in again.");
+        return;
+      }
+
+      const response = await fetch("/api/settings/users/remove", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ userId }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setUsersError(data.error ?? "Failed to remove user from workspace.");
+        return;
+      }
+
+      setUsers((prev) => prev.filter((user) => user.id !== userId));
+      setOperatorAssignments((prev) =>
+        prev.filter((assignment) => assignment.userId !== userId),
+      );
+    } finally {
+      setRemovingUserId(null);
+    }
+  }
+
+  async function handleRemoveUserFromWorkspace(userId: string) {
+    const targetUser = users.find((user) => user.id === userId);
+    if (!targetUser) {
+      return;
+    }
+    const approved = await confirm({
+      title: "Remove user from workspace?",
+      description: `${targetUser.name} will lose access to this workspace.`,
+      confirmLabel: "Remove user",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!approved) {
+      return;
+    }
+    await runPrivilegedAction(() =>
+      handleRemoveUserFromWorkspaceInternal(userId),
+    );
+  }
+
+  async function handleDeactivateUserInternal(userId: string) {
+    if (!supabase) {
+      return;
+    }
+    if (userId === currentUser.id) {
+      setUsersError("You cannot deactivate your own account.");
+      return;
+    }
+    const targetUser = users.find((user) => user.id === userId);
+    if (!targetUser) {
+      return;
+    }
+    if (targetUser.isOwner) {
+      setUsersError("Owner cannot be deactivated.");
+      return;
+    }
+
+    setDeactivatingUserId(userId);
+    setUsersError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        setUsersError("Session expired. Please sign in again.");
+        return;
+      }
+
+      const response = await fetch("/api/settings/users/deactivate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ userId }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setUsersError(data.error ?? "Failed to deactivate user.");
+        return;
+      }
+
+      setUsers((prev) => prev.filter((user) => user.id !== userId));
+      setOperatorAssignments((prev) =>
+        prev.filter((assignment) => assignment.userId !== userId),
+      );
+    } finally {
+      setDeactivatingUserId(null);
+    }
+  }
+
+  async function handleDeactivateUser(userId: string) {
+    const targetUser = users.find((user) => user.id === userId);
+    if (!targetUser) {
+      return;
+    }
+    const approved = await confirm({
+      title: "Deactivate user?",
+      description: `${targetUser.name} will be deactivated and removed from this workspace.`,
+      confirmLabel: "Deactivate",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!approved) {
+      return;
+    }
+    await runPrivilegedAction(() => handleDeactivateUserInternal(userId));
   }
 
   function togglePermissionRole(permission: PermissionKey, role: UserRole) {
@@ -2365,7 +2543,7 @@ export default function SettingsPage() {
     }
     const roles = notificationRoles.length
       ? notificationRoles
-      : ["Production manager", "Admin", "Owner"];
+      : ["Production planner", "Admin", "Owner"];
     setNotificationRoles(roles);
     setNotificationState("saving");
     setNotificationMessage("");
@@ -4669,10 +4847,10 @@ export default function SettingsPage() {
                 <CardContent className="space-y-3">
                 <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
                   {[
-                    "Production manager",
+                    "Production planner",
                     "Admin",
                     "Owner",
-                    "Production",
+                    "Warehouse",
                     "Engineering",
                     "Sales",
                   ].map((role) => (
@@ -6126,10 +6304,50 @@ export default function SettingsPage() {
                     );
                   }
                   if (column.id === "actions") {
+                    const canRemove =
+                      canManageRolePermissions &&
+                      user.id !== currentUser.id &&
+                      !user.isOwner;
                     return (
-                      <span className="block text-right text-xs text-muted-foreground">
-                        {updatingUserId === user.id ? "Saving..." : ""}
-                      </span>
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          {updatingUserId === user.id ? "Saving..." : ""}
+                        </span>
+                        <Tooltip content="Deactivate keeps a user record marked inactive and removes workspace access.">
+                          <InfoIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Tooltip>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2 text-xs"
+                          disabled={!canRemove || deactivatingUserId === user.id}
+                          onClick={() => void handleDeactivateUser(user.id)}
+                        >
+                          {deactivatingUserId === user.id
+                            ? "Deactivating..."
+                            : "Deactivate"}
+                        </Button>
+                        <Tooltip content="Remove detaches the user from this workspace. Account stays in authentication system.">
+                          <InfoIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Tooltip>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2 text-xs"
+                          disabled={
+                            !canRemove ||
+                            removingUserId === user.id ||
+                            deactivatingUserId === user.id
+                          }
+                          onClick={() =>
+                            void handleRemoveUserFromWorkspace(user.id)
+                          }
+                        >
+                          {removingUserId === user.id ? "Removing..." : "Remove"}
+                        </Button>
+                      </div>
                     );
                   }
                   return "--";
@@ -6200,14 +6418,22 @@ export default function SettingsPage() {
                                   variant="outline"
                                   size="sm"
                                   onClick={() =>
-                                    handleResendInvite(invite.email)
+                                    void handleResendInvite(invite.email)
                                   }
                                   disabled={
                                     invite.acceptedAt !== null ||
-                                    !canManageRolePermissions
+                                    !canManageRolePermissions ||
+                                    resendingInviteEmail === invite.email
                                   }
                                 >
-                                  Resend
+                                  {resendingInviteEmail === invite.email ? (
+                                    <span className="inline-flex items-center gap-2">
+                                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                      Resending...
+                                    </span>
+                                  ) : (
+                                    "Resend"
+                                  )}
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -6228,6 +6454,17 @@ export default function SettingsPage() {
                     </tbody>
                   </table>
                 </div>
+                {inviteListMessage ? (
+                  <p
+                    className={`text-xs ${
+                      inviteListState === "error"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {inviteListMessage}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
