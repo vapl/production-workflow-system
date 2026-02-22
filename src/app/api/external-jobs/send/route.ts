@@ -47,6 +47,50 @@ function formatDateTime(value: string) {
   }).format(date);
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderTemplate(
+  template: string,
+  vars: Record<string, string | undefined>,
+) {
+  return template.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, rawKey: string) => {
+    const key = rawKey.toLowerCase();
+    const value = vars[key];
+    return value ?? "";
+  });
+}
+
+const defaultSubjectTemplate = "PWS request {{order_number}} - action required";
+const defaultHtmlTemplate = `
+  <p>Hello,</p>
+  <p>You have received a new external job request from {{customer_name}}.</p>
+  <p><strong>Order:</strong> {{order_number}}</p>
+  <p><strong>External order:</strong> {{external_order_number}}</p>
+  <p><strong>Due date:</strong> {{due_date}}</p>
+  {{comment_block}}
+  {{attachments_block}}
+  <p><a href="{{secure_form_link}}">Open secure form</a></p>
+  <p>This link expires on {{expires_at}}.</p>
+`;
+const defaultTextTemplate = [
+  "Hello,",
+  "Order: {{order_number}}",
+  "Customer: {{customer_name}}",
+  "External order: {{external_order_number}}",
+  "Due date: {{due_date}}",
+  "{{comment_line}}",
+  "{{attachments_line}}",
+  "Secure form: {{secure_form_link}}",
+  "Link expires: {{expires_at}}",
+].join("\n");
+
 function emailDomain(value?: string | null) {
   if (!value || !value.includes("@")) {
     return "";
@@ -144,7 +188,7 @@ export async function POST(request: Request) {
   const { data: tenantSettings } = await admin
     .from("tenants")
     .select(
-      "name, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified",
+      "name, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified, external_request_email_subject_template, external_request_email_html_template, external_request_email_text_template",
     )
     .eq("id", tenantId)
     .maybeSingle();
@@ -270,7 +314,15 @@ export async function POST(request: Request) {
       return `<li><a href="${item.url}" target="_blank" rel="noreferrer">${item.name}</a></li>`;
     })
     .join("");
-  const subject = `PWS request ${orderNumber} - action required`;
+  const subjectTemplate =
+    tenantSettings?.external_request_email_subject_template?.trim() ||
+    defaultSubjectTemplate;
+  const htmlTemplate =
+    tenantSettings?.external_request_email_html_template?.trim() ||
+    defaultHtmlTemplate;
+  const textTemplate =
+    tenantSettings?.external_request_email_text_template?.trim() ||
+    defaultTextTemplate;
   const actorEmail = authUser.email ?? "";
   const actorName = actorProfile.full_name ?? actorEmail ?? "User";
   const tenantName = tenantSettings?.name?.trim() || "PWS";
@@ -294,44 +346,49 @@ export async function POST(request: Request) {
         : `${tenantFromName} <${tenantFromEmail}>`
       : undefined;
   const resolvedReplyTo = actorEmail || tenantReplyTo || undefined;
+  const commentBlock = job.partner_request_comment
+    ? `<p><strong>Comment:</strong> ${escapeHtml(job.partner_request_comment)}</p>`
+    : "";
+  const attachmentsBlock =
+    safeAttachments.length > 0
+      ? `<p><strong>Attachments</strong></p><ul>${attachmentList}</ul>`
+      : "<p>No attachments provided.</p>";
+  const attachmentsTextLine =
+    safeAttachments.length > 0
+      ? `Attachments: ${safeAttachments
+          .map((item) => `${item.name}${item.url ? ` (${item.url})` : ""}`)
+          .join(", ")}`
+      : "Attachments: none";
+  const templateVars: Record<string, string> = {
+    order_number: orderNumber,
+    customer_name: customerName,
+    external_order_number: job.external_order_number ?? "-",
+    due_date: formatDate(job.due_date),
+    comment: job.partner_request_comment ?? "",
+    comment_block: commentBlock,
+    comment_line: job.partner_request_comment
+      ? `Comment: ${job.partner_request_comment}`
+      : "",
+    attachments_block: attachmentsBlock,
+    attachments_line: attachmentsTextLine,
+    secure_form_link: secureLink,
+    expires_at: formatDateTime(expiresAt),
+    partner_name: job.partner_name ?? "",
+    sender_name: actorName,
+    sender_email: actorEmail,
+    tenant_name: tenantName,
+  };
+  const subject = renderTemplate(subjectTemplate, templateVars).trim();
+  const htmlBody = renderTemplate(htmlTemplate, templateVars);
+  const textBody = renderTemplate(textTemplate, templateVars);
 
   const emailResult = await sendResendEmail({
     to: partnerEmail,
     from: resolvedFrom,
     replyTo: resolvedReplyTo,
-    subject,
-    html: `
-      <p>Hello,</p>
-      <p>You have received a new external job request from ${customerName}.</p>
-      <p><strong>Order:</strong> ${orderNumber}</p>
-      <p><strong>External order:</strong> ${job.external_order_number}</p>
-      <p><strong>Due date:</strong> ${formatDate(job.due_date)}</p>
-      ${
-        job.partner_request_comment
-          ? `<p><strong>Comment:</strong> ${job.partner_request_comment}</p>`
-          : ""
-      }
-      ${
-        safeAttachments.length > 0
-          ? `<p><strong>Attachments</strong></p><ul>${attachmentList}</ul>`
-          : "<p>No attachments provided.</p>"
-      }
-      <p><a href="${secureLink}">Open secure form</a></p>
-      <p>This link expires on ${formatDateTime(expiresAt)}.</p>
-    `,
-    text: [
-      "Hello,",
-      `Order: ${orderNumber}`,
-      `External order: ${job.external_order_number}`,
-      `Due date: ${formatDate(job.due_date)}`,
-      job.partner_request_comment
-        ? `Comment: ${job.partner_request_comment}`
-        : "",
-      `Secure form: ${secureLink}`,
-      `Link expires: ${expiresAt}`,
-    ]
-      .filter((line) => line.trim().length > 0)
-      .join("\n"),
+    subject: subject || `PWS request ${orderNumber} - action required`,
+    html: htmlBody,
+    text: textBody,
   });
   if (!emailResult.ok) {
     await admin

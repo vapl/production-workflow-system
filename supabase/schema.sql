@@ -8,6 +8,16 @@ create table if not exists public.tenants (
   created_at timestamptz not null default now()
 );
 
+alter table public.tenants
+  add column if not exists outbound_from_name text,
+  add column if not exists outbound_from_email text,
+  add column if not exists outbound_reply_to_email text,
+  add column if not exists outbound_use_user_sender boolean not null default true,
+  add column if not exists outbound_sender_verified boolean not null default false,
+  add column if not exists external_request_email_subject_template text,
+  add column if not exists external_request_email_html_template text,
+  add column if not exists external_request_email_text_template text;
+
 alter table public.profiles
   add column if not exists tenant_id uuid references public.tenants(id) on delete restrict;
 

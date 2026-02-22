@@ -127,6 +127,31 @@ const integrations = [
   { id: "int-5", name: "Custom API", status: "Coming soon" },
 ];
 
+const defaultExternalRequestEmailSubjectTemplate =
+  "PWS request {{order_number}} - action required";
+const defaultExternalRequestEmailHtmlTemplate = `
+<p>Hello,</p>
+<p>You have received a new external job request from {{customer_name}}.</p>
+<p><strong>Order:</strong> {{order_number}}</p>
+<p><strong>External order:</strong> {{external_order_number}}</p>
+<p><strong>Due date:</strong> {{due_date}}</p>
+{{comment_block}}
+{{attachments_block}}
+<p><a href="{{secure_form_link}}">Open secure form</a></p>
+<p>This link expires on {{expires_at}}.</p>
+`.trim();
+const defaultExternalRequestEmailTextTemplate = [
+  "Hello,",
+  "Order: {{order_number}}",
+  "Customer: {{customer_name}}",
+  "External order: {{external_order_number}}",
+  "Due date: {{due_date}}",
+  "{{comment_line}}",
+  "{{attachments_line}}",
+  "Secure form: {{secure_form_link}}",
+  "Link expires: {{expires_at}}",
+].join("\n");
+
 const workflowStatusOptions: { value: OrderStatus; label: string }[] = [
   { value: "draft", label: "Draft" },
   { value: "ready_for_engineering", label: "Ready for engineering" },
@@ -753,6 +778,14 @@ export default function SettingsPage() {
   const [outboundReplyToEmail, setOutboundReplyToEmail] = useState("");
   const [outboundUseUserSender, setOutboundUseUserSender] = useState(true);
   const [outboundSenderVerified, setOutboundSenderVerified] = useState(false);
+  const [
+    externalRequestEmailSubjectTemplate,
+    setExternalRequestEmailSubjectTemplate,
+  ] = useState(defaultExternalRequestEmailSubjectTemplate);
+  const [externalRequestEmailHtmlTemplate, setExternalRequestEmailHtmlTemplate] =
+    useState(defaultExternalRequestEmailHtmlTemplate);
+  const [externalRequestEmailTextTemplate, setExternalRequestEmailTextTemplate] =
+    useState(defaultExternalRequestEmailTextTemplate);
   const [outboundState, setOutboundState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
@@ -993,7 +1026,7 @@ export default function SettingsPage() {
         const { data, error } = await sb
           .from("tenants")
           .select(
-            "name, legal_name, registration_no, vat_no, billing_email, address, logo_url, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified",
+            "name, legal_name, registration_no, vat_no, billing_email, address, logo_url, outbound_from_name, outbound_from_email, outbound_reply_to_email, outbound_use_user_sender, outbound_sender_verified, external_request_email_subject_template, external_request_email_html_template, external_request_email_text_template",
           )
           .eq("id", currentUser.tenantId)
           .maybeSingle();
@@ -1012,6 +1045,18 @@ export default function SettingsPage() {
         setOutboundReplyToEmail(data.outbound_reply_to_email ?? "");
         setOutboundUseUserSender(data.outbound_use_user_sender ?? true);
         setOutboundSenderVerified(data.outbound_sender_verified ?? false);
+        setExternalRequestEmailSubjectTemplate(
+          data.external_request_email_subject_template ??
+            defaultExternalRequestEmailSubjectTemplate,
+        );
+        setExternalRequestEmailHtmlTemplate(
+          data.external_request_email_html_template ??
+            defaultExternalRequestEmailHtmlTemplate,
+        );
+        setExternalRequestEmailTextTemplate(
+          data.external_request_email_text_template ??
+            defaultExternalRequestEmailTextTemplate,
+        );
       } finally {
         if (isMounted) {
           setIsTenantProfileLoading(false);
@@ -2377,6 +2422,12 @@ export default function SettingsPage() {
         outbound_reply_to_email: outboundReplyToEmail.trim() || null,
         outbound_use_user_sender: outboundUseUserSender,
         outbound_sender_verified: outboundSenderVerified,
+        external_request_email_subject_template:
+          externalRequestEmailSubjectTemplate.trim() || null,
+        external_request_email_html_template:
+          externalRequestEmailHtmlTemplate.trim() || null,
+        external_request_email_text_template:
+          externalRequestEmailTextTemplate.trim() || null,
       })
       .eq("id", currentUser.tenantId);
     if (error) {
@@ -7565,6 +7616,64 @@ export default function SettingsPage() {
                       />
                       Domain is verified in Resend
                     </label>
+                  </div>
+                </div>
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                  <div className="text-sm font-semibold">
+                    External request email template
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Available placeholders:
+                    {" {{order_number}}, {{customer_name}}, {{external_order_number}}, {{due_date}}, {{comment_block}}, {{attachments_block}}, {{comment_line}}, {{attachments_line}}, {{secure_form_link}}, {{expires_at}}, {{partner_name}}, {{sender_name}}, {{sender_email}}, {{tenant_name}}"}.
+                  </p>
+                  <InputField
+                    label="Subject template"
+                    value={externalRequestEmailSubjectTemplate}
+                    onChange={(event) =>
+                      setExternalRequestEmailSubjectTemplate(event.target.value)
+                    }
+                    className="h-11 text-sm"
+                    disabled={!currentUser.isAdmin}
+                  />
+                  <TextAreaField
+                    label="HTML template"
+                    value={externalRequestEmailHtmlTemplate}
+                    onChange={(event) =>
+                      setExternalRequestEmailHtmlTemplate(event.target.value)
+                    }
+                    rows={8}
+                    className="text-sm"
+                    disabled={!currentUser.isAdmin}
+                  />
+                  <TextAreaField
+                    label="Text template"
+                    value={externalRequestEmailTextTemplate}
+                    onChange={(event) =>
+                      setExternalRequestEmailTextTemplate(event.target.value)
+                    }
+                    rows={8}
+                    className="text-sm"
+                    disabled={!currentUser.isAdmin}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setExternalRequestEmailSubjectTemplate(
+                          defaultExternalRequestEmailSubjectTemplate,
+                        );
+                        setExternalRequestEmailHtmlTemplate(
+                          defaultExternalRequestEmailHtmlTemplate,
+                        );
+                        setExternalRequestEmailTextTemplate(
+                          defaultExternalRequestEmailTextTemplate,
+                        );
+                      }}
+                      disabled={!currentUser.isAdmin}
+                    >
+                      Reset default template
+                    </Button>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">

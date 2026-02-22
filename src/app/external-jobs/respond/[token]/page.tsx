@@ -198,6 +198,20 @@ export default function ExternalJobRespondPage() {
         form.set(`field_${field.id}`, value === true ? "true" : "false");
         return;
       }
+
+      if (field.fieldType === "number") {
+        const normalizedValue =
+          typeof value === "string" ? value.replace(/,/g, ".") : "";
+
+        const parsed =
+          normalizedValue !== "" ? parseFloat(normalizedValue) : "";
+
+        form.set(
+          `field_${field.id}`,
+          parsed !== "" && !isNaN(parsed) ? String(parsed) : "",
+        );
+        return;
+      }
       form.set(`field_${field.id}`, typeof value === "string" ? value : "");
     });
     if (file) {
@@ -485,14 +499,21 @@ export default function ExternalJobRespondPage() {
                 <InputField
                   key={field.id}
                   label={label}
-                  type={field.fieldType === "number" ? "number" : "text"}
+                  type="text"
+                  inputMode={
+                    field.fieldType === "number" ? "decimal" : undefined
+                  }
                   value={typeof value === "string" ? value : ""}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const normalizedValue = event.target.value.replace(
+                      /,/g,
+                      ".",
+                    );
                     setPortalFieldValues((prev) => ({
                       ...prev,
-                      [field.id]: event.target.value,
-                    }))
-                  }
+                      [field.id]: normalizedValue,
+                    }));
+                  }}
                   className="h-10 text-sm"
                   required={field.isRequired}
                 />

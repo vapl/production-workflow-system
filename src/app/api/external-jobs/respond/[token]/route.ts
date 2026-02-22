@@ -49,6 +49,7 @@ type PortalField = {
   label: string;
   field_type: "text" | "textarea" | "number" | "date" | "select" | "toggle";
   scope?: "manual" | "portal_response" | null;
+  field_role?: "none" | "planned_price" | "invoice_price" | null;
   is_required: boolean;
   options?: { options?: string[] } | null;
   sort_order: number | null;
@@ -60,7 +61,10 @@ function shouldSkipPortalField(key: string) {
 }
 
 function pickPreferredPortalFields(fields: PortalField[]) {
-  const filtered = fields.filter((field) => !shouldSkipPortalField(field.key));
+  const filtered = fields.filter(
+    (field) =>
+      !shouldSkipPortalField(field.key) && field.field_role !== "invoice_price",
+  );
   const preferred =
     filtered.filter((field) => field.scope === "portal_response").length > 0
       ? filtered.filter((field) => field.scope === "portal_response")
@@ -161,7 +165,9 @@ export async function GET(
 
   const { data: fields } = await admin
     .from("external_job_fields")
-    .select("id, key, label, field_type, scope, is_required, options, sort_order")
+    .select(
+      "id, key, label, field_type, scope, field_role, is_required, options, sort_order",
+    )
     .eq("tenant_id", job.tenant_id)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
@@ -305,7 +311,7 @@ export async function POST(
 
   const { data: fields } = await admin
     .from("external_job_fields")
-    .select("id, key, label, field_type, scope, is_required")
+    .select("id, key, label, field_type, scope, field_role, is_required")
     .eq("tenant_id", job.tenant_id)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
