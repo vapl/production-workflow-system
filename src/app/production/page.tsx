@@ -4874,13 +4874,30 @@ export default function ProductionPage() {
                 visibility: visible;
               }
               .qr-print-root {
-                position: fixed;
-                left: 0;
-                top: 0;
-                width: 100%;
+                position: static !important;
+                width: auto !important;
+                height: auto !important;
+                overflow: visible !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                border: 0 !important;
+                background: transparent !important;
+                transform: none !important;
               }
               .qr-print-page {
+                break-inside: avoid;
+                page-break-inside: avoid;
+                break-after: page;
                 page-break-after: always;
+                margin: 0 !important;
+                box-shadow: none !important;
+              }
+              .qr-print-page:last-child {
+                break-after: auto;
+                page-break-after: auto;
+              }
+              .qr-preview-scale {
+                transform: none !important;
               }
             }
           `}</style>
@@ -5045,7 +5062,7 @@ export default function ProductionPage() {
                   </div>
                 ) : (
                   <div
-                    className="space-y-4"
+                    className="qr-preview-scale space-y-4"
                     style={{
                       transform: `scale(${qrPreviewScale})`,
                       transformOrigin: "top left",

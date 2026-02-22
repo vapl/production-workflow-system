@@ -34,7 +34,7 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
       <span
         className={cn(
           variant === "toggle"
-            ? "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-border transition-colors"
+            ? "relative inline-flex h-5 w-10 shrink-0 items-center rounded-full border border-border transition-colors"
             : "relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border bg-background transition-colors",
           checked
             ? variant === "toggle"
@@ -50,8 +50,8 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
         {variant === "toggle" ? (
           <span
             className={cn(
-              "pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
-              checked ? "translate-x-[1.25rem]" : "translate-x-0.5",
+              "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform",
+              checked ? "translate-x-5" : "translate-x-0.5",
             )}
           />
         ) : (

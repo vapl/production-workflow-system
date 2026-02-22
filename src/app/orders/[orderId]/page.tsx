@@ -53,6 +53,7 @@ import {
   ArrowLeftIcon,
   Copy,
   CopyIcon,
+  DownloadIcon,
   FileIcon,
   FileTextIcon,
   ImageIcon,
@@ -62,6 +63,7 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
+import JSZip from "jszip";
 import { OrderModal } from "@/app/orders/components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
@@ -129,6 +131,16 @@ function normalizeExternalFieldToken(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function sanitizeArchiveName(value: string) {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
 }
 
 function getExternalFieldSemantic(field: ExternalJobField) {
@@ -361,6 +373,14 @@ export default function OrderDetailPage() {
   >({});
   const [signedExternalAttachmentUrls, setSignedExternalAttachmentUrls] =
     useState<Record<string, string>>({});
+  const [downloadingAttachmentGroup, setDownloadingAttachmentGroup] =
+    useState<string | null>(null);
+  const [deletingAttachmentGroup, setDeletingAttachmentGroup] = useState<
+    string | null
+  >(null);
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<string[]>(
+    [],
+  );
   const [showDesktopStickyShadow, setShowDesktopStickyShadow] = useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
@@ -586,6 +606,20 @@ export default function OrderDetailPage() {
     if (!sb || !orderState?.id) {
       return;
     }
+    const trackedExternalJobIds = new Set(
+      (orderState.externalJobs ?? []).map((job) => job.id),
+    );
+    const isTrackedExternalJobPayload = (payload: {
+      new?: { external_job_id?: string | null };
+      old?: { external_job_id?: string | null };
+    }) => {
+      const newId = payload.new?.external_job_id ?? null;
+      const oldId = payload.old?.external_job_id ?? null;
+      return (
+        (typeof newId === "string" && trackedExternalJobIds.has(newId)) ||
+        (typeof oldId === "string" && trackedExternalJobIds.has(oldId))
+      );
+    };
     const channel = sb
       .channel(`order-live-${orderState.id}`)
       .on(
@@ -624,12 +658,63 @@ export default function OrderDetailPage() {
           void refreshOrders();
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "external_jobs",
+          filter: `order_id=eq.${orderState.id}`,
+        },
+        () => {
+          void refreshOrders();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "external_job_status_history",
+        },
+        (payload) => {
+          if (isTrackedExternalJobPayload(payload)) {
+            void refreshOrders();
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "external_job_attachments",
+        },
+        (payload) => {
+          if (isTrackedExternalJobPayload(payload)) {
+            void refreshOrders();
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "external_job_field_values",
+        },
+        (payload) => {
+          if (isTrackedExternalJobPayload(payload)) {
+            void refreshOrders();
+          }
+        },
+      )
       .subscribe();
 
     return () => {
       sb.removeChannel(channel);
     };
-  }, [orderState?.id, refreshOrders]);
+  }, [orderState?.externalJobs, orderState?.id, refreshOrders]);
 
   useEffect(() => {
     const sb = supabase;
@@ -975,6 +1060,13 @@ export default function OrderDetailPage() {
   }, [attachments, signedAttachmentUrls]);
 
   useEffect(() => {
+    const availableIds = new Set(attachments.map((attachment) => attachment.id));
+    setSelectedAttachmentIds((prev) =>
+      prev.filter((attachmentId) => availableIds.has(attachmentId)),
+    );
+  }, [attachments]);
+
+  useEffect(() => {
     const sb = supabase;
     if (!sb) {
       return;
@@ -1046,7 +1138,7 @@ export default function OrderDetailPage() {
       label: attachmentCategoryLabels[key] ?? "Uncategorized",
       items,
     }));
-  }, [attachments]);
+  }, [attachmentCategoryLabels, attachments]);
   const activeOrderInputFields = useMemo(
     () =>
       orderInputFields
@@ -2645,6 +2737,83 @@ export default function OrderDetailPage() {
       setOrderState((prev) =>
         prev ? { ...prev, attachments: nextAttachments } : prev,
       );
+      setSelectedAttachmentIds((prev) =>
+        prev.filter((selectedId) => selectedId !== attachmentId),
+      );
+    }
+  }
+
+  async function handleDeleteAttachmentGroup(
+    group: { key: string; label: string; items: OrderAttachment[] },
+    mode: "all" | "selected",
+  ) {
+    if (!orderState) {
+      return;
+    }
+    const targetItems =
+      mode === "all"
+        ? group.items
+        : group.items.filter((item) => selectedAttachmentIds.includes(item.id));
+    if (targetItems.length === 0) {
+      notify({
+        title: "No files selected",
+        description: "Select at least one file in this category.",
+        variant: "error",
+      });
+      return;
+    }
+    const count = targetItems.length;
+    const confirmed = await confirmRemove(
+      mode === "all"
+        ? `Delete all files in "${group.label}"?`
+        : `Delete selected files in "${group.label}"?`,
+      `This will remove ${count} file${count === 1 ? "" : "s"}.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setDeletingAttachmentGroup(group.key);
+    try {
+      const removedIds: string[] = [];
+      for (const attachment of targetItems) {
+        if (attachment.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(attachment.url);
+        }
+        const removed = await removeOrderAttachment(orderState.id, attachment.id);
+        if (removed) {
+          removedIds.push(attachment.id);
+        }
+      }
+      if (removedIds.length > 0) {
+        const removedSet = new Set(removedIds);
+        setOrderState((prev) =>
+          prev
+            ? {
+                ...prev,
+                attachments: (prev.attachments ?? []).filter(
+                  (item) => !removedSet.has(item.id),
+                ),
+              }
+            : prev,
+        );
+        setSelectedAttachmentIds((prev) =>
+          prev.filter((id) => !removedSet.has(id)),
+        );
+      }
+      if (removedIds.length !== targetItems.length) {
+        notify({
+          title: "Some files were not deleted",
+          description: `Deleted ${removedIds.length}/${targetItems.length} files.`,
+          variant: "error",
+        });
+      } else {
+        notify({
+          title: "Files deleted",
+          description: `Deleted ${removedIds.length} file${removedIds.length === 1 ? "" : "s"}.`,
+        });
+      }
+    } finally {
+      setDeletingAttachmentGroup(null);
     }
   }
 
@@ -3424,6 +3593,91 @@ export default function OrderDetailPage() {
     setChecklistState(next);
     setOrderState((prev) => (prev ? { ...prev, checklist: next } : prev));
     await updateOrder(orderState.id, { checklist: next });
+  }
+
+  async function handleDownloadAttachmentGroup(group: {
+    key: string;
+    label: string;
+    items: OrderAttachment[];
+  }) {
+    if (!orderState || group.items.length === 0) {
+      return;
+    }
+    setDownloadingAttachmentGroup(group.key);
+    try {
+      const zip = new JSZip();
+      const usedNames = new Set<string>();
+      let skippedCount = 0;
+
+      for (let index = 0; index < group.items.length; index += 1) {
+        const attachment = group.items[index];
+        const fileUrl = resolveAttachmentUrl(attachment);
+        if (!fileUrl) {
+          skippedCount += 1;
+          continue;
+        }
+        const response = await fetch(fileUrl);
+        if (!response.ok) {
+          skippedCount += 1;
+          continue;
+        }
+        const blob = await response.blob();
+        const originalName =
+          attachment.name?.trim() || `attachment-${index + 1}.bin`;
+        const lastDot = originalName.lastIndexOf(".");
+        const baseName =
+          lastDot > 0 ? originalName.slice(0, lastDot) : originalName;
+        const ext = lastDot > 0 ? originalName.slice(lastDot) : "";
+        let nextName = originalName;
+        let suffix = 2;
+        while (usedNames.has(nextName.toLowerCase())) {
+          nextName = `${baseName} (${suffix})${ext}`;
+          suffix += 1;
+        }
+        usedNames.add(nextName.toLowerCase());
+        zip.file(nextName, blob);
+      }
+
+      const includedCount = Object.keys(zip.files).length;
+      if (includedCount === 0) {
+        notify({
+          title: "Download failed",
+          description: "No files in this category could be downloaded.",
+          variant: "error",
+        });
+        return;
+      }
+
+      const archiveBlob = await zip.generateAsync({ type: "blob" });
+      const orderPart = sanitizeArchiveName(orderState.orderNumber || "order");
+      const categoryPart = sanitizeArchiveName(group.label || "attachments");
+      const datePart = new Date().toISOString().slice(0, 10);
+      const archiveName = `${orderPart}-${categoryPart}-${datePart}.zip`;
+      const objectUrl = URL.createObjectURL(archiveBlob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = archiveName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+
+      notify({
+        title: "Archive downloaded",
+        description:
+          skippedCount > 0
+            ? `${includedCount} file(s) downloaded, ${skippedCount} skipped.`
+            : `${includedCount} file(s) downloaded.`,
+      });
+    } catch {
+      notify({
+        title: "Download failed",
+        description: "Could not create archive for this category.",
+        variant: "error",
+      });
+    } finally {
+      setDownloadingAttachmentGroup(null);
+    }
   }
 
   const resolveAttachmentUrl = (attachment: OrderAttachment) => {
@@ -4242,8 +4496,63 @@ export default function OrderDetailPage() {
                   <div className="space-y-4">
                     {attachmentGroups.map((group) => (
                       <div key={group.key} className="space-y-2">
-                        <div className="text-xs font-semibold text-muted-foreground">
-                          {group.label}
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs font-semibold text-muted-foreground">
+                            {group.label}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              disabled={downloadingAttachmentGroup === group.key}
+                              onClick={() => {
+                                void handleDownloadAttachmentGroup(group);
+                              }}
+                            >
+                              <DownloadIcon className="h-3.5 w-3.5" />
+                              {downloadingAttachmentGroup === group.key
+                                ? "Preparing..."
+                                : "Download all"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              disabled={
+                                deletingAttachmentGroup === group.key ||
+                                !group.items.some((item) =>
+                                  selectedAttachmentIds.includes(item.id),
+                                )
+                              }
+                              onClick={() => {
+                                void handleDeleteAttachmentGroup(
+                                  group,
+                                  "selected",
+                                );
+                              }}
+                            >
+                              {deletingAttachmentGroup === group.key
+                                ? "Deleting..."
+                                : "Delete selected"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs text-destructive hover:text-destructive"
+                              disabled={deletingAttachmentGroup === group.key}
+                              onClick={() => {
+                                void handleDeleteAttachmentGroup(group, "all");
+                              }}
+                            >
+                              {deletingAttachmentGroup === group.key
+                                ? "Deleting..."
+                                : "Delete all"}
+                            </Button>
+                          </div>
                         </div>
                         {group.items.map((attachment) => (
                           <div
@@ -4272,6 +4581,25 @@ export default function OrderDetailPage() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
+                              <Checkbox
+                                variant="box"
+                                checked={selectedAttachmentIds.includes(
+                                  attachment.id,
+                                )}
+                                onChange={(event) => {
+                                  const checked = event.target.checked;
+                                  setSelectedAttachmentIds((prev) => {
+                                    if (checked) {
+                                      return prev.includes(attachment.id)
+                                        ? prev
+                                        : [...prev, attachment.id];
+                                    }
+                                    return prev.filter(
+                                      (itemId) => itemId !== attachment.id,
+                                    );
+                                  });
+                                }}
+                              />
                               {resolveAttachmentUrl(attachment) && (
                                 <a
                                   href={resolveAttachmentUrl(attachment)}

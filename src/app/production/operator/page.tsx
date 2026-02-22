@@ -50,11 +50,16 @@ import {
 } from "lucide-react";
 
 type Priority = "low" | "normal" | "high" | "urgent";
+type StationTrackingMode =
+  | "construction_level"
+  | "order_level"
+  | "receipt_only";
 
 type Station = {
   id: string;
   name: string;
   sortOrder: number;
+  trackingMode: StationTrackingMode;
 };
 
 type ProductionItemRow = {
@@ -72,6 +77,21 @@ type ProductionItemRow = {
   duration_minutes?: number | null;
   created_at?: string | null;
 };
+
+function getProductionItemRowIndex(item: ProductionItemRow) {
+  if (!item.meta || typeof item.meta !== "object") {
+    return null;
+  }
+  const raw = (item.meta as Record<string, unknown>).rowIndex;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw;
+  }
+  if (typeof raw === "string") {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 type BatchRunRow = {
   id: string;
@@ -128,10 +148,15 @@ type QueueItem = {
   startedAt?: string | null;
   doneAt?: string | null;
   items: ProductionItemRow[];
+  trackingMode: StationTrackingMode;
 };
 
 type PendingAction = {
   itemId: string;
+  action: "in_progress" | "done" | "blocked";
+};
+type PendingRunAction = {
+  runId: string;
   action: "in_progress" | "done" | "blocked";
 };
 
@@ -161,6 +186,13 @@ function statusBadge(status: BatchRunRow["status"]) {
   if (status === "in_progress") return "status-in_engineering";
   if (status === "done") return "status-ready_for_production";
   return "status-draft";
+}
+
+function normalizeTrackingMode(value: unknown): StationTrackingMode {
+  if (value === "order_level" || value === "receipt_only") {
+    return value;
+  }
+  return "construction_level";
 }
 
 function isFuturePlannedDate(plannedDate: string | null | undefined) {
@@ -294,6 +326,12 @@ export default function OperatorProductionPage() {
   const [quickActionOrderId, setQuickActionOrderId] = useState<string | null>(
     null,
   );
+  const [quickActionItemId, setQuickActionItemId] = useState<string | null>(
+    null,
+  );
+  const [quickActionRowIndex, setQuickActionRowIndex] = useState<number | null>(
+    null,
+  );
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
@@ -330,6 +368,8 @@ export default function OperatorProductionPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(
     null,
   );
+  const [pendingRunAction, setPendingRunAction] =
+    useState<PendingRunAction | null>(null);
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [activityEvents, setActivityEvents] = useState<StatusEventRow[]>([]);
@@ -445,7 +485,14 @@ export default function OperatorProductionPage() {
             cached.tenantId === currentUser.tenantId &&
             cached.date === selectedDate
           ) {
-            setStations(cached.stations ?? []);
+            setStations(
+              (cached.stations ?? []).map((station) => ({
+                ...station,
+                trackingMode: normalizeTrackingMode(
+                  (station as { trackingMode?: unknown }).trackingMode,
+                ),
+              })),
+            );
             setBatchRuns(cached.batchRuns ?? []);
             setStationDependencies(cached.stationDependencies ?? []);
             setProductionItems(cached.productionItems ?? []);
@@ -509,7 +556,7 @@ export default function OperatorProductionPage() {
       const [stationsResult, runsResult, depsResult] = await Promise.all([
         sb
           .from("workstations")
-          .select("id, name, sort_order")
+          .select("id, name, sort_order, tracking_mode")
           .in("id", stationIds)
           .order("sort_order", { ascending: true })
           .order("name", { ascending: true }),
@@ -588,6 +635,7 @@ export default function OperatorProductionPage() {
           id: station.id,
           name: station.name,
           sortOrder: station.sort_order ?? 0,
+          trackingMode: normalizeTrackingMode(station.tracking_mode),
         })),
       );
       setBatchRuns(runs);
@@ -976,6 +1024,9 @@ export default function OperatorProductionPage() {
 
   const queueByStation = useMemo(() => {
     const map = new Map<string, QueueItem[]>();
+    const stationModeById = new Map(
+      visibleStations.map((station) => [station.id, station.trackingMode]),
+    );
     visibleStations.forEach((station) => map.set(station.id, []));
     const runMap = new Map<string, BatchRunRow>();
     batchRuns.forEach((run) => {
@@ -1026,6 +1077,8 @@ export default function OperatorProductionPage() {
         startedAt: run.started_at,
         doneAt: run.done_at,
         items: dedupedItems,
+        trackingMode:
+          stationModeById.get(run.station_id) ?? "construction_level",
       } satisfies QueueItem;
       map.get(run.station_id)?.push(queueItem);
     });
@@ -1090,6 +1143,12 @@ export default function OperatorProductionPage() {
   const quickActionItem = quickActionOrderId
     ? (queueItemByOrderId.get(quickActionOrderId) ?? null)
     : null;
+  const quickActionVisibleItems =
+    quickActionItem?.trackingMode === "construction_level" &&
+    quickActionItemId &&
+    quickActionItem
+      ? quickActionItem.items.filter((item) => item.id === quickActionItemId)
+      : (quickActionItem?.items ?? []);
 
   const activitySummary = useMemo(() => {
     const todayEvents = activityEvents.filter(
@@ -1184,7 +1243,7 @@ export default function OperatorProductionPage() {
       })
       .eq("id", itemId);
     if (error) {
-      setDataError("Failed to update item status.");
+      setDataError(error.message ?? "Failed to update item status.");
       return;
     }
 
@@ -1354,7 +1413,7 @@ export default function OperatorProductionPage() {
         })
         .eq("id", runId);
       if (runError) {
-        setDataError("Failed to update batch status.");
+        setDataError(runError.message ?? "Failed to update batch status.");
         return;
       }
       setBatchRuns((prev) =>
@@ -1426,8 +1485,58 @@ export default function OperatorProductionPage() {
     }
   };
 
+  const handleRunStatusUpdate = async (
+    runId: string,
+    status: PendingRunAction["action"],
+    extra?: { blockedReason?: string | null; blockedReasonId?: string | null },
+  ) => {
+    if (pendingRunAction || pendingAction) {
+      return;
+    }
+    const run = batchRuns.find((item) => item.id === runId);
+    if (!run) {
+      return;
+    }
+    const runItems = productionItems.filter(
+      (item) =>
+        item.order_id === run.order_id &&
+        item.batch_code === run.batch_code &&
+        item.station_id === run.station_id,
+    );
+    if (runItems.length === 0) {
+      return;
+    }
+    const targetItems = runItems.filter((item) => {
+      if (status === "in_progress") {
+        return item.status !== "done";
+      }
+      if (status === "done") {
+        return item.status !== "done";
+      }
+      if (status === "blocked") {
+        return item.status !== "done";
+      }
+      return true;
+    });
+    if (targetItems.length === 0) {
+      return;
+    }
+    setPendingRunAction({ runId, action: status });
+    try {
+      for (const item of targetItems) {
+        await updateItemStatus(item.id, runId, status, extra);
+      }
+    } finally {
+      setPendingRunAction(null);
+    }
+  };
+
   const isActionLoading = (itemId: string, action: PendingAction["action"]) =>
     pendingAction?.itemId === itemId && pendingAction.action === action;
+  const isRunActionLoading = (
+    runId: string,
+    action: PendingRunAction["action"],
+  ) => pendingRunAction?.runId === runId && pendingRunAction.action === action;
 
   useEffect(() => {
     if (!supabase || productionItems.length === 0) {
@@ -1494,25 +1603,32 @@ export default function OperatorProductionPage() {
     batchRuns,
   ]);
 
-  const handleOpenBlocked = (runId: string, itemId: string) => {
+  const handleOpenBlocked = (runId: string, itemId?: string | null) => {
     setBlockedRunId(runId);
-    setBlockedItemId(itemId);
+    setBlockedItemId(itemId ?? null);
     setBlockedReasonId("");
     setBlockedReasonText("");
   };
 
   const handleConfirmBlocked = async () => {
-    if (!blockedRunId || !blockedItemId) {
+    if (!blockedRunId) {
       return;
     }
     const manual = blockedReasonText.trim();
     const selectedLabel =
       stopReasons.find((reason) => reason.id === blockedReasonId)?.label ?? "";
     const reason = manual || selectedLabel || "Blocked";
-    await handleUserStatusUpdate(blockedItemId, blockedRunId, "blocked", {
-      blockedReason: reason,
-      blockedReasonId: blockedReasonId || null,
-    });
+    if (blockedItemId) {
+      await handleUserStatusUpdate(blockedItemId, blockedRunId, "blocked", {
+        blockedReason: reason,
+        blockedReasonId: blockedReasonId || null,
+      });
+    } else {
+      await handleRunStatusUpdate(blockedRunId, "blocked", {
+        blockedReason: reason,
+        blockedReasonId: blockedReasonId || null,
+      });
+    }
     setBlockedRunId(null);
     setBlockedItemId(null);
     setBlockedReasonId("");
@@ -1522,6 +1638,8 @@ export default function OperatorProductionPage() {
   const closeQuickAction = () => {
     setIsQuickActionOpen(false);
     setQuickActionOrderId(null);
+    setQuickActionItemId(null);
+    setQuickActionRowIndex(null);
   };
 
   const applyFiltersToUrl = (next?: {
@@ -1573,6 +1691,26 @@ export default function OperatorProductionPage() {
     setIsQuickActionOpen(true);
   }, [quickActionOrderId, quickActionItem]);
 
+  useEffect(() => {
+    if (!quickActionOrderId || quickActionRowIndex == null) {
+      return;
+    }
+    const candidates = productionItems.filter(
+      (item) =>
+        item.order_id === quickActionOrderId &&
+        getProductionItemRowIndex(item) === quickActionRowIndex,
+    );
+    if (candidates.length === 0) {
+      return;
+    }
+    const target = [...candidates].sort((a, b) => {
+      const aTs = a.created_at ? Date.parse(a.created_at) : 0;
+      const bTs = b.created_at ? Date.parse(b.created_at) : 0;
+      return bTs - aTs;
+    })[0];
+    setQuickActionItemId(target.id);
+  }, [quickActionOrderId, quickActionRowIndex, productionItems]);
+
   const handleScannerResolved = async (result: ResolveScanTargetResult) => {
     const sb = supabase;
     if (!result.ok) {
@@ -1623,7 +1761,13 @@ export default function OperatorProductionPage() {
       });
     }
     if (currentUser.role === "Operator" && result.orderId) {
+      const rowIndex =
+        typeof result.rowIndex === "number" ? result.rowIndex : null;
       setQuickActionOrderId(result.orderId);
+      setQuickActionRowIndex(rowIndex);
+      if (rowIndex == null) {
+        setQuickActionItemId(null);
+      }
       setIsQuickActionOpen(true);
       setQueryParams({
         date: selectedDate,
@@ -1708,11 +1852,16 @@ export default function OperatorProductionPage() {
           type="button"
           onClick={handleConfirmBlocked}
           disabled={
-            blockedItemId ? isActionLoading(blockedItemId, "blocked") : false
+            blockedItemId
+              ? isActionLoading(blockedItemId, "blocked")
+              : (blockedRunId
+                  ? isRunActionLoading(blockedRunId, "blocked")
+                  : false)
           }
           className="gap-2"
         >
-          {blockedItemId && isActionLoading(blockedItemId, "blocked") ? (
+          {(blockedItemId && isActionLoading(blockedItemId, "blocked")) ||
+          (blockedRunId && isRunActionLoading(blockedRunId, "blocked")) ? (
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
           ) : null}
           Save
@@ -2036,6 +2185,43 @@ export default function OperatorProductionPage() {
                         const isPartiallyBlocked = hasBlocked && hasActive;
                         const showBlockedStyle =
                           isPartiallyBlocked && item.status === "in_progress";
+                        const isConstructionTracking =
+                          item.trackingMode === "construction_level";
+                        const isReceiptOnlyTracking =
+                          item.trackingMode === "receipt_only";
+                        const hasBatchStarted =
+                          Boolean(item.startedAt) || item.status === "in_progress";
+                        const isBatchBlocked = item.status === "blocked";
+                        const isBatchDone = item.status === "done";
+                        const batchStartLockedByDate =
+                          !hasBatchStarted &&
+                          !isBatchBlocked &&
+                          isFuturePlannedDate(item.plannedDate);
+                        const hasBlockingDependenciesForBatch = item.items.some(
+                          (prodItem) => {
+                            const dependencyStations =
+                              dependenciesByStation.get(prodItem.station_id ?? "") ??
+                              [];
+                            if (dependencyStations.length === 0) {
+                              return false;
+                            }
+                            const groupKey = getItemGroupKey(prodItem);
+                            return dependencyStations.some((depId) => {
+                              const depItem =
+                                itemsByGroupAndStation.get(groupKey)?.get(depId) ??
+                                null;
+                              return depItem && depItem.status !== "done";
+                            });
+                          },
+                        );
+                        const isBatchStarting = isRunActionLoading(
+                          item.id,
+                          "in_progress",
+                        );
+                        const isBatchCompleting = isRunActionLoading(
+                          item.id,
+                          "done",
+                        );
                         const elapsedMinutes = item.startedAt
                           ? computeWorkingMinutes(
                               item.startedAt,
@@ -2108,7 +2294,7 @@ export default function OperatorProductionPage() {
                                 Time: {elapsedLabel}
                               </div>
                             ) : null}
-                            {item.items.length > 0 ? (
+                            {item.items.length > 0 && isConstructionTracking ? (
                               <div className="mt-3">
                                 <Button
                                   type="button"
@@ -2360,6 +2546,74 @@ export default function OperatorProductionPage() {
                                         </div>
                                       );
                                     })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {item.items.length > 0 && !isConstructionTracking ? (
+                              <div className="mt-3 rounded-md border border-border bg-muted/20 px-2 py-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="text-[11px] text-muted-foreground">
+                                    {isReceiptOnlyTracking
+                                      ? "Receipt action for this batch"
+                                      : "Batch actions for this station"}
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {!isReceiptOnlyTracking ? (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="gap-2"
+                                        disabled={
+                                          isBatchDone ||
+                                          (hasBatchStarted && !isBatchBlocked) ||
+                                          batchStartLockedByDate ||
+                                          hasBlockingDependenciesForBatch ||
+                                          isBatchStarting
+                                        }
+                                        onClick={() =>
+                                          handleRunStatusUpdate(
+                                            item.id,
+                                            "in_progress",
+                                          )
+                                        }
+                                      >
+                                        {isBatchBlocked ? "Resume" : "Start"}
+                                      </Button>
+                                    ) : null}
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="gap-2"
+                                      disabled={
+                                        (!isReceiptOnlyTracking &&
+                                          (!hasBatchStarted ||
+                                            isBatchDone ||
+                                            isBatchBlocked)) ||
+                                        (isReceiptOnlyTracking && isBatchDone) ||
+                                        isBatchCompleting
+                                      }
+                                      onClick={() =>
+                                        handleRunStatusUpdate(item.id, "done")
+                                      }
+                                    >
+                                      {isReceiptOnlyTracking ? "Received" : "Done"}
+                                    </Button>
+                                    {!isReceiptOnlyTracking ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled={isBatchDone}
+                                        onClick={() => handleOpenBlocked(item.id)}
+                                      >
+                                        Blocked
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                {batchStartLockedByDate && item.plannedDate ? (
+                                  <div className="mt-1 text-[10px] text-amber-600">
+                                    Available on {formatDate(item.plannedDate)}
                                   </div>
                                 ) : null}
                               </div>
@@ -2645,90 +2899,173 @@ export default function OperatorProductionPage() {
                     : ""}
                 </div>
               </div>
-              {quickActionItem.items.map((prodItem) => {
-                const hasStarted =
-                  Boolean(prodItem.started_at) ||
-                  prodItem.status === "in_progress";
-                const isBlocked = prodItem.status === "blocked";
-                const isDone = prodItem.status === "done";
-                const startLockedByDate =
-                  !hasStarted &&
-                  !isBlocked &&
-                  isFuturePlannedDate(quickActionItem.plannedDate);
-                const isStarting = isActionLoading(prodItem.id, "in_progress");
-                const isCompleting = isActionLoading(prodItem.id, "done");
-                return (
-                  <div
-                    key={prodItem.id}
-                    className="rounded-md border border-border bg-background px-3 py-2"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs text-muted-foreground">
-                        {prodItem.item_name}
-                      </div>
-                      <Badge variant={statusBadge(prodItem.status)}>
-                        {String(prodItem.status ?? "queued").replace("_", " ")}
-                      </Badge>
+              {quickActionItem.trackingMode !== "construction_level" ? (
+                <div className="rounded-md border border-border bg-background px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs text-muted-foreground">
+                      {quickActionItem.trackingMode === "receipt_only"
+                        ? "Receipt action for this batch"
+                        : "Batch actions for this station"}
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      Qty: {prodItem.qty}
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <Badge variant={statusBadge(quickActionItem.status)}>
+                      {String(quickActionItem.status ?? "queued").replace(
+                        "_",
+                        " ",
+                      )}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {quickActionItem.trackingMode !== "receipt_only" ? (
                       <Button
                         variant="outline"
                         size="sm"
                         className="gap-2"
                         disabled={
-                          isDone ||
-                          (hasStarted && !isBlocked) ||
-                          startLockedByDate ||
-                          isStarting
+                          quickActionItem.status === "done" ||
+                          quickActionItem.status === "in_progress" ||
+                          isFuturePlannedDate(quickActionItem.plannedDate) ||
+                          isRunActionLoading(quickActionItem.id, "in_progress")
                         }
                         onClick={() =>
-                          handleUserStatusUpdate(
-                            prodItem.id,
-                            quickActionItem.id,
-                            "in_progress",
-                          )
+                          handleRunStatusUpdate(quickActionItem.id, "in_progress")
                         }
                       >
-                        {isBlocked ? "Resume" : "Start"}
+                        {quickActionItem.status === "blocked"
+                          ? "Resume"
+                          : "Start"}
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={
-                          !hasStarted || isDone || isBlocked || isCompleting
-                        }
-                        onClick={() =>
-                          handleUserStatusUpdate(
-                            prodItem.id,
-                            quickActionItem.id,
-                            "done",
-                          )
-                        }
-                      >
-                        Done
-                      </Button>
+                    ) : null}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        quickActionItem.status === "done" ||
+                        isRunActionLoading(quickActionItem.id, "done")
+                      }
+                      onClick={() =>
+                        handleRunStatusUpdate(quickActionItem.id, "done")
+                      }
+                    >
+                      {quickActionItem.trackingMode === "receipt_only"
+                        ? "Received"
+                        : "Done"}
+                    </Button>
+                    {quickActionItem.trackingMode !== "receipt_only" ? (
                       <Button
                         variant="ghost"
                         size="sm"
-                        disabled={isDone}
-                        onClick={() =>
-                          handleOpenBlocked(quickActionItem.id, prodItem.id)
-                        }
+                        disabled={quickActionItem.status === "done"}
+                        onClick={() => handleOpenBlocked(quickActionItem.id)}
                       >
                         Blocked
                       </Button>
-                    </div>
-                    {startLockedByDate && quickActionItem.plannedDate ? (
-                      <div className="mt-1 text-[11px] text-amber-600">
-                        Available on {formatDate(quickActionItem.plannedDate)}
-                      </div>
                     ) : null}
                   </div>
-                );
-              })}
+                  {isFuturePlannedDate(quickActionItem.plannedDate) &&
+                  quickActionItem.plannedDate ? (
+                    <div className="mt-1 text-[11px] text-amber-600">
+                      Available on {formatDate(quickActionItem.plannedDate)}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {quickActionItem.trackingMode === "construction_level"
+                ? quickActionVisibleItems.map((prodItem) => {
+                    const hasStarted =
+                      Boolean(prodItem.started_at) ||
+                      prodItem.status === "in_progress";
+                    const isBlocked = prodItem.status === "blocked";
+                    const isDone = prodItem.status === "done";
+                    const startLockedByDate =
+                      !hasStarted &&
+                      !isBlocked &&
+                      isFuturePlannedDate(quickActionItem.plannedDate);
+                    const isStarting = isActionLoading(
+                      prodItem.id,
+                      "in_progress",
+                    );
+                    const isCompleting = isActionLoading(prodItem.id, "done");
+                    return (
+                      <div
+                        key={prodItem.id}
+                        className="rounded-md border border-border bg-background px-3 py-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs text-muted-foreground">
+                            {prodItem.item_name}
+                          </div>
+                          <Badge variant={statusBadge(prodItem.status)}>
+                            {String(prodItem.status ?? "queued").replace(
+                              "_",
+                              " ",
+                            )}
+                          </Badge>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Qty: {prodItem.qty}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                            disabled={
+                              isDone ||
+                              (hasStarted && !isBlocked) ||
+                              startLockedByDate ||
+                              isStarting
+                            }
+                            onClick={() =>
+                              handleUserStatusUpdate(
+                                prodItem.id,
+                                quickActionItem.id,
+                                "in_progress",
+                              )
+                            }
+                          >
+                            {isBlocked ? "Resume" : "Start"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={
+                              !hasStarted || isDone || isBlocked || isCompleting
+                            }
+                            onClick={() =>
+                              handleUserStatusUpdate(
+                                prodItem.id,
+                                quickActionItem.id,
+                                "done",
+                              )
+                            }
+                          >
+                            Done
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={isDone}
+                            onClick={() =>
+                              handleOpenBlocked(quickActionItem.id, prodItem.id)
+                            }
+                          >
+                            Blocked
+                          </Button>
+                        </div>
+                        {startLockedByDate && quickActionItem.plannedDate ? (
+                          <div className="mt-1 text-[11px] text-amber-600">
+                            Available on {formatDate(quickActionItem.plannedDate)}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                : null}
+              {quickActionVisibleItems.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                  No constructions found for this QR code in your current queue.
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">

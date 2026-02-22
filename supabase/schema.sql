@@ -575,6 +575,8 @@ create table if not exists public.workstations (
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   name text not null,
   description text,
+  tracking_mode text not null default 'construction_level'
+    check (tracking_mode in ('construction_level', 'order_level', 'receipt_only')),
   is_active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),

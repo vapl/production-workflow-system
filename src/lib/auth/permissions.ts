@@ -139,7 +139,7 @@ export function canAccessRoute(
   user: Pick<CurrentUser, "role" | "isAdmin" | "isOwner">,
   roleMap: PermissionRoleMap = defaultPermissionRoles,
 ) {
-  if (isProductionWorker(user)) {
+  if (isProductionWorker(user) && !isAdminLike(user)) {
     return route === "/production/operator";
   }
   if (route === "/") return hasPermission(user, "dashboard.view", roleMap);

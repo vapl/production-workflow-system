@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   CopyIcon,
   FactoryIcon,
@@ -61,7 +61,7 @@ import {
 import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
 import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
-import type { WorkStation } from "@/types/workstation";
+import type { StationTrackingMode, WorkStation } from "@/types/workstation";
 import type {
   OrderInputFieldType,
   OrderInputGroupKey,
@@ -221,6 +221,15 @@ const externalJobFieldTypeOptions: {
   { value: "toggle", label: "Toggle" },
 ];
 
+const stationTrackingModeOptions: Array<{
+  value: StationTrackingMode;
+  label: string;
+}> = [
+  { value: "construction_level", label: "By construction" },
+  { value: "order_level", label: "By whole order/batch" },
+  { value: "receipt_only", label: "Receipt only" },
+];
+
 const externalJobStatusOptions: {
   value: ExternalJobStatus;
   label: string;
@@ -354,6 +363,8 @@ type ExternalTableColumnSetting = {
 };
 
 export default function SettingsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
   const {
@@ -488,6 +499,8 @@ export default function SettingsPage() {
   );
   const [stationName, setStationName] = useState("");
   const [stationDescription, setStationDescription] = useState("");
+  const [stationTrackingMode, setStationTrackingMode] =
+    useState<StationTrackingMode>("construction_level");
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
   const [dragStationId, setDragStationId] = useState<string | null>(null);
   const [isStationOrderSaving, setIsStationOrderSaving] = useState(false);
@@ -782,10 +795,14 @@ export default function SettingsPage() {
     externalRequestEmailSubjectTemplate,
     setExternalRequestEmailSubjectTemplate,
   ] = useState(defaultExternalRequestEmailSubjectTemplate);
-  const [externalRequestEmailHtmlTemplate, setExternalRequestEmailHtmlTemplate] =
-    useState(defaultExternalRequestEmailHtmlTemplate);
-  const [externalRequestEmailTextTemplate, setExternalRequestEmailTextTemplate] =
-    useState(defaultExternalRequestEmailTextTemplate);
+  const [
+    externalRequestEmailHtmlTemplate,
+    setExternalRequestEmailHtmlTemplate,
+  ] = useState(defaultExternalRequestEmailHtmlTemplate);
+  const [
+    externalRequestEmailTextTemplate,
+    setExternalRequestEmailTextTemplate,
+  ] = useState(defaultExternalRequestEmailTextTemplate);
   const [outboundState, setOutboundState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
@@ -1320,20 +1337,14 @@ export default function SettingsPage() {
         body: JSON.stringify({ email: trimmed, mode: "invite" }),
       });
     } catch {
-      await supabase
-        .from("user_invites")
-        .delete()
-        .eq("id", inviteRow.id);
+      await supabase.from("user_invites").delete().eq("id", inviteRow.id);
       setInviteState("error");
       setInviteMessage("Failed to send invite.");
       return;
     }
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      await supabase
-        .from("user_invites")
-        .delete()
-        .eq("id", inviteRow.id);
+      await supabase.from("user_invites").delete().eq("id", inviteRow.id);
       setInviteState("error");
       setInviteMessage(data.error ?? "Failed to send invite.");
       return;
@@ -2348,6 +2359,7 @@ export default function SettingsPage() {
       description: station.description,
       isActive: station.isActive,
       sortOrder: station.sortOrder,
+      trackingMode: station.trackingMode ?? "construction_level",
     });
   }
 
@@ -2488,6 +2500,7 @@ export default function SettingsPage() {
   function resetStationForm() {
     setStationName("");
     setStationDescription("");
+    setStationTrackingMode("construction_level");
     setEditingStationId(null);
   }
 
@@ -3246,6 +3259,7 @@ export default function SettingsPage() {
       await updateWorkStation(editingStationId, {
         name: trimmedName,
         description: stationDescription.trim() || undefined,
+        trackingMode: stationTrackingMode,
       });
       resetStationForm();
       return;
@@ -3255,6 +3269,7 @@ export default function SettingsPage() {
       description: stationDescription.trim() || undefined,
       isActive: true,
       sortOrder: displayStations.length,
+      trackingMode: stationTrackingMode,
     });
     resetStationForm();
   }
@@ -3267,6 +3282,7 @@ export default function SettingsPage() {
     setEditingStationId(stationId);
     setStationName(station.name);
     setStationDescription(station.description ?? "");
+    setStationTrackingMode(station.trackingMode ?? "construction_level");
   }
 
   function resetStopReasonForm() {
@@ -3380,6 +3396,15 @@ export default function SettingsPage() {
     }
   }, [searchParams]);
 
+  const setActiveSettingsTab = (nextTab: string) => {
+    setActiveTab(nextTab);
+    const current = new URLSearchParams(searchParams?.toString() ?? "");
+    current.set("tab", nextTab);
+    router.replace(`${pathname ?? "/settings"}?${current.toString()}`, {
+      scroll: false,
+    });
+  };
+
   useEffect(() => {
     if (!isMobileSectionsOpen) {
       return;
@@ -3460,7 +3485,7 @@ export default function SettingsPage() {
 
       <Tabs
         value={activeTab}
-        onValueChange={setActiveTab}
+        onValueChange={setActiveSettingsTab}
         className="space-y-0 md:space-y-4"
       >
         <DesktopPageHeader
@@ -3504,7 +3529,7 @@ export default function SettingsPage() {
                         key={section.value}
                         type="button"
                         onClick={() => {
-                          setActiveTab(section.value);
+                          setActiveSettingsTab(section.value);
                           setIsMobileSectionsOpen(false);
                         }}
                         aria-current={isActive ? "page" : undefined}
@@ -4605,8 +4630,8 @@ export default function SettingsPage() {
                     Manage the list of production stations.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(240px,1.2fr)_auto] lg:items-end">
+                <CardContent className="min-w-0 space-y-4">
+                  <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
                     <InputField
                       label="Station name"
                       value={stationName}
@@ -4623,7 +4648,27 @@ export default function SettingsPage() {
                       placeholder="Sawing and prep"
                       className="h-10 text-sm"
                     />
-                    <div className="flex gap-2">
+                    <label className="flex flex-col gap-2 text-sm font-medium">
+                      <span>Tracking mode</span>
+                      <Select
+                        value={stationTrackingMode}
+                        onValueChange={(value) =>
+                          setStationTrackingMode(value as StationTrackingMode)
+                        }
+                      >
+                        <SelectTrigger className="h-10 w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {stationTrackingModeOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2 md:col-span-2 xl:col-span-1 xl:justify-end">
                       <Button onClick={handleSaveStation}>
                         {editingStationId ? "Save station" : "Add station"}
                       </Button>
@@ -4678,27 +4723,27 @@ export default function SettingsPage() {
                     {displayStations.map((station, index) => (
                       <div
                         key={station.id}
-                        className="flex flex-wrap items-center justify-between gap-3 overflow-hidden rounded-lg border border-border px-4 py-3"
+                        className="min-w-0 rounded-lg border border-border px-4 py-3"
                         draggable
                         onDragStart={() => setDragStationId(station.id)}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={() => handleStationDrop(station.id)}
                       >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-full h-6 w-6 flex justify-center items-center border border-border text-xs text-muted-foreground">
-                              {index + 1}
-                            </span>
-                            <span className="font-medium wrap-break-word">
-                              {station.name}
-                            </span>
+                        <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="flex h-6 w-6 items-center justify-center rounded-full border border-border text-xs text-muted-foreground">
+                                {index + 1}
+                              </span>
+                              <span className="break-words text-md font-semibold leading-tight">
+                                {station.name}
+                              </span>
+                            </div>
+                            <div className="mt-1 break-words text-sm text-muted-foreground">
+                              {station.description ?? "No description"}
+                            </div>
                           </div>
-                          <div className="text-sm text-muted-foreground wrap-break-word">
-                            {station.description ?? "No description"}
-                          </div>
-                        </div>
-                        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
-                          <label className="flex items-center gap-2 text-sm">
+                          <label className="flex items-center gap-2 text-sm lg:mt-1">
                             <Checkbox
                               checked={station.isActive}
                               onChange={(event) =>
@@ -4709,50 +4754,76 @@ export default function SettingsPage() {
                             />
                             Active
                           </label>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEditStation(station.id)}
-                          >
-                            <PencilIcon className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleCopyWorkStation(station.id)}
-                          >
-                            <CopyIcon className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={async () => {
-                              if (
-                                !(await confirmRemove(
-                                  `Remove workstation "${station.name}"?`,
-                                ))
-                              ) {
-                                return;
-                              }
-                              removeWorkStation(station.id);
-                            }}
-                          >
-                            <Trash2Icon className="h-4 w-4" />
-                          </Button>
-                          <Checkbox
-                            variant="box"
-                            checked={selectedWorkStationIds.includes(
-                              station.id,
-                            )}
-                            onChange={(event) => {
-                              setSelectedWorkStationIds((prev) => {
-                                if (event.target.checked) {
-                                  return [...prev, station.id];
-                                }
-                                return prev.filter((id) => id !== station.id);
+                        </div>
+                        <div className="mt-3 grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                          <Select
+                            value={station.trackingMode ?? "construction_level"}
+                            onValueChange={(value) => {
+                              void updateWorkStation(station.id, {
+                                trackingMode: value as StationTrackingMode,
                               });
                             }}
-                          />
+                          >
+                            <SelectTrigger className="h-9 w-full rounded-md text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {stationTrackingModeOptions.map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditStation(station.id)}
+                            >
+                              <PencilIcon className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleCopyWorkStation(station.id)}
+                            >
+                              <CopyIcon className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                if (
+                                  !(await confirmRemove(
+                                    `Remove workstation "${station.name}"?`,
+                                  ))
+                                ) {
+                                  return;
+                                }
+                                removeWorkStation(station.id);
+                              }}
+                            >
+                              <Trash2Icon className="h-4 w-4" />
+                            </Button>
+                            <Checkbox
+                              variant="box"
+                              checked={selectedWorkStationIds.includes(
+                                station.id,
+                              )}
+                              onChange={(event) => {
+                                setSelectedWorkStationIds((prev) => {
+                                  if (event.target.checked) {
+                                    return [...prev, station.id];
+                                  }
+                                  return prev.filter((id) => id !== station.id);
+                                });
+                              }}
+                            />
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -4896,15 +4967,15 @@ export default function SettingsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-                  {[
-                    "Production planner",
-                    "Admin",
-                    "Owner",
-                    "Warehouse",
-                    "Engineering",
-                    "Sales",
-                  ].map((role) => (
+                  <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                    {[
+                      "Production planner",
+                      "Admin",
+                      "Owner",
+                      "Warehouse",
+                      "Engineering",
+                      "Sales",
+                    ].map((role) => (
                       <label
                         key={role}
                         className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
@@ -6372,7 +6443,9 @@ export default function SettingsPage() {
                           variant="outline"
                           size="sm"
                           className="h-8 px-2 text-xs"
-                          disabled={!canRemove || deactivatingUserId === user.id}
+                          disabled={
+                            !canRemove || deactivatingUserId === user.id
+                          }
                           onClick={() => void handleDeactivateUser(user.id)}
                         >
                           {deactivatingUserId === user.id
@@ -6396,7 +6469,9 @@ export default function SettingsPage() {
                             void handleRemoveUserFromWorkspace(user.id)
                           }
                         >
-                          {removingUserId === user.id ? "Removing..." : "Remove"}
+                          {removingUserId === user.id
+                            ? "Removing..."
+                            : "Remove"}
                         </Button>
                       </div>
                     );
@@ -7624,7 +7699,10 @@ export default function SettingsPage() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Available placeholders:
-                    {" {{order_number}}, {{customer_name}}, {{external_order_number}}, {{due_date}}, {{comment_block}}, {{attachments_block}}, {{comment_line}}, {{attachments_line}}, {{secure_form_link}}, {{expires_at}}, {{partner_name}}, {{sender_name}}, {{sender_email}}, {{tenant_name}}"}.
+                    {
+                      " {{order_number}}, {{customer_name}}, {{external_order_number}}, {{due_date}}, {{comment_block}}, {{attachments_block}}, {{comment_line}}, {{attachments_line}}, {{secure_form_link}}, {{expires_at}}, {{partner_name}}, {{sender_name}}, {{sender_email}}, {{tenant_name}}"
+                    }
+                    .
                   </p>
                   <InputField
                     label="Subject template"

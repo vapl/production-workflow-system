@@ -28,7 +28,7 @@ import { cn } from "@/components/ui/utils";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
   const { signOut } = useAuthActions();
-  const { permissions, hasPermission } = useRbac();
+  const { permissions, hasPermission, loading: rbacLoading } = useRbac();
   const pathname = usePathname();
   const router = useRouter();
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
@@ -336,6 +336,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (user.loading || !user.isAuthenticated || isPublicRoute || !pathname) {
       return;
     }
+    if (rbacLoading) {
+      return;
+    }
     const authUser = {
       role: user.role,
       isAdmin: user.isAdmin,
@@ -389,6 +392,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     user.isOwner,
     user.loading,
     user.role,
+    rbacLoading,
   ]);
 
   if (isExternalJobRespondRoute) {

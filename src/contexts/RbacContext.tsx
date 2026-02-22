@@ -53,13 +53,14 @@ export function RbacProvider({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
   const [permissions, setPermissions] =
     useState<PermissionRoleMap>(defaultPermissionRoles);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!supabase || !user.isAuthenticated || !user.tenantId) {
       setPermissions(defaultPermissionRoles);
       setError(null);
+      setLoading(false);
       return;
     }
     setLoading(true);

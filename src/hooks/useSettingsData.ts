@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
-import type { StationDependency, WorkStation } from "@/types/workstation";
+import type {
+  StationDependency,
+  StationTrackingMode,
+  WorkStation,
+} from "@/types/workstation";
 import type {
   OrderInputField,
   OrderInputFieldType,
@@ -128,13 +132,20 @@ function mapWorkStation(row: {
   description?: string | null;
   is_active: boolean;
   sort_order?: number | null;
+  tracking_mode?: string | null;
 }): WorkStation {
+  const rawMode = row.tracking_mode;
+  const trackingMode: StationTrackingMode =
+    rawMode === "order_level" || rawMode === "receipt_only"
+      ? rawMode
+      : "construction_level";
   return {
     id: row.id,
     name: row.name,
     description: row.description ?? undefined,
     isActive: row.is_active,
     sortOrder: row.sort_order ?? 0,
+    trackingMode,
   };
 }
 
@@ -478,7 +489,7 @@ export function useSettingsData(): SettingsDataState {
     ] = await Promise.all([
       supabase
         .from("workstations")
-        .select("id, name, description, is_active, sort_order")
+        .select("id, name, description, is_active, sort_order, tracking_mode")
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
       supabase
@@ -605,8 +616,11 @@ export function useSettingsData(): SettingsDataState {
               description: payload.description ?? null,
               is_active: payload.isActive,
               sort_order: payload.sortOrder ?? 0,
+              tracking_mode: payload.trackingMode ?? "construction_level",
             })
-            .select("id, name, description, is_active, sort_order")
+            .select(
+              "id, name, description, is_active, sort_order, tracking_mode",
+            )
             .single();
         if (insertError || !data) {
           setError(insertError?.message ?? "Failed to add workstation.");
@@ -632,11 +646,15 @@ export function useSettingsData(): SettingsDataState {
             updatePayload.is_active = patch.isActive;
           if (patch.sortOrder !== undefined)
             updatePayload.sort_order = patch.sortOrder;
+          if (patch.trackingMode !== undefined)
+            updatePayload.tracking_mode = patch.trackingMode;
           const { data, error: updateError } = await supabase
             .from("workstations")
             .update(updatePayload)
             .eq("id", stationId)
-            .select("id, name, description, is_active, sort_order")
+            .select(
+              "id, name, description, is_active, sort_order, tracking_mode",
+            )
             .single();
         if (updateError || !data) {
           setError(updateError?.message ?? "Failed to update workstation.");

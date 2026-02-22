@@ -167,17 +167,19 @@ async function fetchUserRole(userId: string) {
   const role = normalizeUserRole(data.role);
   const isOwner = data.is_owner ?? false;
   const isAdmin = (data.is_admin ?? false) || isOwner || role === "Admin";
-  const resolvedAvatarUrl = await resolveSignedUrl(
-    data.avatar_url ?? null,
-    supabaseAvatarBucket,
-  );
+  const [resolvedAvatarUrl, tenantResult] = await Promise.all([
+    resolveSignedUrl(data.avatar_url ?? null, supabaseAvatarBucket),
+    data.tenant_id
+      ? supabase
+          .from("tenants")
+          .select("name, logo_url")
+          .eq("id", data.tenant_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null as { name?: string | null; logo_url?: string | null } | null }),
+  ]);
   let tenantName: string | null = null;
   if (data.tenant_id) {
-    const { data: tenantData } = await supabase
-      .from("tenants")
-      .select("name, logo_url")
-      .eq("id", data.tenant_id)
-      .maybeSingle();
+    const tenantData = tenantResult.data;
     tenantName = tenantData?.name ?? null;
     const resolvedTenantLogo = await resolveSignedUrl(
       tenantData?.logo_url ?? null,
@@ -301,7 +303,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     ...fallbackUser,
     loading: true,
   });
-  const profileTimeoutMs = 8000;
+  const profileTimeoutMs = 2500;
 
   async function withTimeout<T>(promise: Promise<T>, ms: number) {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -478,6 +480,44 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     };
   }
 
+  function buildUserFromCache(
+    sessionUser: {
+      id: string;
+      email?: string | null;
+    },
+    cached: {
+      fullName: string;
+      role: UserRole;
+      isAdmin: boolean;
+      isOwner: boolean;
+      tenantId?: string | null;
+      tenantName?: string | null;
+      tenantLogoUrl?: string | null;
+      avatarUrl?: string | null;
+      phone?: string | null;
+    },
+    requiresPasswordSetup: boolean,
+  ): CurrentUser {
+    const hasTenant = Boolean(cached.tenantId);
+    return {
+      id: sessionUser.id,
+      name: cached.fullName,
+      email: sessionUser.email ?? undefined,
+      phone: cached.phone ?? null,
+      role: cached.role,
+      isAdmin: cached.isAdmin,
+      isOwner: cached.isOwner ?? false,
+      tenantId: cached.tenantId ?? null,
+      avatarUrl: cached.avatarUrl ?? null,
+      tenantName: cached.tenantName ?? null,
+      tenantLogoUrl: cached.tenantLogoUrl ?? null,
+      requiresPasswordSetup,
+      isAuthenticated: true,
+      // If we already know tenant context, render app immediately and refresh in background.
+      loading: !hasTenant,
+    };
+  }
+
   useEffect(() => {
     if (!supabase) {
       setUser(fallbackUser);
@@ -520,22 +560,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         );
         const cached = readCachedProfile(sessionUser.id);
         if (cached) {
-          setUser({
-            id: sessionUser.id,
-            name: cached.fullName,
-            email: sessionUser.email ?? undefined,
-            phone: cached.phone ?? null,
-            role: cached.role,
-            isAdmin: cached.isAdmin,
-            isOwner: cached.isOwner ?? false,
-            tenantId: cached.tenantId ?? null,
-            avatarUrl: cached.avatarUrl ?? null,
-            tenantName: cached.tenantName ?? null,
-            tenantLogoUrl: cached.tenantLogoUrl ?? null,
-            requiresPasswordSetup,
-            isAuthenticated: true,
-            loading: false,
-          });
+          setUser(buildUserFromCache(sessionUser, cached, requiresPasswordSetup));
         }
         try {
           const profileResult = await withTimeout(
@@ -639,22 +664,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         );
         const cached = readCachedProfile(sessionUser.id);
         if (cached) {
-          setUser({
-            id: sessionUser.id,
-            name: cached.fullName,
-            email: sessionUser.email ?? undefined,
-            phone: cached.phone ?? null,
-            role: cached.role,
-            isAdmin: cached.isAdmin,
-            isOwner: cached.isOwner ?? false,
-            tenantId: cached.tenantId ?? null,
-            avatarUrl: cached.avatarUrl ?? null,
-            tenantName: cached.tenantName ?? null,
-            tenantLogoUrl: cached.tenantLogoUrl ?? null,
-            requiresPasswordSetup,
-            isAuthenticated: true,
-            loading: false,
-          });
+          setUser(buildUserFromCache(sessionUser, cached, requiresPasswordSetup));
         }
         try {
           const profileResult = await withTimeout(
