@@ -123,6 +123,7 @@ export default function AuthPage() {
     }
     const sb = supabase;
     const url = new URL(window.location.href);
+    const inviteFlag = url.searchParams.get("invite") === "1";
     const errorDescription =
       url.searchParams.get("error_description") ??
       new URLSearchParams(window.location.hash.replace(/^#/, "")).get(
@@ -170,7 +171,9 @@ export default function AuthPage() {
           }
           const { data: userData } = await sb.auth.getUser();
           const shouldShowInviteSetup =
-            isInvite || requiresInviteSetup(userData.user?.user_metadata);
+            isInvite ||
+            inviteFlag ||
+            requiresInviteSetup(userData.user?.user_metadata);
           if (isRecovery) {
             setRecoveryMode(true);
             setIsRecoveryLink(true);
@@ -235,7 +238,9 @@ export default function AuthPage() {
           }
           const { data: userData } = await sb.auth.getUser();
           const shouldShowInviteSetup =
-            isInvite || requiresInviteSetup(userData.user?.user_metadata);
+            isInvite ||
+            inviteFlag ||
+            requiresInviteSetup(userData.user?.user_metadata);
           if (shouldShowInviteSetup) {
             setInviteMode(true);
             setStatus("idle");
@@ -254,6 +259,21 @@ export default function AuthPage() {
     }
     setAuthModeChecked(true);
   }, [router]);
+
+  useEffect(() => {
+    if (!authModeChecked || typeof window === "undefined") {
+      return;
+    }
+    const url = new URL(window.location.href);
+    const inviteFlag = url.searchParams.get("invite") === "1";
+    if (inviteFlag && user.isAuthenticated && user.requiresPasswordSetup) {
+      setInviteMode(true);
+    }
+  }, [
+    authModeChecked,
+    user.isAuthenticated,
+    user.requiresPasswordSetup,
+  ]);
 
   useEffect(() => {
     if (!supabase) {
@@ -687,16 +707,36 @@ export default function AuthPage() {
         full_name?: string;
         role?: string;
       };
-      const tenantId = metadata?.tenant_id ?? null;
+      let tenantId = metadata?.tenant_id ?? null;
+      let roleFromInvite = metadata?.role ?? null;
+      let fullNameFromInvite = metadata?.full_name ?? null;
+      if (!tenantId && authUser.email) {
+        const { data: inviteLookup, error: inviteLookupError } = await supabase
+          .from("user_invites")
+          .select("tenant_id, role, full_name")
+          .eq("email", authUser.email)
+          .is("accepted_at", null)
+          .order("invited_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (inviteLookupError) {
+          setInviteError(inviteLookupError.message);
+          setStatus("error");
+          return;
+        }
+        tenantId = inviteLookup?.tenant_id ?? tenantId;
+        roleFromInvite = inviteLookup?.role ?? roleFromInvite;
+        fullNameFromInvite = inviteLookup?.full_name ?? fullNameFromInvite;
+      }
       if (!tenantId) {
         setInviteError("Invite metadata missing tenant.");
         setStatus("error");
         return;
       }
-      const normalizedRole = normalizeUserRole(metadata?.role);
+      const normalizedRole = normalizeUserRole(roleFromInvite);
       const finalName =
         inviteFullName.trim() ||
-        metadata?.full_name?.trim() ||
+        fullNameFromInvite?.trim() ||
         authUser.email ||
         "User";
 

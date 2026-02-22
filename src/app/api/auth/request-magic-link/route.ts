@@ -9,7 +9,8 @@ function getOrigin(request: Request) {
   if (origin) {
     return origin;
   }
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const host =
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
   const proto = request.headers.get("x-forwarded-proto") ?? "https";
   return host ? `${proto}://${host}` : undefined;
 }
@@ -31,7 +32,10 @@ export async function POST(request: Request) {
       typeof body.companyName === "string" ? body.companyName.trim() : "";
 
     if (!email) {
-      return NextResponse.json({ error: "Email is required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Email is required." },
+        { status: 400 },
+      );
     }
 
     const admin = createClient(supabaseUrl, serviceRoleKey, {
@@ -89,7 +93,7 @@ export async function POST(request: Request) {
           role: invite.role,
           require_password_setup: true,
         },
-        redirectTo: origin ? `${origin}/auth` : undefined,
+        redirectTo: origin ? `${origin}/auth?invite=1` : undefined,
       });
 
       if (error) {
@@ -105,12 +109,13 @@ export async function POST(request: Request) {
             { status: 500 },
           );
         }
-        const { error: fallbackError } = await admin.auth.resetPasswordForEmail(
+        const { error: fallbackError } = await admin.auth.signInWithOtp({
           email,
-          {
-            redirectTo: origin ? `${origin}/auth?invite=1` : undefined,
+          options: {
+            shouldCreateUser: false,
+            emailRedirectTo: origin ? `${origin}/auth?invite=1` : undefined,
           },
-        );
+        });
         if (fallbackError) {
           console.error("Invite resend fallback failed", fallbackError);
           return NextResponse.json(

@@ -309,6 +309,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ]);
 
   useEffect(() => {
+    if (
+      user.loading ||
+      !user.isAuthenticated ||
+      user.tenantId ||
+      !user.requiresPasswordSetup ||
+      isAuthRoute
+    ) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      window.location.replace("/auth?invite=1");
+    }, 1200);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    isAuthRoute,
+    user.isAuthenticated,
+    user.loading,
+    user.requiresPasswordSetup,
+    user.tenantId,
+  ]);
+
+  useEffect(() => {
     if (user.loading || !user.isAuthenticated || isPublicRoute || !pathname) {
       return;
     }
@@ -395,7 +419,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (user.requiresPasswordSetup) {
       return (
         <div className="flex min-h-screen items-center justify-center bg-background">
-          <LoadingSpinner label="Redirecting to invite setup..." />
+          <div className="flex flex-col items-center gap-4">
+            <LoadingSpinner label="Redirecting to invite setup..." />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                window.location.href = "/auth?invite=1";
+              }}
+            >
+              Open invite setup
+            </Button>
+          </div>
         </div>
       );
     }
