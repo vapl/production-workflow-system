@@ -2861,7 +2861,26 @@ export default function OrderDetailPage() {
       setExternalPartnerId("");
       setExternalPartnerGroupId("");
       if (isPortalMode) {
-        await handleSendToPartner(created.id);
+        const sent = await handleSendToPartner(created.id);
+        if (!sent) {
+          await removeExternalJob(created.id);
+          setExternalJobValuesByJobId((prev) => {
+            const next = { ...prev };
+            delete next[created.id];
+            return next;
+          });
+          setOrderState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  externalJobs: (prev.externalJobs ?? []).filter(
+                    (job) => job.id !== created.id,
+                  ),
+                }
+              : prev,
+          );
+          return;
+        }
         setExternalPortalComment("");
         setExternalPortalFiles([]);
       } else {
@@ -2885,11 +2904,11 @@ export default function OrderDetailPage() {
   async function handleSendToPartner(externalJobId: string) {
     if (!supabase) {
       setExternalError("Supabase is not configured.");
-      return;
+      return false;
     }
     if (!canSendExternalJobToPartner) {
       setExternalError("Send to partner is available on Pro plan.");
-      return;
+      return false;
     }
     setExternalError("");
     setSendingToPartnerJobId(externalJobId);
@@ -2900,7 +2919,7 @@ export default function OrderDetailPage() {
     if (!accessToken) {
       setSendingToPartnerJobId(null);
       setExternalError("Please sign in again.");
-      return;
+      return false;
     }
 
     const response = await fetch("/api/external-jobs/send", {
@@ -2923,7 +2942,7 @@ export default function OrderDetailPage() {
         setExternalError(payload.error ?? "Failed to send to partner.");
       }
       setSendingToPartnerJobId(null);
-      return;
+      return false;
     }
 
     setOrderState((prev) =>
@@ -2951,6 +2970,7 @@ export default function OrderDetailPage() {
       variant: "success",
     });
     setSendingToPartnerJobId(null);
+    return true;
   }
 
   async function handleExternalStatusChange(

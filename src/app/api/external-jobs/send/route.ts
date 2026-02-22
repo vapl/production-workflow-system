@@ -3,9 +3,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 import { sendResendEmail } from "@/lib/server/externalJobEmails";
 import {
-  requirePermissionForRequest,
+  getBearerToken,
   type PermissionAdminClient,
 } from "@/lib/server/apiPermission";
+import {
+  actorHasPermission,
+  resolveAllowedRolesForPermission,
+} from "@/lib/server/rbac";
 
 function getOrigin(request: Request) {
   const origin = request.headers.get("origin");
@@ -59,15 +63,58 @@ export async function POST(request: Request) {
     );
   }
 
-  const authCheck = await requirePermissionForRequest(
-    request,
-    admin as unknown as PermissionAdminClient,
-    "orders.manage",
-  );
-  if (authCheck.response) {
-    return authCheck.response;
+  const bearer = getBearerToken(request);
+  if (!bearer) {
+    return NextResponse.json({ error: "Missing auth token." }, { status: 401 });
   }
-  const { authUser, actorProfile, tenantId } = authCheck.actor;
+  const { data: authData, error: authError } = await (
+    admin as unknown as PermissionAdminClient
+  ).auth.getUser(bearer);
+  if (authError || !authData.user) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  const authUser = authData.user;
+  const { data: actorProfile } = await admin
+    .from("profiles")
+    .select("id, tenant_id, full_name, role, phone, is_admin, is_owner")
+    .eq("id", authUser.id)
+    .maybeSingle();
+  if (!actorProfile?.tenant_id) {
+    return NextResponse.json(
+      { error: "User tenant is not configured." },
+      { status: 403 },
+    );
+  }
+  const tenantId = actorProfile.tenant_id;
+  const [ordersManageRoles, productionViewRoles, productionOperatorViewRoles] =
+    await Promise.all([
+      resolveAllowedRolesForPermission(
+        admin as unknown as PermissionAdminClient,
+        tenantId,
+        "orders.manage",
+      ),
+      resolveAllowedRolesForPermission(
+        admin as unknown as PermissionAdminClient,
+        tenantId,
+        "production.view",
+      ),
+      resolveAllowedRolesForPermission(
+        admin as unknown as PermissionAdminClient,
+        tenantId,
+        "production.operator.view",
+      ),
+    ]);
+  const canSendExternalRequest =
+    actorHasPermission(actorProfile, ordersManageRoles) ||
+    actorHasPermission(actorProfile, productionViewRoles) ||
+    actorHasPermission(actorProfile, productionOperatorViewRoles) ||
+    actorProfile.role === "Engineering";
+  if (!canSendExternalRequest) {
+    return NextResponse.json(
+      { error: "Missing permission: external_jobs.send" },
+      { status: 403 },
+    );
+  }
 
   const body = await request.json().catch(() => ({}));
   const externalJobId =
@@ -116,6 +163,13 @@ export async function POST(request: Request) {
       external_order_number,
       due_date,
       status,
+      request_mode,
+      partner_request_sender_name,
+      partner_request_sender_email,
+      partner_request_sender_phone,
+      partner_request_sent_at,
+      partner_request_token_hash,
+      partner_request_token_expires_at,
       orders (
         order_number,
         customer_name
@@ -176,16 +230,6 @@ export async function POST(request: Request) {
       { error: updateError.message ?? "Failed to send to partner." },
       { status: 500 },
     );
-  }
-
-  if (shouldSetOrdered) {
-    await admin.from("external_job_status_history").insert({
-      tenant_id: tenantId,
-      external_job_id: job.id,
-      status: "ordered",
-      changed_by_name: actorProfile.full_name ?? authUser.email ?? "User",
-      changed_by_role: actorProfile.role ?? "Sales",
-    });
   }
 
   const { data: attachmentRows } = await admin
@@ -290,10 +334,35 @@ export async function POST(request: Request) {
       .join("\n"),
   });
   if (!emailResult.ok) {
+    await admin
+      .from("external_jobs")
+      .update({
+        request_mode: job.request_mode ?? "manual",
+        partner_email: job.partner_email ?? null,
+        partner_request_sender_name: job.partner_request_sender_name ?? null,
+        partner_request_sender_email: job.partner_request_sender_email ?? null,
+        partner_request_sender_phone: job.partner_request_sender_phone ?? null,
+        partner_request_sent_at: job.partner_request_sent_at ?? null,
+        partner_request_token_hash: job.partner_request_token_hash ?? null,
+        partner_request_token_expires_at:
+          job.partner_request_token_expires_at ?? null,
+        status: job.status,
+      })
+      .eq("id", job.id);
     return NextResponse.json(
       { error: emailResult.error ?? "Failed to send email." },
       { status: 500 },
     );
+  }
+
+  if (shouldSetOrdered) {
+    await admin.from("external_job_status_history").insert({
+      tenant_id: tenantId,
+      external_job_id: job.id,
+      status: "ordered",
+      changed_by_name: actorProfile.full_name ?? authUser.email ?? "User",
+      changed_by_role: actorProfile.role ?? "Sales",
+    });
   }
 
   return NextResponse.json({
