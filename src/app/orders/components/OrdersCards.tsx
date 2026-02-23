@@ -13,15 +13,19 @@ import {
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 import type { Order } from "@/types/orders";
 import { createPortal } from "react-dom";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 interface OrdersCardsProps {
   orders: Order[];
+  isLoading?: boolean;
+  loadingLabel?: string;
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
   onTakeOrder?: (order: Order) => void;
@@ -45,8 +49,8 @@ function OrderCard({
   dueSoonDays = 5,
   dueIndicatorEnabled = true,
   dueIndicatorStatuses,
-  engineerLabel = "Engineer",
-  managerLabel = "Manager",
+  engineerLabel,
+  managerLabel,
 }: {
   order: Order;
   activeLevels: { id: string; name: string }[];
@@ -59,6 +63,7 @@ function OrderCard({
   engineerLabel?: string;
   managerLabel?: string;
 }) {
+  const { t } = useI18n();
   const router = useRouter();
   const { nodes } = useHierarchy();
   const { rules } = useWorkflowRules();
@@ -222,7 +227,7 @@ function OrderCard({
           </Badge>
           {hasOverdueExternal && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
-              Overdue
+              {t("orders.page.overdue")}
             </span>
           )}
         </div>
@@ -236,11 +241,11 @@ function OrderCard({
           </div>
         ))}
         <div className="text-xs">
-          <div className="text-muted-foreground">Quantity</div>
+          <div className="text-muted-foreground">{t("orders.page.quantity")}</div>
           <div className="text-foreground">{order.quantity ?? "--"}</div>
         </div>
         <div className="text-xs">
-          <div className="text-muted-foreground">Due Date</div>
+          <div className="text-muted-foreground">{t("orders.page.dueDate")}</div>
           <div
             className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs ${
               dueState === "overdue"
@@ -254,7 +259,7 @@ function OrderCard({
           </div>
         </div>
         <div className="text-xs">
-          <div className="text-muted-foreground">{engineerLabel}</div>
+          <div className="text-muted-foreground">{engineerLabel ?? t("orders.page.engineerFallback")}</div>
           {order.assignedEngineerName ? (
             <div className="flex items-center gap-2 text-foreground">
               {order.assignedEngineerAvatarUrl ? (
@@ -275,7 +280,7 @@ function OrderCard({
           )}
         </div>
         <div className="text-xs">
-          <div className="text-muted-foreground">{managerLabel}</div>
+          <div className="text-muted-foreground">{managerLabel ?? t("orders.page.managerFallback")}</div>
           {order.assignedManagerName ? (
             <div className="flex items-center gap-2 text-foreground">
               {order.assignedManagerAvatarUrl ? (
@@ -313,13 +318,13 @@ function OrderCard({
             <button
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
-              onClick={(event) => {
-                event.stopPropagation();
-                onTakeOrder(order);
-              }}
-              title="Take order"
-              aria-label="Take order"
-            >
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onTakeOrder(order);
+                }}
+                title={t("orders.page.takeOrder")}
+                aria-label={t("orders.page.takeOrder")}
+              >
               <UserCheckIcon className="h-4 w-4" />
             </button>
           ) : null}
@@ -327,13 +332,13 @@ function OrderCard({
             <button
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded-full text-foreground hover:bg-muted/50"
-              onClick={(event) => {
-                event.stopPropagation();
-                onEdit(order);
-              }}
-              title="Edit"
-              aria-label="Edit"
-            >
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onEdit(order);
+                }}
+                title={t("orders.page.edit")}
+                aria-label={t("orders.page.edit")}
+              >
               <PencilIcon className="h-4 w-4" />
             </button>
           ) : null}
@@ -341,13 +346,13 @@ function OrderCard({
             <button
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
-              onClick={(event) => {
-                event.stopPropagation();
-                onDelete(order);
-              }}
-              title="Delete"
-              aria-label="Delete"
-            >
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(order);
+                }}
+                title={t("orders.page.delete")}
+                aria-label={t("orders.page.delete")}
+              >
               <Trash2Icon className="h-4 w-4" />
             </button>
           ) : null}
@@ -396,7 +401,7 @@ function OrderCard({
                     }}
                   >
                     <PencilIcon className="h-4 w-4" />
-                    Edit
+                    {t("orders.page.edit")}
                   </button>
                 )}
                 {canTakeOrderQuick && (
@@ -409,7 +414,7 @@ function OrderCard({
                     }}
                   >
                     <UserCheckIcon className="h-4 w-4" />
-                    Take order
+                    {t("orders.page.takeOrder")}
                   </button>
                 )}
                 {onDelete && (
@@ -422,7 +427,7 @@ function OrderCard({
                     }}
                   >
                     <Trash2Icon className="h-4 w-4" />
-                    Delete
+                    {t("orders.page.delete")}
                   </button>
                 )}
               </div>
@@ -436,6 +441,8 @@ function OrderCard({
 
 export function OrdersCards({
   orders,
+  isLoading = false,
+  loadingLabel,
   onEdit,
   onDelete,
   onTakeOrder,
@@ -443,9 +450,10 @@ export function OrdersCards({
   dueSoonDays,
   dueIndicatorEnabled,
   dueIndicatorStatuses,
-  engineerLabel = "Engineer",
-  managerLabel = "Manager",
+  engineerLabel,
+  managerLabel,
 }: OrdersCardsProps) {
+  const { t } = useI18n();
   const { levels } = useHierarchy();
   const activeLevels = levels
     .filter(
@@ -511,9 +519,9 @@ export function OrdersCards({
             </Fragment>
           );
         })
-      ) : orders.length === 0 ? (
+      ) : !isLoading && orders.length === 0 ? (
         <div className="rounded-md border border-border px-4 py-8 text-center text-sm text-muted-foreground">
-          No orders found
+          {t("orders.page.noOrdersFound")}
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -534,6 +542,11 @@ export function OrdersCards({
           ))}
         </div>
       )}
+      {isLoading ? (
+        <div className="rounded-md border border-border px-4 py-5">
+          <LoadingSpinner label={loadingLabel ?? t("orders.page.loadingOrders")} />
+        </div>
+      ) : null}
     </div>
   );
 }

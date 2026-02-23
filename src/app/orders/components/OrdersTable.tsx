@@ -5,14 +5,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/Table";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { OrderRow } from "./OrderRow";
 import { Order } from "@/types/orders";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { Fragment, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 interface OrdersTableProps {
   orders: Order[];
+  isLoading?: boolean;
+  loadingLabel?: string;
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
   onTakeOrder?: (order: Order) => void;
@@ -29,6 +33,8 @@ interface OrdersTableProps {
 
 export function OrdersTable({
   orders,
+  isLoading = false,
+  loadingLabel,
   onEdit,
   onDelete,
   onTakeOrder,
@@ -36,9 +42,10 @@ export function OrdersTable({
   dueSoonDays,
   dueIndicatorEnabled,
   dueIndicatorStatuses,
-  engineerLabel = "Engineer",
-  managerLabel = "Manager",
+  engineerLabel,
+  managerLabel,
 }: OrdersTableProps) {
+  const { t } = useI18n();
   const { levels } = useHierarchy();
   const activeLevels = levels
     .filter(
@@ -60,8 +67,8 @@ export function OrdersTable({
       <Table className="w-full min-w-225">
         <TableHeader>
           <TableRow>
-            <TableHead className="whitespace-nowrap">Order #</TableHead>
-            <TableHead className="whitespace-normal">Customer</TableHead>
+            <TableHead className="whitespace-nowrap">{t("orders.page.orderNumberShort")}</TableHead>
+            <TableHead className="whitespace-normal">{t("orders.page.customer")}</TableHead>
             {activeLevels.map((level) => (
               <TableHead
                 key={level.id}
@@ -72,14 +79,14 @@ export function OrdersTable({
                 {level.name}
               </TableHead>
             ))}
-            <TableHead className="whitespace-normal">Quantity</TableHead>
-            <TableHead className="whitespace-normal">Due Date</TableHead>
-            <TableHead className="whitespace-normal">{engineerLabel}</TableHead>
-            <TableHead className="whitespace-normal">{managerLabel}</TableHead>
-            <TableHead className="whitespace-normal">Priority</TableHead>
-            <TableHead className="whitespace-normal">Status</TableHead>
+            <TableHead className="whitespace-normal">{t("orders.page.quantity")}</TableHead>
+            <TableHead className="whitespace-normal">{t("orders.page.dueDate")}</TableHead>
+            <TableHead className="whitespace-normal">{engineerLabel ?? t("orders.page.engineerFallback")}</TableHead>
+            <TableHead className="whitespace-normal">{managerLabel ?? t("orders.page.managerFallback")}</TableHead>
+            <TableHead className="whitespace-normal">{t("orders.page.priority")}</TableHead>
+            <TableHead className="whitespace-normal">{t("orders.page.status")}</TableHead>
             <TableHead className="text-right whitespace-normal">
-              Actions
+              {t("orders.page.actions")}
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -134,13 +141,13 @@ export function OrdersTable({
                 </Fragment>
               );
             })
-          ) : orders.length === 0 ? (
+          ) : !isLoading && orders.length === 0 ? (
             <TableRow>
               <td
                 colSpan={totalColumns}
                 className="py-8 text-center text-muted-foreground"
               >
-                No orders found
+                {t("orders.page.noOrdersFound")}
               </td>
             </TableRow>
           ) : (
@@ -158,6 +165,20 @@ export function OrdersTable({
               />
             ))
           )}
+          {isLoading ? (
+            <TableRow>
+              <td
+                colSpan={totalColumns}
+                className="py-6 text-center text-muted-foreground"
+              >
+                <div className="flex justify-center">
+                  <LoadingSpinner
+                    label={loadingLabel ?? t("orders.page.loadingOrders")}
+                  />
+                </div>
+              </td>
+            </TableRow>
+          ) : null}
         </TableBody>
       </Table>
     </div>
