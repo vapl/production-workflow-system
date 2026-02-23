@@ -21,7 +21,11 @@ import { Button } from "@/components/ui/Button";
 import { SideDrawer } from "@/components/ui/SideDrawer";
 import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { canAccessRoute, isProductionWorker } from "@/lib/auth/permissions";
+import {
+  canAccessRoute,
+  isAdminLike,
+  isProductionWorker,
+} from "@/lib/auth/permissions";
 import { useRbac } from "@/contexts/RbacContext";
 import { cn } from "@/components/ui/utils";
 
@@ -42,7 +46,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     "/external-jobs/respond/",
   );
   const isPublicRoute = isAuthRoute || isExternalJobRespondRoute;
-  const isWarehouseUser = user.role === "Warehouse";
+  const hasAdminAccess = isAdminLike(user);
+  const isWarehouseUser = user.role === "Warehouse" && !hasAdminAccess;
   const hideTabsNav =
     isExternalJobRespondRoute ||
     pathname?.startsWith("/profile") ||

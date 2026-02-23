@@ -13,6 +13,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { useRbac } from "@/contexts/RbacContext";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { isAdminLike } from "@/lib/auth/permissions";
 import { supabase } from "@/lib/supabaseClient";
 import { cn } from "@/components/ui/utils";
 
@@ -56,7 +57,8 @@ export function TabsNav() {
 
   const canViewProductionPlanner = hasPermission("production.view");
   const canViewProductionOperator = hasPermission("production.operator.view");
-  const isWarehouseUser = user.role === "Warehouse";
+  const hasAdminAccess = isAdminLike(user);
+  const isWarehouseUser = user.role === "Warehouse" && !hasAdminAccess;
 
   useEffect(() => {
     const sb = supabase;
@@ -82,13 +84,13 @@ export function TabsNav() {
         setCanViewNotifications(true);
         return;
       }
-      setCanViewNotifications(roles.includes(user.role));
+      setCanViewNotifications(hasAdminAccess || roles.includes(user.role));
     };
     void loadNotificationAccess();
     return () => {
       isMounted = false;
     };
-  }, [user.isAuthenticated, user.role, user.tenantId]);
+  }, [hasAdminAccess, user.isAuthenticated, user.role, user.tenantId]);
 
   useEffect(() => {
     const sb = supabase;
