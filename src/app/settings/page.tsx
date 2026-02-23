@@ -3513,6 +3513,7 @@ export default function SettingsPage() {
                   key={section.value}
                   value={section.value}
                   className="gap-2"
+                  onClick={() => setActiveSettingsTab(section.value)}
                 >
                   <section.icon className="h-4 w-4" />
                   {sectionLabel(section.value)}

@@ -209,8 +209,13 @@ export function TabsNav() {
       >
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <TabsList>
-            {visibleMainTabs.map(({ value, label, icon: Icon }) => (
-              <TabsTrigger key={value} value={value} className="gap-2">
+            {visibleMainTabs.map(({ value, href, label, icon: Icon }) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="gap-2"
+                onClick={() => router.push(href)}
+              >
                 <Icon className="h-4 w-4" />
                 {label}
               </TabsTrigger>
@@ -218,7 +223,11 @@ export function TabsNav() {
           </TabsList>
           {showSettings ? (
             <TabsList className="ml-auto">
-              <TabsTrigger value={settingsTab.value} className="gap-2">
+              <TabsTrigger
+                value={settingsTab.value}
+                className="gap-2"
+                onClick={() => router.push(settingsTab.href)}
+              >
                 <SettingsIcon className="h-4 w-4" />
                 {settingsTab.label}
               </TabsTrigger>
