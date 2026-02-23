@@ -1,4 +1,5 @@
 import { LayoutGridIcon, LayoutListIcon } from "lucide-react";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 interface ViewModeToggleProps {
   value: "table" | "cards";
@@ -11,6 +12,8 @@ export function ViewModeToggle({
   onChange,
   className,
 }: ViewModeToggleProps) {
+  const { t } = useI18n();
+
   return (
     <div
       className={`inline-flex w-fit items-center gap-1 rounded-full border border-border bg-background p-1 text-xs shadow-sm ${className ?? ""}`}
@@ -25,7 +28,7 @@ export function ViewModeToggle({
         }`}
       >
         <LayoutListIcon className="h-3.5 w-3.5" />
-        Table
+        {t("orders.page.tableView")}
       </button>
       <button
         type="button"
@@ -37,7 +40,7 @@ export function ViewModeToggle({
         }`}
       >
         <LayoutGridIcon className="h-3.5 w-3.5" />
-        Cards
+        {t("orders.page.cardsView")}
       </button>
     </div>
   );

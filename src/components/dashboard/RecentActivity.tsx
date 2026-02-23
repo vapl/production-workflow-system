@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/Card";
 import { AlertTriangleIcon, CheckCircleIcon, ClockIcon } from "lucide-react";
 import { Badge } from "../ui/Badge";
 import { formatActivityStatus, formatTime } from "@/lib/domain/formatters";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export function getStatusColor(status: ActivityStatus): string {
   switch (status) {
@@ -43,12 +44,13 @@ function getStatusBadgeVariant(status: ActivityStatus) {
 }
 
 export function RecentActivityList({ activities }: { activities: Activity[] }) {
+  const { t } = useI18n();
+
   return (
     <>
-      {/* Recent Activity */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
+          <CardTitle>{t("dashboard.recentActivity.title")}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -68,7 +70,7 @@ export function RecentActivityList({ activities }: { activities: Activity[] }) {
                     <div className="text-sm text-muted-foreground">
                       {activity.orderNumber &&
                         activity.workStation &&
-                        activity.orderNumber + " • " + activity.workStation}
+                        `${activity.orderNumber} / ${activity.workStation}`}
                     </div>
                   </div>
                 </div>

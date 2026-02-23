@@ -8,6 +8,7 @@ import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 import { ViewModeToggle } from "./ViewModeToggle";
 import { Input } from "@/components/ui/Input";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export type StatusOption = { value: OrderStatus | "all"; label: string };
 type StatusFilter = StatusOption["value"];
@@ -59,6 +60,8 @@ export function OrdersToolbar({
   onToggleUnassignedOnly,
   showGroupByContract = true,
 }: OrdersToolbarProps) {
+  const { t } = useI18n();
+
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex w-full flex-col gap-3 lg:flex-1 lg:flex-row lg:items-center">
@@ -66,7 +69,7 @@ export function OrdersToolbar({
           type="search"
           value={searchQuery}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search orders, customers, products..."
+          placeholder={t("orders.page.searchPlaceholder")}
           startIcon={<SearchIcon className="h-4 w-4" />}
           wrapperClassName="w-full"
         />
@@ -84,12 +87,12 @@ export function OrdersToolbar({
           <div className="space-y-3">
             {assignmentFilter && onAssignmentChange && (
               <div className="space-y-2">
-                <div className="text-sm font-medium">Engineering</div>
+                <div className="text-sm font-medium">{t("orders.page.engineering")}</div>
                 <div className="flex flex-wrap gap-2">
                   {(
                     [
-                      { value: "queue", label: "Queue" },
-                      { value: "my", label: "My work" },
+                      { value: "queue", label: t("orders.page.queue") },
+                      { value: "my", label: t("orders.page.myWork") },
                     ] as const
                   ).map((option) => {
                     const isActive = assignmentFilter === option.value;
@@ -116,7 +119,7 @@ export function OrdersToolbar({
             ) : null}
             <div className="space-y-2">
               <FilterOptionSelector
-                title="Status"
+                title={t("orders.page.status")}
                 value={statusFilter}
                 onChange={onStatusChange}
                 options={statusOptions.map((option) => ({
@@ -128,25 +131,25 @@ export function OrdersToolbar({
             </div>
             <div className="h-px bg-border/70" />
             <div className="space-y-2">
-              <div className="text-sm font-medium">Quick filters</div>
+              <div className="text-sm font-medium">{t("orders.page.quickFilters")}</div>
               <div className="flex flex-wrap gap-2">
                 <Checkbox
                   checked={overdueOnly}
                   onChange={() => onToggleOverdueOnly?.()}
-                  label="Overdue only"
+                  label={t("orders.page.overdueOnly")}
                 />
                 {assignmentFilter !== undefined ? (
                   <Checkbox
                     checked={blockedOnly}
                     onChange={() => onToggleBlockedOnly?.()}
-                    label="Blocked only"
+                    label={t("orders.page.blockedOnly")}
                   />
                 ) : null}
                 {assignmentFilter !== undefined ? (
                   <Checkbox
                     checked={unassignedOnly}
                     onChange={() => onToggleUnassignedOnly?.()}
-                    label="Unassigned only"
+                    label={t("orders.page.unassignedOnly")}
                   />
                 ) : null}
               </div>
@@ -157,7 +160,7 @@ export function OrdersToolbar({
                 <Checkbox
                   checked={groupByContract}
                   onChange={onToggleGroupByContract}
-                  label="Group by Contract"
+                  label={t("orders.page.groupByContract")}
                 />
               </>
             ) : null}

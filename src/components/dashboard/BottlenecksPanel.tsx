@@ -1,8 +1,11 @@
 import type { Batch } from "@/types/batch";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/Card";
 import { AlertTriangleIcon } from "lucide-react";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export function BottlenecksPanel({ batches }: { batches: Batch[] }) {
+  const { t } = useI18n();
+
   if (batches.length === 0) {
     return null;
   }
@@ -12,7 +15,7 @@ export function BottlenecksPanel({ batches }: { batches: Batch[] }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <AlertTriangleIcon className="h-5 w-5 text-amber-500" />
-          Bottlenecks Requiring Attention
+          {t("dashboard.bottlenecksPanel.title")}
         </CardTitle>
       </CardHeader>
 
@@ -26,7 +29,7 @@ export function BottlenecksPanel({ batches }: { batches: Batch[] }) {
               <div className="flex-1">
                 <div className="font-medium">{batch.name}</div>
                 <div className="text-sm text-slate-600">
-                  Station: {batch.workstation}
+                  {t("dashboard.bottlenecksPanel.station")}: {batch.workstation}
                 </div>
               </div>
 
@@ -35,7 +38,7 @@ export function BottlenecksPanel({ batches }: { batches: Batch[] }) {
                   {batch.actualHours ?? 0}h / {batch.estimatedHours}h
                 </div>
                 <div className="text-xs text-slate-600">
-                  Over estimate
+                  {t("dashboard.bottlenecksPanel.overEstimate")}
                 </div>
               </div>
             </div>

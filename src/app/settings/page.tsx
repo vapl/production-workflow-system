@@ -1514,7 +1514,7 @@ export default function SettingsPage() {
   }
 
   async function handleRemoveAttachmentCategory(id: string) {
-    if (!(await confirmRemove("Remove this attachment category?"))) {
+    if (!(await confirmRemove(t("settings.workflow.removeAttachmentCategoryConfirm")))) {
       return;
     }
     const nextCategories = attachmentCategoryDrafts.filter(
@@ -1935,11 +1935,10 @@ export default function SettingsPage() {
   async function handleUpdateUserOwner(userId: string, isOwner: boolean) {
     if (isOwner) {
       const approved = await confirm({
-        title: "Transfer ownership?",
-        description:
-          "This will move Owner access to the selected user and remove Owner from the current one.",
-        confirmLabel: "Transfer owner",
-        cancelLabel: "Cancel",
+        title: t("settings.users.transferOwnershipTitle"),
+        description: t("settings.users.transferOwnershipDescription"),
+        confirmLabel: t("settings.users.transferOwner"),
+        cancelLabel: t("settings.common.cancel"),
         destructive: true,
       });
       if (!approved) {
@@ -1956,7 +1955,7 @@ export default function SettingsPage() {
       return;
     }
     if (userId === currentUser.id) {
-      setUsersError("You cannot remove your own account from workspace.");
+      setUsersError(t("settings.users.cannotRemoveOwnAccount"));
       return;
     }
     const targetUser = users.find((user) => user.id === userId);
@@ -1964,7 +1963,7 @@ export default function SettingsPage() {
       return;
     }
     if (targetUser.isOwner) {
-      setUsersError("Owner cannot be removed from workspace.");
+      setUsersError(t("settings.users.ownerCannotBeRemoved"));
       return;
     }
 
@@ -1976,7 +1975,7 @@ export default function SettingsPage() {
       } = await supabase.auth.getSession();
       const accessToken = session?.access_token;
       if (!accessToken) {
-        setUsersError("Session expired. Please sign in again.");
+        setUsersError(t("settings.users.sessionExpired"));
         return;
       }
 
@@ -1990,7 +1989,7 @@ export default function SettingsPage() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setUsersError(data.error ?? "Failed to remove user from workspace.");
+        setUsersError(data.error ?? t("settings.users.failedRemoveUser"));
         return;
       }
 
@@ -2009,10 +2008,12 @@ export default function SettingsPage() {
       return;
     }
     const approved = await confirm({
-      title: "Remove user from workspace?",
-      description: `${targetUser.name} will lose access to this workspace.`,
-      confirmLabel: "Remove user",
-      cancelLabel: "Cancel",
+      title: t("settings.users.removeUserTitle"),
+      description: t("settings.users.removeUserDescription", {
+        name: targetUser.name,
+      }),
+      confirmLabel: t("settings.users.removeUser"),
+      cancelLabel: t("settings.common.cancel"),
       destructive: true,
     });
     if (!approved) {
@@ -2028,7 +2029,7 @@ export default function SettingsPage() {
       return;
     }
     if (userId === currentUser.id) {
-      setUsersError("You cannot deactivate your own account.");
+      setUsersError(t("settings.users.cannotDeactivateOwnAccount"));
       return;
     }
     const targetUser = users.find((user) => user.id === userId);
@@ -2036,7 +2037,7 @@ export default function SettingsPage() {
       return;
     }
     if (targetUser.isOwner) {
-      setUsersError("Owner cannot be deactivated.");
+      setUsersError(t("settings.users.ownerCannotBeDeactivated"));
       return;
     }
 
@@ -2048,7 +2049,7 @@ export default function SettingsPage() {
       } = await supabase.auth.getSession();
       const accessToken = session?.access_token;
       if (!accessToken) {
-        setUsersError("Session expired. Please sign in again.");
+        setUsersError(t("settings.users.sessionExpired"));
         return;
       }
 
@@ -2062,7 +2063,7 @@ export default function SettingsPage() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setUsersError(data.error ?? "Failed to deactivate user.");
+        setUsersError(data.error ?? t("settings.users.failedDeactivateUser"));
         return;
       }
 
@@ -2081,10 +2082,12 @@ export default function SettingsPage() {
       return;
     }
     const approved = await confirm({
-      title: "Deactivate user?",
-      description: `${targetUser.name} will be deactivated and removed from this workspace.`,
-      confirmLabel: "Deactivate",
-      cancelLabel: "Cancel",
+      title: t("settings.users.deactivateUserTitle"),
+      description: t("settings.users.deactivateUserDescription", {
+        name: targetUser.name,
+      }),
+      confirmLabel: t("settings.users.deactivate"),
+      cancelLabel: t("settings.common.cancel"),
       destructive: true,
     });
     if (!approved) {
@@ -2131,7 +2134,7 @@ export default function SettingsPage() {
       }
     }
     setPermissionState("saved");
-    setPermissionMessage("Role permissions saved.");
+    setPermissionMessage(t("settings.users.rolePermissionsSaved"));
   }
 
   const selectedLevel = levels.find((level) => level.id === selectedLevelId);
@@ -2297,7 +2300,10 @@ export default function SettingsPage() {
     }
     if (
       !(await confirmRemove(
-        `Remove ${selectedNodeIds.length} selected item(s) from ${selectedLevel?.name ?? "list"}?`,
+        t("settings.structure.removeSelectedItemsConfirm", {
+          count: selectedNodeIds.length,
+          level: selectedLevel?.name ?? t("settings.structure.level"),
+        }),
       ))
     ) {
       return;
@@ -2373,7 +2379,9 @@ export default function SettingsPage() {
     }
     if (
       !(await confirmRemove(
-        `Remove ${selectedWorkStationIds.length} selected workstation(s)?`,
+        t("settings.operations.removeSelectedWorkstationsConfirm", {
+          count: selectedWorkStationIds.length,
+        }),
       ))
     ) {
       return;
@@ -2399,7 +2407,9 @@ export default function SettingsPage() {
     }
     if (
       !(await confirmRemove(
-        `Remove ${selectedStopReasonIds.length} selected reason(s)?`,
+        t("settings.operations.removeSelectedReasonsConfirm", {
+          count: selectedStopReasonIds.length,
+        }),
       ))
     ) {
       return;
@@ -2463,7 +2473,9 @@ export default function SettingsPage() {
     }
     if (
       !(await confirmRemove(
-        `Remove ${selectedPartnerIds.length} selected partner(s)?`,
+        t("settings.partners.removeSelectedPartnersConfirm", {
+          count: selectedPartnerIds.length,
+        }),
       ))
     ) {
       return;
@@ -2489,7 +2501,9 @@ export default function SettingsPage() {
     }
     if (
       !(await confirmRemove(
-        `Remove ${selectedPartnerGroupIds.length} selected group(s)?`,
+        t("settings.partners.removeSelectedGroupsConfirm", {
+          count: selectedPartnerGroupIds.length,
+        }),
       ))
     ) {
       return;
@@ -3025,8 +3039,8 @@ export default function SettingsPage() {
 
   async function handleDeleteOrderField(fieldId: string) {
     const target = orderInputFields.find((field) => field.id === fieldId);
-    const label = target?.label ?? "this field";
-    if (!(await confirmRemove(`Remove "${label}"?`))) {
+    const label = target?.label ?? t("settings.orderInputs.label");
+    if (!(await confirmRemove(t("settings.orderInputs.removeFieldConfirm", { label })))) {
       return;
     }
     await removeOrderInputField(fieldId);
@@ -3039,7 +3053,9 @@ export default function SettingsPage() {
     }
     if (
       !(await confirmRemove(
-        `Remove ${selectedOrderFieldIds.length} selected field(s)?`,
+        t("settings.orderInputs.removeSelectedFieldsConfirm", {
+          count: selectedOrderFieldIds.length,
+        }),
       ))
     ) {
       return;
@@ -3054,8 +3070,8 @@ export default function SettingsPage() {
 
   async function handleDeleteExternalJobField(fieldId: string) {
     const target = externalJobFields.find((field) => field.id === fieldId);
-    const label = target?.label ?? "this field";
-    if (!(await confirmRemove(`Remove "${label}"?`))) {
+    const label = target?.label ?? t("settings.partners.externalFieldFallback");
+    if (!(await confirmRemove(t("settings.partners.removeFieldConfirm", { label })))) {
       return;
     }
     await removeExternalJobField(fieldId);
@@ -3748,7 +3764,9 @@ export default function SettingsPage() {
                                 onClick={async () => {
                                   if (
                                     !(await confirmRemove(
-                                      `Remove level "${level.name}"?`,
+                                      t("settings.structure.removeLevelConfirm", {
+                                        name: level.name,
+                                      }),
                                     ))
                                   ) {
                                     return;
@@ -3969,7 +3987,10 @@ export default function SettingsPage() {
                                 onClick={async () => {
                                   if (
                                     !(await confirmRemove(
-                                      `Remove "${node.label}" from ${selectedLevel?.name ?? "list"}?`,
+                                      t("settings.structure.removeItemFromLevelConfirm", {
+                                        label: node.label,
+                                        level: selectedLevel?.name ?? t("settings.structure.level"),
+                                      }),
                                     ))
                                   ) {
                                     return;

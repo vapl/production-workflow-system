@@ -5,6 +5,7 @@ import {
   TrendingUpIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/Card";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export function KPIStats({
   kpis,
@@ -19,6 +20,7 @@ export function KPIStats({
     overdueOrders: number;
   };
 }) {
+  const { t } = useI18n();
   const {
     activeOrders,
     totalOrders,
@@ -33,42 +35,46 @@ export function KPIStats({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Card className="gap-3">
           <CardHeader className="flex flex-row items-center justify-between px-4 pt-4 pb-1 sm:px-6 sm:pt-6 sm:pb-2">
-            <CardTitle className="text-sm">Active Orders</CardTitle>
+            <CardTitle className="text-sm">{t("dashboard.kpi.activeOrdersTitle")}</CardTitle>
             <PackageIcon className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
             <div className="text-[1.75rem] leading-none font-bold">{activeOrders}</div>
             <p className="text-xs text-muted-foreground">
-              {totalOrders} total orders
+              {t("dashboard.kpi.totalOrdersSubtitle", { count: totalOrders })}
             </p>
           </CardContent>
         </Card>
 
         <Card className="gap-3">
           <CardHeader className="flex flex-row items-center justify-between px-4 pt-4 pb-1 sm:px-6 sm:pt-6 sm:pb-2">
-            <CardTitle className="text-sm">In Production</CardTitle>
+            <CardTitle className="text-sm">{t("dashboard.kpi.inProductionTitle")}</CardTitle>
             <ClockIcon className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
             <div className="text-[1.75rem] leading-none font-bold">{activeBatches}</div>
-            <p className="text-xs text-muted-foreground">Active work batches</p>
+            <p className="text-xs text-muted-foreground">
+              {t("dashboard.kpi.activeWorkBatchesSubtitle")}
+            </p>
           </CardContent>
         </Card>
 
         <Card className="gap-3">
           <CardHeader className="flex flex-row items-center justify-between px-4 pt-4 pb-1 sm:px-6 sm:pt-6 sm:pb-2">
-            <CardTitle className="text-sm">Completed Today</CardTitle>
+            <CardTitle className="text-sm">{t("dashboard.kpi.completedTodayTitle")}</CardTitle>
             <TrendingUpIcon className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
             <div className="text-[1.75rem] leading-none font-bold">{completedToday}</div>
-            <p className="text-xs text-muted-foreground">Batches finished</p>
+            <p className="text-xs text-muted-foreground">
+              {t("dashboard.kpi.batchesFinishedSubtitle")}
+            </p>
           </CardContent>
         </Card>
 
         <Card className="gap-3">
           <CardHeader className="flex flex-row items-center justify-between px-4 pt-4 pb-1 sm:px-6 sm:pt-6 sm:pb-2">
-            <CardTitle className="text-sm">Bottlenecks</CardTitle>
+            <CardTitle className="text-sm">{t("dashboard.kpi.bottlenecksTitle")}</CardTitle>
             {lateBatches > 0 && (
               <AlertTriangleIcon className="w-4 h-4 text-amber-500" />
             )}
@@ -80,14 +86,14 @@ export function KPIStats({
               {lateBatches}
             </div>
             <p className="text-xs text-muted-foreground">
-              Batches over estimate
+              {t("dashboard.kpi.batchesOverEstimateSubtitle")}
             </p>
           </CardContent>
         </Card>
 
         <Card className="gap-3">
           <CardHeader className="flex flex-row items-center justify-between px-4 pt-4 pb-1 sm:px-6 sm:pt-6 sm:pb-2">
-            <CardTitle className="text-sm">Due Soon</CardTitle>
+            <CardTitle className="text-sm">{t("dashboard.kpi.dueSoonTitle")}</CardTitle>
             <ClockIcon className="w-4 h-4 text-amber-500" />
           </CardHeader>
           <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
@@ -95,14 +101,14 @@ export function KPIStats({
               {dueSoonOrders}
             </div>
             <p className="text-xs text-muted-foreground">
-              Orders approaching due date
+              {t("dashboard.kpi.ordersApproachingDueDateSubtitle")}
             </p>
           </CardContent>
         </Card>
 
         <Card className="gap-3">
           <CardHeader className="flex flex-row items-center justify-between px-4 pt-4 pb-1 sm:px-6 sm:pt-6 sm:pb-2">
-            <CardTitle className="text-sm">Overdue</CardTitle>
+            <CardTitle className="text-sm">{t("dashboard.kpi.overdueTitle")}</CardTitle>
             <AlertTriangleIcon className="w-4 h-4 text-rose-500" />
           </CardHeader>
           <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
@@ -110,7 +116,7 @@ export function KPIStats({
               {overdueOrders}
             </div>
             <p className="text-xs text-muted-foreground">
-              Orders past due date
+              {t("dashboard.kpi.ordersPastDueDateSubtitle")}
             </p>
           </CardContent>
         </Card>

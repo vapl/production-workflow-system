@@ -22,20 +22,21 @@ import {
 } from "@/lib/excel/ordersExcel";
 import { createId } from "@/lib/utils/createId";
 import type { OrderStatus } from "@/types/orders";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 const requiredFields = [
-  { key: "orderNumber", label: "Order #", required: true },
-  { key: "customerName", label: "Customer Name", required: true },
-  { key: "dueDate", label: "Due Date", required: true },
+  { key: "orderNumber", labelKey: "orders.page.orderNumberShort", required: true },
+  { key: "customerName", labelKey: "orders.page.customer", required: true },
+  { key: "dueDate", labelKey: "orders.page.dueDate", required: true },
 ];
 
 const optionalFields = [
-  { key: "customerEmail", label: "Customer Email" },
-  { key: "productName", label: "Product" },
-  { key: "quantity", label: "Quantity" },
-  { key: "priority", label: "Priority" },
-  { key: "status", label: "Status" },
-  { key: "notes", label: "Notes" },
+  { key: "customerEmail", labelKey: "orders.modal.customerEmail" },
+  { key: "productName", labelKey: "orders.modal.product" },
+  { key: "quantity", labelKey: "orders.page.quantity" },
+  { key: "priority", labelKey: "orders.page.priority" },
+  { key: "status", labelKey: "orders.page.status" },
+  { key: "notes", labelKey: "orders.modal.notes" },
 ];
 
 interface ImportWizardProps {
@@ -81,6 +82,7 @@ function normalizeEnum(value: unknown) {
 }
 
 export function ImportWizard({ open, onClose }: ImportWizardProps) {
+  const { t } = useI18n();
   const { levels, nodes, addNode } = useHierarchy();
   const { importOrdersFromExcel } = useOrders();
   const { notify } = useNotifications();
@@ -149,8 +151,8 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
       lowerName.endsWith(".csv");
     if (!isSupported) {
       notify({
-        title: "Unsupported file type",
-        description: "Use .xlsx, .xls, or .csv.",
+        title: t("orders.import.unsupportedTypeTitle"),
+        description: t("orders.import.unsupportedTypeDescription"),
         variant: "error",
       });
       return;
@@ -158,8 +160,8 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     const parsed = await parseOrdersWorkbook(file);
     if (parsed.length === 0) {
       notify({
-        title: "Import failed",
-        description: "No rows found in the file.",
+        title: t("orders.import.failedTitle"),
+        description: t("orders.import.noRowsFound"),
         variant: "error",
       });
       return;
@@ -266,18 +268,16 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
   }, [priorityColumn, uniquePriorityValues]);
 
   function buildImportRows() {
-    const missingMapping = requiredFields.filter(
-      (field) => !mapping[field.key],
-    );
+    const missingMapping = requiredFields.filter((field) => !mapping[field.key]);
     if (missingMapping.length > 0) {
       return {
         rows: [],
         errors: [
           {
             row: 0,
-            message: `Map required fields: ${missingMapping
-              .map((field) => field.label)
-              .join(", ")}.`,
+            message: t("orders.import.mapRequiredFields", {
+              fields: missingMapping.map((field) => t(field.labelKey)).join(", "),
+            }),
           },
         ],
       };
@@ -308,24 +308,26 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
       if (!orderNumber || !customerName || !dueDate) {
         const missingFields: string[] = [];
         if (!orderNumber) {
-          missingFields.push("Order #");
+          missingFields.push(t("orders.page.orderNumberShort"));
         }
         if (!customerName) {
-          missingFields.push("Customer Name");
+          missingFields.push(t("orders.page.customer"));
         }
         if (!dueDate) {
-          missingFields.push("Due Date");
+          missingFields.push(t("orders.page.dueDate"));
         }
         rowErrors.push({
           row: rowNumber,
-          message: `Missing required values: ${missingFields.join(", ")}.`,
+          message: t("orders.import.missingRequiredValues", {
+            fields: missingFields.join(", "),
+          }),
         });
         return;
       }
       if (seenOrderNumbers.has(orderNumber)) {
         rowErrors.push({
           row: rowNumber,
-          message: `Duplicate Order # ${orderNumber}.`,
+          message: t("orders.import.duplicateOrderNumber", { orderNumber }),
         });
         return;
       }
@@ -363,7 +365,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
       const quantityValue = String(getMappedValue(row, "quantity")).trim();
       const quantity = quantityValue ? Number(quantityValue) : undefined;
       if (quantityValue && Number.isNaN(quantity)) {
-        rowErrors.push({ row: rowNumber, message: "Invalid Quantity." });
+        rowErrors.push({ row: rowNumber, message: t("orders.import.invalidQuantity") });
         return;
       }
 
@@ -403,7 +405,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     const { rows: importRows, errors } = buildImportRows();
     if (errors.length > 0) {
       notify({
-        title: "Excel import failed",
+        title: t("orders.import.excelFailedTitle"),
         description: errors
           .slice(0, 3)
           .map((err) => err.message)
@@ -415,8 +417,8 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
 
     if (importRows.length >= 1000 && !ackLargeImport) {
       notify({
-        title: "Large import warning",
-        description: "Confirm the warning before importing 1000+ rows.",
+        title: t("orders.import.largeWarningTitle"),
+        description: t("orders.import.largeWarningDescription"),
         variant: "error",
       });
       return;
@@ -480,7 +482,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
         importOrdersFromExcel(importRows),
         new Promise((_, reject) =>
           setTimeout(() => {
-            reject(new Error("Import timed out. Please try again."));
+            reject(new Error(t("orders.import.timeout")));
           }, 20000),
         ),
       ]);
@@ -488,9 +490,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
       onClose();
     } catch (error) {
       notify({
-        title: "Excel import failed",
+        title: t("orders.import.excelFailedTitle"),
         description:
-          error instanceof Error ? error.message : "Unexpected error.",
+          error instanceof Error ? error.message : t("orders.import.unexpectedError"),
         variant: "error",
       });
     } finally {
@@ -541,9 +543,9 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
       <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Import orders</h2>
+            <h2 className="text-lg font-semibold">{t("orders.import.title")}</h2>
             <p className="text-sm text-muted-foreground">
-              {fileName ? fileName : "Upload your Excel or CSV file"}
+              {fileName ? fileName : t("orders.import.uploadFileHint")}
             </p>
           </div>
           <button
@@ -553,7 +555,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               onClose();
             }}
             className="rounded-full p-1 text-muted-foreground hover:text-foreground"
-            aria-label="Close modal"
+            aria-label={t("orders.modal.closeModal")}
           >
             <XIcon className="h-4 w-4" />
           </button>
@@ -567,11 +569,11 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                 <div className="flex flex-col w-full md:flex-row justify-between items-start">
                   <div>
                     <div className="font-medium text-foreground">
-                      Add import file
+                      {t("orders.import.addImportFile")}
                     </div>
-                    <div>Drag & drop a file here, or click to browse.</div>
+                    <div>{t("orders.import.dragDropBrowse")}</div>
                     <div className="text-xs">
-                      Supported formats:{" "}
+                      {t("orders.import.supportedFormats")}{" "}
                       <span className="font-medium">.xlsx, .xls, .csv</span>
                     </div>
                   </div>
@@ -581,14 +583,14 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                     onClick={handleDownloadTemplate}
                   >
                     <DownloadIcon className="h-3.5 w-3.5" />
-                    Download template
+                    {t("orders.import.downloadTemplate")}
                   </button>
                 </div>
               </div>
               <FileField
                 accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                emptyText="Drag & drop Excel/CSV file here or click to upload"
-                emptyHint="First row should contain column names (headers)"
+                emptyText={t("orders.import.emptyText")}
+                emptyHint={t("orders.import.emptyHint")}
                 onChange={async (event) => {
                   const file = event.target.files?.[0];
                   if (file) {
@@ -600,7 +602,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
             </div>
             <div className="flex justify-end">
               <Button variant="outline" onClick={onClose}>
-                Cancel
+                {t("orders.page.cancel")}
               </Button>
             </div>
           </div>
@@ -612,7 +614,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               {[...requiredFields, ...optionalFields].map((field) => (
                 <SelectField
                   key={field.key}
-                  label={`${field.label}${"required" in field && field.required ? " *" : ""}`}
+                  label={`${t(field.labelKey)}${"required" in field && field.required ? " *" : ""}`}
                   value={mapping[field.key] ?? "__none__"}
                   onValueChange={(value) =>
                     setMapping((prev) => ({
@@ -631,10 +633,10 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                     }
                   >
                     <SelectTrigger className="h-10 w-full">
-                      <SelectValue placeholder="-- Not mapped --" />
+                      <SelectValue placeholder={t("orders.import.notMapped")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">-- Not mapped --</SelectItem>
+                      <SelectItem value="__none__">{t("orders.import.notMapped")}</SelectItem>
                       {headers.map((header) => (
                         <SelectItem key={header} value={header}>
                           {header}
@@ -648,7 +650,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
 
             {hierarchyFields.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold">Hierarchy columns</h3>
+                <h3 className="text-sm font-semibold">{t("orders.import.hierarchyColumns")}</h3>
                 <div className="mt-3 grid gap-4 md:grid-cols-2">
                   {hierarchyFields.map((field) => (
                     <SelectField
@@ -672,12 +674,10 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                         }
                       >
                         <SelectTrigger className="h-10 w-full">
-                          <SelectValue placeholder="-- Not mapped --" />
+                          <SelectValue placeholder={t("orders.import.notMapped")} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__none__">
-                            -- Not mapped --
-                          </SelectItem>
+                          <SelectItem value="__none__">{t("orders.import.notMapped")}</SelectItem>
                           {headers.map((header) => (
                             <SelectItem key={header} value={header}>
                               {header}
@@ -694,11 +694,11 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
             {(uniqueStatusValues.length > 0 ||
               uniquePriorityValues.length > 0) && (
               <div className="space-y-4 rounded-xl border border-border bg-muted/30 p-4">
-                <h3 className="text-sm font-semibold">Value mappings</h3>
+                <h3 className="text-sm font-semibold">{t("orders.import.valueMappings")}</h3>
                 {uniqueStatusValues.length > 0 && (
                   <div className="space-y-2">
                     <div className="text-xs font-medium uppercase text-muted-foreground">
-                      Status mapping
+                      {t("orders.import.statusMapping")}
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
                       {uniqueStatusValues.map((value) => (
@@ -753,7 +753,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                 {uniquePriorityValues.length > 0 && (
                   <div className="space-y-2">
                     <div className="text-xs font-medium uppercase text-muted-foreground">
-                      Priority mapping
+                      {t("orders.import.priorityMapping")}
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
                       {uniquePriorityValues.map((value) => (
@@ -809,7 +809,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               onChange={(event) =>
                 setCreateHierarchyItems(event.target.checked)
               }
-              label="Create hierarchy items in Settings from imported values"
+              label={t("orders.import.createHierarchyItems")}
             />
 
             <div className="flex justify-between">
@@ -819,13 +819,13 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                   setStep("upload");
                 }}
               >
-                Back
+                {t("orders.modal.back")}
               </Button>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={onClose}>
-                  Cancel
+                  {t("orders.page.cancel")}
                 </Button>
-                <Button onClick={() => setStep("preview")}>Continue</Button>
+                <Button onClick={() => setStep("preview")}>{t("orders.import.continue")}</Button>
               </div>
             </div>
           </div>
@@ -836,45 +836,43 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
             {previewErrors.length > 0 && (
               <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <div className="font-medium">
-                  {previewErrors.length} errors found. Fix the Excel file and
-                  try again.
+                  {t("orders.import.errorsFound", { count: previewErrors.length })}
                 </div>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
                   {previewErrors.slice(0, 6).map((error) => (
                     <li key={`${error.row}-${error.message}`}>
-                      Row {error.row}: {error.message}
+                      {t("orders.import.rowLabel", { row: error.row })}: {error.message}
                     </li>
                   ))}
                 </ul>
                 <div className="mt-2">
                   <Button variant="outline" onClick={downloadErrors}>
-                    Download error list
+                    {t("orders.import.downloadErrorList")}
                   </Button>
                 </div>
               </div>
             )}
             {rows.length >= 1000 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                <div className="font-medium">Large import warning</div>
+                <div className="font-medium">{t("orders.import.largeWarningTitle")}</div>
                 <p className="mt-1 text-xs">
-                  You are importing {rows.length} rows. This will update the
-                  database in bulk.
+                  {t("orders.import.largeWarningRows", { count: rows.length })}
                 </p>
                 <Checkbox
                   checked={ackLargeImport}
                   onChange={(event) => setAckLargeImport(event.target.checked)}
-                  label="I understand and want to continue"
+                  label={t("orders.import.ackLargeImport")}
                   containerClassName="mt-2 text-xs"
                 />
               </div>
             )}
             <div className="rounded-lg border border-border">
               <div className="grid grid-cols-5 gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium">
-                <span>Order #</span>
-                <span>Customer</span>
-                <span>Due date</span>
-                <span>Product</span>
-                <span>Status</span>
+                <span>{t("orders.page.orderNumberShort")}</span>
+                <span>{t("orders.page.customer")}</span>
+                <span>{t("orders.page.dueDate")}</span>
+                <span>{t("orders.modal.product")}</span>
+                <span>{t("orders.page.status")}</span>
               </div>
               {previewRows.map((row, index) => (
                 <div
@@ -891,11 +889,11 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
             </div>
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setStep("map")}>
-                Back
+                {t("orders.modal.back")}
               </Button>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={onClose}>
-                  Cancel
+                  {t("orders.page.cancel")}
                 </Button>
                 <Button
                   onClick={handleImport}
@@ -905,7 +903,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                     (rows.length >= 1000 && !ackLargeImport)
                   }
                 >
-                  {isImporting ? "Importing..." : "Import"}
+                  {isImporting ? t("orders.modal.accounting.importing") : t("orders.import.import")}
                 </Button>
               </div>
             </div>

@@ -21,6 +21,7 @@ import { useHierarchy } from "@/app/settings/HierarchyContext";
 import type { ReactNode } from "react";
 import { getAccountingAdapter } from "@/lib/integrations/accounting/getAdapter";
 import type { AccountingOrder } from "@/lib/integrations/accounting/types";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export interface OrderFormValues {
   orderNumber: string;
@@ -65,14 +66,17 @@ export function OrderModal({
   open,
   onClose,
   onSubmit,
-  title = "Create New Order",
-  submitLabel = "Create Order",
+  title,
+  submitLabel,
   initialValues,
   editMode = "full",
   existingOrderNumbers = [],
   enableCreateEntryModeSelection = false,
   onOpenImportExcel,
 }: OrderModalProps) {
+  const { t } = useI18n();
+  const resolvedTitle = title ?? t("orders.page.createOrderTitle");
+  const resolvedSubmitLabel = submitLabel ?? t("orders.page.createOrder");
   const minDueDate = initialValues?.dueDate
     ? undefined
     : new Date().toISOString().slice(0, 10);
@@ -205,7 +209,7 @@ export function OrderModal({
       setAccountingImportSummary("");
     } catch {
       setAccountingOrders([]);
-      setAccountingLoadError("Failed to load accounting orders.");
+      setAccountingLoadError(t("orders.modal.accounting.loadFailed"));
     } finally {
       setIsAccountingLoading(false);
     }
@@ -284,18 +288,18 @@ export function OrderModal({
   function validateField(field: string, value: string) {
     switch (field) {
       case "customerName":
-        return value.trim() ? "" : "Customer name is required.";
+        return value.trim() ? "" : t("orders.modal.validation.customerNameRequired");
       case "orderNumber":
         if (!value.trim()) {
-          return "Order number is required.";
+          return t("orders.modal.validation.orderNumberRequired");
         }
         if (isDuplicateOrderNumber) {
-          return "Order number already exists.";
+          return t("orders.modal.validation.orderNumberExists");
         }
         return "";
       case "customerEmail":
         return value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
-          ? "Customer email must be valid."
+          ? t("orders.modal.validation.customerEmailInvalid")
           : "";
       case "productName":
         return "";
@@ -303,11 +307,11 @@ export function OrderModal({
         const parsed = Number(value);
         return Number.isFinite(parsed) && parsed > 0
           ? ""
-          : "Quantity must be a positive number.";
+          : t("orders.modal.validation.quantityPositive");
       }
       case "dueDate": {
         if (!value) {
-          return "Due date is required.";
+          return t("orders.modal.validation.dueDateRequired");
         }
         if (isEditingOrderNumber) {
           return "";
@@ -315,7 +319,7 @@ export function OrderModal({
         const today = new Date();
         const dueDate = new Date(value);
         today.setHours(0, 0, 0, 0);
-        return dueDate < today ? "Due date cannot be in the past." : "";
+        return dueDate < today ? t("orders.modal.validation.dueDatePast") : "";
       }
       default:
         return "";
@@ -354,7 +358,7 @@ export function OrderModal({
           } max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 pt-0 shadow-xl`}
         >
           <div className="sticky top-0 z-10 -mx-6 mb-4 flex items-center justify-between bg-card px-6 py-4 shadow-sm">
-            <h2 className="text-lg font-semibold">{title}</h2>
+            <h2 className="text-lg font-semibold">{resolvedTitle}</h2>
             <button
               type="button"
               onClick={() => {
@@ -362,7 +366,7 @@ export function OrderModal({
                 onClose();
               }}
               className="rounded-full p-1 text-muted-foreground hover:text-foreground"
-              aria-label="Close modal"
+              aria-label={t("orders.modal.closeModal")}
             >
               <XIcon className="h-4 w-4" />
             </button>
@@ -377,16 +381,16 @@ export function OrderModal({
     return renderModalFrame(
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          Choose how you want to create the order.
+          {t("orders.modal.choose.description")}
         </p>
         <button
           type="button"
           className="w-full rounded-lg border border-border p-4 text-left transition hover:bg-muted/40"
           onClick={() => setEntryMode("manual")}
         >
-          <div className="text-sm font-semibold">Manual entry</div>
+          <div className="text-sm font-semibold">{t("orders.modal.choose.manualTitle")}</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            Fill in order details manually.
+            {t("orders.modal.choose.manualDescription")}
           </div>
         </button>
         <button
@@ -396,9 +400,9 @@ export function OrderModal({
             void handleEnterAccountingMode();
           }}
         >
-          <div className="text-sm font-semibold">Import from Accounting</div>
+          <div className="text-sm font-semibold">{t("orders.modal.choose.accountingTitle")}</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            Select one or multiple orders from accounting.
+            {t("orders.modal.choose.accountingDescription")}
           </div>
         </button>
         <button
@@ -410,9 +414,9 @@ export function OrderModal({
             onClose();
           }}
         >
-          <div className="text-sm font-semibold">Import CSV / Excel</div>
+          <div className="text-sm font-semibold">{t("orders.modal.choose.csvTitle")}</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            Open spreadsheet import wizard.
+            {t("orders.modal.choose.csvDescription")}
           </div>
         </button>
         <div className="flex justify-end pt-2">
@@ -424,7 +428,7 @@ export function OrderModal({
               onClose();
             }}
           >
-            Cancel
+            {t("orders.page.cancel")}
           </Button>
         </div>
       </div>,
@@ -624,7 +628,7 @@ export function OrderModal({
 
       setAccountingImportStatusByExternalId(nextStatuses);
       setAccountingImportSummary(
-        `Imported ${imported}, skipped ${skipped}, errors ${error}.`,
+        t("orders.modal.accounting.importSummary", { imported, skipped, error }),
       );
       setIsAccountingImporting(false);
     }
@@ -632,20 +636,20 @@ export function OrderModal({
     return renderModalFrame(
       <div className="space-y-4">
         <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
-          <div className="text-sm font-semibold">Accounting import</div>
+          <div className="text-sm font-semibold">{t("orders.modal.accounting.title")}</div>
           <Input
             type="search"
             icon="search"
             value={accountingQuery}
             onChange={(event) => setAccountingQuery(event.target.value)}
-            placeholder="Search order #, customer, contract, category, product..."
+            placeholder={t("orders.modal.accounting.searchPlaceholder")}
             className="h-10"
           />
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>{filteredAccountingOrders.length} rows</span>
-            <span>•</span>
-            <span>{selectedAccountingExternalIds.length} selected</span>
-            <span>•</span>
+            <span>{t("orders.modal.accounting.rowsCount", { count: filteredAccountingOrders.length })}</span>
+            <span>/</span>
+            <span>{t("orders.modal.accounting.selectedCount", { count: selectedAccountingExternalIds.length })}</span>
+            <span>/</span>
             <button
               type="button"
               className="underline decoration-dotted underline-offset-2 hover:text-foreground"
@@ -653,7 +657,7 @@ export function OrderModal({
                 void loadAccountingOrders();
               }}
             >
-              Refresh
+              {t("orders.modal.accounting.refresh")}
             </button>
           </div>
         </div>
@@ -668,20 +672,20 @@ export function OrderModal({
                       variant="box"
                       checked={allVisibleSelected}
                       onChange={(event) => toggleAllVisible(event.target.checked)}
-                      aria-label="Select all visible accounting rows"
+                      aria-label={t("orders.modal.accounting.selectAllVisible")}
                     />
                   </TableHead>
-                  <TableHead>Order #</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Due Date</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>{t("orders.page.orderNumberShort")}</TableHead>
+                  <TableHead>{t("orders.page.customer")}</TableHead>
+                  <TableHead>{t("orders.page.dueDate")}</TableHead>
+                  <TableHead>{t("orders.page.status")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isAccountingLoading ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
-                      Loading accounting orders...
+                      {t("orders.modal.accounting.loading")}
                     </TableCell>
                   </TableRow>
                 ) : accountingLoadError ? (
@@ -693,7 +697,7 @@ export function OrderModal({
                 ) : filteredAccountingOrders.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
-                      No accounting orders found.
+                      {t("orders.modal.accounting.empty")}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -716,7 +720,9 @@ export function OrderModal({
                             onChange={(event) =>
                               toggleRow(order.externalId, event.target.checked)
                             }
-                            aria-label={`Select ${order.orderNumber}`}
+                            aria-label={t("orders.modal.accounting.selectOrder", {
+                              orderNumber: order.orderNumber,
+                            })}
                           />
                         </TableCell>
                         <TableCell className="font-medium">{order.orderNumber}</TableCell>
@@ -736,7 +742,7 @@ export function OrderModal({
                                       : "text-muted-foreground"
                             }
                           >
-                            {status}
+                            {t(`orders.modal.accounting.status.${status}`)}
                           </span>
                         </TableCell>
                       </TableRow>
@@ -748,50 +754,50 @@ export function OrderModal({
           </div>
 
           <div className="rounded-lg border border-border p-4 space-y-3">
-            <div className="text-sm font-semibold">Preview</div>
+            <div className="text-sm font-semibold">{t("orders.modal.accounting.previewTitle")}</div>
             {!oneSelected && selectedRows.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                Select one row to preview details.
+                {t("orders.modal.accounting.previewEmpty")}
               </p>
             ) : null}
             {selectedRows.length > 1 ? (
               <div className="text-xs text-muted-foreground space-y-1">
-                <p>{selectedRows.length} rows selected.</p>
-                <p>Single-row preview is shown when only one row is selected.</p>
-                <p>New: {importCounts.new}</p>
-                <p>Skipped: {importCounts.skipped}</p>
-                <p>Imported: {importCounts.imported}</p>
-                <p>Errors: {importCounts.error}</p>
+                <p>{t("orders.modal.accounting.selectedCount", { count: selectedRows.length })}</p>
+                <p>{t("orders.modal.accounting.singlePreviewHint")}</p>
+                <p>{t("orders.modal.accounting.previewNew", { count: importCounts.new })}</p>
+                <p>{t("orders.modal.accounting.previewSkipped", { count: importCounts.skipped })}</p>
+                <p>{t("orders.modal.accounting.previewImported", { count: importCounts.imported })}</p>
+                <p>{t("orders.modal.accounting.previewErrors", { count: importCounts.error })}</p>
               </div>
             ) : null}
             {oneSelected ? (
               <div className="space-y-2 text-xs">
                 <div>
-                  <span className="text-muted-foreground">Order #:</span>{" "}
+                  <span className="text-muted-foreground">{t("orders.page.orderNumberShort")}:</span>{" "}
                   <span className="font-medium">{oneSelected.orderNumber}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Customer:</span>{" "}
+                  <span className="text-muted-foreground">{t("orders.page.customer")}:</span>{" "}
                   <span className="font-medium">{oneSelected.customerName}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Contract:</span>{" "}
+                  <span className="text-muted-foreground">{t("orders.modal.contract")}:</span>{" "}
                   <span>{oneSelected.contract ?? "-"}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Category:</span>{" "}
+                  <span className="text-muted-foreground">{t("orders.modal.category")}:</span>{" "}
                   <span>{oneSelected.category ?? "-"}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Product:</span>{" "}
+                  <span className="text-muted-foreground">{t("orders.modal.product")}:</span>{" "}
                   <span>{oneSelected.productName ?? oneSelected.product ?? "-"}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Quantity:</span>{" "}
+                  <span className="text-muted-foreground">{t("orders.page.quantity")}:</span>{" "}
                   <span>{oneSelected.quantity ?? 1}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Due date:</span>{" "}
+                  <span className="text-muted-foreground">{t("orders.page.dueDate")}:</span>{" "}
                   <span>{oneSelected.dueDate}</span>
                 </div>
               </div>
@@ -811,7 +817,7 @@ export function OrderModal({
             className="w-full sm:w-auto"
             onClick={() => setEntryMode("choose")}
           >
-            Back
+            {t("orders.modal.back")}
           </Button>
           <Button
             type="button"
@@ -820,7 +826,7 @@ export function OrderModal({
             onClick={useSelectedInForm}
             disabled={!oneSelected}
           >
-            Use selected in form
+            {t("orders.modal.accounting.useSelectedInForm")}
           </Button>
           <Button
             type="button"
@@ -830,7 +836,9 @@ export function OrderModal({
             }}
             disabled={selectedRows.length === 0 || isAccountingImporting}
           >
-            {isAccountingImporting ? "Importing..." : "Import selected to PWS"}
+            {isAccountingImporting
+              ? t("orders.modal.accounting.importing")
+              : t("orders.modal.accounting.importSelected")}
           </Button>
         </div>
       </div>,
@@ -935,7 +943,7 @@ export function OrderModal({
               if (level.isRequired) {
                 setErrors((prev) => ({
                   ...prev,
-                  [errorKey]: `${level.name} is required.`,
+                  [errorKey]: t("orders.modal.levelRequired", { level: level.name }),
                 }));
               }
               return;
@@ -960,7 +968,7 @@ export function OrderModal({
               ? "border-destructive"
               : "border-border"
           }`}
-          placeholder={`Search or enter ${level.name}`}
+          placeholder={t("orders.modal.searchOrEnterLevel", { level: level.name })}
           disabled={!editableLevelIds.has(level.id)}
           error={
             touched[errorKey] && errors[errorKey] ? errors[errorKey] : undefined
@@ -1031,7 +1039,9 @@ export function OrderModal({
             !resolvedHierarchy[level.id] &&
             editableLevelIds.has(level.id)
           ) {
-            nextErrors[`hierarchy.${level.id}`] = `${level.name} is required.`;
+            nextErrors[`hierarchy.${level.id}`] = t("orders.modal.levelRequired", {
+              level: level.name,
+            });
           }
         });
         setErrors(nextErrors);
@@ -1073,7 +1083,7 @@ export function OrderModal({
         if (!success) {
           setErrors((prev) => ({
             ...prev,
-            form: "Order could not be created. Check required data and try again.",
+            form: t("orders.modal.createFailed"),
           }));
           return;
         }
@@ -1086,7 +1096,7 @@ export function OrderModal({
         {!isCategoryProductOnly && (
           <div key="order-number">
             <InputField
-              label="Order #"
+              label={t("orders.page.orderNumberShort")}
               value={formState.orderNumber}
               onChange={(event) =>
                 setFormState((prev) => ({
@@ -1114,14 +1124,14 @@ export function OrderModal({
                   ? "border-destructive"
                   : "border-border"
               }`}
-              placeholder="Accounting Order #"
+              placeholder={t("orders.modal.orderNumberPlaceholder")}
               required
               disabled={isCategoryProductOnly || isEditingOrderNumber}
               error={
                 touched.orderNumber && errors.orderNumber
                   ? errors.orderNumber
                   : !touched.orderNumber && isDuplicateOrderNumber
-                    ? "Order number already exists."
+                    ? t("orders.modal.validation.orderNumberExists")
                     : undefined
               }
             />
@@ -1133,7 +1143,7 @@ export function OrderModal({
           : !isCategoryProductOnly && (
               <div key="customer-name-fallback">
                 <InputField
-                  label="Customer Name"
+                  label={t("orders.page.customer")}
                   icon="user"
                   value={formState.customerName}
                   onChange={(event) =>
@@ -1162,7 +1172,7 @@ export function OrderModal({
                       ? "border-destructive"
                       : "border-border"
                   }`}
-                  placeholder="Acme Manufacturing"
+                  placeholder={t("orders.modal.customerNamePlaceholder")}
                   required
                   disabled={isCategoryProductOnly}
                   error={
@@ -1177,7 +1187,7 @@ export function OrderModal({
         {!isCategoryProductOnly && contractLevel && (
           <div key="customer-name">
             <InputField
-              label="Customer Name"
+              label={t("orders.page.customer")}
               icon="user"
               value={formState.customerName}
               onChange={(event) =>
@@ -1206,7 +1216,7 @@ export function OrderModal({
                   ? "border-destructive"
                   : "border-border"
               }`}
-              placeholder="Acme Manufacturing"
+              placeholder={t("orders.modal.customerNamePlaceholder")}
               required
               disabled={isCategoryProductOnly}
               error={
@@ -1221,7 +1231,7 @@ export function OrderModal({
         {!isCategoryProductOnly && (
           <div key="customer-email">
             <InputField
-              label="Customer Email"
+              label={t("orders.modal.customerEmail")}
               icon="email"
               value={formState.customerEmail}
               onChange={(event) =>
@@ -1250,7 +1260,7 @@ export function OrderModal({
                   ? "border-destructive"
                   : "border-border"
               }`}
-              placeholder="contact@acme.com"
+              placeholder={t("orders.modal.customerEmailPlaceholder")}
               type="email"
               disabled={isCategoryProductOnly}
               error={
@@ -1272,7 +1282,7 @@ export function OrderModal({
 
       <div className="grid gap-4 md:grid-cols-2">
         <InputField
-          label="Quantity"
+          label={t("orders.page.quantity")}
           value={formState.quantity}
           onChange={(event) =>
             setFormState((prev) => ({
@@ -1307,7 +1317,7 @@ export function OrderModal({
         />
         <div className="space-y-2 text-sm font-medium">
           <DatePicker
-            label="Due Date *"
+            label={`${t("orders.page.dueDate")} *`}
             value={formState.dueDate}
             onChange={(next) => {
               setFormState((prev) => ({
@@ -1340,7 +1350,7 @@ export function OrderModal({
       </div>
 
       <SelectField
-        label="Priority"
+        label={t("orders.page.priority")}
         value={formState.priority}
         onValueChange={(value) =>
           setFormState((prev) => ({
@@ -1350,21 +1360,21 @@ export function OrderModal({
         }
         disabled={isCategoryProductOnly}
         options={[
-          { value: "low", label: "Low" },
-          { value: "normal", label: "Normal" },
-          { value: "high", label: "High" },
-          { value: "urgent", label: "Urgent" },
+          { value: "low", label: t("orders.modal.priority.low") },
+          { value: "normal", label: t("orders.modal.priority.normal") },
+          { value: "high", label: t("orders.modal.priority.high") },
+          { value: "urgent", label: t("orders.modal.priority.urgent") },
         ]}
       />
 
       <TextAreaField
-        label="Notes"
+        label={t("orders.modal.notes")}
         value={formState.notes}
         onChange={(event) =>
           setFormState((prev) => ({ ...prev, notes: event.target.value }))
         }
         className="min-h-22.5"
-        placeholder="Special requirements or additional information..."
+        placeholder={t("orders.modal.notesPlaceholder")}
         disabled={isCategoryProductOnly}
       />
 
@@ -1383,10 +1393,10 @@ export function OrderModal({
             onClose();
           }}
         >
-          Cancel
+          {t("orders.page.cancel")}
         </Button>
         <Button type="submit" disabled={isSubmitDisabled}>
-          {submitLabel}
+          {resolvedSubmitLabel}
         </Button>
       </div>
     </form>,

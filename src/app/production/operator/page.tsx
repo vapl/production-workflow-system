@@ -32,6 +32,7 @@ import {
   type WorkingCalendar,
 } from "@/lib/domain/workingCalendar";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
+import { useI18n } from "@/lib/i18n/useI18n";
 import {
   FileIcon,
   FileTextIcon,
@@ -299,6 +300,7 @@ function renderAttachmentIcon(
 }
 
 export default function OperatorProductionPage() {
+  const { t } = useI18n();
   const currentUser = useCurrentUser();
   const { signOut } = useAuthActions();
   const today = new Date().toISOString().slice(0, 10);
@@ -382,6 +384,34 @@ export default function OperatorProductionPage() {
     "Owner",
   ]);
   const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const statusOptions: Array<{ value: QueueStatusFilter; label: string }> = [
+    { value: "all", label: t("production.operator.status.all") },
+    { value: "queued", label: t("production.operator.status.queued") },
+    { value: "pending", label: t("production.operator.status.pending") },
+    {
+      value: "in_progress",
+      label: t("production.operator.status.in_progress"),
+    },
+    { value: "blocked", label: t("production.operator.status.blocked") },
+    { value: "done", label: t("production.operator.status.done") },
+  ];
+  const priorityOptions: Array<{
+    value: "all" | Priority;
+    label: string;
+  }> = [
+    { value: "all", label: t("production.operator.priority.all") },
+    { value: "urgent", label: t("production.operator.priority.urgent") },
+    { value: "high", label: t("production.operator.priority.high") },
+    { value: "normal", label: t("production.operator.priority.normal") },
+    { value: "low", label: t("production.operator.priority.low") },
+  ];
+  const blockedOnlyLabel = onlyBlocked
+    ? t("production.operator.filters.blockedOnlyOn")
+    : t("production.operator.filters.blockedOnly");
+  const runStatusLabel = (status: BatchRunRow["status"]) =>
+    t(`production.operator.status.${status}`);
+  const priorityLabel = (priority: Priority) =>
+    t(`production.operator.priority.${priority}`);
 
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
@@ -1730,7 +1760,7 @@ export default function OperatorProductionPage() {
     }
     setScannerError("");
     if (result.targetRoute.startsWith("/qr/")) {
-      const message = "QR code is not linked to an order in this queue.";
+      const message = t("production.operator.errors.qrNotInQueue");
       setScannerError(message);
       if (sb && currentUser.tenantId) {
         await sb.from("qr_scan_events").insert({
@@ -1795,14 +1825,16 @@ export default function OperatorProductionPage() {
   }, [currentUser.name]);
 
   const userRoleLabel = currentUser.isOwner
-    ? `${currentUser.role} / Owner`
+    ? `${currentUser.role} / ${t("profile.owner")}`
     : currentUser.role;
 
   if (!currentUser.isAuthenticated) {
     return null;
   }
 
-  const headerSubtitle = `All my stations - Planned ${formatDate(selectedDate)}`;
+  const headerSubtitle = t("production.operator.header.subtitle", {
+    date: formatDate(selectedDate),
+  });
   const closeBlockedDialog = () => {
     setBlockedRunId(null);
     setBlockedItemId(null);
@@ -1810,7 +1842,7 @@ export default function OperatorProductionPage() {
   const blockedDialogContent = (
     <div className="space-y-3 text-sm">
       <SelectField
-        label="Reason template"
+        label={t("production.operator.blocked.reasonTemplate")}
         labelClassName="text-xs text-muted-foreground"
         value={blockedReasonId || "__none__"}
         onValueChange={(value) =>
@@ -1824,10 +1856,14 @@ export default function OperatorProductionPage() {
           }
         >
           <SelectTrigger className="h-9 w-full">
-            <SelectValue placeholder="Select reason..." />
+            <SelectValue
+              placeholder={t("production.operator.blocked.selectReason")}
+            />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__none__">Select reason...</SelectItem>
+            <SelectItem value="__none__">
+              {t("production.operator.blocked.selectReason")}
+            </SelectItem>
             {stopReasons.map((reason) => (
               <SelectItem key={reason.id} value={reason.id}>
                 {reason.label}
@@ -1837,16 +1873,16 @@ export default function OperatorProductionPage() {
         </Select>
       </SelectField>
       <TextAreaField
-        label="Manual note"
+        label={t("production.operator.blocked.manualNote")}
         labelClassName="text-xs text-muted-foreground"
         value={blockedReasonText}
         onChange={(event) => setBlockedReasonText(event.target.value)}
-        placeholder="Type a custom reason..."
+        placeholder={t("production.operator.blocked.customReasonPlaceholder")}
         className="min-h-22.5"
       />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" type="button" onClick={closeBlockedDialog}>
-          Cancel
+          {t("production.operator.common.cancel")}
         </Button>
         <Button
           type="button"
@@ -1864,7 +1900,7 @@ export default function OperatorProductionPage() {
           (blockedRunId && isRunActionLoading(blockedRunId, "blocked")) ? (
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
           ) : null}
-          Save
+          {t("production.operator.common.save")}
         </Button>
       </div>
     </div>
@@ -1873,7 +1909,7 @@ export default function OperatorProductionPage() {
   return (
     <section className="relative flex flex-col gap-3 pt-16 md:pt-0">
       <MobilePageTitle
-        title="Station queue"
+        title={t("production.operator.header.title")}
         subtitle={headerSubtitle}
         showCompact={showCompactMobileTitle}
         className="pt-6 pb-6"
@@ -1882,7 +1918,7 @@ export default function OperatorProductionPage() {
             type="button"
             onClick={() => setIsProfilePanelOpen(true)}
             className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background shadow-sm"
-            aria-label="Open profile panel"
+            aria-label={t("production.operator.profile.openPanel")}
           >
             {currentUser.avatarUrl ? (
               <img
@@ -1901,7 +1937,7 @@ export default function OperatorProductionPage() {
 
       <DesktopPageHeader
         sticky
-        title="Station queue"
+        title={t("production.operator.header.title")}
         subtitle={headerSubtitle}
         actions={
           <button
@@ -1940,7 +1976,7 @@ export default function OperatorProductionPage() {
                 applyFiltersToUrl({ q: searchQuery });
               }
             }}
-            placeholder="Search order, batch or customer"
+            placeholder={t("production.operator.filters.searchPlaceholder")}
             icon="search"
             className="h-10"
           />
@@ -1948,13 +1984,13 @@ export default function OperatorProductionPage() {
 
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
           <DatePicker
-            label="Date"
+            label={t("production.operator.filters.date")}
             value={selectedDate}
             onChange={(value) => applyFiltersToUrl({ date: value || today })}
           />
 
           <SelectField
-            label="Status"
+            label={t("production.operator.filters.status")}
             value={statusFilter}
             onValueChange={(value) =>
               applyFiltersToUrl({ status: value as QueueStatusFilter })
@@ -1967,21 +2003,22 @@ export default function OperatorProductionPage() {
               }
             >
               <SelectTrigger className="h-10 w-full">
-                <SelectValue placeholder="All statuses" />
+                <SelectValue
+                  placeholder={t("production.operator.status.all")}
+                />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="queued">Queued</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="in_progress">In progress</SelectItem>
-                <SelectItem value="blocked">Blocked</SelectItem>
-                <SelectItem value="done">Done</SelectItem>
+                {statusOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </SelectField>
 
           <SelectField
-            label="Priority"
+            label={t("production.operator.filters.priority")}
             value={priorityFilter}
             onValueChange={(value) =>
               applyFiltersToUrl({ priority: value as "all" | Priority })
@@ -1994,14 +2031,16 @@ export default function OperatorProductionPage() {
               }
             >
               <SelectTrigger className="h-10 w-full">
-                <SelectValue placeholder="All priorities" />
+                <SelectValue
+                  placeholder={t("production.operator.priority.all")}
+                />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All priorities</SelectItem>
-                <SelectItem value="urgent">Urgent</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
+                {priorityOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </SelectField>
@@ -2013,7 +2052,7 @@ export default function OperatorProductionPage() {
               className="h-10 flex-1"
               onClick={() => applyFiltersToUrl({ blocked: !onlyBlocked })}
             >
-              {onlyBlocked ? "Blocked only: on" : "Blocked only"}
+              {blockedOnlyLabel}
             </Button>
             <Button
               type="button"
@@ -2022,7 +2061,7 @@ export default function OperatorProductionPage() {
               onClick={() => setIsScannerOpen(true)}
             >
               <QrCodeIcon className="h-4 w-4" />
-              Scan
+              {t("production.operator.filters.scan")}
             </Button>
           </div>
 
@@ -2042,7 +2081,7 @@ export default function OperatorProductionPage() {
               })
             }
           >
-            Reset filters
+            {t("production.operator.filters.reset")}
           </Button>
         </div>
       </div>
@@ -2051,45 +2090,61 @@ export default function OperatorProductionPage() {
         <Card>
           <CardContent className="flex items-center justify-between py-4">
             <div>
-              <div className="text-xs text-muted-foreground">Started</div>
+              <div className="text-xs text-muted-foreground">
+                {t("production.operator.metrics.started")}
+              </div>
               <div className="text-xl font-semibold">
                 {activitySummary.started}
               </div>
             </div>
-            <Badge variant="status-in_engineering">Today</Badge>
+            <Badge variant="status-in_engineering">
+              {t("production.operator.metrics.today")}
+            </Badge>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="flex items-center justify-between py-4">
             <div>
-              <div className="text-xs text-muted-foreground">Done</div>
+              <div className="text-xs text-muted-foreground">
+                {t("production.operator.metrics.done")}
+              </div>
               <div className="text-xl font-semibold">
                 {activitySummary.done}
               </div>
             </div>
-            <Badge variant="status-ready_for_production">Today</Badge>
+            <Badge variant="status-ready_for_production">
+              {t("production.operator.metrics.today")}
+            </Badge>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="flex items-center justify-between py-4">
             <div>
-              <div className="text-xs text-muted-foreground">Blocked</div>
+              <div className="text-xs text-muted-foreground">
+                {t("production.operator.metrics.blocked")}
+              </div>
               <div className="text-xl font-semibold">
                 {activitySummary.blocked}
               </div>
             </div>
-            <Badge variant="status-blocked">Today</Badge>
+            <Badge variant="status-blocked">
+              {t("production.operator.metrics.today")}
+            </Badge>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="flex items-center justify-between py-4">
             <div>
-              <div className="text-xs text-muted-foreground">Work time</div>
+              <div className="text-xs text-muted-foreground">
+                {t("production.operator.metrics.workTime")}
+              </div>
               <div className="text-xl font-semibold">
                 {formatDuration(activitySummary.minutes)}
               </div>
             </div>
-            <Badge variant="status-draft">Accumulated</Badge>
+            <Badge variant="status-draft">
+              {t("production.operator.metrics.accumulated")}
+            </Badge>
           </CardContent>
         </Card>
       </div>
@@ -2102,14 +2157,13 @@ export default function OperatorProductionPage() {
 
       {isLoading ? (
         <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-          Loading station queue...
+          {t("production.operator.states.loadingQueue")}
         </div>
       ) : null}
 
       {!isLoading && visibleStations.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-          No stations available for this view. Ask admin to assign you to a
-          station.
+          {t("production.operator.states.noStations")}
         </div>
       ) : null}
 
@@ -2121,7 +2175,7 @@ export default function OperatorProductionPage() {
 
       {!isLoading && visibleStations.length > 0 && filteredItemsCount === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-          No queue items match selected filters.
+          {t("production.operator.states.noItemsForFilters")}
         </div>
       ) : null}
 
@@ -2141,7 +2195,11 @@ export default function OperatorProductionPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">{station.name}</CardTitle>
                   <div className="text-right text-xs text-muted-foreground">
-                    <div>{queue.length} items</div>
+                    <div>
+                      {t("production.operator.queue.itemsCount", {
+                        count: queue.length,
+                      })}
+                    </div>
                     {stationTotalMinutes > 0 ? (
                       <div>{formatDuration(stationTotalMinutes)}</div>
                     ) : null}
@@ -2151,7 +2209,7 @@ export default function OperatorProductionPage() {
               <CardContent className="space-y-3">
                 {queue.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                    No work queued
+                    {t("production.operator.queue.noWorkQueued")}
                   </div>
                 ) : (
                   queue.map((item) => (
@@ -2162,10 +2220,18 @@ export default function OperatorProductionPage() {
                       {(() => {
                         const metaParts: string[] = [];
                         if (item.totalQty > 0) {
-                          metaParts.push(`${item.totalQty} pcs`);
+                          metaParts.push(
+                            t("production.operator.queue.pieces", {
+                              count: item.totalQty,
+                            }),
+                          );
                         }
                         if (item.dueDate) {
-                          metaParts.push(`Due ${formatDate(item.dueDate)}`);
+                          metaParts.push(
+                            t("production.operator.queue.dueDate", {
+                              date: formatDate(item.dueDate),
+                            }),
+                          );
                         }
                         const metaLine = metaParts.join(" - ");
                         const stationDurationMinutes = item.items.reduce(
@@ -2253,7 +2319,7 @@ export default function OperatorProductionPage() {
                                   /{item.items.length}
                                 </span>
                                 <Badge variant={priorityBadge(item.priority)}>
-                                  {item.priority}
+                                  {priorityLabel(item.priority)}
                                 </Badge>
                                 <Badge
                                   variant={
@@ -2262,10 +2328,7 @@ export default function OperatorProductionPage() {
                                       : statusBadge(item.status)
                                   }
                                 >
-                                  {String(item.status ?? "queued").replace(
-                                    "_",
-                                    " ",
-                                  )}
+                                  {runStatusLabel(item.status ?? "queued")}
                                 </Badge>
                               </div>
                             </div>
@@ -2279,19 +2342,21 @@ export default function OperatorProductionPage() {
                             </div>
                             {stationDurationMinutes > 0 ? (
                               <div className="mt-1 text-[11px] text-muted-foreground">
-                                Station time:{" "}
+                                {t("production.operator.queue.stationTime")}{" "}
                                 {formatDuration(stationDurationMinutes)}
                               </div>
                             ) : null}
                             {orderDurationMinutes > 0 ? (
                               <div className="mt-1 text-[11px] text-muted-foreground">
-                                Order time:{" "}
+                                {t("production.operator.queue.orderTime")}{" "}
                                 {formatDuration(orderDurationMinutes)}
                               </div>
                             ) : null}
                             {elapsedLabel ? (
                               <div className="mt-2 text-[11px] text-muted-foreground">
-                                Time: {elapsedLabel}
+                                {t("production.operator.queue.time", {
+                                  value: elapsedLabel,
+                                })}
                               </div>
                             ) : null}
                             {item.items.length > 0 && isConstructionTracking ? (
@@ -2319,8 +2384,8 @@ export default function OperatorProductionPage() {
                                     <ChevronDownIcon className="h-3.5 w-3.5" />
                                   )}
                                   {expandedOrderItems.has(item.id)
-                                    ? "Hide constructions"
-                                    : "Show constructions"}
+                                    ? t("production.operator.queue.hideConstructions")
+                                    : t("production.operator.queue.showConstructions")}
                                 </Button>
                                 {expandedOrderItems.has(item.id) ? (
                                   <div className="mt-2 space-y-2">
@@ -2388,13 +2453,15 @@ export default function OperatorProductionPage() {
                                                 prodItem.status,
                                               )}
                                             >
-                                              {String(
+                                              {runStatusLabel(
                                                 prodItem.status ?? "queued",
-                                              ).replace("_", " ")}
+                                              )}
                                             </Badge>
                                           </div>
                                           <div className="mt-1 text-[11px] text-muted-foreground">
-                                            Qty: {prodItem.qty}
+                                            {t("production.operator.queue.qty", {
+                                              qty: prodItem.qty,
+                                            })}
                                             {prodItem.material
                                               ? ` - ${prodItem.material}`
                                               : ""}
@@ -2402,7 +2469,7 @@ export default function OperatorProductionPage() {
                                           {hasBlockingDependencies ? (
                                             <div className="mt-2 space-y-1">
                                               <div className="text-[11px] text-amber-600">
-                                                Waiting for
+                                                {t("production.operator.queue.waitingFor")}
                                               </div>
                                               <div className="flex flex-wrap gap-1">
                                                 {blockingDependencies.map(
@@ -2410,16 +2477,19 @@ export default function OperatorProductionPage() {
                                                     const name =
                                                       stationsById.get(
                                                         dep.stationId,
-                                                      ) ?? "Station";
+                                                      ) ??
+                                                      t(
+                                                        "production.operator.queue.stationFallback",
+                                                      );
                                                     return (
                                                       <span
                                                         key={dep.stationId}
                                                         className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700"
                                                       >
-                                                        {name} ·{" "}
-                                                        {String(
+                                                        {name} -{" "}
+                                                        {runStatusLabel(
                                                           dep.status,
-                                                        ).replace("_", " ")}
+                                                        )}
                                                       </span>
                                                     );
                                                   },
@@ -2429,13 +2499,17 @@ export default function OperatorProductionPage() {
                                           ) : null}
                                           {itemElapsedLabel ? (
                                             <div className="mt-1 text-[11px] text-muted-foreground">
-                                              Time: {itemElapsedLabel}
+                                              {t("production.operator.queue.time", {
+                                                value: itemElapsedLabel,
+                                              })}
                                             </div>
                                           ) : null}
                                           {prodItem.status === "blocked" &&
                                           blockedReason ? (
                                             <div className="mt-1 text-[11px] text-rose-600">
-                                              Blocked: {String(blockedReason)}
+                                              {t("production.operator.queue.blockedReason", {
+                                                reason: String(blockedReason),
+                                              })}
                                             </div>
                                           ) : null}
                                           <div className="mt-2 flex flex-wrap gap-2">
@@ -2491,15 +2565,19 @@ export default function OperatorProductionPage() {
                                                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                                                     ) : null}
                                                     {isBlocked
-                                                      ? "Resume"
-                                                      : "Start"}
+                                                      ? t("production.operator.actions.resume")
+                                                      : t("production.operator.actions.start")}
                                                   </Button>
                                                   {startLockedByDate &&
                                                   item.plannedDate ? (
                                                     <span className="self-center text-[10px] text-amber-600">
-                                                      Available on{" "}
-                                                      {formatDate(
-                                                        item.plannedDate,
+                                                      {t(
+                                                        "production.operator.queue.availableOn",
+                                                        {
+                                                          date: formatDate(
+                                                            item.plannedDate,
+                                                          ),
+                                                        },
                                                       )}
                                                     </span>
                                                   ) : null}
@@ -2524,7 +2602,7 @@ export default function OperatorProductionPage() {
                                                     {isCompleting ? (
                                                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                                                     ) : null}
-                                                    Done
+                                                    {t("production.operator.actions.done")}
                                                   </Button>
                                                   <Button
                                                     variant="ghost"
@@ -2537,7 +2615,7 @@ export default function OperatorProductionPage() {
                                                       )
                                                     }
                                                   >
-                                                    Blocked
+                                                    {t("production.operator.actions.blocked")}
                                                   </Button>
                                                 </>
                                               );
@@ -2555,8 +2633,8 @@ export default function OperatorProductionPage() {
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <div className="text-[11px] text-muted-foreground">
                                     {isReceiptOnlyTracking
-                                      ? "Receipt action for this batch"
-                                      : "Batch actions for this station"}
+                                      ? t("production.operator.queue.receiptAction")
+                                      : t("production.operator.queue.batchActions")}
                                   </div>
                                   <div className="flex flex-wrap gap-2">
                                     {!isReceiptOnlyTracking ? (
@@ -2578,7 +2656,9 @@ export default function OperatorProductionPage() {
                                           )
                                         }
                                       >
-                                        {isBatchBlocked ? "Resume" : "Start"}
+                                        {isBatchBlocked
+                                          ? t("production.operator.actions.resume")
+                                          : t("production.operator.actions.start")}
                                       </Button>
                                     ) : null}
                                     <Button
@@ -2597,7 +2677,9 @@ export default function OperatorProductionPage() {
                                         handleRunStatusUpdate(item.id, "done")
                                       }
                                     >
-                                      {isReceiptOnlyTracking ? "Received" : "Done"}
+                                      {isReceiptOnlyTracking
+                                        ? t("production.operator.actions.received")
+                                        : t("production.operator.actions.done")}
                                     </Button>
                                     {!isReceiptOnlyTracking ? (
                                       <Button
@@ -2606,14 +2688,16 @@ export default function OperatorProductionPage() {
                                         disabled={isBatchDone}
                                         onClick={() => handleOpenBlocked(item.id)}
                                       >
-                                        Blocked
+                                        {t("production.operator.actions.blocked")}
                                       </Button>
                                     ) : null}
                                   </div>
                                 </div>
                                 {batchStartLockedByDate && item.plannedDate ? (
                                   <div className="mt-1 text-[10px] text-amber-600">
-                                    Available on {formatDate(item.plannedDate)}
+                                    {t("production.operator.queue.availableOn", {
+                                      date: formatDate(item.plannedDate),
+                                    })}
                                   </div>
                                 ) : null}
                               </div>
@@ -2662,14 +2746,14 @@ export default function OperatorProductionPage() {
                                     <ChevronDownIcon className="h-3.5 w-3.5" />
                                   )}
                                   {expandedJobs.has(item.id)
-                                    ? "Hide files"
-                                    : "Show files"}
+                                    ? t("production.operator.files.hide")
+                                    : t("production.operator.files.show")}
                                 </Button>
                                 {expandedJobs.has(item.id) ? (
                                   <div className="space-y-2">
                                     {signingJobs.has(item.id) ? (
                                       <div className="text-xs text-muted-foreground">
-                                        Loading files...
+                                        {t("production.operator.files.loading")}
                                       </div>
                                     ) : null}
                                     {item.attachments.map((attachment) => {
@@ -2740,7 +2824,7 @@ export default function OperatorProductionPage() {
                     closeMobileSearch();
                   }
                 }}
-                placeholder="Search"
+                placeholder={t("production.operator.search.search")}
                 enterKeyHint="search"
                 className="h-12 text-[16px]"
                 wrapperClassName="rounded-full border-border bg-background shadow-lg"
@@ -2749,7 +2833,7 @@ export default function OperatorProductionPage() {
                 type="button"
                 onClick={closeMobileSearch}
                 className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg"
-                aria-label="Close search"
+                aria-label={t("production.operator.search.close")}
               >
                 <XIcon className="h-5 w-5" />
               </button>
@@ -2758,7 +2842,7 @@ export default function OperatorProductionPage() {
           <button
             type="button"
             className="fixed inset-0 -z-10 h-full w-full"
-            aria-label="Close search overlay"
+            aria-label={t("production.operator.search.closeOverlay")}
             onClick={closeMobileSearch}
           />
         </div>
@@ -2767,20 +2851,20 @@ export default function OperatorProductionPage() {
       <BottomSheet
         open={isFiltersOpen}
         onClose={() => setIsFiltersOpen(false)}
-        ariaLabel="Operator filters"
-        title="Filters"
-        closeButtonLabel="Close filters"
+        ariaLabel={t("production.operator.filters.aria")}
+        title={t("production.operator.filters.title")}
+        closeButtonLabel={t("production.operator.filters.close")}
         keyboardAware
         enableSwipeToClose
       >
         <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3">
           <DatePicker
-            label="Date"
+            label={t("production.operator.filters.date")}
             value={selectedDate}
             onChange={(value) => applyFiltersToUrl({ date: value || today })}
           />
           <SelectField
-            label="Status"
+            label={t("production.operator.filters.status")}
             value={statusFilter}
             onValueChange={(value) =>
               applyFiltersToUrl({ status: value as QueueStatusFilter })
@@ -2793,20 +2877,19 @@ export default function OperatorProductionPage() {
               }
             >
               <SelectTrigger className="h-10 w-full">
-                <SelectValue placeholder="All statuses" />
+                <SelectValue placeholder={t("production.operator.status.all")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="queued">Queued</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="in_progress">In progress</SelectItem>
-                <SelectItem value="blocked">Blocked</SelectItem>
-                <SelectItem value="done">Done</SelectItem>
+                {statusOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </SelectField>
           <SelectField
-            label="Priority"
+            label={t("production.operator.filters.priority")}
             value={priorityFilter}
             onValueChange={(value) =>
               applyFiltersToUrl({ priority: value as "all" | Priority })
@@ -2819,14 +2902,16 @@ export default function OperatorProductionPage() {
               }
             >
               <SelectTrigger className="h-10 w-full">
-                <SelectValue placeholder="All priorities" />
+                <SelectValue
+                  placeholder={t("production.operator.priority.all")}
+                />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All priorities</SelectItem>
-                <SelectItem value="urgent">Urgent</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
+                {priorityOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </SelectField>
@@ -2836,7 +2921,7 @@ export default function OperatorProductionPage() {
             className="w-full"
             onClick={() => applyFiltersToUrl({ blocked: !onlyBlocked })}
           >
-            {onlyBlocked ? "Blocked only: on" : "Blocked only"}
+            {blockedOnlyLabel}
           </Button>
           <Button
             type="button"
@@ -2855,7 +2940,7 @@ export default function OperatorProductionPage() {
               });
             }}
           >
-            Reset filters
+            {t("production.operator.filters.reset")}
           </Button>
         </div>
       </BottomSheet>
@@ -2874,13 +2959,13 @@ export default function OperatorProductionPage() {
       <BottomSheet
         open={isQuickActionOpen}
         onClose={closeQuickAction}
-        ariaLabel="Quick order actions"
+        ariaLabel={t("production.operator.quickActions.aria")}
         title={
           quickActionItem
             ? `${quickActionItem.orderNumber} / ${quickActionItem.batchCode}`
-            : "Quick actions"
+            : t("production.operator.quickActions.title")
         }
-        closeButtonLabel="Close quick actions"
+        closeButtonLabel={t("production.operator.quickActions.close")}
         keyboardAware
         enableSwipeToClose
       >
@@ -2890,12 +2975,16 @@ export default function OperatorProductionPage() {
               <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
                 <div>{quickActionItem.customerName}</div>
                 <div className="mt-1">
-                  {quickActionItem.totalQty} pcs
+                  {t("production.operator.queue.pieces", {
+                    count: quickActionItem.totalQty,
+                  })}
                   {quickActionItem.material
-                    ? ` · ${quickActionItem.material}`
+                    ? ` - ${quickActionItem.material}`
                     : ""}
                   {quickActionItem.plannedDate
-                    ? ` · Planned ${formatDate(quickActionItem.plannedDate)}`
+                    ? ` - ${t("production.operator.quickActions.planned", {
+                        date: formatDate(quickActionItem.plannedDate),
+                      })}`
                     : ""}
                 </div>
               </div>
@@ -2904,14 +2993,11 @@ export default function OperatorProductionPage() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-xs text-muted-foreground">
                       {quickActionItem.trackingMode === "receipt_only"
-                        ? "Receipt action for this batch"
-                        : "Batch actions for this station"}
+                        ? t("production.operator.queue.receiptAction")
+                        : t("production.operator.queue.batchActions")}
                     </div>
                     <Badge variant={statusBadge(quickActionItem.status)}>
-                      {String(quickActionItem.status ?? "queued").replace(
-                        "_",
-                        " ",
-                      )}
+                      {runStatusLabel(quickActionItem.status ?? "queued")}
                     </Badge>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -2931,8 +3017,8 @@ export default function OperatorProductionPage() {
                         }
                       >
                         {quickActionItem.status === "blocked"
-                          ? "Resume"
-                          : "Start"}
+                          ? t("production.operator.actions.resume")
+                          : t("production.operator.actions.start")}
                       </Button>
                     ) : null}
                     <Button
@@ -2947,8 +3033,8 @@ export default function OperatorProductionPage() {
                       }
                     >
                       {quickActionItem.trackingMode === "receipt_only"
-                        ? "Received"
-                        : "Done"}
+                        ? t("production.operator.actions.received")
+                        : t("production.operator.actions.done")}
                     </Button>
                     {quickActionItem.trackingMode !== "receipt_only" ? (
                       <Button
@@ -2957,14 +3043,16 @@ export default function OperatorProductionPage() {
                         disabled={quickActionItem.status === "done"}
                         onClick={() => handleOpenBlocked(quickActionItem.id)}
                       >
-                        Blocked
+                        {t("production.operator.actions.blocked")}
                       </Button>
                     ) : null}
                   </div>
                   {isFuturePlannedDate(quickActionItem.plannedDate) &&
                   quickActionItem.plannedDate ? (
                     <div className="mt-1 text-[11px] text-amber-600">
-                      Available on {formatDate(quickActionItem.plannedDate)}
+                      {t("production.operator.queue.availableOn", {
+                        date: formatDate(quickActionItem.plannedDate),
+                      })}
                     </div>
                   ) : null}
                 </div>
@@ -2995,14 +3083,13 @@ export default function OperatorProductionPage() {
                             {prodItem.item_name}
                           </div>
                           <Badge variant={statusBadge(prodItem.status)}>
-                            {String(prodItem.status ?? "queued").replace(
-                              "_",
-                              " ",
-                            )}
+                            {runStatusLabel(prodItem.status ?? "queued")}
                           </Badge>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          Qty: {prodItem.qty}
+                          {t("production.operator.queue.qty", {
+                            qty: prodItem.qty,
+                          })}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
@@ -3023,7 +3110,9 @@ export default function OperatorProductionPage() {
                               )
                             }
                           >
-                            {isBlocked ? "Resume" : "Start"}
+                            {isBlocked
+                              ? t("production.operator.actions.resume")
+                              : t("production.operator.actions.start")}
                           </Button>
                           <Button
                             variant="outline"
@@ -3039,7 +3128,7 @@ export default function OperatorProductionPage() {
                               )
                             }
                           >
-                            Done
+                            {t("production.operator.actions.done")}
                           </Button>
                           <Button
                             variant="ghost"
@@ -3049,12 +3138,14 @@ export default function OperatorProductionPage() {
                               handleOpenBlocked(quickActionItem.id, prodItem.id)
                             }
                           >
-                            Blocked
+                            {t("production.operator.actions.blocked")}
                           </Button>
                         </div>
                         {startLockedByDate && quickActionItem.plannedDate ? (
                           <div className="mt-1 text-[11px] text-amber-600">
-                            Available on {formatDate(quickActionItem.plannedDate)}
+                            {t("production.operator.queue.availableOn", {
+                              date: formatDate(quickActionItem.plannedDate),
+                            })}
                           </div>
                         ) : null}
                       </div>
@@ -3063,13 +3154,13 @@ export default function OperatorProductionPage() {
                 : null}
               {quickActionVisibleItems.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
-                  No constructions found for this QR code in your current queue.
+                  {t("production.operator.quickActions.noConstructions")}
                 </div>
               ) : null}
             </>
           ) : (
             <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-              Order not found in your queue.
+              {t("production.operator.quickActions.orderNotFound")}
             </div>
           )}
         </div>
@@ -3078,19 +3169,21 @@ export default function OperatorProductionPage() {
       <SideDrawer
         open={isProfilePanelOpen}
         onClose={() => setIsProfilePanelOpen(false)}
-        ariaLabel="Operator profile"
-        closeButtonLabel="Close profile panel"
+        ariaLabel={t("production.operator.profile.aria")}
+        closeButtonLabel={t("production.operator.profile.closePanel")}
         side="right"
       >
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h3 className="text-sm font-semibold">My profile</h3>
+            <h3 className="text-sm font-semibold">
+              {t("production.operator.profile.title")}
+            </h3>
             <button
               type="button"
               className="text-sm text-muted-foreground"
               onClick={() => setIsProfilePanelOpen(false)}
             >
-              Close
+              {t("production.operator.common.close")}
             </button>
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -3116,7 +3209,7 @@ export default function OperatorProductionPage() {
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-lg border border-border px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">
-                  Today done
+                  {t("production.operator.profile.todayDone")}
                 </div>
                 <div className="text-lg font-semibold">
                   {activitySummary.done}
@@ -3124,20 +3217,24 @@ export default function OperatorProductionPage() {
               </div>
               <div className="rounded-lg border border-border px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">
-                  Today time
+                  {t("production.operator.profile.todayTime")}
                 </div>
                 <div className="text-lg font-semibold">
                   {formatDuration(activitySummary.minutes)}
                 </div>
               </div>
               <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">7d done</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {t("production.operator.profile.weekDone")}
+                </div>
                 <div className="text-lg font-semibold">
                   {weeklySummary.done}
                 </div>
               </div>
               <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">7d time</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {t("production.operator.profile.weekTime")}
+                </div>
                 <div className="text-lg font-semibold">
                   {formatDuration(weeklySummary.minutes)}
                 </div>
@@ -3154,7 +3251,7 @@ export default function OperatorProductionPage() {
                 className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
               >
                 <UserCircle2Icon className="h-4 w-4" />
-                Open profile
+                {t("production.operator.profile.openProfile")}
               </Link>
               <button
                 type="button"
@@ -3165,7 +3262,7 @@ export default function OperatorProductionPage() {
                 }}
               >
                 <LogOutIcon className="h-4 w-4" />
-                Sign out
+                {t("production.operator.profile.signOut")}
               </button>
             </div>
           </div>
@@ -3178,14 +3275,16 @@ export default function OperatorProductionPage() {
       >
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">My profile</h3>
+            <h3 className="text-sm font-semibold">
+              {t("production.operator.profile.title")}
+            </h3>
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => setIsProfilePanelOpen(false)}
             >
-              Close
+              {t("production.operator.common.close")}
             </Button>
           </div>
           <div className="space-y-4">
@@ -3212,7 +3311,7 @@ export default function OperatorProductionPage() {
               <div className="rounded-lg border border-border px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">
                   <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
-                  Today done
+                  {t("production.operator.profile.todayDone")}
                 </div>
                 <div className="text-lg font-semibold">
                   {activitySummary.done}
@@ -3221,7 +3320,7 @@ export default function OperatorProductionPage() {
               <div className="rounded-lg border border-border px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">
                   <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
-                  Today time
+                  {t("production.operator.profile.todayTime")}
                 </div>
                 <div className="text-lg font-semibold">
                   {formatDuration(activitySummary.minutes)}
@@ -3230,7 +3329,7 @@ export default function OperatorProductionPage() {
               <div className="rounded-lg border border-border px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">
                   <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
-                  7d done
+                  {t("production.operator.profile.weekDone")}
                 </div>
                 <div className="text-lg font-semibold">
                   {weeklySummary.done}
@@ -3239,7 +3338,7 @@ export default function OperatorProductionPage() {
               <div className="rounded-lg border border-border px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">
                   <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
-                  7d time
+                  {t("production.operator.profile.weekTime")}
                 </div>
                 <div className="text-lg font-semibold">
                   {formatDuration(weeklySummary.minutes)}
@@ -3259,7 +3358,7 @@ export default function OperatorProductionPage() {
                   onClick={() => setIsProfilePanelOpen(false)}
                 >
                   <SettingsIcon className="h-4 w-4" />
-                  Open profile
+                  {t("production.operator.profile.openProfile")}
                 </Button>
               </Link>
               <Button
@@ -3272,7 +3371,7 @@ export default function OperatorProductionPage() {
                 }}
               >
                 <LogOutIcon className="h-4 w-4" />
-                Sign out
+                {t("production.operator.profile.signOut")}
               </Button>
             </div>
           </div>
@@ -3287,7 +3386,7 @@ export default function OperatorProductionPage() {
               size="icon"
               className="h-12 w-12 rounded-full bg-card shadow-lg"
               onClick={() => setIsFiltersOpen(true)}
-              aria-label="Open filters"
+              aria-label={t("production.operator.fab.openFilters")}
             >
               <SlidersHorizontalIcon className="h-5 w-5" />
             </Button>
@@ -3296,7 +3395,7 @@ export default function OperatorProductionPage() {
               size="icon"
               className="h-12 w-12 rounded-full bg-card shadow-lg"
               onClick={openMobileSearch}
-              aria-label="Open search"
+              aria-label={t("production.operator.fab.openSearch")}
             >
               <SearchIcon className="h-5 w-5" />
             </Button>
@@ -3307,7 +3406,7 @@ export default function OperatorProductionPage() {
             size="icon"
             className="h-12 w-12 rounded-full bg-card shadow-lg"
             onClick={() => setIsScannerOpen(true)}
-            aria-label="Scan QR"
+            aria-label={t("production.operator.fab.scanQr")}
           >
             <QrCodeIcon className="h-5 w-5" />
           </Button>
@@ -3317,9 +3416,9 @@ export default function OperatorProductionPage() {
       <BottomSheet
         open={Boolean(blockedRunId)}
         onClose={closeBlockedDialog}
-        ariaLabel="Mark as blocked"
-        closeButtonLabel="Close blocked dialog"
-        title="Mark as blocked"
+        ariaLabel={t("production.operator.blocked.markAsBlocked")}
+        closeButtonLabel={t("production.operator.blocked.closeDialog")}
+        title={t("production.operator.blocked.markAsBlocked")}
         keyboardAware
       >
         <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3 md:hidden">
@@ -3331,13 +3430,15 @@ export default function OperatorProductionPage() {
         <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 px-4 md:flex">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Mark as blocked</h3>
+              <h3 className="text-sm font-semibold">
+                {t("production.operator.blocked.markAsBlocked")}
+              </h3>
               <button
                 type="button"
                 className="text-sm text-muted-foreground"
                 onClick={closeBlockedDialog}
               >
-                Close
+                {t("production.operator.common.close")}
               </button>
             </div>
             <div className="mt-4">{blockedDialogContent}</div>
@@ -3347,3 +3448,5 @@ export default function OperatorProductionPage() {
     </section>
   );
 }
+
+

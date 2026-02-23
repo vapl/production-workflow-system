@@ -76,6 +76,7 @@ import { usePartners } from "@/hooks/usePartners";
 import { useNotifications } from "@/components/ui/Notifications";
 import { useTenantSubscription } from "@/hooks/useTenantSubscription";
 import { useRbac } from "@/contexts/RbacContext";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -170,6 +171,7 @@ function getExternalFieldSemantic(field: ExternalJobField) {
 }
 
 export default function OrderDetailPage() {
+  const { t } = useI18n();
   const router = useRouter();
   const params = useParams<{ orderId?: string }>();
   const normalizeId = (value: string) =>
@@ -217,11 +219,13 @@ export default function OrderDetailPage() {
     return confirm({
       title,
       description,
-      confirmLabel: "Delete",
+      confirmLabel: t("orders.detail.delete"),
     });
   }
-  const engineerLabel = rules.assignmentLabels?.engineer ?? "Engineer";
-  const managerLabel = rules.assignmentLabels?.manager ?? "Manager";
+  const engineerLabel =
+    rules.assignmentLabels?.engineer ?? t("orders.page.engineerFallback");
+  const managerLabel =
+    rules.assignmentLabels?.manager ?? t("orders.page.managerFallback");
   const attachmentCategories = useMemo(() => {
     return rules.attachmentCategories && rules.attachmentCategories.length > 0
       ? rules.attachmentCategories
@@ -735,7 +739,7 @@ export default function OrderDetailPage() {
         return;
       }
       if (error) {
-        setOrderInputError("Failed to load order inputs.");
+        setOrderInputError(t("orders.detail.errors.loadOrderInputs"));
         return;
       }
       setOrderInputError("");
@@ -760,7 +764,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [supabase, tenantId]);
+  }, [supabase, t, tenantId]);
 
   useEffect(() => {
     const sb = supabase;
@@ -879,7 +883,7 @@ export default function OrderDetailPage() {
         return;
       }
       if (error) {
-        setOrderInputError("Failed to load order values.");
+        setOrderInputError(t("orders.detail.errors.loadOrderValues"));
         return;
       }
       setOrderInputError("");
@@ -894,7 +898,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [orderState?.id, supabase]);
+  }, [orderState?.id, supabase, t]);
 
   useEffect(() => {
     const sb = supabase;
@@ -980,8 +984,10 @@ export default function OrderDetailPage() {
     const labels = Array.from(effectiveAiAttachmentCategoryIds)
       .map((id) => attachmentCategoryLabels[id] ?? id)
       .filter(Boolean);
-    return labels.length > 0 ? labels : ["Production documentation"];
-  }, [attachmentCategoryLabels, effectiveAiAttachmentCategoryIds]);
+    return labels.length > 0
+      ? labels
+      : [t("orders.detail.aiImport.defaultCategoryLabel")];
+  }, [attachmentCategoryLabels, effectiveAiAttachmentCategoryIds, t]);
   const aiAttachmentCategoryHint = aiAttachmentCategoryLabels.join(", ");
   const productionDocumentationParseAttachments = useMemo(
     () =>
@@ -996,7 +1002,8 @@ export default function OrderDetailPage() {
           : false;
         const isProductionDocumentation =
           isConfiguredAiCategory ||
-          normalizedCategory === "production documentation";
+          normalizedCategory ===
+            t("orders.detail.aiImport.defaultCategoryLabel").toLowerCase();
         const nameLower = attachment.name.toLowerCase();
         const mimeLower = (attachment.mimeType ?? "").toLowerCase();
         const isSupported =
@@ -1217,7 +1224,7 @@ export default function OrderDetailPage() {
     ...(requiredForEngineering.length > 0
       ? [
           {
-            label: "Checklist",
+            label: t("orders.detail.workflow.gates.checklist"),
             ok: meetsEngineeringChecklist,
             value: `${requiredForEngineering.filter((item) => checklistState[item.id]).length}/${requiredForEngineering.length}`,
           },
@@ -1226,7 +1233,7 @@ export default function OrderDetailPage() {
     ...(rules.minAttachmentsForEngineering > 0
       ? [
           {
-            label: "Attachments",
+            label: t("orders.detail.workflow.gates.attachments"),
             ok: meetsEngineeringAttachments,
             value: `${Math.min(attachments.length, rules.minAttachmentsForEngineering)}/${rules.minAttachmentsForEngineering}`,
           },
@@ -1235,7 +1242,7 @@ export default function OrderDetailPage() {
     ...(rules.requireCommentForEngineering
       ? [
           {
-            label: "Comments",
+            label: t("orders.detail.workflow.gates.comments"),
             ok: meetsEngineeringComment,
             value: `${Math.min(comments.length, 1)}/1`,
           },
@@ -1244,23 +1251,27 @@ export default function OrderDetailPage() {
     ...(rules.requireOrderInputsForEngineering
       ? [
           {
-            label: "Inputs",
+            label: t("orders.detail.workflow.gates.inputs"),
             ok: hasRequiredOrderInputs,
-            value: hasRequiredOrderInputs ? "yes" : "no",
+            value: hasRequiredOrderInputs
+              ? t("settings.common.yes")
+              : t("settings.common.no"),
           },
         ]
       : []),
   ];
   const productionGateItems = [
     {
-      label: "Engineer",
+      label: t("orders.page.engineerFallback"),
       ok: hasAssignedEngineer,
-      value: hasAssignedEngineer ? "assigned" : "missing",
+      value: hasAssignedEngineer
+        ? t("orders.detail.workflow.gates.assigned")
+        : t("orders.detail.workflow.gates.missing"),
     },
     ...(requiredForProduction.length > 0
       ? [
           {
-            label: "Checklist",
+            label: t("orders.detail.workflow.gates.checklist"),
             ok: meetsProductionChecklist,
             value: `${requiredForProduction.filter((item) => checklistState[item.id]).length}/${requiredForProduction.length}`,
           },
@@ -1269,7 +1280,7 @@ export default function OrderDetailPage() {
     ...(rules.minAttachmentsForProduction > 0
       ? [
           {
-            label: "Attachments",
+            label: t("orders.detail.workflow.gates.attachments"),
             ok:
               engineeringScopedAttachments.length >=
               rules.minAttachmentsForProduction,
@@ -1280,7 +1291,7 @@ export default function OrderDetailPage() {
     ...(rules.requireCommentForProduction
       ? [
           {
-            label: "Comments",
+            label: t("orders.detail.workflow.gates.comments"),
             ok: meetsProductionComment,
             value: `${Math.min(comments.length, 1)}/1`,
           },
@@ -1289,9 +1300,11 @@ export default function OrderDetailPage() {
     ...(rules.requireOrderInputsForProduction
       ? [
           {
-            label: "Inputs",
+            label: t("orders.detail.workflow.gates.inputs"),
             ok: hasRequiredProductionOrderInputs,
-            value: hasRequiredProductionOrderInputs ? "yes" : "no",
+            value: hasRequiredProductionOrderInputs
+              ? t("settings.common.yes")
+              : t("settings.common.no"),
           },
         ]
       : []),
@@ -1302,9 +1315,9 @@ export default function OrderDetailPage() {
       ? productionGateItems
       : [];
   const activeGateLabel = canSendToEngineering
-    ? "Send to engineering checks"
+    ? t("orders.detail.workflow.sendToEngineeringChecks")
     : canSendToProduction
-      ? "Send to production checks"
+      ? t("orders.detail.workflow.sendToProductionChecks")
       : "";
   const manualExternalJobFields = useMemo(
     () =>
@@ -1551,9 +1564,9 @@ export default function OrderDetailPage() {
   if (!orderState && (isLoadingOrder || isOrdersLoading || !showNotFound)) {
     return (
       <section className="space-y-3">
-        <h1 className="text-xl font-semibold">Loading order...</h1>
-        <p className="text-sm text-muted-foreground">Fetching order details.</p>
-        <LoadingSpinner label="Loading..." />
+        <h1 className="text-xl font-semibold">{t("orders.detail.loadingTitle")}</h1>
+        <p className="text-sm text-muted-foreground">{t("orders.detail.loadingDescription")}</p>
+        <LoadingSpinner label={t("orders.detail.loadingSpinner")} />
       </section>
     );
   }
@@ -1561,9 +1574,9 @@ export default function OrderDetailPage() {
   if (!orderState) {
     return (
       <section className="space-y-3">
-        <h1 className="text-xl font-semibold">Order not found</h1>
+        <h1 className="text-xl font-semibold">{t("orders.detail.notFoundTitle")}</h1>
         <p className="text-sm text-muted-foreground">
-          No order matches this ID.
+          {t("orders.detail.notFoundDescription")}
         </p>
       </section>
     );
@@ -1594,12 +1607,12 @@ export default function OrderDetailPage() {
                 : "status-ready_for_production";
   const externalJobStatusLabels: Record<ExternalJobStatus, string> = {
     ...rules.externalJobStatusLabels,
-    requested: "Requested",
-    ordered: "Ordered",
-    in_progress: "In progress",
-    delivered: "In Stock",
-    approved: "Approved",
-    cancelled: "Cancelled",
+    requested: t("orders.detail.external.status.requested"),
+    ordered: t("orders.detail.external.status.ordered"),
+    in_progress: t("orders.detail.external.status.inProgress"),
+    delivered: t("orders.detail.external.status.delivered"),
+    approved: t("orders.detail.external.status.approved"),
+    cancelled: t("orders.detail.external.status.cancelled"),
   };
   const externalJobStatusVariant = (status: ExternalJobStatus) => {
     switch (status) {
@@ -1624,22 +1637,22 @@ export default function OrderDetailPage() {
   };
   const buildExternalTimeline = (job: ExternalJob) => {
     const events: Array<{ label: string; at: string }> = [
-      { label: "Created", at: job.createdAt },
+      { label: t("orders.detail.external.timeline.created"), at: job.createdAt },
     ];
     if (job.partnerRequestSentAt) {
-      events.push({ label: "Sent", at: job.partnerRequestSentAt });
+      events.push({ label: t("orders.detail.external.timeline.sent"), at: job.partnerRequestSentAt });
     }
     if (job.partnerRequestViewedAt) {
-      events.push({ label: "Viewed", at: job.partnerRequestViewedAt });
+      events.push({ label: t("orders.detail.external.timeline.viewed"), at: job.partnerRequestViewedAt });
     }
     if (job.partnerResponseSubmittedAt) {
-      events.push({ label: "Responded", at: job.partnerResponseSubmittedAt });
+      events.push({ label: t("orders.detail.external.timeline.responded"), at: job.partnerResponseSubmittedAt });
     }
     const confirmed = (job.statusHistory ?? []).find(
       (entry) => entry.status === "approved" || entry.status === "delivered",
     );
     if (confirmed) {
-      events.push({ label: "Confirmed manually", at: confirmed.changedAt });
+      events.push({ label: t("orders.detail.external.timeline.confirmedManually"), at: confirmed.changedAt });
     }
     return events
       .slice()
@@ -1667,7 +1680,9 @@ export default function OrderDetailPage() {
 
   async function handleRemovePendingFile(index: number) {
     const target = attachmentFiles[index];
-    const label = target?.name ? `Remove "${target.name}"?` : "Remove file?";
+    const label = target?.name
+      ? t("orders.detail.confirm.removeNamedFile", { name: target.name })
+      : t("orders.detail.confirm.removeFile");
     if (!(await confirmRemove(label))) {
       return;
     }
@@ -1696,10 +1711,10 @@ export default function OrderDetailPage() {
         }
         const result = await uploadOrderAttachment(file, orderState.id);
         if (result.error || !result.attachment) {
-          const rawError = result.error ?? "Upload failed.";
+          const rawError = result.error ?? t("orders.detail.errors.uploadFailed");
           if (rawError.toLowerCase().includes("mime type")) {
             setAttachmentError(
-              "Upload blocked by bucket file type rules. Allow xlsx/xls/csv/pdf in Supabase Storage bucket settings.",
+              t("orders.detail.errors.uploadBlockedByMimeRules"),
             );
           } else {
             setAttachmentError(rawError);
@@ -1728,7 +1743,7 @@ export default function OrderDetailPage() {
         setAttachmentFiles([]);
       }
       if (uploadedAttachments.length === 0 && attachmentError) {
-        setAttachmentNotice("Upload failed. Check Supabase bucket settings.");
+        setAttachmentNotice(t("orders.detail.errors.uploadFailedCheckBucket"));
       }
     } finally {
       setIsUploading(false);
@@ -1787,7 +1802,7 @@ export default function OrderDetailPage() {
         .from("order_input_values")
         .upsert(upsertRows, { onConflict: "order_id,field_id" });
       if (error) {
-        setOrderInputError("Failed to save order inputs.");
+        setOrderInputError(t("orders.detail.errors.saveOrderInputs"));
         setIsSavingOrderInputs(false);
         return;
       }
@@ -1800,7 +1815,7 @@ export default function OrderDetailPage() {
         .eq("order_id", orderState.id)
         .in("field_id", deleteFieldIds);
       if (error) {
-        setOrderInputError("Failed to clear order inputs.");
+        setOrderInputError(t("orders.detail.errors.clearOrderInputs"));
         setIsSavingOrderInputs(false);
         return;
       }
@@ -1822,7 +1837,9 @@ export default function OrderDetailPage() {
     if (availableParseAttachments.length === 0) {
       setTableImportNotices((prev) => ({
         ...prev,
-        [field.id]: `No supported files (PDF/XLSX/XLS) found in Files & Comments categories: ${aiAttachmentCategoryHint}.`,
+        [field.id]: t("orders.detail.aiImport.noSupportedFilesInCategories", {
+          categories: aiAttachmentCategoryHint,
+        }),
       }));
       return;
     }
@@ -1830,7 +1847,9 @@ export default function OrderDetailPage() {
     if (!attachmentId) {
       setTableImportNotices((prev) => ({
         ...prev,
-        [field.id]: `Choose a file from Files & Comments (${aiAttachmentCategoryHint}).`,
+        [field.id]: t("orders.detail.aiImport.chooseFileFromCategories", {
+          categories: aiAttachmentCategoryHint,
+        }),
       }));
       return;
     }
@@ -1838,14 +1857,14 @@ export default function OrderDetailPage() {
     if (!sb) {
       setTableImportNotices((prev) => ({
         ...prev,
-        [field.id]: "Supabase is not configured.",
+        [field.id]: t("orders.detail.errors.supabaseNotConfigured"),
       }));
       return;
     }
     if (!canUseAiOrderInputImport) {
       setTableImportNotices((prev) => ({
         ...prev,
-        [field.id]: "AI import is available on Pro plan.",
+        [field.id]: t("orders.detail.errors.aiImportProOnly"),
       }));
       return;
     }
@@ -1853,7 +1872,7 @@ export default function OrderDetailPage() {
     if (columns.length === 0) {
       setTableImportNotices((prev) => ({
         ...prev,
-        [field.id]: "Add table columns in settings before AI import.",
+        [field.id]: t("orders.detail.aiImport.addTableColumnsFirst"),
       }));
       return;
     }
@@ -1865,7 +1884,7 @@ export default function OrderDetailPage() {
     if (!accessToken) {
       setTableImportNotices((prev) => ({
         ...prev,
-        [field.id]: "Please sign in again.",
+        [field.id]: t("orders.detail.errors.signInAgain"),
       }));
       return;
     }
@@ -1909,8 +1928,8 @@ export default function OrderDetailPage() {
       if (!response.ok) {
         const message =
           payload.error === "feature_not_available"
-            ? "AI import is available on Pro plan."
-            : (payload.error ?? "Failed to parse PDF.");
+            ? t("orders.detail.errors.aiImportProOnly")
+            : (payload.error ?? t("orders.detail.errors.parsePdfFailed"));
         setTableImportNotices((prev) => ({ ...prev, [field.id]: message }));
         return;
       }
@@ -1931,28 +1950,43 @@ export default function OrderDetailPage() {
         ...prev,
         [field.id]:
           normalizedRows.length > 0
-            ? `AI added ${normalizedRows.length} row(s). Total rows: ${totalRowsCount}. AI-generated results may contain errors, so review and verify all values before saving.`
-            : `No rows detected in PDF.${payload.parserModel ? ` Model: ${payload.parserModel}.` : ""}`,
+            ? t("orders.detail.aiImport.rowsAddedNotice", {
+                added: normalizedRows.length,
+                total: totalRowsCount,
+              })
+            : t("orders.detail.aiImport.noRowsInPdfNotice", {
+                model: payload.parserModel
+                  ? t("orders.detail.aiImport.modelWithName", {
+                      model: payload.parserModel,
+                    })
+                  : "",
+              }),
       }));
       notify({
-        title: normalizedRows.length > 0 ? "PDF parsed" : "No rows detected",
+        title:
+          normalizedRows.length > 0
+            ? t("orders.detail.aiImport.pdfParsed")
+            : t("orders.detail.aiImport.noRowsDetected"),
         description:
           normalizedRows.length > 0
-            ? `Detected ${normalizedRows.length} row(s) for ${field.label}.`
-            : "Check the selected PDF and table columns.",
+            ? t("orders.detail.aiImport.detectedRowsForField", {
+                count: normalizedRows.length,
+                field: field.label,
+              })
+            : t("orders.detail.aiImport.checkPdfAndColumns"),
         variant: normalizedRows.length > 0 ? "success" : "info",
       });
     } catch (error) {
       const message =
         error instanceof Error && error.name === "AbortError"
-          ? "Parsing timed out. Try a smaller PDF or fewer columns."
-          : "Failed to parse PDF.";
+          ? t("orders.detail.errors.parsingTimedOut")
+          : t("orders.detail.errors.parsePdfFailed");
       setTableImportNotices((prev) => ({
         ...prev,
         [field.id]: message,
       }));
       notify({
-        title: "PDF parse failed",
+        title: t("orders.detail.aiImport.pdfParseFailed"),
         description: message,
         variant: "error",
       });
@@ -2074,10 +2108,12 @@ export default function OrderDetailPage() {
             }
           >
             <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="Select" />
+              <SelectValue placeholder={t("orders.detail.aiImport.select")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__none__">Select</SelectItem>
+              <SelectItem value="__none__">
+                {t("orders.detail.aiImport.select")}
+              </SelectItem>
               {(field.options ?? []).map((option) => (
                 <SelectItem key={option} value={option}>
                   {option}
@@ -2102,12 +2138,12 @@ export default function OrderDetailPage() {
       const selectedAttachment = availableParseAttachments.find(
         (item) => item.id === selectedAttachmentId,
       );
-      const aiButtonTooltipBasic =
-        "Add with AI reads the selected Production documentation file and appends detected rows into this table. Available on Pro subscription.";
+      const aiButtonTooltipBasic = t("orders.detail.aiImport.description");
       const importNotice = tableImportNotices[field.id] ?? "";
       const isParsingThisField = isParsingTableFieldId === field.id;
       const showAiReviewNotice =
-        isParsingThisField || importNotice.startsWith("AI added ");
+        isParsingThisField ||
+        importNotice.startsWith(t("orders.detail.aiImport.rowsAddedPrefix"));
       const selectedRows = tableRowSelections[field.id] ?? [];
       const allSelected =
         rows.length > 0 && selectedRows.length === rows.length;
@@ -2141,7 +2177,10 @@ export default function OrderDetailPage() {
       };
       const removeRow = async (rowIndex: number) => {
         if (
-          !(await confirmRemove("Delete row?", "This will remove the row."))
+          !(await confirmRemove(
+            t("orders.detail.confirm.deleteRow"),
+            t("orders.detail.confirm.thisWillRemoveRow"),
+          ))
         ) {
           return;
         }
@@ -2162,8 +2201,10 @@ export default function OrderDetailPage() {
         }
         if (
           !(await confirmRemove(
-            "Delete selected rows?",
-            `This will remove ${selectedRows.length} selected row(s).`,
+            t("orders.detail.confirm.deleteSelectedRows"),
+            t("orders.detail.confirm.thisWillRemoveSelectedRows", {
+              count: selectedRows.length,
+            }),
           ))
         ) {
           return;
@@ -2222,19 +2263,25 @@ export default function OrderDetailPage() {
                         }));
                         setTableImportNotices((prev) => ({
                           ...prev,
-                          [field.id]: nextId ? "" : "Choose a PDF first.",
+                          [field.id]: nextId
+                            ? ""
+                            : t("orders.detail.aiImport.choosePdfFirst"),
                         }));
                       }}
                       disabled={!canEditOrderInputs || isParsingThisField}
                     >
                       <SelectTrigger className="h-9 w-full min-w-0 sm:w-65">
                         <SelectValue
-                          placeholder="Choose PDF/XLSX from Production documentation"
+                          placeholder={t(
+                            "orders.detail.aiImport.choosePdfFromProductionDocs",
+                          )}
                           className="block max-w-50 truncate text-left"
                         />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">Choose file</SelectItem>
+                        <SelectItem value="__none__">
+                          {t("orders.detail.aiImport.chooseFile")}
+                        </SelectItem>
                         {availableParseAttachments.map((attachment) => (
                           <SelectItem
                             key={attachment.id}
@@ -2257,12 +2304,12 @@ export default function OrderDetailPage() {
                         {isParsingThisField ? (
                           <>
                             <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                            Adding...
+                            {t("orders.detail.aiImport.adding")}
                           </>
                         ) : (
                           <>
                             <SparklesIcon className="h-4 w-4 text-sky-500" />
-                            Add with AI
+                            {t("orders.detail.aiImport.addWithAi")}
                           </>
                         )}
                       </Button>
@@ -2280,18 +2327,22 @@ export default function OrderDetailPage() {
                               disabled
                             >
                               <SparklesIcon className="h-4 w-4 text-sky-500" />
-                              Add with AI
+                              {t("orders.detail.aiImport.addWithAi")}
                             </Button>
                           </span>
                         </Tooltip>
                         <span className="text-xs text-amber-700">
-                          Locked on {subscription.planCode}. Upgrade to Pro.
+                          {t("orders.detail.aiImport.lockedOnPlan", {
+                            plan: subscription.planCode,
+                          })}
                         </span>
                       </div>
                     )}
                   </div>
                   <div className="wrap-break-word text-xs text-muted-foreground">
-                    Use files from: {aiAttachmentCategoryHint} (PDF/XLSX/XLS).
+                    {t("orders.detail.aiImport.useFilesFrom", {
+                      categories: aiAttachmentCategoryHint,
+                    })}
                   </div>
                 </div>
               )}
@@ -2303,7 +2354,7 @@ export default function OrderDetailPage() {
                 disabled={!canEditOrderInputs || selectedRows.length === 0}
                 className="w-full sm:w-auto"
               >
-                Remove selected
+                {t("orders.detail.aiImport.removeSelected")}
               </Button>
               <Button
                 size="sm"
@@ -2312,7 +2363,7 @@ export default function OrderDetailPage() {
                 disabled={!canEditOrderInputs}
                 className="w-full sm:w-auto"
               >
-                Add row
+                {t("orders.detail.aiImport.addRow")}
               </Button>
             </div>
           </div>
@@ -2321,30 +2372,29 @@ export default function OrderDetailPage() {
           )}
           {canUseAiOrderInputImport && selectedAttachment && (
             <div className="text-xs text-muted-foreground">
-              Source: {selectedAttachment.name}
+              {t("orders.detail.aiImport.source")}: {selectedAttachment.name}
             </div>
           )}
           {!canUseAiOrderInputImport && (
             <div className="text-xs text-muted-foreground">
-              AI PDF import is available on Pro plan.
+              {t("orders.detail.aiImport.proOnly")}
             </div>
           )}
           {canUseAiOrderInputImport && showAiReviewNotice && (
             <div className="text-xs text-amber-700">
-              AI-generated results may contain errors. Always review and verify
-              values before saving inputs.
+              {t("orders.detail.aiImport.reviewWarning")}
             </div>
           )}
           {columns.length === 0 ? (
             <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              No columns configured for this table field.
+              {t("orders.detail.aiImport.noColumnsConfigured")}
             </div>
           ) : (
             <div className="w-full max-w-full overflow-x-auto md:overflow-x-hidden rounded-lg border border-border">
               {isParsingThisField && (
                 <LoadingSpinner
                   className="justify-start border-b border-border px-3 py-2"
-                  label="Adding rows with AI..."
+                  label={t("orders.detail.aiImport.addingRows")}
                 />
               )}
               <table className="w-full text-sm">
@@ -2370,7 +2420,7 @@ export default function OrderDetailPage() {
                     ))}
                     <th className="whitespace-nowrap px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <span>Actions</span>
+                        <span>{t("orders.page.actions")}</span>
                         <Checkbox
                           variant="box"
                           checked={allSelected}
@@ -2390,7 +2440,7 @@ export default function OrderDetailPage() {
                         colSpan={columns.length + 1}
                         className="px-3 py-4 text-center text-xs text-muted-foreground"
                       >
-                        No rows yet.
+                        {t("orders.detail.aiImport.noRowsYet")}
                       </td>
                     </tr>
                   ) : (
@@ -2482,9 +2532,9 @@ export default function OrderDetailPage() {
                                       placeholder={
                                         isMultiSelect
                                           ? canAddMore
-                                            ? "Select"
-                                            : "Max selected"
-                                          : "Select"
+                                            ? t("orders.detail.aiImport.select")
+                                            : t("orders.detail.aiImport.maxSelected")
+                                          : t("orders.detail.aiImport.select")
                                       }
                                     />
                                   </SelectTrigger>
@@ -2492,9 +2542,9 @@ export default function OrderDetailPage() {
                                     <SelectItem value="__none__">
                                       {isMultiSelect
                                         ? canAddMore
-                                          ? "Select"
-                                          : "Max selected"
-                                        : "Select"}
+                                          ? t("orders.detail.aiImport.select")
+                                          : t("orders.detail.aiImport.maxSelected")
+                                        : t("orders.detail.aiImport.select")}
                                     </SelectItem>
                                     {(column.options ?? []).map((option) => (
                                       <SelectItem key={option} value={option}>
@@ -2717,11 +2767,11 @@ export default function OrderDetailPage() {
     const target = attachments.find(
       (attachment) => attachment.id === attachmentId,
     );
-    const targetLabel = target?.name ?? "attachment";
+    const targetLabel = target?.name ?? t("orders.detail.attachments.item");
     if (
       !(await confirmRemove(
-        "Delete attachment?",
-        `This will remove "${targetLabel}".`,
+        t("orders.detail.confirm.deleteAttachment"),
+        t("orders.detail.confirm.thisWillRemoveNamed", { name: targetLabel }),
       ))
     ) {
       return;
@@ -2756,8 +2806,8 @@ export default function OrderDetailPage() {
         : group.items.filter((item) => selectedAttachmentIds.includes(item.id));
     if (targetItems.length === 0) {
       notify({
-        title: "No files selected",
-        description: "Select at least one file in this category.",
+        title: t("orders.detail.notifications.noFilesSelectedTitle"),
+        description: t("orders.detail.notifications.noFilesSelectedDescription"),
         variant: "error",
       });
       return;
@@ -2765,9 +2815,13 @@ export default function OrderDetailPage() {
     const count = targetItems.length;
     const confirmed = await confirmRemove(
       mode === "all"
-        ? `Delete all files in "${group.label}"?`
-        : `Delete selected files in "${group.label}"?`,
-      `This will remove ${count} file${count === 1 ? "" : "s"}.`,
+        ? t("orders.detail.confirm.deleteAllFilesInCategory", {
+            category: group.label,
+          })
+        : t("orders.detail.confirm.deleteSelectedFilesInCategory", {
+            category: group.label,
+          }),
+      t("orders.detail.confirm.thisWillRemoveFiles", { count }),
     );
     if (!confirmed) {
       return;
@@ -2802,14 +2856,19 @@ export default function OrderDetailPage() {
       }
       if (removedIds.length !== targetItems.length) {
         notify({
-          title: "Some files were not deleted",
-          description: `Deleted ${removedIds.length}/${targetItems.length} files.`,
+          title: t("orders.detail.notifications.someFilesNotDeleted"),
+          description: t("orders.detail.notifications.deletedOutOf", {
+            removed: removedIds.length,
+            total: targetItems.length,
+          }),
           variant: "error",
         });
       } else {
         notify({
-          title: "Files deleted",
-          description: `Deleted ${removedIds.length} file${removedIds.length === 1 ? "" : "s"}.`,
+          title: t("orders.detail.notifications.filesDeleted"),
+          description: t("orders.detail.notifications.deletedFiles", {
+            count: removedIds.length,
+          }),
         });
       }
     } finally {
@@ -2824,16 +2883,16 @@ export default function OrderDetailPage() {
     const targetComment = comments.find((comment) => comment.id === commentId);
     if (!targetComment || !canRemoveComment(targetComment)) {
       notify({
-        title: "Comment not removed",
-        description: "You can only remove your own comments.",
+        title: t("orders.detail.notifications.commentNotRemoved"),
+        description: t("orders.detail.notifications.removeOwnCommentsOnly"),
         variant: "error",
       });
       return;
     }
     if (
       !(await confirmRemove(
-        "Delete comment?",
-        "This will permanently remove the comment.",
+        t("orders.detail.confirm.deleteComment"),
+        t("orders.detail.confirm.removeCommentPermanently"),
       ))
     ) {
       return;
@@ -2855,18 +2914,18 @@ export default function OrderDetailPage() {
     }
     const isPortalMode = externalRequestMode === "partner_portal";
     if (isPortalMode && !canSendExternalJobToPartner) {
-      setExternalError("Send to partner is available on Pro plan.");
+      setExternalError(t("orders.detail.errors.sendToPartnerProOnly"));
       return;
     }
     if (!externalPartnerId) {
-      setExternalError("Partner is required.");
+      setExternalError(t("orders.detail.errors.partnerRequired"));
       return;
     }
     const partner = activePartners.find(
       (item) => item.id === externalPartnerId,
     );
     if (!partner) {
-      setExternalError("Select a valid partner.");
+      setExternalError(t("orders.detail.errors.selectValidPartner"));
       return;
     }
     if (!isPortalMode) {
@@ -2881,7 +2940,9 @@ export default function OrderDetailPage() {
         return isEmptyExternalFieldValue(value);
       });
       if (missingRequired) {
-        setExternalError(`"${missingRequired.label}" is required.`);
+        setExternalError(
+          t("orders.detail.errors.fieldRequired", { field: missingRequired.label }),
+        );
         return;
       }
     }
@@ -2988,7 +3049,7 @@ export default function OrderDetailPage() {
           const upload = await uploadExternalJobAttachment(file, created.id);
           if (upload.error || !upload.attachment) {
             setExternalError(
-              upload.error ?? "Failed to upload partner request files.",
+              upload.error ?? t("orders.detail.errors.uploadPartnerRequestFiles"),
             );
             continue;
           }
@@ -3072,11 +3133,11 @@ export default function OrderDetailPage() {
 
   async function handleSendToPartner(externalJobId: string) {
     if (!supabase) {
-      setExternalError("Supabase is not configured.");
+      setExternalError(t("orders.detail.errors.supabaseNotConfigured"));
       return false;
     }
     if (!canSendExternalJobToPartner) {
-      setExternalError("Send to partner is available on Pro plan.");
+      setExternalError(t("orders.detail.errors.sendToPartnerProOnly"));
       return false;
     }
     setExternalError("");
@@ -3087,7 +3148,7 @@ export default function OrderDetailPage() {
     const accessToken = session?.access_token;
     if (!accessToken) {
       setSendingToPartnerJobId(null);
-      setExternalError("Please sign in again.");
+      setExternalError(t("orders.detail.errors.signInAgain"));
       return false;
     }
 
@@ -3106,9 +3167,9 @@ export default function OrderDetailPage() {
 
     if (!response.ok) {
       if (payload.error === "feature_not_available") {
-        setExternalError("This feature is available on Pro plan.");
+        setExternalError(t("orders.detail.errors.featureProOnly"));
       } else {
-        setExternalError(payload.error ?? "Failed to send to partner.");
+        setExternalError(payload.error ?? t("orders.detail.errors.sendToPartnerFailed"));
       }
       setSendingToPartnerJobId(null);
       return false;
@@ -3132,9 +3193,11 @@ export default function OrderDetailPage() {
         : prev,
     );
     notify({
-      title: "Request sent to partner",
+      title: t("orders.detail.notifications.requestSentToPartner"),
       description: payload.expiresAt
-        ? `Secure link expires ${formatDateTime(payload.expiresAt)}`
+        ? t("orders.detail.notifications.secureLinkExpires", {
+            date: formatDateTime(payload.expiresAt),
+          })
         : undefined,
       variant: "success",
     });
@@ -3185,8 +3248,8 @@ export default function OrderDetailPage() {
   async function handleRemoveExternalJob(externalJobId: string) {
     if (
       !(await confirmRemove(
-        "Delete external job?",
-        "This will remove the external job from the order.",
+        t("orders.detail.confirm.deleteExternalJob"),
+        t("orders.detail.confirm.thisWillRemoveExternalJob"),
       ))
     ) {
       return;
@@ -3301,11 +3364,11 @@ export default function OrderDetailPage() {
     const attachment = job?.attachments?.find(
       (item) => item.id === attachmentId,
     );
-    const label = attachment?.name ?? "attachment";
+    const label = attachment?.name ?? t("orders.detail.attachments.item");
     if (
       !(await confirmRemove(
-        "Delete attachment?",
-        `This will remove "${label}".`,
+        t("orders.detail.confirm.deleteAttachment"),
+        t("orders.detail.confirm.thisWillRemoveNamed", { name: label }),
       ))
     ) {
       return;
@@ -3373,7 +3436,7 @@ export default function OrderDetailPage() {
 
     if (claimError) {
       notify({
-        title: "Order not updated",
+        title: t("orders.detail.notifications.orderNotUpdated"),
         description: claimError.message,
         variant: "error",
       });
@@ -3400,21 +3463,23 @@ export default function OrderDetailPage() {
             : prev,
         );
         notify({
-          title: "Order taken",
+          title: t("orders.detail.notifications.orderTaken"),
           variant: "success",
         });
       } else if (latestOrder?.assigned_engineer_id) {
         notify({
-          title: "Order already taken",
+          title: t("orders.detail.notifications.orderAlreadyTaken"),
           description: latestOrder.assigned_engineer_name
-            ? `Already taken by ${latestOrder.assigned_engineer_name}.`
-            : "Another engineer already took this order.",
+            ? t("orders.detail.notifications.alreadyTakenBy", {
+                name: latestOrder.assigned_engineer_name,
+              })
+            : t("orders.detail.notifications.anotherEngineerTook"),
           variant: "error",
         });
       } else if (latestOrder && latestOrder.status !== "ready_for_engineering") {
         notify({
-          title: "Order state changed",
-          description: "Order is no longer in Ready for engineering status.",
+          title: t("orders.detail.notifications.orderStateChanged"),
+          description: t("orders.detail.notifications.noLongerReadyForEngineering"),
           variant: "error",
         });
       } else if (
@@ -3423,15 +3488,14 @@ export default function OrderDetailPage() {
         !latestOrder.assigned_engineer_id
       ) {
         notify({
-          title: "No permission",
-          description:
-            "Your role is not allowed to take this order. Contact Admin.",
+          title: t("orders.detail.notifications.noPermission"),
+          description: t("orders.detail.notifications.roleCannotTakeOrder"),
           variant: "error",
         });
       } else {
         notify({
-          title: "Order not updated",
-          description: "Could not take order. Please refresh and try again.",
+          title: t("orders.detail.notifications.orderNotUpdated"),
+          description: t("orders.detail.notifications.couldNotTakeOrder"),
           variant: "error",
         });
       }
@@ -3641,8 +3705,8 @@ export default function OrderDetailPage() {
       const includedCount = Object.keys(zip.files).length;
       if (includedCount === 0) {
         notify({
-          title: "Download failed",
-          description: "No files in this category could be downloaded.",
+          title: t("orders.detail.notifications.downloadFailed"),
+          description: t("orders.detail.notifications.noFilesDownloadableInCategory"),
           variant: "error",
         });
         return;
@@ -3663,16 +3727,21 @@ export default function OrderDetailPage() {
       URL.revokeObjectURL(objectUrl);
 
       notify({
-        title: "Archive downloaded",
+        title: t("orders.detail.notifications.archiveDownloaded"),
         description:
           skippedCount > 0
-            ? `${includedCount} file(s) downloaded, ${skippedCount} skipped.`
-            : `${includedCount} file(s) downloaded.`,
+            ? t("orders.detail.notifications.downloadedWithSkipped", {
+                included: includedCount,
+                skipped: skippedCount,
+              })
+            : t("orders.detail.notifications.downloadedFiles", {
+                count: includedCount,
+              }),
       });
     } catch {
       notify({
-        title: "Download failed",
-        description: "Could not create archive for this category.",
+        title: t("orders.detail.notifications.downloadFailed"),
+        description: t("orders.detail.notifications.couldNotCreateArchive"),
         variant: "error",
       });
     } finally {
@@ -3757,7 +3826,7 @@ export default function OrderDetailPage() {
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Back"
+            aria-label={t("orders.detail.back")}
             onClick={() => {
               if (window.history.length > 1) {
                 router.back();
@@ -3778,7 +3847,7 @@ export default function OrderDetailPage() {
           size="icon"
           className="h-11 w-11 rounded-full shadow-lg disabled:opacity-100"
           onClick={() => setIsEditOpen(true)}
-          aria-label="Edit order"
+          aria-label={t("orders.detail.editOrder")}
           disabled={!canEditOrderRecord}
         >
           <PencilIcon className="h-4 w-4" />
@@ -3792,7 +3861,7 @@ export default function OrderDetailPage() {
           size="icon"
           className="h-11 w-11 rounded-full shadow-lg"
           onClick={() => setIsMobileSectionsOpen(true)}
-          aria-label="Open order sections"
+          aria-label={t("orders.detail.openSections")}
           aria-haspopup="dialog"
           aria-expanded={isMobileSectionsOpen}
           aria-controls="order-sections-drawer"
@@ -3813,19 +3882,19 @@ export default function OrderDetailPage() {
         id="order-sections-drawer"
         open={isMobileSectionsOpen}
         onClose={() => setIsMobileSectionsOpen(false)}
-        ariaLabel="Order sections"
-        closeButtonLabel="Close order sections"
-        title="Order sections"
+        ariaLabel={t("orders.detail.sections")}
+        closeButtonLabel={t("orders.detail.closeSections")}
+        title={t("orders.detail.sections")}
         enableSwipeToClose
       >
         <div className="flex-1 overflow-y-auto p-3">
           <div className="space-y-1">
             {[
-              { value: "overview", label: "Overview" },
-              { value: "files", label: "Files & Comments" },
-              { value: "details", label: "Order details" },
-              { value: "workflow", label: "Process" },
-              { value: "external", label: "External Jobs" },
+              { value: "overview", label: t("orders.detail.tabs.overview") },
+              { value: "files", label: t("orders.detail.tabs.files") },
+              { value: "details", label: t("orders.detail.tabs.details") },
+              { value: "workflow", label: t("orders.detail.tabs.workflow") },
+              { value: "external", label: t("orders.detail.tabs.external") },
             ].map((section) => {
               const isActive = activeTab === section.value;
               return (
@@ -3844,7 +3913,7 @@ export default function OrderDetailPage() {
                   }`}
                 >
                   <span>{section.label}</span>
-                  {isActive ? <span className="text-xs">Active</span> : null}
+                  {isActive ? <span className="text-xs">{t("orders.detail.active")}</span> : null}
                 </button>
               );
             })}
@@ -3875,14 +3944,14 @@ export default function OrderDetailPage() {
                 className="inline-flex h-9 items-center gap-2 rounded-full border border-(--tabs-border) bg-(--tabs-bg) px-3 text-sm font-medium text-(--tabs-text) shadow-sm transition hover:text-(--tabs-hover-text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--tabs-ring)"
               >
                 <ArrowLeftIcon className="h-4 w-4" />
-                Back
+                {t("orders.detail.back")}
               </Link>
               <TabsList className="min-w-max h-9 shadow-sm **:data-[slot=tabs-trigger]:h-7 **:data-[slot=tabs-trigger]:py-1">
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="files">Files & Comments</TabsTrigger>
-                <TabsTrigger value="details">Order details</TabsTrigger>
-                <TabsTrigger value="workflow">Process</TabsTrigger>
-                <TabsTrigger value="external">External Jobs</TabsTrigger>
+                <TabsTrigger value="overview">{t("orders.detail.tabs.overview")}</TabsTrigger>
+                <TabsTrigger value="files">{t("orders.detail.tabs.files")}</TabsTrigger>
+                <TabsTrigger value="details">{t("orders.detail.tabs.details")}</TabsTrigger>
+                <TabsTrigger value="workflow">{t("orders.detail.tabs.workflow")}</TabsTrigger>
+                <TabsTrigger value="external">{t("orders.detail.tabs.external")}</TabsTrigger>
               </TabsList>
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
@@ -3898,7 +3967,7 @@ export default function OrderDetailPage() {
                 disabled={!canEditOrderRecord}
               >
                 <PencilIcon className="h-4 w-4" />
-                Edit
+                {t("orders.page.edit")}
               </Button>
             </div>
           </div>
@@ -3913,29 +3982,29 @@ export default function OrderDetailPage() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Order Summary</CardTitle>
+                <CardTitle>{t("orders.detail.summaryTitle")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6 text-sm">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-3">
                     <div className="text-xs font-semibold text-muted-foreground">
-                      Schedule
+                      {t("orders.detail.schedule")}
                     </div>
                     <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">Due date</span>
+                      <span className="text-muted-foreground">{t("orders.page.dueDate")}</span>
                       <span className="font-medium">
                         {formatDate(orderState.dueDate)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">Quantity</span>
+                      <span className="text-muted-foreground">{t("orders.page.quantity")}</span>
                       <span className="font-medium">
                         {orderState.quantity ?? "--"}
                       </span>
                     </div>
                     <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
                       <span className="text-muted-foreground">
-                        Production time
+                        {t("orders.detail.productionTime")}
                       </span>
                       <span className="font-medium">
                         {orderState.productionDurationMinutes != null
@@ -3946,11 +4015,11 @@ export default function OrderDetailPage() {
                   </div>
                   <div className="space-y-3">
                     <div className="text-xs font-semibold text-muted-foreground">
-                      Hierarchy
+                      {t("orders.detail.hierarchy")}
                     </div>
                     {activeLevels.length === 0 ? (
                       <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                        No hierarchy levels configured.
+                        {t("orders.detail.noHierarchyConfigured")}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -3984,9 +4053,9 @@ export default function OrderDetailPage() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Order inputs</CardTitle>
+                <CardTitle>{t("orders.detail.orderInputs.title")}</CardTitle>
                 <CardDescription>
-                  Sales notes and production scope details.
+                  {t("orders.detail.orderInputs.description")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -3998,20 +4067,18 @@ export default function OrderDetailPage() {
                 {activeOrderInputFields.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
                     <p className="text-sm font-medium">
-                      No order inputs configured
+                      {t("orders.detail.orderInputs.noneConfiguredTitle")}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Order inputs are used to capture sales details and
-                      production scope for each order.
+                      {t("orders.detail.orderInputs.noneConfiguredDescription1")}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Configure fields in Settings -&gt; Structure -&gt; Order
-                      inputs, then return here.
+                      {t("orders.detail.orderInputs.noneConfiguredDescription2")}
                     </p>
                     <div className="mt-3">
                       <Button variant="outline" size="sm" asChild>
                         <Link href="/settings?tab=structure">
-                          Open settings
+                          {t("orders.detail.openSettings")}
                         </Link>
                       </Button>
                     </div>
@@ -4023,8 +4090,8 @@ export default function OrderDetailPage() {
                         <div key={groupKey} className="space-y-3">
                           <div className="text-sm font-semibold">
                             {groupKey === "production_scope"
-                              ? "Production scope"
-                              : "Order info"}
+                              ? t("orders.detail.orderInputs.productionScope")
+                              : t("orders.detail.orderInputs.orderInfo")}
                           </div>
                           <div className="grid gap-3 md:grid-cols-2">
                             {fields.map((field) =>
@@ -4039,7 +4106,7 @@ export default function OrderDetailPage() {
                 <div className="flex items-center justify-between gap-3">
                   {!canEditOrderInputs && (
                     <span className="text-xs text-muted-foreground">
-                      Only Engineering and Admin can edit these fields.
+                      {t("orders.detail.orderInputs.editPermissionHint")}
                     </span>
                   )}
                   <Button
@@ -4050,7 +4117,9 @@ export default function OrderDetailPage() {
                       isSavingOrderInputs
                     }
                   >
-                    {isSavingOrderInputs ? "Saving..." : "Save inputs"}
+                    {isSavingOrderInputs
+                      ? t("orders.detail.saving")
+                      : t("orders.detail.orderInputs.save")}
                   </Button>
                 </div>
               </CardContent>
@@ -4069,7 +4138,7 @@ export default function OrderDetailPage() {
             >
               <Card className="lg:sticky lg:top-6">
                 <CardHeader>
-                  <CardTitle>Engineering process</CardTitle>
+                  <CardTitle>{t("orders.detail.workflow.title")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4 text-sm">
                   <div className="space-y-2 text-xs text-muted-foreground">
@@ -4105,12 +4174,16 @@ export default function OrderDetailPage() {
                         >
                           <SelectTrigger className="h-8 w-55 rounded-md text-xs">
                             <SelectValue
-                              placeholder={`Assign ${engineerLabel.toLowerCase()}...`}
+                              placeholder={t("orders.detail.workflow.assignPlaceholder", {
+                                role: engineerLabel.toLowerCase(),
+                              })}
                             />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none__">
-                              Assign {engineerLabel.toLowerCase()}...
+                              {t("orders.detail.workflow.assignPlaceholder", {
+                                role: engineerLabel.toLowerCase(),
+                              })}
                             </SelectItem>
                             {engineers
                               .filter((engineer) => engineer.id)
@@ -4130,7 +4203,7 @@ export default function OrderDetailPage() {
                           onClick={handleAssignEngineer}
                           disabled={!selectedEngineerId}
                         >
-                          Assign
+                          {t("orders.detail.workflow.assign")}
                         </Button>
                         {orderState.assignedEngineerId && (
                           <Button
@@ -4138,35 +4211,35 @@ export default function OrderDetailPage() {
                             size="sm"
                             onClick={handleClearEngineer}
                           >
-                            Clear
+                            {t("orders.detail.workflow.clear")}
                           </Button>
                         )}
                       </div>
                     )}
                     {orderState.statusChangedAt && (
                       <div>
-                        Status updated{" "}
+                        {t("orders.detail.workflow.statusUpdated")}{" "}
                         {orderState.statusChangedBy
-                          ? `by ${orderState.statusChangedBy}`
+                          ? `${t("orders.detail.workflow.by")} ${orderState.statusChangedBy}`
                           : ""}
                         {orderState.statusChangedByRole
                           ? ` (${orderState.statusChangedByRole})`
                           : ""}
-                        {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
+                        {` ${t("orders.detail.on")} ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
                       </div>
                     )}
                     {engineeringTiming && (
                       <div>
-                        Engineering time (total):{" "}
+                        {t("orders.detail.workflow.engineeringTimeTotal")}:{" "}
                         {formatDuration(engineeringTiming.durationMinutes)}
                         {engineeringTiming.completedCycles > 0
-                          ? `, cycles: ${engineeringTiming.completedCycles}`
+                          ? `, ${t("orders.detail.workflow.cycles")}: ${engineeringTiming.completedCycles}`
                           : ""}
                         {engineeringTiming.inProgress &&
                         engineeringTiming.activeStartedAt
-                          ? `, in progress since ${formatDateTime(engineeringTiming.activeStartedAt)}`
+                          ? `, ${t("orders.detail.workflow.inProgressSince")} ${formatDateTime(engineeringTiming.activeStartedAt)}`
                           : engineeringTiming.completedAt
-                            ? ` (last completed ${formatDateTime(engineeringTiming.completedAt)})`
+                            ? ` (${t("orders.detail.workflow.lastCompleted")} ${formatDateTime(engineeringTiming.completedAt)})`
                             : ""}
                       </div>
                     )}
@@ -4201,7 +4274,7 @@ export default function OrderDetailPage() {
                           handleStatusChange("ready_for_engineering")
                         }
                       >
-                        Send to engineering
+                        {t("orders.detail.workflow.sendToEngineering")}
                       </Button>
                     )}
                     {canStartEngineering && (
@@ -4209,7 +4282,7 @@ export default function OrderDetailPage() {
                         size="sm"
                         onClick={() => handleStatusChange("in_engineering")}
                       >
-                        Start engineering
+                        {t("orders.detail.workflow.startEngineering")}
                       </Button>
                     )}
                     {canSendToProduction && (
@@ -4229,7 +4302,7 @@ export default function OrderDetailPage() {
                         variant="outline"
                         onClick={() => setIsReturnOpen(true)}
                       >
-                        Send back
+                        {t("orders.detail.sendBack")}
                       </Button>
                     )}
                     {canTakeOrder && (
@@ -4238,7 +4311,7 @@ export default function OrderDetailPage() {
                         size="sm"
                         onClick={handleTakeOrder}
                       >
-                        Take order
+                        {t("orders.page.takeOrder")}
                       </Button>
                     )}
                     {canReturnToQueue && (
@@ -4247,7 +4320,7 @@ export default function OrderDetailPage() {
                         size="sm"
                         onClick={handleReturnToQueue}
                       >
-                        Return to queue
+                        {t("orders.detail.workflow.returnToQueue")}
                       </Button>
                     )}
                   </div>
@@ -4257,7 +4330,7 @@ export default function OrderDetailPage() {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between">
-                      <CardTitle>Preparation Checklist</CardTitle>
+                      <CardTitle>{t("orders.detail.workflow.preparationChecklist")}</CardTitle>
                       <div className="text-xs text-muted-foreground">
                         {checklistDoneCount}/{activeChecklistItems.length}
                       </div>
@@ -4266,7 +4339,7 @@ export default function OrderDetailPage() {
                   <CardContent className="space-y-2 text-sm">
                     {activeChecklistItems.length === 0 ? (
                       <p className="text-muted-foreground">
-                        No checklist items configured.
+                        {t("orders.detail.workflow.noChecklistConfigured")}
                       </p>
                     ) : (
                       activeChecklistItems.map((item) => (
@@ -4289,22 +4362,20 @@ export default function OrderDetailPage() {
                     )}
                     {canSendToEngineering && !canAdvanceToEngineering && (
                       <p className="text-xs text-muted-foreground">
-                        Complete required attachments, comments, and checklist
-                        items
+                        {t("orders.detail.workflow.completeRequired")}
                         {rules.requireOrderInputsForEngineering
-                          ? ", and required order inputs"
+                          ? t("orders.detail.workflow.andRequiredOrderInputs")
                           : ""}{" "}
-                        before sending to engineering.
+                        {t("orders.detail.workflow.beforeSendingToEngineering")}
                       </p>
                     )}
                     {canSendToProduction && !canAdvanceToProduction && (
                       <p className="text-xs text-muted-foreground">
-                        Complete required attachments, comments, and checklist
-                        items
+                        {t("orders.detail.workflow.completeRequired")}
                         {rules.requireOrderInputsForProduction
-                          ? ", and required order inputs"
+                          ? t("orders.detail.workflow.andRequiredOrderInputs")
                           : ""}{" "}
-                        before sending to production.
+                        {t("orders.detail.workflow.beforeSendingToProduction")}
                       </p>
                     )}
                   </CardContent>
@@ -4314,15 +4385,15 @@ export default function OrderDetailPage() {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Status History</CardTitle>
+                  <CardTitle>{t("orders.detail.workflow.statusHistory")}</CardTitle>
                   {statusHistory.length > 5 ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowAllHistory((prev) => !prev)}
-                    >
-                      {showAllHistory ? "Show recent" : "Show all"}
-                    </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowAllHistory((prev) => !prev)}
+                      >
+                      {showAllHistory ? t("orders.detail.showRecent") : t("orders.detail.showAll")}
+                      </Button>
                   ) : null}
                 </div>
               </CardHeader>
@@ -4362,7 +4433,7 @@ export default function OrderDetailPage() {
                       {statusLabel(orderState.status)}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {orderState.statusChangedBy ?? "Unknown"}
+                      {orderState.statusChangedBy ?? t("orders.detail.unknown")}
                       {orderState.statusChangedByRole
                         ? ` (${orderState.statusChangedByRole})`
                         : ""}
@@ -4371,7 +4442,7 @@ export default function OrderDetailPage() {
                   </div>
                 ) : (
                   <p className="text-muted-foreground">
-                    No status changes yet.
+                    {t("orders.detail.noStatusChanges")}
                   </p>
                 )}
               </CardContent>
@@ -4383,17 +4454,17 @@ export default function OrderDetailPage() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Attachments</CardTitle>
+                <CardTitle>{t("orders.detail.attachments.title")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <SelectField
-                  label="Category"
+                  label={t("orders.detail.attachments.category")}
                   value={attachmentCategory}
                   onValueChange={(value) => {
                     setAttachmentCategory(value);
                     setIsAttachmentCategoryManual(true);
                   }}
-                  description="Pick the best bucket before uploading files."
+                  description={t("orders.detail.attachments.categoryDescription")}
                 >
                   <Select
                     value={attachmentCategory}
@@ -4432,7 +4503,7 @@ export default function OrderDetailPage() {
                     }}
                   >
                     <ImageIcon className="h-5 w-5" />
-                    <span>Drag files here or click to upload</span>
+                    <span>{t("orders.detail.attachments.dragAndDrop")}</span>
                     <FileField
                       id="attachment-file-input"
                       multiple
@@ -4445,7 +4516,9 @@ export default function OrderDetailPage() {
                       }}
                     />
                     <span className="text-[11px]">
-                      Max {MAX_FILE_SIZE_MB}MB per file
+                      {t("orders.detail.attachments.maxPerFile", {
+                        size: MAX_FILE_SIZE_MB,
+                      })}
                     </span>
                   </div>
                   {attachmentError && (
@@ -4482,7 +4555,9 @@ export default function OrderDetailPage() {
                         onClick={handleAddAttachment}
                         disabled={isUploading}
                       >
-                        {isUploading ? "Uploading..." : "Upload"}
+                        {isUploading
+                          ? t("orders.detail.uploading")
+                          : t("orders.detail.upload")}
                       </Button>
                     </div>
                   </div>
@@ -4490,7 +4565,7 @@ export default function OrderDetailPage() {
 
                 {attachments.length === 0 ? (
                   <p className="text-muted-foreground">
-                    No attachments added yet.
+                    {t("orders.detail.attachments.empty")}
                   </p>
                 ) : (
                   <div className="space-y-4">
@@ -4513,8 +4588,8 @@ export default function OrderDetailPage() {
                             >
                               <DownloadIcon className="h-3.5 w-3.5" />
                               {downloadingAttachmentGroup === group.key
-                                ? "Preparing..."
-                                : "Download all"}
+                                ? t("orders.detail.preparing")
+                                : t("orders.detail.attachments.downloadAll")}
                             </Button>
                             <Button
                               type="button"
@@ -4535,8 +4610,8 @@ export default function OrderDetailPage() {
                               }}
                             >
                               {deletingAttachmentGroup === group.key
-                                ? "Deleting..."
-                                : "Delete selected"}
+                                ? t("orders.detail.deleting")
+                                : t("orders.detail.attachments.deleteSelected")}
                             </Button>
                             <Button
                               type="button"
@@ -4549,8 +4624,8 @@ export default function OrderDetailPage() {
                               }}
                             >
                               {deletingAttachmentGroup === group.key
-                                ? "Deleting..."
-                                : "Delete all"}
+                                ? t("orders.detail.deleting")
+                                : t("orders.detail.attachments.deleteAll")}
                             </Button>
                           </div>
                         </div>
@@ -4569,11 +4644,13 @@ export default function OrderDetailPage() {
                                   {attachment.name}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
-                                  Added by {attachment.addedBy}
+                                  {t("orders.detail.attachments.addedBy", {
+                                    name: attachment.addedBy,
+                                  })}
                                   {attachment.addedByRole
                                     ? ` (${attachment.addedByRole})`
                                     : ""}{" "}
-                                  on{" "}
+                                  {t("orders.detail.on")}{" "}
                                   {formatDate(
                                     attachment.createdAt.slice(0, 10),
                                   )}
@@ -4607,7 +4684,7 @@ export default function OrderDetailPage() {
                                   rel="noreferrer"
                                   className="text-xs text-primary underline"
                                 >
-                                  Open
+                                  {t("orders.detail.open")}
                                 </a>
                               )}
                               <Button
@@ -4631,7 +4708,7 @@ export default function OrderDetailPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Comments</CardTitle>
+                <CardTitle>{t("orders.detail.comments.title")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="space-y-2">
@@ -4639,14 +4716,14 @@ export default function OrderDetailPage() {
                     value={commentMessage}
                     onChange={(event) => setCommentMessage(event.target.value)}
                     className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                    placeholder="Add a note for the next role..."
+                    placeholder={t("orders.detail.comments.placeholder")}
                   />
                   <div className="flex justify-end">
-                    <Button onClick={handleAddComment}>Add comment</Button>
+                    <Button onClick={handleAddComment}>{t("orders.detail.comments.add")}</Button>
                   </div>
                 </div>
                 {comments.length === 0 ? (
-                  <p className="text-muted-foreground">No comments yet.</p>
+                  <p className="text-muted-foreground">{t("orders.detail.comments.empty")}</p>
                 ) : (
                   <div className="space-y-2">
                     {comments.map((comment) => (
@@ -4686,11 +4763,11 @@ export default function OrderDetailPage() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>External Jobs</CardTitle>
+                <CardTitle>{t("orders.detail.external.title")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 <div className="space-y-2">
-                  <div className="text-sm font-medium">Request mode</div>
+                  <div className="text-sm font-medium">{t("orders.detail.external.requestMode")}</div>
                   <div className="grid gap-2 md:grid-cols-2">
                     <button
                       type="button"
@@ -4701,9 +4778,9 @@ export default function OrderDetailPage() {
                           : "border-border bg-background"
                       }`}
                     >
-                      <div className="font-medium">Manual entry</div>
+                      <div className="font-medium">{t("orders.detail.external.manualEntry")}</div>
                       <div className="text-xs text-muted-foreground">
-                        Partner replies by email, data is entered manually.
+                        {t("orders.detail.external.manualEntryDescription")}
                       </div>
                     </button>
                     <button
@@ -4719,13 +4796,13 @@ export default function OrderDetailPage() {
                           : "border-border bg-background"
                       } ${!canSendExternalJobToPartner ? "opacity-60" : ""}`}
                     >
-                      <div className="font-medium">Send via partner portal</div>
+                      <div className="font-medium">{t("orders.detail.external.partnerPortal")}</div>
                       <div className="text-xs text-muted-foreground">
-                        Secure link + structured response form.
+                        {t("orders.detail.external.partnerPortalDescription")}
                       </div>
                       {!canSendExternalJobToPartner ? (
                         <div className="mt-1 text-xs text-muted-foreground">
-                          Available on Pro.
+                          {t("orders.detail.external.availableOnPro")}
                         </div>
                       ) : null}
                     </button>
@@ -4734,7 +4811,7 @@ export default function OrderDetailPage() {
 
                 <div className="grid gap-3 lg:grid-cols-2">
                   <SelectField
-                    label="Partner group"
+                    label={t("orders.detail.external.partnerGroup")}
                     value={externalPartnerGroupId || "__all__"}
                     onValueChange={(value) =>
                       setExternalPartnerGroupId(
@@ -4754,7 +4831,7 @@ export default function OrderDetailPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__all__">All groups</SelectItem>
+                        <SelectItem value="__all__">{t("orders.detail.external.allGroups")}</SelectItem>
                         {activeGroups.map((group) => (
                           <SelectItem key={group.id} value={group.id}>
                             {group.name}
@@ -4764,7 +4841,7 @@ export default function OrderDetailPage() {
                     </Select>
                   </SelectField>
                   <SelectField
-                    label="Partner"
+                    label={t("orders.detail.external.partner")}
                     value={externalPartnerId || "__none__"}
                     onValueChange={(value) =>
                       setExternalPartnerId(value === "__none__" ? "" : value)
@@ -4780,7 +4857,7 @@ export default function OrderDetailPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">Select partner</SelectItem>
+                        <SelectItem value="__none__">{t("orders.detail.external.selectPartner")}</SelectItem>
                         {activePartners
                           .filter((partner) =>
                             externalPartnerGroupId
@@ -4877,7 +4954,7 @@ export default function OrderDetailPage() {
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem value="__none__">
-                                      Select value
+                                      {t("orders.detail.external.selectValue")}
                                     </SelectItem>
                                     {selectOptions.map((option) => (
                                       <SelectItem
@@ -4963,21 +5040,18 @@ export default function OrderDetailPage() {
                   ) : (
                     <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
                       <p className="text-sm font-medium">
-                        No external job fields configured
+                        {t("orders.detail.external.noFieldsTitle")}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        External Jobs is used to track outsourced work with
-                        partners: order details, deadlines, pricing, and
-                        delivery notes.
+                        {t("orders.detail.external.noFieldsDescription1")}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Configure fields in Settings -&gt; Partners -&gt;
-                        External job schema, then return here.
+                        {t("orders.detail.external.noFieldsDescription2")}
                       </p>
                       <div className="mt-3">
                         <Button variant="outline" size="sm" asChild>
                           <Link href="/settings?tab=partners">
-                            Open settings
+                            {t("orders.detail.openSettings")}
                           </Link>
                         </Button>
                       </div>
@@ -4986,17 +5060,17 @@ export default function OrderDetailPage() {
                 ) : (
                   <div className="space-y-3 rounded-lg border border-border bg-muted/10 px-4 py-3">
                     <TextAreaField
-                      label="Comment for partner (optional)"
+                      label={t("orders.detail.external.partnerComment")}
                       value={externalPortalComment}
                       onChange={(event) =>
                         setExternalPortalComment(event.target.value)
                       }
-                      placeholder="Add request note for partner..."
+                      placeholder={t("orders.detail.external.partnerCommentPlaceholder")}
                       className="min-h-22.5"
                     />
                     <div className="space-y-2">
                       <div className="text-sm font-medium">
-                        Files for partner (optional)
+                        {t("orders.detail.external.partnerFiles")}
                       </div>
                       <FileField
                         multiple
@@ -5044,7 +5118,7 @@ export default function OrderDetailPage() {
                         </div>
                       ) : (
                         <p className="text-xs text-muted-foreground">
-                          No files selected.
+                          {t("orders.detail.external.noFilesSelected")}
                         </p>
                       )}
                     </div>
@@ -5057,20 +5131,20 @@ export default function OrderDetailPage() {
                   Plan:{" "}
                   <span className="font-medium">{subscription.planCode}</span>{" "}
                   {canSendExternalJobToPartner
-                    ? "includes Send to partner."
-                    : "supports manual entry only. Send to partner is available on Pro."}
+                    ? t("orders.detail.external.planIncludesSend")
+                    : t("orders.detail.external.planManualOnly")}
                 </div>
                 <div className="flex justify-end">
                   <Button onClick={handleAddExternalJob}>
                     {externalRequestMode === "partner_portal"
-                      ? "Create portal request"
-                      : "Add external job"}
+                      ? t("orders.detail.external.createPortalRequest")
+                      : t("orders.detail.external.addExternalJob")}
                   </Button>
                 </div>
 
                 {visibleExternalJobs.length === 0 ? (
                   <p className="text-muted-foreground">
-                    No external jobs added yet.
+                    {t("orders.detail.external.empty")}
                   </p>
                 ) : (
                   <div className="space-y-3">
@@ -5127,12 +5201,12 @@ export default function OrderDetailPage() {
                               </div>
                               {job.partnerRequestComment ? (
                                 <div className="text-xs text-muted-foreground">
-                                  Request note: {job.partnerRequestComment}
+                                  {t("orders.detail.external.requestNote")}: {job.partnerRequestComment}
                                 </div>
                               ) : null}
                               {job.partnerResponseNote ? (
                                 <div className="text-xs text-muted-foreground">
-                                  Note: {job.partnerResponseNote}
+                                  {t("orders.detail.external.note")}: {job.partnerResponseNote}
                                 </div>
                               ) : null}
                               {(job.requestMode === "partner_portal"
@@ -5214,16 +5288,16 @@ export default function OrderDetailPage() {
                                   disabled={sendingToPartnerJobId === job.id}
                                 >
                                   {sendingToPartnerJobId === job.id
-                                    ? "Sending..."
+                                    ? t("orders.detail.sending")
                                     : job.requestMode === "partner_portal"
-                                      ? "Resend request"
+                                      ? t("orders.detail.external.resendRequest")
                                       : job.partnerRequestSentAt
-                                        ? "Resend request"
-                                        : "Send to partner"}
+                                        ? t("orders.detail.external.resendRequest")
+                                        : t("orders.detail.external.sendToPartner")}
                                 </Button>
                               ) : (
                                 <span className="text-xs text-muted-foreground">
-                                  Manual entry (Basic)
+                                  {t("orders.detail.external.manualEntryBasic")}
                                 </span>
                               )}
                               <Select
@@ -5261,7 +5335,7 @@ export default function OrderDetailPage() {
                           <div className="space-y-2">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="text-xs text-muted-foreground">
-                                Attachments
+                                {t("orders.detail.attachments.title")}
                               </div>
                               <div className="flex items-center gap-2">
                                 <FileField
@@ -5288,7 +5362,7 @@ export default function OrderDetailPage() {
                                     input?.click();
                                   }}
                                 >
-                                  Add files
+                                  {t("orders.detail.external.addFiles")}
                                 </Button>
                                 <Button
                                   size="sm"
@@ -5301,8 +5375,8 @@ export default function OrderDetailPage() {
                                   }
                                 >
                                   {uploadState?.isUploading
-                                    ? "Uploading..."
-                                    : "Upload"}
+                                    ? t("orders.detail.uploading")
+                                    : t("orders.detail.upload")}
                                 </Button>
                               </div>
                             </div>
@@ -5339,7 +5413,7 @@ export default function OrderDetailPage() {
                             )}
                             {(job.attachments ?? []).length === 0 ? (
                               <p className="text-xs text-muted-foreground">
-                                No files uploaded yet.
+                                {t("orders.detail.external.noFilesUploaded")}
                               </p>
                             ) : (
                               <div className="space-y-2">
@@ -5371,7 +5445,7 @@ export default function OrderDetailPage() {
                                           rel="noreferrer"
                                           className="text-xs text-primary underline"
                                         >
-                                          Open
+                                          {t("orders.detail.open")}
                                         </a>
                                       )}
                                       <Button
@@ -5395,7 +5469,7 @@ export default function OrderDetailPage() {
 
                           <div className="space-y-2">
                             <div className="text-xs text-muted-foreground">
-                              Status history
+                              {t("orders.detail.external.statusHistory")}
                             </div>
                             {job.statusHistory &&
                             job.statusHistory.length > 0 ? (
@@ -5440,14 +5514,16 @@ export default function OrderDetailPage() {
                                     className="text-xs text-primary underline"
                                   >
                                     {expandedExternalHistory[job.id]
-                                      ? "Show less"
-                                      : `Show all (${job.statusHistory.length})`}
+                                      ? t("orders.detail.showLess")
+                                      : t("orders.detail.showAllWithCount", {
+                                          count: job.statusHistory.length,
+                                        })}
                                   </button>
                                 )}
                               </div>
                             ) : (
                               <p className="text-xs text-muted-foreground">
-                                No status updates yet.
+                                {t("orders.detail.external.noStatusUpdates")}
                               </p>
                             )}
                           </div>
@@ -5492,8 +5568,8 @@ export default function OrderDetailPage() {
           });
           return true;
         }}
-        title="Edit Order"
-        submitLabel="Save Changes"
+        title={t("orders.page.editOrderTitle")}
+        submitLabel={t("orders.page.saveChanges")}
         editMode="full"
         initialValues={{
           orderNumber: orderState.orderNumber,
@@ -5509,14 +5585,14 @@ export default function OrderDetailPage() {
       {isReturnOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
-            <h2 className="text-lg font-semibold">Send order back</h2>
+            <h2 className="text-lg font-semibold">{t("orders.detail.sendBackTitle")}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Choose a reason and add a note. The order will return to{" "}
+              {t("orders.detail.sendBackDescription")}{" "}
               {statusLabel(returnTargetStatus)}.
             </p>
             <div className="mt-4 space-y-3">
               <SelectField
-                label="Reason"
+                label={t("orders.detail.reason")}
                 value={returnReason || "__none__"}
                 onValueChange={(value) =>
                   setReturnReason(value === "__none__" ? "" : value)
@@ -5529,10 +5605,10 @@ export default function OrderDetailPage() {
                   }
                 >
                   <SelectTrigger className="h-10 w-full">
-                    <SelectValue placeholder="Select reason" />
+                    <SelectValue placeholder={t("orders.detail.selectReason")} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">Select reason</SelectItem>
+                    <SelectItem value="__none__">{t("orders.detail.selectReason")}</SelectItem>
                     {rules.returnReasons
                       .filter((reason) => reason.trim() !== "")
                       .map((reason) => (
@@ -5544,16 +5620,16 @@ export default function OrderDetailPage() {
                 </Select>
               </SelectField>
               <TextAreaField
-                label="Comment"
+                label={t("orders.detail.comment")}
                 value={returnNote}
                 onChange={(event) => setReturnNote(event.target.value)}
                 className="min-h-22.5"
-                placeholder="Add context for the previous role..."
+                placeholder={t("orders.detail.sendBackCommentPlaceholder")}
               />
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="outline" onClick={() => setIsReturnOpen(false)}>
-                Cancel
+                {t("orders.page.cancel")}
               </Button>
               <Button
                 onClick={async () => {
@@ -5561,7 +5637,7 @@ export default function OrderDetailPage() {
                   if (!returnReason && !trimmedNote) {
                     return;
                   }
-                  const reasonLabel = returnReason || "No reason selected";
+                  const reasonLabel = returnReason || t("orders.detail.noReasonSelected");
                   const created = await addOrderComment(orderState.id, {
                     message: `Returned: ${reasonLabel}${
                       trimmedNote ? ` - ${trimmedNote}` : ""
@@ -5585,7 +5661,7 @@ export default function OrderDetailPage() {
                   await handleStatusChange(returnTargetStatus);
                 }}
               >
-                Send back
+                {t("orders.detail.sendBack")}
               </Button>
             </div>
           </div>

@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 interface OrderRowProps {
   order: Order;
@@ -40,6 +41,7 @@ export function OrderRow({
   dueIndicatorEnabled = true,
   dueIndicatorStatuses,
 }: OrderRowProps) {
+  const { t } = useI18n();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{
@@ -210,9 +212,9 @@ export function OrderRow({
           }`}
           title={
             dueState === "overdue"
-              ? "Overdue"
+              ? t("orders.page.overdue")
               : dueState === "due-soon"
-                ? "Due soon"
+                ? t("orders.page.dueSoon")
                 : undefined
           }
         >
@@ -270,7 +272,7 @@ export function OrderRow({
           </Badge>
           {hasOverdueExternal && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
-              Overdue
+              {t("orders.page.overdue")}
             </span>
           )}
         </div>
@@ -296,8 +298,8 @@ export function OrderRow({
                   event.stopPropagation();
                   onTakeOrder(order);
                 }}
-                title="Take order"
-                aria-label="Take order"
+                title={t("orders.page.takeOrder")}
+                aria-label={t("orders.page.takeOrder")}
               >
                 <UserCheckIcon className="h-4 w-4" />
               </button>
@@ -310,8 +312,8 @@ export function OrderRow({
                   event.stopPropagation();
                   onEdit(order);
                 }}
-                title="Edit"
-                aria-label="Edit"
+                title={t("orders.page.edit")}
+                aria-label={t("orders.page.edit")}
               >
                 <PencilIcon className="h-4 w-4" />
               </button>
@@ -324,8 +326,8 @@ export function OrderRow({
                   event.stopPropagation();
                   onDelete(order);
                 }}
-                title="Delete"
-                aria-label="Delete"
+                title={t("orders.page.delete")}
+                aria-label={t("orders.page.delete")}
               >
                 <Trash2Icon className="h-4 w-4" />
               </button>
@@ -372,7 +374,7 @@ export function OrderRow({
                       }}
                     >
                       <PencilIcon className="h-4 w-4" />
-                      Edit
+                      {t("orders.page.edit")}
                     </button>
                   )}
                   {canTakeOrderQuick && (
@@ -385,7 +387,7 @@ export function OrderRow({
                       }}
                     >
                       <UserCheckIcon className="h-4 w-4" />
-                      Take order
+                      {t("orders.page.takeOrder")}
                     </button>
                   )}
                   {onDelete && (
@@ -398,7 +400,7 @@ export function OrderRow({
                       }}
                     >
                       <Trash2Icon className="h-4 w-4" />
-                      Delete
+                      {t("orders.page.delete")}
                     </button>
                   )}
                 </div>
