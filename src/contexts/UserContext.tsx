@@ -6,6 +6,12 @@ import {
   supabaseAvatarBucket,
   supabaseTenantLogoBucket,
 } from "@/lib/supabaseClient";
+import {
+  defaultAppLocale,
+  normalizeAppLocale,
+  toHtmlLang,
+  type AppLocale,
+} from "@/lib/i18n/locales";
 
 export type UserRole =
   | "Admin"
@@ -58,6 +64,7 @@ export interface CurrentUser {
   name: string;
   email?: string;
   phone?: string | null;
+  locale: AppLocale;
   role: UserRole;
   isAdmin: boolean;
   isOwner: boolean;
@@ -73,11 +80,13 @@ export interface CurrentUser {
 interface UserContextValue {
   user: CurrentUser;
   signOut: () => Promise<void>;
+  setLocale: (locale: AppLocale) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const fallbackUser: CurrentUser = {
   id: "user-1",
   name: "Manager",
+  locale: defaultAppLocale,
   role: "Sales",
   isAdmin: false,
   isOwner: false,
@@ -93,6 +102,7 @@ const fallbackUser: CurrentUser = {
 const UserContext = createContext<UserContextValue>({
   user: fallbackUser,
   signOut: async () => undefined,
+  setLocale: async () => ({ ok: true }),
 });
 
 function getStoragePathFromUrl(url: string, bucket: string) {
@@ -143,11 +153,14 @@ async function fetchUserRole(userId: string) {
       isOwner: false,
       fullName: "Manager",
       tenantId: null,
+      locale: defaultAppLocale,
     };
   }
   const { data, error } = await supabase
     .from("profiles")
-    .select("role, full_name, tenant_id, avatar_url, is_admin, is_owner, phone")
+    .select(
+      "role, full_name, tenant_id, avatar_url, is_admin, is_owner, phone, locale",
+    )
     .eq("id", userId)
     .maybeSingle();
 
@@ -161,12 +174,14 @@ async function fetchUserRole(userId: string) {
       avatarUrl: null,
       tenantName: null,
       phone: null,
+      locale: defaultAppLocale,
     };
   }
 
   const role = normalizeUserRole(data.role);
   const isOwner = data.is_owner ?? false;
   const isAdmin = (data.is_admin ?? false) || isOwner || role === "Admin";
+  const locale = normalizeAppLocale(data.locale);
   const [resolvedAvatarUrl, tenantResult] = await Promise.all([
     resolveSignedUrl(data.avatar_url ?? null, supabaseAvatarBucket),
     data.tenant_id
@@ -195,6 +210,7 @@ async function fetchUserRole(userId: string) {
       tenantName,
       tenantLogoUrl: resolvedTenantLogo,
       phone: data.phone ?? null,
+      locale,
     };
   }
 
@@ -208,6 +224,7 @@ async function fetchUserRole(userId: string) {
     tenantName,
     tenantLogoUrl: null,
     phone: data.phone ?? null,
+    locale,
   };
 }
 
@@ -257,6 +274,7 @@ function readCachedProfile(userId: string) {
         tenantLogoUrl?: string | null;
         avatarUrl?: string | null;
         phone?: string | null;
+        locale?: AppLocale;
       };
     };
     if (!data?.profile) {
@@ -280,6 +298,7 @@ function writeCachedProfile(
     tenantLogoUrl?: string | null;
     avatarUrl?: string | null;
     phone?: string | null;
+    locale?: AppLocale;
   },
 ) {
   if (typeof window === "undefined") {
@@ -290,7 +309,10 @@ function writeCachedProfile(
       `pws_user_cache_${userId}`,
       JSON.stringify({
         cachedAt: Date.now(),
-        profile,
+        profile: {
+          ...profile,
+          locale: profile.locale ?? defaultAppLocale,
+        },
       }),
     );
   } catch {
@@ -304,6 +326,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     loading: true,
   });
   const profileTimeoutMs = 2500;
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    document.documentElement.lang = toHtmlLang(user.locale);
+  }, [user.locale]);
 
   async function withTimeout<T>(promise: Promise<T>, ms: number) {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -336,6 +365,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       tenantName?: string | null;
       tenantLogoUrl?: string | null;
       phone?: string | null;
+      locale?: AppLocale;
     },
   ) {
     if (!supabase) {
@@ -365,6 +395,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             is_owner: true,
             tenant_id: tenant.id,
             email: sessionUser.email ?? null,
+            locale: nextProfile.locale ?? defaultAppLocale,
           });
           nextProfile = {
             ...nextProfile,
@@ -400,6 +431,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               is_owner: false,
               tenant_id: tenantId,
               email: sessionUser.email ?? null,
+              locale: nextProfile.locale ?? defaultAppLocale,
             });
             nextProfile = {
               ...nextProfile,
@@ -437,6 +469,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             is_owner: false,
             tenant_id: invite.tenant_id,
             email: sessionUser.email ?? null,
+            locale: nextProfile.locale ?? defaultAppLocale,
           });
           await supabase
             .from("user_invites")
@@ -477,6 +510,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       tenantName: refreshed.tenantName ?? null,
       tenantLogoUrl: refreshed.tenantLogoUrl ?? null,
       phone: refreshed.phone ?? null,
+      locale: refreshed.locale ?? defaultAppLocale,
     };
   }
 
@@ -495,6 +529,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       tenantLogoUrl?: string | null;
       avatarUrl?: string | null;
       phone?: string | null;
+      locale?: AppLocale;
     },
     requiresPasswordSetup: boolean,
   ): CurrentUser {
@@ -504,6 +539,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       name: cached.fullName,
       email: sessionUser.email ?? undefined,
       phone: cached.phone ?? null,
+      locale: normalizeAppLocale(cached.locale),
       role: cached.role,
       isAdmin: cached.isAdmin,
       isOwner: cached.isOwner ?? false,
@@ -580,6 +616,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 name: sessionUser.email ?? "User",
                 email: sessionUser.email ?? undefined,
                 phone: null,
+                locale: defaultAppLocale,
                 role: "Sales",
                 isAdmin: false,
                 isOwner: false,
@@ -605,6 +642,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             name: ensuredProfile.fullName,
             email: sessionUser.email ?? undefined,
             phone: ensuredProfile.phone ?? null,
+            locale: ensuredProfile.locale ?? defaultAppLocale,
             role: ensuredProfile.role,
             isAdmin: ensuredProfile.isAdmin,
             isOwner: ensuredProfile.isOwner,
@@ -625,6 +663,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             name: sessionUser.email ?? "User",
             email: sessionUser.email ?? undefined,
             phone: null,
+            locale: defaultAppLocale,
             role: "Sales",
             isAdmin: false,
             isOwner: false,
@@ -681,6 +720,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 name: sessionUser.email ?? "User",
                 email: sessionUser.email ?? undefined,
                 phone: null,
+                locale: defaultAppLocale,
                 role: "Sales",
                 isAdmin: false,
                 isOwner: false,
@@ -702,24 +742,26 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             id: sessionUser.id,
             name: ensuredProfile.fullName,
             email: sessionUser.email ?? undefined,
-              phone: ensuredProfile.phone ?? null,
-              role: ensuredProfile.role,
-              isAdmin: ensuredProfile.isAdmin,
-              isOwner: ensuredProfile.isOwner,
-              tenantId: ensuredProfile.tenantId ?? null,
-              avatarUrl: ensuredProfile.avatarUrl ?? null,
-              tenantName: ensuredProfile.tenantName ?? null,
-              tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
-              requiresPasswordSetup,
-              isAuthenticated: true,
-              loading: false,
-            });
+            phone: ensuredProfile.phone ?? null,
+            locale: ensuredProfile.locale ?? defaultAppLocale,
+            role: ensuredProfile.role,
+            isAdmin: ensuredProfile.isAdmin,
+            isOwner: ensuredProfile.isOwner,
+            tenantId: ensuredProfile.tenantId ?? null,
+            avatarUrl: ensuredProfile.avatarUrl ?? null,
+            tenantName: ensuredProfile.tenantName ?? null,
+            tenantLogoUrl: ensuredProfile.tenantLogoUrl ?? null,
+            requiresPasswordSetup,
+            isAuthenticated: true,
+            loading: false,
+          });
           } catch {
             setUser({
               id: sessionUser.id,
               name: sessionUser.email ?? "User",
               email: sessionUser.email ?? undefined,
               phone: null,
+              locale: defaultAppLocale,
               role: "Sales",
               isAdmin: false,
               isOwner: false,
@@ -754,6 +796,32 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         }
         await sb.auth.signOut();
       },
+      setLocale: async (locale) => {
+        const nextLocale = normalizeAppLocale(locale);
+        const previousLocale = user.locale;
+        setUser((prev) => ({ ...prev, locale: nextLocale }));
+
+        if (!user.isAuthenticated || !user.id || user.loading || !supabase) {
+          return { ok: true };
+        }
+
+        const { error } = await supabase
+          .from("profiles")
+          .update({ locale: nextLocale })
+          .eq("id", user.id);
+
+        if (error) {
+          setUser((prev) => ({ ...prev, locale: previousLocale }));
+          return { ok: false, error: error.message };
+        }
+
+        const cached = readCachedProfile(user.id);
+        if (cached) {
+          writeCachedProfile(user.id, { ...cached, locale: nextLocale });
+        }
+
+        return { ok: true };
+      },
     }),
     [user],
   );
@@ -766,6 +834,6 @@ export function useCurrentUser() {
 }
 
 export function useAuthActions() {
-  const { signOut } = useContext(UserContext);
-  return { signOut };
+  const { signOut, setLocale } = useContext(UserContext);
+  return { signOut, setLocale };
 }

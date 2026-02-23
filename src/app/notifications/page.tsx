@@ -11,6 +11,8 @@ import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { toIntlLocale } from "@/lib/i18n/locales";
+import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabaseClient";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
@@ -38,10 +40,10 @@ function notificationBadgeClass(type?: string) {
 }
 
 function notificationBadgeLabel(type?: string) {
-  if (type === "blocked") return "Blocked";
-  if (type === "resumed") return "Resumed";
-  if (type === "done") return "Done";
-  return "Info";
+  if (type === "blocked") return "notifications.badge.blocked";
+  if (type === "resumed") return "notifications.badge.resumed";
+  if (type === "done") return "notifications.badge.done";
+  return "notifications.badge.info";
 }
 
 type NotificationStatusFilter = "all" | "blocked" | "resumed" | "done" | "info";
@@ -77,6 +79,7 @@ function notificationBodyRows(body?: string | null) {
 export default function NotificationsPage() {
   const router = useRouter();
   const user = useCurrentUser();
+  const { t } = useI18n();
   const { confirm, dialog } = useConfirmDialog();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -288,9 +291,9 @@ export default function NotificationsPage() {
       return;
     }
     const shouldDelete = await confirm({
-      title: "Delete notification?",
-      description: "This will permanently remove the notification.",
-      confirmLabel: "Delete",
+      title: t("notifications.deleteNotificationTitle"),
+      description: t("notifications.deleteNotificationDescription"),
+      confirmLabel: t("notifications.delete"),
     });
     if (!shouldDelete) {
       return;
@@ -318,9 +321,11 @@ export default function NotificationsPage() {
       return;
     }
     const shouldDelete = await confirm({
-      title: "Delete read notifications?",
-      description: `This will delete ${readIds.length} read notification(s).`,
-      confirmLabel: "Delete",
+      title: t("notifications.deleteReadTitle"),
+      description: t("notifications.deleteReadDescription", {
+        count: readIds.length,
+      }),
+      confirmLabel: t("notifications.delete"),
     });
     if (!shouldDelete) {
       return;
@@ -342,32 +347,40 @@ export default function NotificationsPage() {
       <Checkbox
         checked={showUnreadOnly}
         onChange={(event) => setShowUnreadOnly(event.target.checked)}
-        label="Unread only"
+        label={t("notifications.unreadOnly")}
         containerClassName="text-xs text-muted-foreground"
       />
       <div className="h-px bg-border/70" />
       <FilterOptionSelector
-        title="Status"
+        title={t("notifications.status")}
         value={statusFilter}
         onChange={(value) => setStatusFilter(value as NotificationStatusFilter)}
         options={[
-          { value: "all", label: "All", count: statusCounts.all },
-          { value: "blocked", label: "Blocked", count: statusCounts.blocked },
-          { value: "resumed", label: "Resumed", count: statusCounts.resumed },
-          { value: "done", label: "Done", count: statusCounts.done },
-          { value: "info", label: "Info", count: statusCounts.info },
+          { value: "all", label: t("notifications.all"), count: statusCounts.all },
+          {
+            value: "blocked",
+            label: t("notifications.blocked"),
+            count: statusCounts.blocked,
+          },
+          {
+            value: "resumed",
+            label: t("notifications.resumed"),
+            count: statusCounts.resumed,
+          },
+          { value: "done", label: t("notifications.done"), count: statusCounts.done },
+          { value: "info", label: t("notifications.info"), count: statusCounts.info },
         ]}
       />
       <div className="h-px bg-border/70" />
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <DatePicker
-          label="From"
+          label={t("notifications.from")}
           value={dateFrom}
           onChange={setDateFrom}
           triggerClassName="h-9"
         />
         <DatePicker
-          label="To"
+          label={t("notifications.to")}
           value={dateTo}
           onChange={setDateTo}
           min={dateFrom || undefined}
@@ -386,7 +399,7 @@ export default function NotificationsPage() {
         }}
         className={isDesktop ? "gap-2" : "gap-2 w-full"}
       >
-        Reset filters
+        {t("notifications.resetFilters")}
       </Button>
     </div>
   );
@@ -405,7 +418,7 @@ export default function NotificationsPage() {
         {markingAllRead ? (
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
         ) : null}
-        Mark all read
+        {t("notifications.markAllRead")}
       </Button>
       <Button
         variant="outline"
@@ -417,7 +430,7 @@ export default function NotificationsPage() {
         {deletingAllRead ? (
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
         ) : null}
-        Delete all read
+        {t("notifications.deleteAllRead")}
       </Button>
     </div>
   );
@@ -437,8 +450,8 @@ export default function NotificationsPage() {
       <BottomSheet
         open={isMobileActionsOpen}
         onClose={() => setIsMobileActionsOpen(false)}
-        ariaLabel="Notifications filters and actions"
-        title="Filters and actions"
+        ariaLabel={t("notifications.sheetAria")}
+        title={t("notifications.sheetTitle")}
         showHandle
         enableSwipeToClose
       >
@@ -454,7 +467,7 @@ export default function NotificationsPage() {
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Back"
+            aria-label={t("notifications.back")}
             onClick={() => {
               if (window.history.length > 1) {
                 router.back();
@@ -474,7 +487,7 @@ export default function NotificationsPage() {
             variant="outline"
             size="icon"
             className="h-12 w-12 rounded-full bg-card shadow-lg"
-            aria-label="Open notification actions"
+            aria-label={t("notifications.openActions")}
             onClick={() => setIsMobileActionsOpen(true)}
           >
             <SlidersHorizontalIcon className="h-5 w-5" />
@@ -483,16 +496,16 @@ export default function NotificationsPage() {
       </div>
 
       <MobilePageTitle
-        title="Notifications"
+        title={t("notifications.pageTitle")}
         showCompact={showCompactMobileTitle}
-        subtitle="Review system updates, unread alerts, and workflow events."
+        subtitle={t("notifications.pageSubtitle")}
         className="pt-6 pb-6"
       />
 
       <DesktopPageHeader
         sticky
-        title="Notifications"
-        subtitle="Review system updates, unread alerts, and workflow events."
+        title={t("notifications.pageTitle")}
+        subtitle={t("notifications.pageSubtitle")}
         className="md:z-20"
         actions={renderDesktopToolbar()}
       />
@@ -500,12 +513,12 @@ export default function NotificationsPage() {
       <div className="space-y-2">
         {isLoading ? (
           <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-            Loading notifications...
+            {t("notifications.loading")}
           </div>
         ) : null}
         {!isLoading && visibleItems.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-            No notifications found.
+            {t("notifications.empty")}
           </div>
         ) : null}
         {visibleItems.map((item) => (
@@ -521,7 +534,7 @@ export default function NotificationsPage() {
                   <span
                     className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${notificationBadgeClass(item.type)}`}
                   >
-                    {notificationBadgeLabel(item.type)}
+                    {t(notificationBadgeLabel(item.type))}
                   </span>
                 </div>
                 <div className="font-medium text-foreground">{item.title}</div>
@@ -534,7 +547,16 @@ export default function NotificationsPage() {
                       >
                         {row.label ? (
                           <span className="min-w-13 text-muted-foreground">
-                            {row.label}:
+                            {row.label.toLowerCase() === "by"
+                              ? t("notifications.body.by")
+                              : row.label.toLowerCase() === "item"
+                                ? t("notifications.body.item")
+                                : row.label.toLowerCase() === "station"
+                                  ? t("notifications.body.station")
+                                  : row.label.toLowerCase() === "action"
+                                    ? t("notifications.body.action")
+                                    : row.label}
+                            :
                           </span>
                         ) : null}
                         <span className="text-foreground">{row.value}</span>
@@ -543,7 +565,9 @@ export default function NotificationsPage() {
                   </div>
                 ) : null}
                 <div className="mt-1 text-[10px] text-muted-foreground">
-                  {new Date(item.created_at).toLocaleString("lv-LV")}
+                  {new Date(item.created_at).toLocaleString(
+                    toIntlLocale(user.locale),
+                  )}
                 </div>
               </div>
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
@@ -558,7 +582,7 @@ export default function NotificationsPage() {
                     {markingId === item.id ? (
                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                     ) : null}
-                    Mark read
+                    {t("notifications.markRead")}
                   </Button>
                 ) : null}
                 <Button
@@ -571,7 +595,7 @@ export default function NotificationsPage() {
                   {deletingId === item.id ? (
                     <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                   ) : null}
-                  Delete
+                  {t("notifications.delete")}
                 </Button>
               </div>
             </div>

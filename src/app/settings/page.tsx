@@ -90,6 +90,7 @@ import type {
   ExternalJobStatus,
   OrderStatus,
 } from "@/types/orders";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 function slugify(value: string) {
   return value
@@ -337,24 +338,15 @@ const defaultQrContentFields = [
 ];
 
 const settingsSections = [
-  { value: "structure", label: "Structure", icon: NetworkIcon },
-  { value: "operations", label: "Production", icon: FactoryIcon },
-  { value: "partners", label: "Partners", icon: GitBranchIcon },
-  { value: "users", label: "Users", icon: UsersIcon },
-  { value: "workflow", label: "Workflow", icon: WorkflowIcon },
-  { value: "integrations", label: "Integrations", icon: PuzzleIcon },
+  { value: "structure", icon: NetworkIcon },
+  { value: "operations", icon: FactoryIcon },
+  { value: "partners", icon: GitBranchIcon },
+  { value: "users", icon: UsersIcon },
+  { value: "workflow", icon: WorkflowIcon },
+  { value: "integrations", icon: PuzzleIcon },
 ] as const;
 
 type SettingsSectionValue = (typeof settingsSections)[number]["value"];
-
-const settingsSectionSubtitles: Record<SettingsSectionValue, string> = {
-  structure: "Define hierarchy, order fields, and system structure.",
-  operations: "Configure production hours, stations, and operation defaults.",
-  partners: "Manage external partners, groups, and field mappings.",
-  users: "Control user access, roles, and account permissions.",
-  workflow: "Set status flow rules, requirements, and automations.",
-  integrations: "Connect accounting, email, and external services.",
-};
 
 type ExternalTableColumnSetting = {
   id: string;
@@ -367,6 +359,7 @@ export default function SettingsPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
+  const { t } = useI18n();
   const {
     permissions: rolePermissions,
     loading: rolePermissionsLoading,
@@ -970,6 +963,11 @@ export default function SettingsPage() {
       ),
     [],
   );
+  const optionLabel = (group: string, value: string, fallback: string) =>
+    t(`settings.options.${group}.${value}`, { fallback }) ===
+    `settings.options.${group}.${value}`
+      ? fallback
+      : t(`settings.options.${group}.${value}`);
 
   useEffect(() => {
     setOrderStatusConfigDrafts(rules.orderStatusConfig);
@@ -999,7 +997,10 @@ export default function SettingsPage() {
       const current = next[option.value];
       const fallback = rules.orderStatusConfig[option.value];
       next[option.value] = {
-        label: (current?.label ?? "").trim() || fallback.label || option.label,
+        label:
+          (current?.label ?? "").trim() ||
+          fallback.label ||
+          optionLabel("workflowStatus", option.value, option.label),
         color: statusColorOptions.some((item) => item.value === current?.color)
           ? (current?.color ?? fallback.color)
           : fallback.color,
@@ -1019,7 +1020,10 @@ export default function SettingsPage() {
       const current = next[option.value];
       const fallback = rules.externalJobStatusConfig[option.value];
       next[option.value] = {
-        label: (current?.label ?? "").trim() || fallback.label || option.label,
+        label:
+          (current?.label ?? "").trim() ||
+          fallback.label ||
+          optionLabel("externalJobStatus", option.value, option.label),
         color: statusColorOptions.some((item) => item.value === current?.color)
           ? (current?.color ?? fallback.color)
           : fallback.color,
@@ -3066,7 +3070,9 @@ export default function SettingsPage() {
     }
     if (
       !(await confirmRemove(
-        `Remove ${selectedExternalJobFieldIds.length} selected field(s)?`,
+        t("settings.partners.removeSelectedFieldsConfirm", {
+          count: selectedExternalJobFieldIds.length,
+        }),
       ))
     ) {
       return;
@@ -3108,43 +3114,47 @@ export default function SettingsPage() {
     () => [
       {
         id: "label",
-        label: "Label",
-        widthClassName: "min-w-[100px] md:min-w-[140px]",
+        label: t("settings.orderInputs.label"),
+        widthClassName: "min-w-25 md:min-w-35",
       },
-      { id: "type", label: "Type", widthClassName: "min-w-[110px] md:min-w-0" },
+      {
+        id: "type",
+        label: t("settings.orderInputs.type"),
+        widthClassName: "min-w-27.5 md:min-w-0",
+      },
       {
         id: "scope",
-        label: "Scope",
-        widthClassName: "min-w-[120px] md:min-w-0",
+        label: t("settings.partners.scope"),
+        widthClassName: "min-w-30 md:min-w-0",
       },
       {
         id: "role",
-        label: "Role",
-        widthClassName: "min-w-[110px] md:min-w-0",
+        label: t("settings.users.role"),
+        widthClassName: "min-w-27.5 md:min-w-0",
       },
       {
         id: "unit",
-        label: "Unit",
+        label: t("settings.orderInputs.unit"),
         widthClassName: "min-w-[64px] md:min-w-0",
       },
       {
         id: "order",
-        label: "Order",
+        label: t("settings.orderInputs.order"),
         widthClassName: "min-w-[64px] md:min-w-0",
       },
       {
         id: "required",
-        label: "Required",
+        label: t("settings.common.required"),
         widthClassName: "min-w-[84px] md:min-w-0",
       },
       {
         id: "active",
-        label: "Active",
+        label: t("settings.common.active"),
         widthClassName: "min-w-[72px] md:min-w-0",
       },
       {
         id: "in_table",
-        label: "In table",
+        label: t("settings.structure.inTable"),
         widthClassName: "min-w-[84px] md:min-w-0",
       },
       {
@@ -3154,14 +3164,14 @@ export default function SettingsPage() {
       },
       {
         id: "match_only",
-        label: "Match only",
+        label: t("settings.partners.matchOnly"),
         widthClassName: "min-w-[96px] md:min-w-0",
       },
       {
         id: "actions",
         label: (
           <div className="flex items-center justify-end gap-2">
-            <span>Actions</span>
+            <span>{t("settings.common.actions")}</span>
             <Checkbox
               variant="box"
               checked={
@@ -3185,38 +3195,38 @@ export default function SettingsPage() {
         headerClassName: "text-right",
       },
     ],
-    [selectedExternalJobFieldIds.length, sortedExternalJobFields],
+    [selectedExternalJobFieldIds.length, sortedExternalJobFields, t],
   );
   const usersAccessColumns = useMemo(
     () => [
       {
         id: "name",
-        label: "Name",
+        label: t("settings.users.name"),
         widthClassName: "min-w-[160px] md:min-w-[220px]",
       },
       {
         id: "role",
-        label: "Role",
+        label: t("settings.users.role"),
         widthClassName: "min-w-[140px] md:min-w-[180px]",
       },
       {
         id: "owner",
-        label: "Owner",
-        widthClassName: "min-w-[90px] md:min-w-[110px]",
+        label: t("settings.users.owner"),
+        widthClassName: "min-w-22.5 md:min-w-27.5",
       },
       {
         id: "admin",
-        label: "Admin",
-        widthClassName: "min-w-[90px] md:min-w-[110px]",
+        label: t("settings.users.admin"),
+        widthClassName: "min-w-22.5 md:min-w-27.5",
       },
       {
         id: "actions",
-        label: "Actions",
-        widthClassName: "min-w-[100px] md:min-w-[120px]",
+        label: t("settings.common.actions"),
+        widthClassName: "min-w-25 md:min-w-30",
         headerClassName: "text-right",
       },
     ],
-    [],
+    [t],
   );
 
   function reorderStations(
@@ -3450,14 +3460,17 @@ export default function SettingsPage() {
     };
   }, []);
 
-  const activeSectionLabel =
-    settingsSections.find((section) => section.value === activeTab)?.label ??
-    "Settings";
-  const activeSectionSubtitle =
-    settingsSectionSubtitles[
-      (settingsSections.find((section) => section.value === activeTab)?.value ??
-        "structure") as SettingsSectionValue
-    ];
+  const sectionLabel = (value: SettingsSectionValue) =>
+    t(`settings.section.${value}`);
+  const sectionSubtitle = (value: SettingsSectionValue) =>
+    t(`settings.sectionSubtitle.${value}`);
+
+  const activeSectionValue =
+    (settingsSections.find((section) => section.value === activeTab)?.value ??
+      "structure") as SettingsSectionValue;
+
+  const activeSectionLabel = sectionLabel(activeSectionValue);
+  const activeSectionSubtitle = sectionSubtitle(activeSectionValue);
 
   return (
     <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
@@ -3468,7 +3481,7 @@ export default function SettingsPage() {
           size="icon"
           className="h-11 w-11 rounded-full shadow-lg"
           onClick={() => setIsMobileSectionsOpen(true)}
-          aria-label="Open settings sections"
+          aria-label={t("settings.openSections")}
           aria-haspopup="dialog"
           aria-expanded={isMobileSectionsOpen}
           aria-controls="settings-sections-drawer"
@@ -3502,7 +3515,7 @@ export default function SettingsPage() {
                   className="gap-2"
                 >
                   <section.icon className="h-4 w-4" />
-                  {section.label}
+                  {sectionLabel(section.value)}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -3515,9 +3528,9 @@ export default function SettingsPage() {
               id="settings-sections-drawer"
               open={isMobileSectionsOpen}
               onClose={() => setIsMobileSectionsOpen(false)}
-              ariaLabel="Settings sections"
-              closeButtonLabel="Close settings sections"
-              title="Settings sections"
+              ariaLabel={t("settings.sections")}
+              closeButtonLabel={t("settings.closeSections")}
+              title={t("settings.sections")}
               enableSwipeToClose
             >
               <div className="flex-1 overflow-y-auto p-3">
@@ -3541,10 +3554,10 @@ export default function SettingsPage() {
                       >
                         <span className="flex items-center gap-2">
                           <section.icon className="h-4 w-4" />
-                          {section.label}
+                          {sectionLabel(section.value)}
                         </span>
                         {isActive ? (
-                          <span className="text-xs">Active</span>
+                          <span className="text-xs">{t("settings.active")}</span>
                         ) : null}
                       </button>
                     );
@@ -3560,30 +3573,30 @@ export default function SettingsPage() {
             {isSettingsDataLoading ? (
               <Card className="min-w-0">
                 <CardContent className="py-10">
-                  <LoadingSpinner label="Loading structure settings..." />
+                  <LoadingSpinner label={t("settings.loadingStructure")} />
                 </CardContent>
               </Card>
             ) : null}
             <Card>
               <CardHeader>
-                <CardTitle>Hierarchy Levels</CardTitle>
+                <CardTitle>{t("settings.structure.hierarchyTitle")}</CardTitle>
                 <CardDescription>
-                  Define the order of fields users select when creating orders.
+                  {t("settings.structure.hierarchyDescription")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(120px,0.5fr)_minmax(240px,1fr)_auto] lg:items-end">
                   <InputField
-                    label="Level name"
+                    label={t("settings.structure.levelName")}
                     value={levelName}
                     onChange={(event) => {
                       setLevelName(event.target.value);
                     }}
-                    placeholder="Contract"
+                    placeholder={t("settings.structure.levelNamePlaceholder")}
                     className="h-10 text-sm"
                   />
                   <InputField
-                    label="Order"
+                    label={t("settings.structure.order")}
                     type="number"
                     min={1}
                     value={levelOrder}
@@ -3598,59 +3611,59 @@ export default function SettingsPage() {
                       onChange={(event) =>
                         setLevelRequired(event.target.checked)
                       }
-                      label="Required"
+                      label={t("settings.common.required")}
                     />
                     <Checkbox
                       checked={levelActive}
                       onChange={(event) => setLevelActive(event.target.checked)}
-                      label="Active"
+                      label={t("settings.common.active")}
                     />
                     <Checkbox
                       checked={levelShowInTable}
                       onChange={(event) =>
                         setLevelShowInTable(event.target.checked)
                       }
-                      label="Show in table"
+                      label={t("settings.structure.showInTable")}
                     />
                   </div>
                   <div className="flex gap-2">
                     <Button onClick={handleSaveLevel}>
-                      {editingLevelId ? "Save level" : "Add level"}
+                      {editingLevelId
+                        ? t("settings.structure.saveLevel")
+                        : t("settings.structure.addLevel")}
                     </Button>
                     {editingLevelId && (
                       <Button variant="outline" onClick={resetLevelForm}>
-                        Cancel
+                        {t("settings.common.cancel")}
                       </Button>
                     )}
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Default meanings (do not repurpose): Contract, Product
-                  category, Product, Sales management, Engineering. You can
-                  rename the labels, but keep their meaning.
+                  {t("settings.structure.defaultMeaningHint")}
                 </p>
 
                 <div className="overflow-x-hidden rounded-lg border border-border">
-                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top">
+                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
-                          Level
+                          {t("settings.structure.level")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Order
+                          {t("settings.structure.order")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Required
+                          {t("settings.common.required")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Active
+                          {t("settings.common.active")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          In table
+                          {t("settings.structure.inTable")}
                         </th>
                         <th className="px-4 py-2 text-right font-medium">
-                          Actions
+                          {t("settings.common.actions")}
                         </th>
                       </tr>
                     </thead>
@@ -3662,7 +3675,7 @@ export default function SettingsPage() {
                               {level.name}
                               {lockedLevelKeys.has(level.key) && (
                                 <span className="ml-2 text-xs text-muted-foreground">
-                                  Default
+                                  {t("settings.common.default")}
                                 </span>
                               )}
                             </div>
@@ -3682,7 +3695,11 @@ export default function SettingsPage() {
                                   isRequired: event.target.checked,
                                 })
                               }
-                              label={level.isRequired ? "Yes" : "No"}
+                              label={
+                                level.isRequired
+                                  ? t("settings.common.yes")
+                                  : t("settings.common.no")
+                              }
                             />
                           </td>
                           <td className="px-4 py-2">
@@ -3693,7 +3710,11 @@ export default function SettingsPage() {
                                   isActive: event.target.checked,
                                 })
                               }
-                              label={level.isActive ? "Active" : "Hidden"}
+                              label={
+                                level.isActive
+                                  ? t("settings.common.active")
+                                  : t("settings.common.hidden")
+                              }
                             />
                           </td>
                           <td className="px-4 py-2">
@@ -3704,7 +3725,11 @@ export default function SettingsPage() {
                                   showInTable: event.target.checked,
                                 })
                               }
-                              label={level.showInTable ? "Shown" : "Hidden"}
+                              label={
+                                level.showInTable
+                                  ? t("settings.common.shown")
+                                  : t("settings.common.hidden")
+                              }
                             />
                           </td>
                           <td className="px-4 py-2 text-right">
@@ -3743,7 +3768,7 @@ export default function SettingsPage() {
                             colSpan={6}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
-                            Add your first hierarchy level.
+                            {t("settings.structure.addFirstLevel")}
                           </td>
                         </tr>
                       )}
@@ -3754,15 +3779,15 @@ export default function SettingsPage() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Reference Lists</CardTitle>
+                <CardTitle>{t("settings.structure.referenceListsTitle")}</CardTitle>
                 <CardDescription>
-                  Maintain the selectable values for each hierarchy level.
+                  {t("settings.structure.referenceListsDescription")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap gap-3">
                   <SelectField
-                    label="Level"
+                    label={t("settings.structure.level")}
                     value={selectedLevelId}
                     onValueChange={setSelectedLevelId}
                   >
@@ -3784,7 +3809,7 @@ export default function SettingsPage() {
                   </SelectField>
                   {parentLevel && (
                     <SelectField
-                      label={`Parent (${parentLevel.name})`}
+                      label={`${t("settings.structure.parent")} (${parentLevel.name})`}
                       value={nodeParentId}
                       onValueChange={setNodeParentId}
                     >
@@ -3796,7 +3821,7 @@ export default function SettingsPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">No parent</SelectItem>
+                          <SelectItem value="none">{t("settings.structure.noParent")}</SelectItem>
                           {parentNodes.map((node) => (
                             <SelectItem key={node.id} value={node.id}>
                               {node.label}
@@ -3810,26 +3835,28 @@ export default function SettingsPage() {
 
                 <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,0.6fr)_auto] lg:items-end">
                   <InputField
-                    label="Label"
+                    label={t("settings.structure.label")}
                     value={nodeLabel}
                     onChange={(event) => setNodeLabel(event.target.value)}
-                    placeholder="Enter label"
+                    placeholder={t("settings.structure.enterLabel")}
                     className="h-10 text-sm"
                   />
                   <InputField
-                    label="Code (optional)"
+                    label={t("settings.structure.codeOptional")}
                     value={nodeCode}
                     onChange={(event) => setNodeCode(event.target.value)}
-                    placeholder="Optional code"
+                    placeholder={t("settings.structure.optionalCode")}
                     className="h-10 text-sm"
                   />
                   <div className="flex gap-2">
                     <Button onClick={handleSaveNode}>
-                      {editingNodeId ? "Save item" : "Add item"}
+                      {editingNodeId
+                        ? t("settings.structure.saveItem")
+                        : t("settings.structure.addItem")}
                     </Button>
                     {editingNodeId && (
                       <Button variant="outline" onClick={resetNodeForm}>
-                        Cancel
+                        {t("settings.common.cancel")}
                       </Button>
                     )}
                   </div>
@@ -3837,27 +3864,24 @@ export default function SettingsPage() {
 
                 <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
                   <TextAreaField
-                    label="Bulk add (one per line)"
+                    label={t("settings.structure.bulkAdd")}
                     value={bulkNodeInput}
                     onChange={(event) => setBulkNodeInput(event.target.value)}
                     placeholder="PE 40 Durvis\nPE 40 Vitrina\nPE 40 Logs"
                     className="min-h-30"
-                    description={
-                      <>
-                        Optional code: use &quot;Label | Code&quot; or
-                        &quot;Label;Code&quot;.
-                      </>
-                    }
+                    description={t("settings.structure.bulkAddDescription")}
                   />
                   <div className="flex gap-2">
-                    <Button onClick={handleBulkAddNodes}>Add list</Button>
+                    <Button onClick={handleBulkAddNodes}>{t("settings.structure.addList")}</Button>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-sm text-muted-foreground">
                     {selectedNodeIds.length > 0
-                      ? `${selectedNodeIds.length} selected`
+                      ? t("settings.common.selectedCount", {
+                          count: selectedNodeIds.length,
+                        })
                       : " "}
                   </div>
                   <Button
@@ -3866,25 +3890,25 @@ export default function SettingsPage() {
                     onClick={handleDeleteSelectedNodes}
                     disabled={selectedNodeIds.length === 0}
                   >
-                    Remove selected
+                    {t("settings.common.removeSelected")}
                   </Button>
                 </div>
                 <div className="overflow-hidden rounded-lg border border-border">
-                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top">
+                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
-                          Label
+                          {t("settings.structure.label")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Code
+                          {t("settings.structure.code")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Parent
+                          {t("settings.structure.parent")}
                         </th>
                         <th className="px-4 py-2 text-right font-medium">
                           <div className="flex items-center justify-end gap-2">
-                            <span>Actions</span>
+                            <span>{t("settings.common.actions")}</span>
                             <Checkbox
                               variant="box"
                               checked={
@@ -3976,7 +4000,7 @@ export default function SettingsPage() {
                             colSpan={4}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
-                            Add items for this level.
+                            {t("settings.structure.addItemsForLevel")}
                           </td>
                         </tr>
                       )}
@@ -3987,22 +4011,22 @@ export default function SettingsPage() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Order inputs</CardTitle>
+                <CardTitle>{t("settings.orderInputs.title")}</CardTitle>
                 <CardDescription>
-                  Configure the additional fields shown in the order view.
+                  {t("settings.orderInputs.description")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {orderInputFields.length === 0 && (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                    No order inputs yet. Add defaults to get started.
+                    {t("settings.orderInputs.empty")}
                     <div className="mt-3">
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={ensureDefaultOrderInputFields}
                       >
-                        Add default fields
+                        {t("settings.orderInputs.addDefaultFields")}
                       </Button>
                     </div>
                   </div>
@@ -4010,14 +4034,14 @@ export default function SettingsPage() {
 
                 <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(160px,0.6fr)_minmax(160px,0.6fr)_minmax(120px,0.4fr)_auto] lg:items-end">
                   <InputField
-                    label="Label"
+                    label={t("settings.orderInputs.label")}
                     value={orderFieldLabel}
                     onChange={(event) => setOrderFieldLabel(event.target.value)}
-                    placeholder="Construction count"
+                    placeholder={t("settings.orderInputs.labelPlaceholder")}
                     className="h-10 text-sm"
                   />
                   <SelectField
-                    label="Group"
+                    label={t("settings.orderInputs.group")}
                     value={orderFieldGroup}
                     onValueChange={(value) =>
                       setOrderFieldGroup(value as OrderInputGroupKey)
@@ -4035,14 +4059,18 @@ export default function SettingsPage() {
                       <SelectContent>
                         {orderInputGroupOptions.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
-                            {option.label}
+                            {optionLabel(
+                              "orderInputGroup",
+                              option.value,
+                              option.label,
+                            )}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </SelectField>
                   <SelectField
-                    label="Type"
+                    label={t("settings.orderInputs.type")}
                     value={orderFieldType}
                     onValueChange={(value) =>
                       setOrderFieldType(value as OrderInputFieldType)
@@ -4060,14 +4088,18 @@ export default function SettingsPage() {
                       <SelectContent>
                         {orderInputFieldTypeOptions.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
-                            {option.label}
+                            {optionLabel(
+                              "orderInputFieldType",
+                              option.value,
+                              option.label,
+                            )}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </SelectField>
                   <InputField
-                    label="Order"
+                    label={t("settings.orderInputs.order")}
                     type="number"
                     value={orderFieldSortOrder}
                     onChange={(event) =>
@@ -4077,11 +4109,13 @@ export default function SettingsPage() {
                   />
                   <div className="flex gap-2">
                     <Button onClick={handleSaveOrderField}>
-                      {editingOrderFieldId ? "Save field" : "Add field"}
+                      {editingOrderFieldId
+                        ? t("settings.orderInputs.saveField")
+                        : t("settings.orderInputs.addField")}
                     </Button>
                     {editingOrderFieldId && (
                       <Button variant="outline" onClick={resetOrderFieldForm}>
-                        Cancel
+                        {t("settings.common.cancel")}
                       </Button>
                     )}
                   </div>
@@ -4089,20 +4123,20 @@ export default function SettingsPage() {
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <InputField
-                    label="Unit (optional)"
+                    label={t("settings.orderInputs.unitOptional")}
                     value={orderFieldUnit}
                     onChange={(event) => setOrderFieldUnit(event.target.value)}
                     placeholder="pcs"
                     className="h-10 text-sm"
                   />
                   <TextAreaField
-                    label='Select options (comma, newline, or "\\\\" separated)'
+                    label={t("settings.orderInputs.selectOptions")}
                     value={orderFieldOptions}
                     onChange={(event) =>
                       setOrderFieldOptions(event.target.value)
                     }
                     disabled={orderFieldType !== "select"}
-                    placeholder="Dealer, Private, Partner"
+                    placeholder={t("settings.orderInputs.selectOptionsPlaceholder")}
                     className="min-h-20 disabled:opacity-50"
                   />
                 </div>
@@ -4110,21 +4144,23 @@ export default function SettingsPage() {
                 {orderFieldType === "table" && (
                   <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-medium">Table columns</div>
+                      <div className="text-sm font-medium">
+                        {t("settings.orderInputs.tableColumns")}
+                      </div>
                       <div className="text-xs text-muted-foreground">
-                        Drag rows to reorder columns
+                        {t("settings.orderInputs.dragRows")}
                       </div>
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={addOrderFieldColumn}
                       >
-                        Add column
+                        {t("settings.orderInputs.addColumn")}
                       </Button>
                     </div>
                     {orderFieldColumns.length === 0 ? (
                       <p className="text-xs text-muted-foreground">
-                        Add at least one column for this table field.
+                        {t("settings.orderInputs.addAtLeastOneColumn")}
                       </p>
                     ) : (
                       <div className="space-y-3">
@@ -4162,36 +4198,36 @@ export default function SettingsPage() {
                             <div className="grid gap-2 md:grid-cols-[24px_1.4fr_1fr_0.9fr_0.7fr_0.5fr_auto] md:items-end">
                               <div
                                 className="mb-2 select-none text-center text-xs text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100 md:mb-0 md:cursor-grab"
-                                title="Drag to reorder"
+                                title={t("settings.orderInputs.dragToReorder")}
                               >
                                 ||
                               </div>
                               <InputField
-                                label="Label"
+                                label={t("settings.orderInputs.label")}
                                 value={column.label}
                                 onChange={(event) =>
                                   updateOrderFieldColumn(index, {
                                     label: event.target.value,
                                   })
                                 }
-                                placeholder="Position"
+                                placeholder={t("settings.orderInputs.positionPlaceholder")}
                                 className="h-9 text-sm"
                                 labelClassName="text-xs font-medium"
                               />
                               <InputField
-                                label="AI key (optional)"
+                                label={t("settings.orderInputs.aiKeyOptional")}
                                 value={column.aiKey ?? ""}
                                 onChange={(event) =>
                                   updateOrderFieldColumn(index, {
                                     aiKey: event.target.value,
                                   })
                                 }
-                                placeholder="construction"
+                                placeholder={t("settings.orderInputs.aiKeyPlaceholder")}
                                 className="h-9 text-sm"
                                 labelClassName="text-xs font-medium"
                               />
                               <SelectField
-                                label="Type"
+                                label={t("settings.orderInputs.type")}
                                 value={column.fieldType}
                                 onValueChange={(value) =>
                                   updateOrderFieldColumn(index, {
@@ -4221,7 +4257,11 @@ export default function SettingsPage() {
                                           key={option.value}
                                           value={option.value}
                                         >
-                                          {option.label}
+                                          {optionLabel(
+                                            "orderInputColumnType",
+                                            option.value,
+                                            option.label,
+                                          )}
                                         </SelectItem>
                                       ),
                                     )}
@@ -4229,7 +4269,7 @@ export default function SettingsPage() {
                                 </Select>
                               </SelectField>
                               <InputField
-                                label="Unit"
+                                label={t("settings.orderInputs.unit")}
                                 value={column.unit ?? ""}
                                 onChange={(event) =>
                                   updateOrderFieldColumn(index, {
@@ -4242,7 +4282,7 @@ export default function SettingsPage() {
                               />
                               <div className="space-y-1">
                                 <div className="text-xs font-medium">
-                                  Required
+                                  {t("settings.common.required")}
                                 </div>
                                 <Checkbox
                                   checked={column.isRequired ?? false}
@@ -4260,7 +4300,7 @@ export default function SettingsPage() {
                                   onClick={async () => {
                                     if (
                                       !(await confirmRemove(
-                                        "Remove this column?",
+                                        t("settings.orderInputs.removeColumnConfirm"),
                                       ))
                                     ) {
                                       return;
@@ -4275,7 +4315,7 @@ export default function SettingsPage() {
                             {column.fieldType === "select" && (
                               <div className="grid gap-2 md:grid-cols-[1fr_160px] md:items-end">
                                 <TextAreaField
-                                  label='Options (comma, newline, or "\\\\" separated)'
+                                  label={t("settings.orderInputs.options")}
                                   value={(column.options ?? []).join("\n")}
                                   onChange={(event) =>
                                     updateOrderFieldColumn(index, {
@@ -4284,12 +4324,12 @@ export default function SettingsPage() {
                                       ),
                                     })
                                   }
-                                  placeholder="Type A, Type B"
+                                  placeholder={t("settings.orderInputs.optionsPlaceholder")}
                                   className="min-h-17.5 rounded-md px-2 py-2 text-sm"
                                   labelClassName="text-xs font-medium"
                                 />
                                 <label className="flex flex-col gap-1 text-xs font-medium">
-                                  Max selects (1-3)
+                                  {t("settings.orderInputs.maxSelects")}
                                   <Input
                                     type="number"
                                     min={1}
@@ -4319,28 +4359,30 @@ export default function SettingsPage() {
                     onChange={(event) =>
                       setOrderFieldRequired(event.target.checked)
                     }
-                    label="Required"
+                    label={t("settings.common.required")}
                   />
                   <Checkbox
                     checked={orderFieldActive}
                     onChange={(event) =>
                       setOrderFieldActive(event.target.checked)
                     }
-                    label="Active"
+                    label={t("settings.common.active")}
                   />
                   <Checkbox
                     checked={orderFieldShowInProduction}
                     onChange={(event) =>
                       setOrderFieldShowInProduction(event.target.checked)
                     }
-                    label="Show in production"
+                    label={t("settings.orderInputs.showInProduction")}
                   />
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-sm text-muted-foreground">
                     {selectedOrderFieldIds.length > 0
-                      ? `${selectedOrderFieldIds.length} selected`
+                      ? t("settings.common.selectedCount", {
+                          count: selectedOrderFieldIds.length,
+                        })
                       : " "}
                   </div>
                   <Button
@@ -4349,37 +4391,37 @@ export default function SettingsPage() {
                     onClick={handleDeleteSelectedOrderFields}
                     disabled={selectedOrderFieldIds.length === 0}
                   >
-                    Remove selected
+                    {t("settings.common.removeSelected")}
                   </Button>
                 </div>
                 <div className="overflow-hidden rounded-lg border border-border">
-                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top">
+                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
-                          Label
+                          {t("settings.orderInputs.label")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Group
+                          {t("settings.orderInputs.group")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Type
+                          {t("settings.orderInputs.type")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Order
+                          {t("settings.orderInputs.order")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Required
+                          {t("settings.common.required")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Active
+                          {t("settings.common.active")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          Production
+                          {t("settings.orderInputs.production")}
                         </th>
                         <th className="px-4 py-2 text-right font-medium">
                           <div className="flex items-center justify-end gap-2">
-                            <span>Actions</span>
+                            <span>{t("settings.common.actions")}</span>
                             <Checkbox
                               variant="box"
                               checked={
@@ -4410,7 +4452,7 @@ export default function SettingsPage() {
                             colSpan={8}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
-                            No order inputs configured.
+                            {t("settings.orderInputs.noOrderInputs")}
                           </td>
                         </tr>
                       ) : (
@@ -4433,13 +4475,19 @@ export default function SettingsPage() {
                               {field.sortOrder}
                             </td>
                             <td className="px-4 py-2 text-sm">
-                              {field.isRequired ? "Yes" : "No"}
+                              {field.isRequired
+                                ? t("settings.common.yes")
+                                : t("settings.common.no")}
                             </td>
                             <td className="px-4 py-2 text-sm">
-                              {field.isActive ? "Yes" : "No"}
+                              {field.isActive
+                                ? t("settings.common.yes")
+                                : t("settings.common.no")}
                             </td>
                             <td className="px-4 py-2 text-sm">
-                              {field.showInProduction ? "Yes" : "No"}
+                              {field.showInProduction
+                                ? t("settings.common.yes")
+                                : t("settings.common.no")}
                             </td>
                             <td className="px-4 py-2 text-right">
                               <div className="flex justify-end items-center gap-2">
@@ -4500,22 +4548,23 @@ export default function SettingsPage() {
             {isSettingsDataLoading || isTenantSettingsLoading ? (
               <Card>
                 <CardContent className="py-10">
-                  <LoadingSpinner label="Loading production settings..." />
+                  <LoadingSpinner label={t("settings.operations.loading")} />
                 </CardContent>
               </Card>
             ) : null}
             <div className="grid min-w-0 gap-6 lg:grid-cols-2 *:min-w-0">
               <Card>
                 <CardHeader>
-                  <CardTitle>Working hours</CardTitle>
+                  <CardTitle>{t("settings.operations.workingHoursTitle")}</CardTitle>
                   <CardDescription>
-                    Define workdays and shifts used for production timing and
-                    start/stop duration calculations.
+                    {t("settings.operations.workingHoursDescription")}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="min-w-0 space-y-4">
                   <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Workdays</label>
+                    <label className="text-sm font-medium">
+                      {t("settings.operations.workdays")}
+                    </label>
                     <div className="flex flex-wrap gap-2">
                       {weekdayOptions.map((option) => (
                         <button
@@ -4528,21 +4577,27 @@ export default function SettingsPage() {
                               : "border-border bg-background text-muted-foreground"
                           }`}
                         >
-                          {option.label}
+                          {optionLabel(
+                            "weekday",
+                            String(option.value),
+                            option.label,
+                          )}
                         </button>
                       ))}
                     </div>
                   </div>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium">Shifts</label>
+                      <label className="text-sm font-medium">
+                        {t("settings.operations.shifts")}
+                      </label>
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
                         onClick={handleAddShift}
                       >
-                        Add shift
+                        {t("settings.operations.addShift")}
                       </Button>
                     </div>
                     {workShifts.map((shift, index) => (
@@ -4605,7 +4660,7 @@ export default function SettingsPage() {
                       </div>
                     ))}
                     <div className="text-xs text-muted-foreground">
-                      Overnight shift is supported, for example 22:00 to 06:00.
+                      {t("settings.operations.overnightShiftHint")}
                     </div>
                   </div>
                   {workdayError ? (
@@ -4618,38 +4673,40 @@ export default function SettingsPage() {
                       onClick={handleSaveWorkHours}
                       disabled={isWorkdaySaving}
                     >
-                      {isWorkdaySaving ? "Saving..." : "Save hours"}
+                      {isWorkdaySaving
+                        ? t("settings.users.saving")
+                        : t("settings.operations.saveHours")}
                     </Button>
                   </div>
                 </CardContent>
               </Card>
               <Card>
                 <CardHeader>
-                  <CardTitle>Work Stations</CardTitle>
+                  <CardTitle>{t("settings.operations.workStationsTitle")}</CardTitle>
                   <CardDescription>
-                    Manage the list of production stations.
+                    {t("settings.operations.workStationsDescription")}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="min-w-0 space-y-4">
                   <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
                     <InputField
-                      label="Station name"
+                      label={t("settings.operations.stationName")}
                       value={stationName}
                       onChange={(event) => setStationName(event.target.value)}
-                      placeholder="Cutting"
+                      placeholder={t("settings.operations.stationNamePlaceholder")}
                       className="h-10 text-sm"
                     />
                     <InputField
-                      label="Description"
+                      label={t("settings.operations.description")}
                       value={stationDescription}
                       onChange={(event) =>
                         setStationDescription(event.target.value)
                       }
-                      placeholder="Sawing and prep"
+                      placeholder={t("settings.operations.descriptionPlaceholder")}
                       className="h-10 text-sm"
                     />
                     <label className="flex flex-col gap-2 text-sm font-medium">
-                      <span>Tracking mode</span>
+                      <span>{t("settings.operations.trackingMode")}</span>
                       <Select
                         value={stationTrackingMode}
                         onValueChange={(value) =>
@@ -4662,7 +4719,11 @@ export default function SettingsPage() {
                         <SelectContent>
                           {stationTrackingModeOptions.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
-                              {option.label}
+                              {optionLabel(
+                                "stationTrackingMode",
+                                option.value,
+                                option.label,
+                              )}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -4670,11 +4731,13 @@ export default function SettingsPage() {
                     </label>
                     <div className="flex flex-wrap items-center gap-2 md:col-span-2 xl:col-span-1 xl:justify-end">
                       <Button onClick={handleSaveStation}>
-                        {editingStationId ? "Save station" : "Add station"}
+                        {editingStationId
+                          ? t("settings.operations.saveStation")
+                          : t("settings.operations.addStation")}
                       </Button>
                       {editingStationId && (
                         <Button variant="outline" onClick={resetStationForm}>
-                          Cancel
+                          {t("settings.common.cancel")}
                         </Button>
                       )}
                     </div>
@@ -4683,7 +4746,9 @@ export default function SettingsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0 text-sm text-muted-foreground">
                       {selectedWorkStationIds.length > 0
-                        ? `${selectedWorkStationIds.length} selected`
+                        ? t("settings.common.selectedCount", {
+                            count: selectedWorkStationIds.length,
+                          })
                         : " "}
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -4706,7 +4771,7 @@ export default function SettingsPage() {
                           }}
                           disabled={displayStations.length === 0}
                         />
-                        Select all
+                        {t("settings.operations.selectAll")}
                       </label>
                       <Button
                         size="sm"
@@ -4714,7 +4779,7 @@ export default function SettingsPage() {
                         onClick={handleDeleteSelectedWorkStations}
                         disabled={selectedWorkStationIds.length === 0}
                       >
-                        Remove selected
+                        {t("settings.common.removeSelected")}
                       </Button>
                     </div>
                   </div>
@@ -4735,12 +4800,13 @@ export default function SettingsPage() {
                               <span className="flex h-6 w-6 items-center justify-center rounded-full border border-border text-xs text-muted-foreground">
                                 {index + 1}
                               </span>
-                              <span className="break-words text-md font-semibold leading-tight">
+                              <span className="wrap-break-word text-md font-semibold leading-tight">
                                 {station.name}
                               </span>
                             </div>
-                            <div className="mt-1 break-words text-sm text-muted-foreground">
-                              {station.description ?? "No description"}
+                            <div className="mt-1 wrap-break-word text-sm text-muted-foreground">
+                              {station.description ??
+                                t("settings.operations.noDescription")}
                             </div>
                           </div>
                           <label className="flex items-center gap-2 text-sm lg:mt-1">
@@ -4752,7 +4818,7 @@ export default function SettingsPage() {
                                 })
                               }
                             />
-                            Active
+                            {t("settings.common.active")}
                           </label>
                         </div>
                         <div className="mt-3 grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
@@ -4773,7 +4839,11 @@ export default function SettingsPage() {
                                   key={option.value}
                                   value={option.value}
                                 >
-                                  {option.label}
+                                  {optionLabel(
+                                    "stationTrackingMode",
+                                    option.value,
+                                    option.label,
+                                  )}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -4799,7 +4869,9 @@ export default function SettingsPage() {
                               onClick={async () => {
                                 if (
                                   !(await confirmRemove(
-                                    `Remove workstation "${station.name}"?`,
+                                    t("settings.operations.removeWorkstationConfirm", {
+                                      name: station.name,
+                                    }),
                                   ))
                                 ) {
                                   return;
@@ -4833,15 +4905,17 @@ export default function SettingsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>QR label settings</CardTitle>
+                  <CardTitle>{t("settings.operations.qrLabelTitle")}</CardTitle>
                   <CardDescription>
-                    Configure the default QR label layout for production.
+                    {t("settings.operations.qrLabelDescription")}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
                     <div className="space-y-2">
-                      <div className="text-sm font-medium">Label sizes</div>
+                      <div className="text-sm font-medium">
+                        {t("settings.operations.labelSizes")}
+                      </div>
                       <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
                         {qrLabelSizeOptions.map((option) => {
                           const checked = qrEnabledSizes.includes(option.value);
@@ -4863,14 +4937,16 @@ export default function SettingsPage() {
                                   });
                                 }}
                               />
-                              {option.label}
+                              {optionLabel("qrSize", option.value, option.label)}
                             </label>
                           );
                         })}
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <div className="text-sm font-medium">Default size</div>
+                      <div className="text-sm font-medium">
+                        {t("settings.operations.defaultSize")}
+                      </div>
                       <Select
                         value={qrDefaultSize}
                         onValueChange={setQrDefaultSize}
@@ -4888,19 +4964,25 @@ export default function SettingsPage() {
                                 key={option.value}
                                 value={option.value}
                               >
-                                {option.label}
+                                {optionLabel(
+                                  "qrContentField",
+                                  option.value,
+                                  option.label,
+                                )}
                               </SelectItem>
                             ))}
                         </SelectContent>
                       </Select>
                       <div className="text-xs text-muted-foreground">
-                        Used as the default print format in Production.
+                        {t("settings.operations.defaultPrintHint")}
                       </div>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-sm font-medium">Content fields</div>
+                    <div className="text-sm font-medium">
+                      {t("settings.operations.contentFields")}
+                    </div>
                     <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
                       {qrContentFieldOptions.map((option) => {
                         const checked = qrContentFields.includes(option.value);
@@ -4927,7 +5009,12 @@ export default function SettingsPage() {
                                 string,
                                 { label?: string }
                               >
-                            )[option.value]?.label ?? option.label}
+                            )[option.value]?.label ??
+                              optionLabel(
+                                "qrContentField",
+                                option.value,
+                                option.label,
+                              )}
                           </label>
                         );
                       })}
@@ -4940,8 +5027,8 @@ export default function SettingsPage() {
                       disabled={qrSettingsState === "saving"}
                     >
                       {qrSettingsState === "saving"
-                        ? "Saving..."
-                        : "Save QR settings"}
+                        ? t("settings.users.saving")
+                        : t("settings.operations.saveQrSettings")}
                     </Button>
                     {qrSettingsState !== "idle" && qrSettingsMessage ? (
                       <span
@@ -4960,10 +5047,9 @@ export default function SettingsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Notifications</CardTitle>
+                  <CardTitle>{t("settings.operations.notificationsTitle")}</CardTitle>
                   <CardDescription>
-                    Choose who receives system notifications about blocked and
-                    resumed work.
+                    {t("settings.operations.notificationsDescription")}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -5001,8 +5087,8 @@ export default function SettingsPage() {
                       disabled={notificationState === "saving"}
                     >
                       {notificationState === "saving"
-                        ? "Saving..."
-                        : "Save notification roles"}
+                        ? t("settings.users.saving")
+                        : t("settings.operations.saveNotificationRoles")}
                     </Button>
                     {notificationState !== "idle" && notificationMessage ? (
                       <span
@@ -5021,15 +5107,17 @@ export default function SettingsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Station dependencies</CardTitle>
+                  <CardTitle>
+                    {t("settings.operations.stationDependenciesTitle")}
+                  </CardTitle>
                   <CardDescription>
-                    Define which stations must finish before another can start.
+                    {t("settings.operations.stationDependenciesDescription")}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {displayStations.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                      Add work stations to configure dependencies.
+                      {t("settings.operations.addStationsForDependencies")}
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -5050,7 +5138,7 @@ export default function SettingsPage() {
                             </div>
                             {available.length === 0 ? (
                               <div className="mt-2 text-xs text-muted-foreground">
-                                No other stations available.
+                                {t("settings.operations.noOtherStations")}
                               </div>
                             ) : (
                               <div className="mt-2 flex flex-wrap gap-2 text-xs">
@@ -5092,9 +5180,11 @@ export default function SettingsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Operator station assignments</CardTitle>
+                  <CardTitle>
+                    {t("settings.operations.operatorAssignmentsTitle")}
+                  </CardTitle>
                   <CardDescription>
-                    Assign users to one or more stations for the operator view.
+                    {t("settings.operations.operatorAssignmentsDescription")}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -5107,7 +5197,9 @@ export default function SettingsPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-muted/40 text-muted-foreground">
                         <tr>
-                          <th className="px-4 py-2 text-left">User</th>
+                          <th className="px-4 py-2 text-left">
+                            {t("settings.operations.user")}
+                          </th>
                           {displayStations.map((station) => (
                             <th
                               key={station.id}
@@ -5127,7 +5219,7 @@ export default function SettingsPage() {
                             >
                               <LoadingSpinner
                                 className="justify-center"
-                                label="Loading assignments..."
+                                label={t("settings.operations.loadingAssignments")}
                               />
                             </td>
                           </tr>
@@ -5137,7 +5229,7 @@ export default function SettingsPage() {
                               colSpan={Math.max(1, displayStations.length + 1)}
                               className="px-4 py-6 text-center text-muted-foreground"
                             >
-                              No users found.
+                              {t("settings.users.noUsers")}
                             </td>
                           </tr>
                         ) : (
@@ -5169,7 +5261,7 @@ export default function SettingsPage() {
                                         }
                                       />
                                       <span className="text-xs text-muted-foreground">
-                                        Assigned
+                                        {t("settings.operations.assigned")}
                                       </span>
                                     </label>
                                   </td>
@@ -5187,27 +5279,29 @@ export default function SettingsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Stop Reasons</CardTitle>
+                <CardTitle>{t("settings.operations.stopReasonsTitle")}</CardTitle>
                 <CardDescription>
-                  Reasons appear when a station pauses a task.
+                  {t("settings.operations.stopReasonsDescription")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto] lg:items-end">
                   <InputField
-                    label="Reason"
+                    label={t("settings.operations.reason")}
                     value={stopReasonLabel}
                     onChange={(event) => setStopReasonLabel(event.target.value)}
-                    placeholder="Missing material"
+                    placeholder={t("settings.operations.reasonPlaceholder")}
                     className="h-10 text-sm"
                   />
                   <div className="flex gap-2">
                     <Button onClick={handleSaveStopReason}>
-                      {editingStopReasonId ? "Save reason" : "Add reason"}
+                      {editingStopReasonId
+                        ? t("settings.operations.saveReason")
+                        : t("settings.operations.addReason")}
                     </Button>
                     {editingStopReasonId && (
                       <Button variant="outline" onClick={resetStopReasonForm}>
-                        Cancel
+                        {t("settings.common.cancel")}
                       </Button>
                     )}
                   </div>
@@ -5217,7 +5311,9 @@ export default function SettingsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0 text-sm text-muted-foreground">
                       {selectedStopReasonIds.length > 0
-                        ? `${selectedStopReasonIds.length} selected`
+                        ? t("settings.common.selectedCount", {
+                            count: selectedStopReasonIds.length,
+                          })
                         : " "}
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -5239,7 +5335,7 @@ export default function SettingsPage() {
                           }}
                           disabled={stopReasons.length === 0}
                         />
-                        Select all
+                        {t("settings.operations.selectAll")}
                       </label>
                       <Button
                         size="sm"
@@ -5247,7 +5343,7 @@ export default function SettingsPage() {
                         onClick={handleDeleteSelectedStopReasons}
                         disabled={selectedStopReasonIds.length === 0}
                       >
-                        Remove selected
+                        {t("settings.common.removeSelected")}
                       </Button>
                     </div>
                   </div>
@@ -5267,7 +5363,7 @@ export default function SettingsPage() {
                               })
                             }
                           />
-                          Active
+                          {t("settings.common.active")}
                         </label>
                         <Button
                           variant="outline"
@@ -5289,7 +5385,9 @@ export default function SettingsPage() {
                           onClick={async () => {
                             if (
                               !(await confirmRemove(
-                                `Remove reason "${reason.label}"?`,
+                                t("settings.operations.removeReasonConfirm", {
+                                  label: reason.label,
+                                }),
                               ))
                             ) {
                               return;
@@ -5325,40 +5423,44 @@ export default function SettingsPage() {
             {isSettingsDataLoading ? (
               <Card className="min-w-0">
                 <CardContent className="py-10">
-                  <LoadingSpinner label="Loading partner settings..." />
+                  <LoadingSpinner label={t("settings.partners.loading")} />
                 </CardContent>
               </Card>
             ) : null}
             <Card>
               <CardHeader>
-                <CardTitle>Partners</CardTitle>
+                <CardTitle>{t("settings.partners.title")}</CardTitle>
                 <CardDescription>
-                  Maintain external suppliers for outsourced steps.
+                  {t("settings.partners.description")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="min-w-0 space-y-4">
                 <div className="border-t border-border pt-4 pb-8">
-                  <div className="text-sm font-medium">Partner groups</div>
+                  <div className="text-sm font-medium">
+                    {t("settings.partners.partnerGroups")}
+                  </div>
                   <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
                     <InputField
-                      label="Group name"
+                      label={t("settings.partners.groupName")}
                       value={partnerGroupName}
                       onChange={(event) =>
                         setPartnerGroupName(event.target.value)
                       }
-                      placeholder="Glass"
+                      placeholder={t("settings.partners.groupNamePlaceholder")}
                       className="h-10 text-sm"
                     />
                     <div className="flex gap-2">
                       <Button onClick={handleSavePartnerGroup}>
-                        {editingPartnerGroupId ? "Save group" : "Add group"}
+                        {editingPartnerGroupId
+                          ? t("settings.partners.saveGroup")
+                          : t("settings.partners.addGroup")}
                       </Button>
                       {editingPartnerGroupId && (
                         <Button
                           variant="outline"
                           onClick={resetPartnerGroupForm}
                         >
-                          Cancel
+                          {t("settings.common.cancel")}
                         </Button>
                       )}
                     </div>
@@ -5367,7 +5469,9 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-sm text-muted-foreground">
                         {selectedPartnerGroupIds.length > 0
-                          ? `${selectedPartnerGroupIds.length} selected`
+                          ? t("settings.common.selectedCount", {
+                              count: selectedPartnerGroupIds.length,
+                            })
                           : " "}
                       </div>
                       <div className="flex items-center gap-2">
@@ -5390,7 +5494,7 @@ export default function SettingsPage() {
                             }}
                             disabled={partnerGroups.length === 0}
                           />
-                          Select all
+                          {t("settings.operations.selectAll")}
                         </label>
                         <Button
                           size="sm"
@@ -5398,7 +5502,7 @@ export default function SettingsPage() {
                           onClick={handleDeleteSelectedPartnerGroups}
                           disabled={selectedPartnerGroupIds.length === 0}
                         >
-                          Remove selected
+                          {t("settings.common.removeSelected")}
                         </Button>
                       </div>
                     </div>
@@ -5418,7 +5522,7 @@ export default function SettingsPage() {
                                 })
                               }
                             />
-                            Active
+                            {t("settings.common.active")}
                           </label>
                           <Button
                             variant="outline"
@@ -5440,7 +5544,9 @@ export default function SettingsPage() {
                             onClick={async () => {
                               if (
                                 !(await confirmRemove(
-                                  `Remove group "${group.name}"?`,
+                                  t("settings.partners.removeGroupConfirm", {
+                                    name: group.name,
+                                  }),
                                 ))
                               ) {
                                 return;
@@ -5467,7 +5573,7 @@ export default function SettingsPage() {
                     ))}
                     {partnerGroups.length === 0 && (
                       <div className="text-sm text-muted-foreground">
-                        No partner groups yet.
+                        {t("settings.partners.noPartnerGroups")}
                       </div>
                     )}
                   </div>
@@ -5475,10 +5581,10 @@ export default function SettingsPage() {
 
                 <div className="border-t border-border pt-4 grid gap-3 lg:grid-cols-[minmax(200px,1fr)_minmax(180px,0.8fr)_minmax(180px,0.8fr)_minmax(180px,0.8fr)_auto] lg:items-end">
                   <InputField
-                    label="Partner name"
+                    label={t("settings.partners.partnerName")}
                     value={partnerName}
                     onChange={(event) => setPartnerName(event.target.value)}
-                    placeholder="Baltic Glass"
+                    placeholder={t("settings.partners.partnerNamePlaceholder")}
                     className="h-10 text-sm"
                   />
                   <InputField
@@ -5490,14 +5596,14 @@ export default function SettingsPage() {
                     className="h-10 text-sm"
                   />
                   <InputField
-                    label="Phone"
+                    label={t("profile.phone")}
                     value={partnerPhone}
                     onChange={(event) => setPartnerPhone(event.target.value)}
                     placeholder="+371 2xxxxxxx"
                     className="h-10 text-sm"
                   />
                   <SelectField
-                    label="Group"
+                    label={t("settings.partners.group")}
                     value={partnerGroupId || "__none__"}
                     onValueChange={(value) =>
                       setPartnerGroupId(value === "__none__" ? "" : value)
@@ -5513,7 +5619,9 @@ export default function SettingsPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">No group</SelectItem>
+                        <SelectItem value="__none__">
+                          {t("settings.partners.noGroup")}
+                        </SelectItem>
                         {partnerGroups
                           .filter((group) => group.isActive)
                           .map((group) => (
@@ -5526,11 +5634,13 @@ export default function SettingsPage() {
                   </SelectField>
                   <div className="flex gap-2">
                     <Button onClick={handleSavePartner}>
-                      {editingPartnerId ? "Save partner" : "Add partner"}
+                      {editingPartnerId
+                        ? t("settings.partners.savePartner")
+                        : t("settings.partners.addPartner")}
                     </Button>
                     {editingPartnerId && (
                       <Button variant="outline" onClick={resetPartnerForm}>
-                        Cancel
+                        {t("settings.common.cancel")}
                       </Button>
                     )}
                   </div>
@@ -5540,7 +5650,9 @@ export default function SettingsPage() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm text-muted-foreground">
                       {selectedPartnerIds.length > 0
-                        ? `${selectedPartnerIds.length} selected`
+                        ? t("settings.common.selectedCount", {
+                            count: selectedPartnerIds.length,
+                          })
                         : " "}
                     </div>
                     <div className="flex items-center gap-2">
@@ -5562,7 +5674,7 @@ export default function SettingsPage() {
                           }}
                           disabled={partners.length === 0}
                         />
-                        Select all
+                        {t("settings.operations.selectAll")}
                       </label>
                       <Button
                         size="sm"
@@ -5570,7 +5682,7 @@ export default function SettingsPage() {
                         onClick={handleDeleteSelectedPartners}
                         disabled={selectedPartnerIds.length === 0}
                       >
-                        Remove selected
+                        {t("settings.common.removeSelected")}
                       </Button>
                     </div>
                   </div>
@@ -5585,8 +5697,8 @@ export default function SettingsPage() {
                           {partner.groupId
                             ? (partnerGroups.find(
                                 (group) => group.id === partner.groupId,
-                              )?.name ?? "Group")
-                            : "No group"}
+                              )?.name ?? t("settings.partners.group"))
+                            : t("settings.partners.noGroup")}
                         </div>
                         {(partner.email || partner.phone) && (
                           <div className="mt-1 text-xs text-muted-foreground">
@@ -5605,8 +5717,8 @@ export default function SettingsPage() {
                                 isActive: event.target.checked,
                               })
                             }
-                          />
-                          Active
+                            />
+                          {t("settings.common.active")}
                         </label>
                         <Button
                           variant="outline"
@@ -5628,7 +5740,9 @@ export default function SettingsPage() {
                           onClick={async () => {
                             if (
                               !(await confirmRemove(
-                                `Remove partner "${partner.name}"?`,
+                                t("settings.partners.removePartnerConfirm", {
+                                  name: partner.name,
+                                }),
                               ))
                             ) {
                               return;
@@ -5655,7 +5769,7 @@ export default function SettingsPage() {
                   ))}
                   {partners.length === 0 && (
                     <div className="text-sm text-muted-foreground">
-                      No partners yet.
+                      {t("settings.partners.noPartners")}
                     </div>
                   )}
                 </div>
@@ -5664,20 +5778,20 @@ export default function SettingsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>External job schema</CardTitle>
+                <CardTitle>{t("settings.partners.externalSchemaTitle")}</CardTitle>
                 <CardDescription>
-                  Configure the fields captured for outsourced jobs.
+                  {t("settings.partners.externalSchemaDescription")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {externalJobFields.length === 0 && (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                    No external job fields yet. Add your first field to start.
+                    {t("settings.partners.noExternalFields")}
                   </div>
                 )}
 
                 <div className="text-sm text-muted-foreground">
-                  Add or edit the fields shown on external job forms.
+                  {t("settings.partners.externalFieldsHint")}
                 </div>
 
                 <div className="rounded-lg border border-border bg-muted/20 p-3">
@@ -5689,7 +5803,7 @@ export default function SettingsPage() {
                           setExternalPricingEnabled(event.target.checked)
                         }
                       />
-                      Enable price reconciliation (planned vs invoice)
+                      {t("settings.partners.enablePriceReconciliation")}
                     </label>
                     <div className="flex items-center gap-2">
                       <Button
@@ -5699,8 +5813,8 @@ export default function SettingsPage() {
                         disabled={externalPricingState === "saving"}
                       >
                         {externalPricingState === "saving"
-                          ? "Saving..."
-                          : "Save pricing"}
+                          ? t("settings.users.saving")
+                          : t("settings.partners.savePricing")}
                       </Button>
                       {externalPricingState !== "idle" &&
                       externalPricingMessage ? (
@@ -5755,7 +5869,11 @@ export default function SettingsPage() {
                       <SelectContent>
                         {externalJobFieldTypeOptions.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
-                            {option.label}
+                            {optionLabel(
+                              "externalFieldType",
+                              option.value,
+                              option.label,
+                            )}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -5780,7 +5898,11 @@ export default function SettingsPage() {
                       <SelectContent>
                         {externalJobFieldScopeOptions.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
-                            {option.label}
+                            {optionLabel(
+                              "externalFieldScope",
+                              option.value,
+                              option.label,
+                            )}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -5806,7 +5928,11 @@ export default function SettingsPage() {
                       <SelectContent>
                         {externalJobFieldRoleOptions.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
-                            {option.label}
+                            {optionLabel(
+                              "externalFieldRole",
+                              option.value,
+                              option.label,
+                            )}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -5946,7 +6072,7 @@ export default function SettingsPage() {
                       onClick={handleDeleteSelectedExternalJobFields}
                       disabled={selectedExternalJobFieldIds.length === 0}
                     >
-                      Remove selected
+                      {t("settings.common.removeSelected")}
                     </Button>
                   </div>
                 </div>
@@ -5966,7 +6092,7 @@ export default function SettingsPage() {
                   columns={externalSchemaTableColumns}
                   stickyFirstColumn
                   wrapperClassName="overflow-x-auto overflow-y-hidden rounded-lg border border-border md:overflow-x-visible"
-                  tableClassName="w-full table-auto [&_th]:whitespace-normal [&_th]:break-words [&_td]:whitespace-normal [&_td]:break-words [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4"
+                  tableClassName="w-full table-auto [&_th]:whitespace-normal [&_th]:wrap-break-word [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4"
                   customBody={
                     <>
                       {externalTableColumns.length === 0 ? (
@@ -5975,7 +6101,7 @@ export default function SettingsPage() {
                             colSpan={12}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
-                            No external table columns configured.
+                            {t("settings.partners.noExternalTableColumns")}
                           </td>
                         </tr>
                       ) : (
@@ -6045,7 +6171,7 @@ export default function SettingsPage() {
                                 }}
                               >
                                 <td
-                                  className={`sticky left-0 z-10 min-w-[100px] px-3 py-2 md:min-w-[140px] md:px-4 ${
+                                  className={`sticky left-0 z-10 min-w-25 px-3 py-2 md:min-w-35 md:px-4 ${
                                     dragExternalTableColumnId === column.id
                                       ? "bg-primary/5"
                                       : "bg-background"
@@ -6058,7 +6184,7 @@ export default function SettingsPage() {
                                     >
                                       ::
                                     </span>
-                                    <div className="min-w-[100px] flex-1 md:min-w-[120px]">
+                                    <div className="min-w-25 flex-1 md:min-w-30">
                                       <Input
                                         value={column.label ?? ""}
                                         onChange={(event) =>
@@ -6079,7 +6205,7 @@ export default function SettingsPage() {
                                     </div>
                                   </div>
                                 </td>
-                                <td className="min-w-[120px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-30 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? (externalJobFieldTypeOptions.find(
                                         (option) =>
@@ -6087,7 +6213,7 @@ export default function SettingsPage() {
                                       )?.label ?? field.fieldType)
                                     : "System"}
                                 </td>
-                                <td className="min-w-[130px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-32.5 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? (externalJobFieldScopeOptions.find(
                                         (option) =>
@@ -6096,7 +6222,7 @@ export default function SettingsPage() {
                                       )?.label ?? "Manual entry")
                                     : "External table"}
                                 </td>
-                                <td className="min-w-[120px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-30 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? (externalJobFieldRoleOptions.find(
                                         (option) =>
@@ -6105,27 +6231,27 @@ export default function SettingsPage() {
                                       )?.label ?? "None")
                                     : "--"}
                                 </td>
-                                <td className="min-w-[70px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-17.5 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field ? field.unit || "--" : "--"}
                                 </td>
-                                <td className="min-w-[70px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-17.5 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {fullIndex}
                                 </td>
-                                <td className="min-w-[90px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-22.5 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? field.isRequired
                                       ? "Yes"
                                       : "No"
                                     : "--"}
                                 </td>
-                                <td className="min-w-[80px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-20 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? field.isActive
                                       ? "Yes"
                                       : "No"
                                     : "--"}
                                 </td>
-                                <td className="min-w-[90px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-22.5 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   <Checkbox
                                     checked={column.visible}
                                     onChange={(event) =>
@@ -6142,21 +6268,21 @@ export default function SettingsPage() {
                                     }
                                   />
                                 </td>
-                                <td className="min-w-[70px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-17.5 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? field.aiEnabled
                                       ? "Yes"
                                       : "No"
                                     : "--"}
                                 </td>
-                                <td className="min-w-[110px] px-3 py-2 text-sm md:min-w-0 md:px-4">
+                                <td className="min-w-27.5 px-3 py-2 text-sm md:min-w-0 md:px-4">
                                   {field
                                     ? field.aiMatchOnly
                                       ? "Yes"
                                       : "No"
                                     : "--"}
                                 </td>
-                                <td className="min-w-[290px] px-3 py-2 text-right md:min-w-0 md:px-4">
+                                <td className="min-w-72.5 px-3 py-2 text-right md:min-w-0 md:px-4">
                                   {field ? (
                                     <div className="flex flex-nowrap items-center justify-end gap-2">
                                       <Button
@@ -6247,39 +6373,39 @@ export default function SettingsPage() {
         <TabsContent value="users">
           <Card>
             <CardHeader>
-              <CardTitle>User Access</CardTitle>
+              <CardTitle>{t("settings.users.title")}</CardTitle>
               <CardDescription>
-                Manage who can access this workspace and their role.
+                {t("settings.users.description")}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {isUsersLoading || isInvitesLoading || rolePermissionsLoading ? (
                 <div className="rounded-lg border border-border bg-muted/20 p-4">
-                  <LoadingSpinner label="Loading user access settings..." />
+                  <LoadingSpinner label={t("settings.users.loading")} />
                 </div>
               ) : null}
               <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="text-sm font-medium">Invite user</div>
+                <div className="text-sm font-medium">{t("settings.users.inviteUser")}</div>
                 <div className="mt-3 grid gap-3 items-center md:grid-cols-[minmax(220px,1.2fr)_minmax(200px,1fr)_minmax(140px,0.5fr)_auto] md:items-end">
                   <InputField
-                    label="Email"
+                    label={t("settings.users.email")}
                     type="email"
                     value={inviteEmail}
                     onChange={(event) => setInviteEmail(event.target.value)}
-                    placeholder="user@company.com"
+                    placeholder={t("settings.users.emailPlaceholder")}
                     className="h-10 w-full text-sm"
                     disabled={!canManageRolePermissions}
                   />
                   <InputField
-                    label="Full name"
+                    label={t("settings.users.fullName")}
                     value={inviteFullName}
                     onChange={(event) => setInviteFullName(event.target.value)}
-                    placeholder="Full name"
+                    placeholder={t("settings.users.fullNamePlaceholder")}
                     className="h-10 w-full text-sm"
                     disabled={!canManageRolePermissions}
                   />
                   <SelectField
-                    label="Role"
+                    label={t("settings.users.role")}
                     value={inviteRole}
                     onValueChange={(value) => setInviteRole(value as UserRole)}
                   >
@@ -6308,7 +6434,9 @@ export default function SettingsPage() {
                       !canManageRolePermissions || inviteState === "sending"
                     }
                   >
-                    {inviteState === "sending" ? "Sending..." : "Send invite"}
+                    {inviteState === "sending"
+                      ? t("settings.users.sending")
+                      : t("settings.users.sendInvite")}
                   </Button>
                 </div>
                 {inviteMessage && (
@@ -6325,7 +6453,7 @@ export default function SettingsPage() {
               </div>
               {!canManageRolePermissions && (
                 <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                  Only Admin and Owner can update user roles or admin access.
+                  {t("settings.users.adminOwnerOnly")}
                 </div>
               )}
               {process.env.NODE_ENV !== "production" &&
@@ -6337,7 +6465,7 @@ export default function SettingsPage() {
                         setDevRoleOverride(event.target.checked)
                       }
                     />
-                    Dev override: allow changing your own role
+                    {t("settings.users.devOverride")}
                   </label>
                 )}
               {usersError && (
@@ -6350,15 +6478,15 @@ export default function SettingsPage() {
                 rows={isUsersLoading ? [] : users}
                 getRowId={(user) => user.id}
                 wrapperClassName="overflow-x-auto overflow-y-hidden rounded-lg border border-border"
-                tableClassName="w-full [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm [&_th]:whitespace-normal [&_th]:break-words [&_td]:whitespace-normal md:[&_th]:px-4 md:[&_td]:px-4"
+                tableClassName="w-full [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm [&_th]:whitespace-normal [&_th]:wrap-break-word [&_td]:whitespace-normal md:[&_th]:px-4 md:[&_td]:px-4"
                 emptyState={
                   isUsersLoading ? (
                     <LoadingSpinner
                       className="justify-center"
-                      label="Loading users..."
+                      label={t("settings.users.loadingUsers")}
                     />
                   ) : (
-                    "No users found."
+                    t("settings.users.noUsers")
                   )
                 }
                 renderCell={(user, column) => {
@@ -6389,7 +6517,7 @@ export default function SettingsPage() {
                           ].map((roleOption) => (
                             <SelectItem key={roleOption} value={roleOption}>
                               {roleOption === "Admin"
-                                ? "Admin (legacy)"
+                                ? t("settings.users.adminLegacy")
                                 : formatUserRoleLabel(roleOption)}
                             </SelectItem>
                           ))}
@@ -6407,7 +6535,7 @@ export default function SettingsPage() {
                           }
                           disabled={user.isOwner || !canManageRolePermissions}
                         />
-                        Owner
+                        {t("settings.users.owner")}
                       </label>
                     );
                   }
@@ -6421,7 +6549,7 @@ export default function SettingsPage() {
                           }
                           disabled={user.isOwner || !canManageRolePermissions}
                         />
-                        Admin
+                        {t("settings.users.admin")}
                       </label>
                     );
                   }
@@ -6433,9 +6561,9 @@ export default function SettingsPage() {
                     return (
                       <div className="flex items-center justify-end gap-2">
                         <span className="text-xs text-muted-foreground">
-                          {updatingUserId === user.id ? "Saving..." : ""}
+                          {updatingUserId === user.id ? t("settings.users.saving") : ""}
                         </span>
-                        <Tooltip content="Deactivate keeps a user record marked inactive and removes workspace access.">
+                        <Tooltip content={t("settings.users.deactivateHint")}>
                           <InfoIcon className="h-3.5 w-3.5 text-muted-foreground" />
                         </Tooltip>
                         <Button
@@ -6449,10 +6577,10 @@ export default function SettingsPage() {
                           onClick={() => void handleDeactivateUser(user.id)}
                         >
                           {deactivatingUserId === user.id
-                            ? "Deactivating..."
-                            : "Deactivate"}
+                            ? t("settings.users.deactivating")
+                            : t("settings.users.deactivate")}
                         </Button>
-                        <Tooltip content="Remove detaches the user from this workspace. Account stays in authentication system.">
+                        <Tooltip content={t("settings.users.removeHint")}>
                           <InfoIcon className="h-3.5 w-3.5 text-muted-foreground" />
                         </Tooltip>
                         <Button
@@ -6470,8 +6598,8 @@ export default function SettingsPage() {
                           }
                         >
                           {removingUserId === user.id
-                            ? "Removing..."
-                            : "Remove"}
+                            ? t("settings.users.removing")
+                            : t("settings.users.remove")}
                         </Button>
                       </div>
                     );
@@ -6480,7 +6608,9 @@ export default function SettingsPage() {
                 }}
               />
               <div className="space-y-2">
-                <div className="text-sm font-medium">Invites</div>
+                <div className="text-sm font-medium">
+                  {t("settings.users.invites")}
+                </div>
                 <div className="overflow-x-auto rounded-lg border border-border">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/40 text-muted-foreground">
@@ -6511,7 +6641,7 @@ export default function SettingsPage() {
                           >
                             <LoadingSpinner
                               className="justify-center"
-                              label="Loading invites..."
+                              label={t("settings.users.loadingInvites")}
                             />
                           </td>
                         </tr>
@@ -6521,7 +6651,7 @@ export default function SettingsPage() {
                             colSpan={5}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
-                            No invites yet.
+                            {t("settings.users.noInvites")}
                           </td>
                         </tr>
                       ) : (
@@ -6536,7 +6666,9 @@ export default function SettingsPage() {
                             </td>
                             <td className="px-4 py-2">{invite.role}</td>
                             <td className="px-4 py-2 text-xs text-muted-foreground">
-                              {invite.acceptedAt ? "Accepted" : "Pending"}
+                              {invite.acceptedAt
+                                ? t("settings.users.accepted")
+                                : t("settings.users.pending")}
                             </td>
                             <td className="px-4 py-2 text-right">
                               <div className="flex items-center justify-end gap-2">
@@ -6555,10 +6687,10 @@ export default function SettingsPage() {
                                   {resendingInviteEmail === invite.email ? (
                                     <span className="inline-flex items-center gap-2">
                                       <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                      Resending...
+                                      {t("settings.users.resending")}
                                     </span>
                                   ) : (
-                                    "Resend"
+                                    t("settings.users.resend")
                                   )}
                                 </Button>
                                 <Button
@@ -6570,7 +6702,7 @@ export default function SettingsPage() {
                                     !canManageRolePermissions
                                   }
                                 >
-                                  Cancel
+                                  {t("settings.common.cancel")}
                                 </Button>
                               </div>
                             </td>
@@ -6595,9 +6727,11 @@ export default function SettingsPage() {
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium">Role permissions</div>
+                    <div className="text-sm font-medium">
+                      {t("settings.users.rolePermissions")}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      RBAC rules saved in database and used across UI + server.
+                      {t("settings.users.rolePermissionsHint")}
                     </div>
                   </div>
                   <Button
@@ -6609,12 +6743,14 @@ export default function SettingsPage() {
                       !hasPermissionChanges
                     }
                   >
-                    {permissionState === "saving" ? "Saving..." : "Save RBAC"}
+                    {permissionState === "saving"
+                      ? t("settings.users.saving")
+                      : t("settings.users.saveRbac")}
                   </Button>
                 </div>
                 {rolePermissionsLoading ? (
                   <div className="rounded-md border border-border bg-muted/20 px-3 py-3">
-                    <LoadingSpinner label="Loading RBAC..." />
+                    <LoadingSpinner label={t("settings.users.loadingRbac")} />
                   </div>
                 ) : null}
                 {rolePermissionsError ? (
@@ -6638,7 +6774,7 @@ export default function SettingsPage() {
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2 text-left font-medium">
-                          Permission
+                          {t("settings.users.permission")}
                         </th>
                         {editablePermissionRoles.map((role) => (
                           <th
@@ -6700,9 +6836,9 @@ export default function SettingsPage() {
         <TabsContent value="workflow">
           <Card>
             <CardHeader>
-              <CardTitle>Workflow Rules</CardTitle>
+              <CardTitle>{t("settings.workflow.rulesTitle")}</CardTitle>
               <CardDescription>
-                Define what must be complete before moving orders forward.
+                {t("settings.workflow.rulesDescription")}
               </CardDescription>
               {saveError ? (
                 <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -6713,15 +6849,17 @@ export default function SettingsPage() {
             <CardContent className="space-y-6">
               {!isLoadedFromDb ? (
                 <div className="rounded-lg border border-border bg-muted/20 p-4">
-                  <LoadingSpinner label="Syncing workflow rules..." />
+                  <LoadingSpinner label={t("settings.workflow.syncing")} />
                 </div>
               ) : null}
               <div className="grid gap-6">
                 <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                  <div className="text-sm font-semibold">Core rules</div>
+                  <div className="text-sm font-semibold">
+                    {t("settings.workflow.coreRules")}
+                  </div>
                   <div className="mt-3 grid gap-4 lg:grid-cols-3">
                     <label className="space-y-2 text-sm font-medium">
-                      Min attachments for engineering
+                      {t("settings.workflow.minAttachmentsEngineering")}
                       <Input
                         type="number"
                         min={0}
@@ -6736,7 +6874,7 @@ export default function SettingsPage() {
                       />
                     </label>
                     <label className="space-y-2 text-sm font-medium">
-                      Min attachments for production
+                      {t("settings.workflow.minAttachmentsProduction")}
                       <Input
                         type="number"
                         min={0}
@@ -6751,7 +6889,7 @@ export default function SettingsPage() {
                       />
                     </label>
                     <label className="space-y-2 text-sm font-medium">
-                      Due soon threshold (days)
+                      {t("settings.workflow.dueSoonThresholdDays")}
                       <Input
                         type="number"
                         min={0}
@@ -6778,7 +6916,7 @@ export default function SettingsPage() {
                           })
                         }
                       />
-                      Require comment before engineering
+                      {t("settings.workflow.requireCommentEngineering")}
                     </label>
                     <label className="flex items-center gap-2">
                       <Checkbox
@@ -6789,7 +6927,7 @@ export default function SettingsPage() {
                           })
                         }
                       />
-                      Require comment before production
+                      {t("settings.workflow.requireCommentProduction")}
                     </label>
                     <label className="flex items-center gap-2">
                       <Checkbox
@@ -6801,7 +6939,7 @@ export default function SettingsPage() {
                           })
                         }
                       />
-                      Require order inputs before engineering
+                      {t("settings.workflow.requireOrderInputsEngineering")}
                     </label>
                     <label className="flex items-center gap-2">
                       <Checkbox
@@ -6813,7 +6951,7 @@ export default function SettingsPage() {
                           })
                         }
                       />
-                      Require order inputs before production
+                      {t("settings.workflow.requireOrderInputsProduction")}
                     </label>
                   </div>
                   <div className="mt-4 rounded-lg border border-border bg-background/60 p-3">
@@ -6826,7 +6964,7 @@ export default function SettingsPage() {
                           })
                         }
                       />
-                      Enable due date indicators
+                      {t("settings.workflow.enableDueDateIndicators")}
                     </label>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                       {workflowStatusOptions.map((option) => {
@@ -6854,7 +6992,11 @@ export default function SettingsPage() {
                                 });
                               }}
                             />
-                            {option.label}
+                            {optionLabel(
+                              "workflowStatus",
+                              option.value,
+                              option.label,
+                            )}
                           </label>
                         );
                       })}
@@ -6865,13 +7007,14 @@ export default function SettingsPage() {
                 <div className="grid gap-6 lg:grid-cols-2">
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                     <div className="text-sm font-semibold">
-                      Order status configuration
+                      {t("settings.workflow.orderStatusConfiguration")}
                     </div>
                     <div className="mt-2 space-y-2">
                       {workflowStatusOptions.map((option) => {
                         const config = orderStatusConfigDrafts[option.value];
                         const previewLabel =
-                          config?.label?.trim() || option.label;
+                          config?.label?.trim() ||
+                          optionLabel("workflowStatus", option.value, option.label);
                         return (
                           <div
                             key={option.value}
@@ -6879,7 +7022,11 @@ export default function SettingsPage() {
                           >
                             <div className="mb-2 flex items-center justify-between gap-3">
                               <div className="text-sm font-medium">
-                                {option.label}
+                                {optionLabel(
+                                  "workflowStatus",
+                                  option.value,
+                                  option.label,
+                                )}
                               </div>
                               <span
                                 className={`inline-flex w-fit items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getStatusBadgeColorClass(config?.color)}`}
@@ -6889,7 +7036,14 @@ export default function SettingsPage() {
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                               <Input
-                                value={config?.label ?? option.label}
+                                value={
+                                  config?.label ??
+                                  optionLabel(
+                                    "workflowStatus",
+                                    option.value,
+                                    option.label,
+                                  )
+                                }
                                 onChange={(event) =>
                                   setOrderStatusConfigDrafts((prev) => ({
                                     ...prev,
@@ -6926,7 +7080,11 @@ export default function SettingsPage() {
                                         <span
                                           className={`inline-block h-2.5 w-2.5 rounded-full ${colorOption.swatchClass}`}
                                         />
-                                        {colorOption.label}
+                                        {optionLabel(
+                                          "statusColor",
+                                          colorOption.value,
+                                          colorOption.label,
+                                        )}
                                       </span>
                                     </SelectItem>
                                   ))}
@@ -6940,7 +7098,7 @@ export default function SettingsPage() {
                                     className="text-xs text-muted-foreground"
                                     title="Required for workflow transitions"
                                   >
-                                    Required
+                                    {t("settings.common.required")}
                                   </span>
                                 ) : null}
                                 <Checkbox
@@ -6958,7 +7116,7 @@ export default function SettingsPage() {
                                     }))
                                   }
                                 />
-                                <span>Active</span>
+                                <span>{t("settings.common.active")}</span>
                               </label>
                             </div>
                           </div>
@@ -6973,7 +7131,7 @@ export default function SettingsPage() {
                         }
                         disabled={!hasStatusLabelChanges}
                       >
-                        Reset
+                        {t("settings.workflow.reset")}
                       </Button>
                       <Button
                         onClick={handleSaveStatusLabels}
@@ -6983,8 +7141,8 @@ export default function SettingsPage() {
                         }
                       >
                         {statusLabelState === "saving"
-                          ? "Saving..."
-                          : "Save order statuses"}
+                          ? t("settings.users.saving")
+                          : t("settings.workflow.saveOrderStatuses")}
                       </Button>
                       {statusLabelState !== "idle" && statusLabelMessage && (
                         <span
@@ -7002,14 +7160,19 @@ export default function SettingsPage() {
 
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                     <div className="text-sm font-semibold">
-                      External job status configuration
+                      {t("settings.workflow.externalJobStatusConfiguration")}
                     </div>
                     <div className="mt-2 space-y-2">
                       {externalJobStatusOptions.map((option) => {
                         const config =
                           externalJobStatusConfigDrafts[option.value];
                         const previewLabel =
-                          config?.label?.trim() || option.label;
+                          config?.label?.trim() ||
+                          optionLabel(
+                            "externalJobStatus",
+                            option.value,
+                            option.label,
+                          );
                         return (
                           <div
                             key={option.value}
@@ -7017,7 +7180,11 @@ export default function SettingsPage() {
                           >
                             <div className="mb-2 flex items-center justify-between gap-3">
                               <div className="text-sm font-medium">
-                                {option.label}
+                                {optionLabel(
+                                  "externalJobStatus",
+                                  option.value,
+                                  option.label,
+                                )}
                               </div>
                               <span
                                 className={`inline-flex w-fit items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getStatusBadgeColorClass(config?.color)}`}
@@ -7027,7 +7194,14 @@ export default function SettingsPage() {
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                               <Input
-                                value={config?.label ?? option.label}
+                                value={
+                                  config?.label ??
+                                  optionLabel(
+                                    "externalJobStatus",
+                                    option.value,
+                                    option.label,
+                                  )
+                                }
                                 onChange={(event) =>
                                   setExternalJobStatusConfigDrafts((prev) => ({
                                     ...prev,
@@ -7064,7 +7238,11 @@ export default function SettingsPage() {
                                         <span
                                           className={`inline-block h-2.5 w-2.5 rounded-full ${colorOption.swatchClass}`}
                                         />
-                                        {colorOption.label}
+                                        {optionLabel(
+                                          "statusColor",
+                                          colorOption.value,
+                                          colorOption.label,
+                                        )}
                                       </span>
                                     </SelectItem>
                                   ))}
@@ -7078,7 +7256,7 @@ export default function SettingsPage() {
                                     className="text-xs text-muted-foreground"
                                     title="Required for external job lifecycle"
                                   >
-                                    Required
+                                    {t("settings.common.required")}
                                   </span>
                                 ) : null}
                                 <Checkbox
@@ -7098,7 +7276,7 @@ export default function SettingsPage() {
                                     )
                                   }
                                 />
-                                <span>Active</span>
+                                <span>{t("settings.common.active")}</span>
                               </label>
                             </div>
                           </div>
@@ -7115,7 +7293,7 @@ export default function SettingsPage() {
                         }
                         disabled={!hasExternalJobStatusLabelChanges}
                       >
-                        Reset
+                        {t("settings.workflow.reset")}
                       </Button>
                       <Button
                         onClick={handleSaveExternalJobStatusLabels}
@@ -7125,8 +7303,8 @@ export default function SettingsPage() {
                         }
                       >
                         {externalJobStatusLabelState === "saving"
-                          ? "Saving..."
-                          : "Save external statuses"}
+                          ? t("settings.users.saving")
+                          : t("settings.workflow.saveExternalStatuses")}
                       </Button>
                       {externalJobStatusLabelState !== "idle" &&
                         externalJobStatusLabelMessage && (
@@ -7145,11 +7323,11 @@ export default function SettingsPage() {
 
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                     <div className="text-sm font-semibold">
-                      Assignment labels
+                      {t("settings.workflow.assignmentLabels")}
                     </div>
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       <label className="space-y-2 text-sm font-medium">
-                        Engineer
+                        {t("settings.workflow.engineer")}
                         <Input
                           value={assignmentLabelDrafts.engineer}
                           onChange={(event) =>
@@ -7162,7 +7340,7 @@ export default function SettingsPage() {
                         />
                       </label>
                       <label className="space-y-2 text-sm font-medium">
-                        Manager
+                        {t("settings.workflow.manager")}
                         <Input
                           value={assignmentLabelDrafts.manager}
                           onChange={(event) =>
@@ -7188,7 +7366,7 @@ export default function SettingsPage() {
                         }
                         disabled={!hasAssignmentLabelChanges}
                       >
-                        Reset
+                        {t("settings.workflow.reset")}
                       </Button>
                       <Button
                         onClick={handleSaveAssignmentLabels}
@@ -7198,8 +7376,8 @@ export default function SettingsPage() {
                         }
                       >
                         {assignmentLabelState === "saving"
-                          ? "Saving..."
-                          : "Save assignment labels"}
+                          ? t("settings.users.saving")
+                          : t("settings.workflow.saveAssignmentLabels")}
                       </Button>
                       {assignmentLabelState !== "idle" &&
                         assignmentLabelMessage && (
@@ -7218,11 +7396,13 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                  <div className="text-sm font-semibold">Attachments</div>
+                  <div className="text-sm font-semibold">
+                    {t("settings.workflow.attachments")}
+                  </div>
                   <div className="mt-3 grid gap-6 lg:grid-cols-2">
                     <div className="space-y-3">
                       <div className="text-sm font-medium">
-                        Attachment categories
+                        {t("settings.workflow.attachmentCategories")}
                       </div>
                       <div className="grid gap-3">
                         {attachmentCategoryDrafts.map((category) => (
@@ -7263,7 +7443,7 @@ export default function SettingsPage() {
                                   )
                                 }
                               />
-                              Use for AI parsing
+                              {t("settings.workflow.useForAiParsing")}
                             </label>
                             <Button
                               variant="ghost"
@@ -7284,17 +7464,17 @@ export default function SettingsPage() {
                           onChange={(event) =>
                             setNewAttachmentCategoryLabel(event.target.value)
                           }
-                          placeholder="Add category"
+                          placeholder={t("settings.workflow.addCategoryPlaceholder")}
                           className="h-10 min-w-50 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
                         />
                         <Button onClick={handleAddAttachmentCategory}>
-                          Add category
+                          {t("settings.workflow.addCategory")}
                         </Button>
                       </div>
                     </div>
                     <div className="space-y-3">
                       <div className="text-sm font-medium">
-                        Default category by role
+                        {t("settings.workflow.defaultCategoryByRole")}
                       </div>
                       <div className="grid gap-3 md:grid-cols-2">
                         {attachmentRoles.map((role) => (
@@ -7344,12 +7524,10 @@ export default function SettingsPage() {
                         ))}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        New uploads will default to the selected category for
-                        each role.
+                        {t("settings.workflow.newUploadsHint")}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        AI Order Input parsing uses categories marked as
-                        &quot;Use for AI parsing&quot;.
+                        {t("settings.workflow.aiParsingHint")}
                       </p>
                     </div>
                   </div>
@@ -7364,7 +7542,7 @@ export default function SettingsPage() {
                       }}
                       disabled={!hasAttachmentCategoryChanges}
                     >
-                      Reset
+                      {t("settings.workflow.reset")}
                     </Button>
                     <Button
                       onClick={handleSaveAttachmentCategories}
@@ -7374,8 +7552,8 @@ export default function SettingsPage() {
                       }
                     >
                       {attachmentCategoryState === "saving"
-                        ? "Saving..."
-                        : "Save attachment categories"}
+                        ? t("settings.users.saving")
+                        : t("settings.workflow.saveAttachmentCategories")}
                     </Button>
                     {attachmentCategoryState !== "idle" &&
                       attachmentCategoryMessage && (
@@ -7394,12 +7572,14 @@ export default function SettingsPage() {
 
                 {isStationOrderSaving ? (
                   <div className="text-xs text-muted-foreground">
-                    Saving station order...
+                    {t("settings.workflow.savingStationOrder")}
                   </div>
                 ) : null}
 
                 <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                  <div className="text-sm font-semibold">Checklist items</div>
+                  <div className="text-sm font-semibold">
+                    {t("settings.workflow.checklistItems")}
+                  </div>
                   <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
                     <div className="space-y-2">
                       <Input
@@ -7407,7 +7587,7 @@ export default function SettingsPage() {
                         onChange={(event) =>
                           setNewChecklistLabel(event.target.value)
                         }
-                        placeholder="Checklist item"
+                        placeholder={t("settings.workflow.checklistItemPlaceholder")}
                         className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       />
                       <Button
@@ -7419,7 +7599,7 @@ export default function SettingsPage() {
                           setNewChecklistLabel("");
                         }}
                       >
-                        Add item
+                        {t("settings.workflow.addItem")}
                       </Button>
                       <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                         <label className="flex items-center gap-2">
@@ -7439,7 +7619,7 @@ export default function SettingsPage() {
                               });
                             }}
                           />
-                          Required for engineering
+                          {t("settings.workflow.requiredForEngineering")}
                         </label>
                         <label className="flex items-center gap-2">
                           <Checkbox
@@ -7461,7 +7641,7 @@ export default function SettingsPage() {
                               });
                             }}
                           />
-                          Required for production
+                          {t("settings.workflow.requiredForProduction")}
                         </label>
                       </div>
                     </div>
@@ -7491,7 +7671,7 @@ export default function SettingsPage() {
                                 });
                               }}
                             />
-                            Eng.
+                            {t("settings.workflow.engineeringShort")}
                           </label>
                           <label className="flex items-center gap-2">
                             <Checkbox
@@ -7512,7 +7692,7 @@ export default function SettingsPage() {
                                 });
                               }}
                             />
-                            Prod.
+                            {t("settings.workflow.productionShort")}
                           </label>
                           <label className="flex items-center gap-2">
                             <Checkbox
@@ -7523,7 +7703,7 @@ export default function SettingsPage() {
                                 })
                               }
                             />
-                            Active
+                            {t("settings.common.active")}
                           </label>
                         </div>
                         <div className="flex items-center gap-2">
@@ -7533,7 +7713,9 @@ export default function SettingsPage() {
                             onClick={async () => {
                               if (
                                 !(await confirmRemove(
-                                  `Remove checklist item "${item.label}"?`,
+                                  t("settings.workflow.removeChecklistConfirm", {
+                                    label: item.label,
+                                  }),
                                 ))
                               ) {
                                 return;
@@ -7548,7 +7730,7 @@ export default function SettingsPage() {
                     ))}
                     {rules.checklistItems.length === 0 && (
                       <div className="text-sm text-muted-foreground">
-                        No checklist items yet.
+                        {t("settings.workflow.noChecklistItems")}
                       </div>
                     )}
                   </div>
@@ -7556,14 +7738,16 @@ export default function SettingsPage() {
 
                 <div className="grid gap-6 lg:grid-cols-1">
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                    <div className="text-sm font-semibold">Return reasons</div>
+                    <div className="text-sm font-semibold">
+                      {t("settings.workflow.returnReasons")}
+                    </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Input
                         value={newReturnReason}
                         onChange={(event) =>
                           setNewReturnReason(event.target.value)
                         }
-                        placeholder="Add reason"
+                        placeholder={t("settings.workflow.addReasonPlaceholder")}
                         className="h-10 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
                       />
                       <Button
@@ -7572,7 +7756,7 @@ export default function SettingsPage() {
                           setNewReturnReason("");
                         }}
                       >
-                        Add reason
+                        {t("settings.workflow.addReason")}
                       </Button>
                     </div>
                     <div className="mt-3 space-y-2">
@@ -7588,7 +7772,9 @@ export default function SettingsPage() {
                             onClick={async () => {
                               if (
                                 !(await confirmRemove(
-                                  `Remove reason "${reason}"?`,
+                                  t("settings.workflow.removeReasonConfirm", {
+                                    reason,
+                                  }),
                                 ))
                               ) {
                                 return;
@@ -7602,7 +7788,7 @@ export default function SettingsPage() {
                       ))}
                       {rules.returnReasons.length === 0 && (
                         <div className="text-sm text-muted-foreground">
-                          No return reasons yet.
+                          {t("settings.workflow.noReturnReasons")}
                         </div>
                       )}
                     </div>
@@ -7618,33 +7804,37 @@ export default function SettingsPage() {
             {isTenantProfileLoading ? (
               <Card>
                 <CardContent className="py-10">
-                  <LoadingSpinner label="Loading integration settings..." />
+                  <LoadingSpinner
+                    label={t("settings.integrations.loading")}
+                  />
                 </CardContent>
               </Card>
             ) : null}
             <Card>
               <CardHeader>
-                <CardTitle>Outbound Email Sender</CardTitle>
+                <CardTitle>{t("settings.integrations.outboundTitle")}</CardTitle>
                 <CardDescription>
-                  Configure tenant sender identity for partner emails.
+                  {t("settings.integrations.outboundDescription")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2 text-sm font-medium">
-                    From name
+                    {t("settings.integrations.fromName")}
                     <Input
                       value={outboundFromName}
                       onChange={(event) =>
                         setOutboundFromName(event.target.value)
                       }
                       className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      placeholder={companyName || "Company"}
+                      placeholder={
+                        companyName || t("settings.integrations.companyPlaceholder")
+                      }
                       disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
-                    From email (tenant domain)
+                    {t("settings.integrations.fromEmail")}
                     <Input
                       type="email"
                       value={outboundFromEmail}
@@ -7652,12 +7842,12 @@ export default function SettingsPage() {
                         setOutboundFromEmail(event.target.value)
                       }
                       className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      placeholder="orders@your-company.com"
+                      placeholder={t("settings.integrations.fromEmailPlaceholder")}
                       disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <label className="space-y-2 text-sm font-medium">
-                    Default reply-to
+                    {t("settings.integrations.replyTo")}
                     <Input
                       type="email"
                       value={outboundReplyToEmail}
@@ -7665,12 +7855,12 @@ export default function SettingsPage() {
                         setOutboundReplyToEmail(event.target.value)
                       }
                       className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      placeholder="engineering@your-company.com"
+                      placeholder={t("settings.integrations.replyToPlaceholder")}
                       disabled={!currentUser.isAdmin}
                     />
                   </label>
                   <div className="space-y-2 text-sm font-medium">
-                    Sender mode
+                    {t("settings.integrations.senderMode")}
                     <label className="flex items-center gap-2 text-sm font-normal">
                       <Checkbox
                         checked={outboundUseUserSender}
@@ -7679,7 +7869,7 @@ export default function SettingsPage() {
                         }
                         disabled={!currentUser.isAdmin}
                       />
-                      Use engineer email as sender when domain matches
+                      {t("settings.integrations.useEngineerSender")}
                     </label>
                     <label className="flex items-center gap-2 text-sm font-normal">
                       <Checkbox
@@ -7689,23 +7879,23 @@ export default function SettingsPage() {
                         }
                         disabled={!currentUser.isAdmin}
                       />
-                      Domain is verified in Resend
+                      {t("settings.integrations.domainVerified")}
                     </label>
                   </div>
                 </div>
                 <div className="space-y-3 rounded-lg border border-border p-3">
                   <div className="text-sm font-semibold">
-                    External request email template
+                    {t("settings.integrations.templateTitle")}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Available placeholders:
+                    {t("settings.integrations.placeholders")}
                     {
                       " {{order_number}}, {{customer_name}}, {{external_order_number}}, {{due_date}}, {{comment_block}}, {{attachments_block}}, {{comment_line}}, {{attachments_line}}, {{secure_form_link}}, {{expires_at}}, {{partner_name}}, {{sender_name}}, {{sender_email}}, {{tenant_name}}"
                     }
                     .
                   </p>
                   <InputField
-                    label="Subject template"
+                    label={t("settings.integrations.subjectTemplate")}
                     value={externalRequestEmailSubjectTemplate}
                     onChange={(event) =>
                       setExternalRequestEmailSubjectTemplate(event.target.value)
@@ -7714,7 +7904,7 @@ export default function SettingsPage() {
                     disabled={!currentUser.isAdmin}
                   />
                   <TextAreaField
-                    label="HTML template"
+                    label={t("settings.integrations.htmlTemplate")}
                     value={externalRequestEmailHtmlTemplate}
                     onChange={(event) =>
                       setExternalRequestEmailHtmlTemplate(event.target.value)
@@ -7724,7 +7914,7 @@ export default function SettingsPage() {
                     disabled={!currentUser.isAdmin}
                   />
                   <TextAreaField
-                    label="Text template"
+                    label={t("settings.integrations.textTemplate")}
                     value={externalRequestEmailTextTemplate}
                     onChange={(event) =>
                       setExternalRequestEmailTextTemplate(event.target.value)
@@ -7750,13 +7940,12 @@ export default function SettingsPage() {
                       }}
                       disabled={!currentUser.isAdmin}
                     >
-                      Reset default template
+                      {t("settings.integrations.resetDefault")}
                     </Button>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Until tenant domain is verified, emails fallback to global
-                  sender. Reply-to still points to engineer when available.
+                  {t("settings.integrations.domainHint")}
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -7766,8 +7955,8 @@ export default function SettingsPage() {
                     }
                   >
                     {outboundState === "saving"
-                      ? "Saving..."
-                      : "Save outbound email"}
+                      ? t("settings.users.saving")
+                      : t("settings.integrations.saveOutbound")}
                   </Button>
                   {outboundMessage ? (
                     <span
@@ -7785,9 +7974,9 @@ export default function SettingsPage() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Integrations</CardTitle>
+                <CardTitle>{t("settings.section.integrations")}</CardTitle>
                 <CardDescription>
-                  Orders can sync from accounting tools to PWS - coming soon.
+                  {t("settings.integrations.comingSoonDescription")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -7798,15 +7987,17 @@ export default function SettingsPage() {
                   >
                     <div className="font-medium">{integration.name}</div>
                     <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                      {integration.status}
+                      {integration.status === "Coming soon"
+                        ? t("settings.integrations.comingSoon")
+                        : integration.status}
                     </span>
                   </div>
                 ))}
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  Expected flow: accounting order to PWS to production stations.
+                  {t("settings.integrations.expectedFlow")}
                 </div>
                 <Button variant="outline" className="w-full">
-                  Request integration
+                  {t("settings.integrations.requestIntegration")}
                 </Button>
               </CardContent>
             </Card>
@@ -7816,17 +8007,17 @@ export default function SettingsPage() {
       <BottomSheet
         open={isSecurityPromptOpen}
         onClose={closeSecurityPrompt}
-        ariaLabel="Security verification"
-        title="Confirm your password"
-        closeButtonLabel="Close verification"
+        ariaLabel={t("settings.security.ariaLabel")}
+        title={t("settings.security.title")}
+        closeButtonLabel={t("settings.security.close")}
         enableSwipeToClose
       >
         <div className="space-y-3 p-4">
           <p className="text-sm text-muted-foreground">
-            Re-enter your password to confirm Owner/Admin permission changes.
+            {t("settings.security.description")}
           </p>
           <label className="space-y-2 text-sm font-medium">
-            Password
+            {t("settings.security.password")}
             <Input
               type="password"
               value={securityPassword}
@@ -7846,13 +8037,15 @@ export default function SettingsPage() {
           ) : null}
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={closeSecurityPrompt}>
-              Cancel
+              {t("settings.common.cancel")}
             </Button>
             <Button
               onClick={handleConfirmSecurityVerification}
               disabled={securityState === "verifying"}
             >
-              {securityState === "verifying" ? "Verifying..." : "Confirm"}
+              {securityState === "verifying"
+                ? t("settings.security.verifying")
+                : t("settings.security.confirm")}
             </Button>
           </div>
         </div>
@@ -7860,12 +8053,12 @@ export default function SettingsPage() {
       {isSecurityPromptOpen ? (
         <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
-            <h2 className="text-lg font-semibold">Confirm your password</h2>
+            <h2 className="text-lg font-semibold">{t("settings.security.title")}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Re-enter your password to confirm Owner/Admin permission changes.
+              {t("settings.security.description")}
             </p>
             <label className="mt-4 block space-y-2 text-sm font-medium">
-              Password
+              {t("settings.security.password")}
               <Input
                 type="password"
                 value={securityPassword}
@@ -7885,13 +8078,15 @@ export default function SettingsPage() {
             ) : null}
             <div className="mt-6 flex items-center justify-end gap-2">
               <Button variant="outline" onClick={closeSecurityPrompt}>
-                Cancel
+                {t("settings.common.cancel")}
               </Button>
               <Button
                 onClick={handleConfirmSecurityVerification}
                 disabled={securityState === "verifying"}
               >
-                {securityState === "verifying" ? "Verifying..." : "Confirm"}
+                {securityState === "verifying"
+                  ? t("settings.security.verifying")
+                  : t("settings.security.confirm")}
               </Button>
             </div>
           </div>

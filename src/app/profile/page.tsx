@@ -6,14 +6,27 @@ import { Button } from "@/components/ui/Button";
 import { FileField } from "@/components/ui/FileField";
 import { InputField } from "@/components/ui/InputField";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
+import {
   supabase,
   supabaseAvatarBucket,
 } from "@/lib/supabaseClient";
-import { useCurrentUser } from "@/contexts/UserContext";
+import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeftIcon, PencilIcon, XIcon } from "lucide-react";
+import {
+  appLocales,
+  defaultAppLocale,
+  normalizeAppLocale,
+} from "@/lib/i18n/locales";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 function getStoragePathFromUrl(url: string, bucket: string) {
   if (!url) {
@@ -37,6 +50,8 @@ function getStoragePathFromUrl(url: string, bucket: string) {
 
 export default function ProfilePage() {
   const user = useCurrentUser();
+  const { setLocale } = useAuthActions();
+  const { t } = useI18n();
   const router = useRouter();
   const [fullName, setFullName] = useState(user.name ?? "");
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
@@ -57,6 +72,10 @@ export default function ProfilePage() {
     "idle",
   );
   const [message, setMessage] = useState("");
+  const [languageState, setLanguageState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [languageMessage, setLanguageMessage] = useState("");
 
   useEffect(() => {
     setFullName(user.name ?? "");
@@ -88,7 +107,7 @@ export default function ProfilePage() {
   async function handleSave() {
     if (!supabase || !user.id) {
       setStatus("error");
-      setMessage("Supabase is not configured.");
+      setMessage(t("profile.supabaseNotConfigured"));
       return;
     }
     setStatus("saving");
@@ -107,7 +126,7 @@ export default function ProfilePage() {
       return;
     }
     setStatus("saved");
-    setMessage("Profile updated.");
+    setMessage(t("profile.profileUpdated"));
     setInitialProfile({
       fullName: fullName.trim(),
       avatarUrl: avatarUrl.trim(),
@@ -118,7 +137,7 @@ export default function ProfilePage() {
   async function handleAvatarUpload() {
     if (!supabase || !avatarFile || !user.id) {
       setAvatarState("error");
-      setAvatarMessage("Supabase is not configured.");
+      setAvatarMessage(t("profile.supabaseNotConfigured"));
       return;
     }
     setAvatarState("uploading");
@@ -126,7 +145,7 @@ export default function ProfilePage() {
     const result = await uploadAvatar(avatarFile, user.id);
     if (result.error || !result.url) {
       setAvatarState("error");
-      setAvatarMessage(result.error ?? "Upload failed.");
+      setAvatarMessage(result.error ?? t("profile.uploadFailed"));
       return;
     }
     const storagePath = getStoragePathFromUrl(
@@ -143,7 +162,7 @@ export default function ProfilePage() {
       }
     }
     setAvatarState("uploaded");
-    setAvatarMessage("Avatar uploaded.");
+    setAvatarMessage(t("profile.avatarUploaded"));
     setAvatarUrl(displayUrl);
     await supabase
       .from("profiles")
@@ -181,7 +200,26 @@ export default function ProfilePage() {
     }
     setAvatarPreview(null);
     setAvatarState("uploaded");
-    setAvatarMessage("Avatar removed.");
+    setAvatarMessage(t("profile.avatarRemoved"));
+  }
+
+  async function handleUserLocaleChange(nextValue: string) {
+    const locale = normalizeAppLocale(nextValue);
+    if (locale === normalizeAppLocale(user.locale)) {
+      setLanguageState("idle");
+      setLanguageMessage("");
+      return;
+    }
+    setLanguageState("saving");
+    setLanguageMessage("");
+    const result = await setLocale(locale);
+    if (!result.ok) {
+      setLanguageState("error");
+      setLanguageMessage(result.error ?? t("profile.languageSaveError"));
+      return;
+    }
+    setLanguageState("saved");
+    setLanguageMessage(t("profile.languageSaved"));
   }
 
   const maxAvatarBytes = 2 * 1024 * 1024;
@@ -216,12 +254,12 @@ export default function ProfilePage() {
           }}
         >
           <ArrowLeftIcon className="h-4 w-4" />
-          Back
+          {t("profile.back")}
         </button>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>My Profile</CardTitle>
+          <CardTitle>{t("profile.title")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center gap-4">
@@ -229,12 +267,12 @@ export default function ProfilePage() {
               type="button"
               className="group relative h-14 w-14 rounded-full"
               onClick={() => setAvatarModalOpen(true)}
-              aria-label="Edit avatar"
+              aria-label={t("profile.editAvatar")}
             >
               {avatarUrl ? (
                 <img
                   src={avatarUrl}
-                  alt={fullName || "User avatar"}
+                  alt={fullName || t("profile.userFallback")}
                   className="h-14 w-14 rounded-full object-cover"
                 />
               ) : (
@@ -247,27 +285,33 @@ export default function ProfilePage() {
               </span>
             </button>
             <div>
-              <div className="text-sm font-medium">{fullName || "User"}</div>
+              <div className="text-sm font-medium">
+                {fullName || t("profile.userFallback")}
+              </div>
               <div className="text-xs text-muted-foreground">
                 {user.email ?? "--"}
               </div>
               <div className="text-xs text-muted-foreground">
-                Role: {user.role}
-                {user.isOwner ? " / Owner" : user.isAdmin ? " / Admin" : ""}
+                {t("profile.role")}: {user.role}
+                {user.isOwner
+                  ? ` / ${t("profile.owner")}`
+                  : user.isAdmin
+                    ? ` / ${t("profile.admin")}`
+                    : ""}
               </div>
             </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
             <InputField
-              label="Full name"
+              label={t("profile.fullName")}
               icon="user"
               value={fullName}
               onChange={(event) => setFullName(event.target.value)}
               className="h-11 text-sm"
             />
             <InputField
-              label="Email"
+              label={t("profile.email")}
               icon="email"
               value={user.email ?? ""}
               readOnly
@@ -275,7 +319,7 @@ export default function ProfilePage() {
               wrapperClassName="h-11 bg-muted"
             />
             <InputField
-              label="Phone"
+              label={t("profile.phone")}
               icon="phone"
               value={phone}
               onChange={(event) => setPhone(event.target.value)}
@@ -283,12 +327,52 @@ export default function ProfilePage() {
             />
           </div>
 
+          <div className="space-y-2">
+            <div className="text-sm font-medium">{t("profile.language")}</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Select
+                value={normalizeAppLocale(user.locale)}
+                onValueChange={handleUserLocaleChange}
+              >
+                <SelectTrigger className="h-11 w-full min-w-[120px] sm:w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {appLocales.map((locale) => (
+                    <SelectItem key={locale} value={locale}>
+                      {t(`common.localeName.${locale}`)}
+                      {locale === defaultAppLocale ? " (default)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {languageState === "saving" ? (
+                <span className="text-xs text-muted-foreground">
+                  {t("profile.saving")}
+                </span>
+              ) : null}
+              {languageMessage ? (
+                <span
+                  className={`text-xs ${
+                    languageState === "error"
+                      ? "text-destructive"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {languageMessage}
+                </span>
+              ) : null}
+            </div>
+          </div>
+
           <div className="flex items-center gap-3">
             <Button
               onClick={handleSave}
               disabled={status === "saving" || !isDirty}
             >
-              {status === "saving" ? "Saving..." : "Save profile"}
+              {status === "saving"
+                ? t("profile.saving")
+                : t("profile.saveProfile")}
             </Button>
             {message && (
               <span
@@ -307,17 +391,17 @@ export default function ProfilePage() {
       {user.isAdmin && (
           <Card>
             <CardHeader>
-              <CardTitle>Company & Billing</CardTitle>
+              <CardTitle>{t("profile.companyBillingTitle")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-sm text-muted-foreground">
-                Manage company legal details and subscription settings.
+                {t("profile.companyBillingDescription")}
               </div>
               <Link
                 href="/company"
                 className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
               >
-                Open company settings
+                {t("profile.openCompanySettings")}
               </Link>
             </CardContent>
           </Card>
@@ -332,12 +416,12 @@ export default function ProfilePage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">Edit avatar</div>
+              <div className="text-sm font-semibold">{t("profile.editAvatar")}</div>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setAvatarModalOpen(false)}
-                aria-label="Close"
+                aria-label={t("profile.close")}
               >
                 <XIcon className="h-4 w-4" />
               </Button>
@@ -348,12 +432,12 @@ export default function ProfilePage() {
                   {avatarPreview || avatarUrl ? (
                     <img
                       src={avatarPreview ?? avatarUrl}
-                      alt="Avatar preview"
+                      alt={t("profile.avatarPreview")}
                       className="h-full w-full object-cover"
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                      Avatar
+                      {t("profile.avatarPlaceholder")}
                     </div>
                   )}
                 </div>
@@ -361,14 +445,14 @@ export default function ProfilePage() {
                   <div>
                     {avatarFile
                       ? avatarFile.name
-                      : "Choose an image file to upload."}
+                      : t("profile.chooseImage")}
                   </div>
-                  <div>PNG or JPG up to 2MB.</div>
+                  <div>{t("profile.imageHint")}</div>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <FileField
-                  label="Select file"
+                  label={t("profile.selectFile")}
                   accept="image/*"
                   onChange={(event) => {
                     const file = event.target.files?.[0];

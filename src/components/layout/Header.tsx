@@ -11,6 +11,8 @@ import {
 import { Button } from "@/components/ui/Button";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
+import { toIntlLocale } from "@/lib/i18n/locales";
+import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 
@@ -37,10 +39,10 @@ function notificationBadgeClass(type?: string | null) {
 }
 
 function notificationBadgeLabel(type?: string | null) {
-  if (type === "blocked") return "Blocked";
-  if (type === "resumed") return "Resumed";
-  if (type === "done") return "Done";
-  return "Info";
+  if (type === "blocked") return "header.badge.blocked";
+  if (type === "resumed") return "header.badge.resumed";
+  if (type === "done") return "header.badge.done";
+  return "header.badge.info";
 }
 
 function formatNotificationBody(body?: string | null) {
@@ -74,6 +76,7 @@ function notificationBodyRows(body?: string | null) {
 export function Header() {
   const user = useCurrentUser();
   const { signOut } = useAuthActions();
+  const { t } = useI18n();
   const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
@@ -86,14 +89,23 @@ export function Header() {
   const notificationsRef = useRef<HTMLDivElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
+  const translateBodyLabel = (label: string) => {
+    const normalized = label.toLowerCase();
+    if (normalized === "by") return t("header.body.by");
+    if (normalized === "item") return t("header.body.item");
+    if (normalized === "station") return t("header.body.station");
+    if (normalized === "action") return t("header.body.action");
+    return label;
+  };
+
   useEffect(() => {
-    const formatter = new Intl.DateTimeFormat("lv-LV", {
+    const formatter = new Intl.DateTimeFormat(toIntlLocale(user.locale), {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
     });
     setCurrentDate(formatter.format(new Date()));
-  }, []);
+  }, [user.locale]);
 
   useEffect(() => {
     if (!userMenuOpen) {
@@ -359,10 +371,10 @@ export function Header() {
                 )}
                 <div className="leading-tight">
                   <h1 className="text-lg font-semibold">
-                    {user.tenantName ?? "Company workspace"}
+                    {user.tenantName ?? t("header.companyWorkspace")}
                   </h1>
                   <p className="text-xs text-muted-foreground">
-                    Production Workflow System
+                    {t("header.appName")}
                   </p>
                 </div>
               </div>
@@ -373,10 +385,10 @@ export function Header() {
                 </div>
                 <div className="leading-tight">
                   <h1 className="text-lg font-semibold">
-                    Production Workflow System
+                    {t("header.appName")}
                   </h1>
                   <p className="text-xs text-muted-foreground">
-                    Operational tool for manufacturing
+                    {t("header.appTagline")}
                   </p>
                 </div>
               </>
@@ -385,7 +397,7 @@ export function Header() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 sm:justify-end">
             <div className="hidden text-xs text-muted-foreground sm:block">
-              Shift: Day | {currentDate ?? "--"}
+              {t("header.shiftDay", { date: currentDate ?? "--" })}
             </div>
 
             <div className="hidden items-center gap-1 rounded-full border border-border bg-background px-2 py-1 sm:flex">
@@ -393,7 +405,7 @@ export function Header() {
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 rounded-full"
-                aria-label="Search"
+                aria-label={t("header.search")}
               >
                 <SearchIcon className="h-4 w-4" />
               </Button>
@@ -403,7 +415,7 @@ export function Header() {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 rounded-full"
-                    aria-label="Notifications"
+                    aria-label={t("header.notifications")}
                     onClick={() => setNotificationsOpen((prev) => !prev)}
                   >
                     <BellIcon className="h-4 w-4" />
@@ -416,19 +428,19 @@ export function Header() {
                   {notificationsOpen ? (
                     <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-card p-2 shadow-lg">
                     <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
-                      <span>Notifications</span>
+                      <span>{t("header.notificationsTitle")}</span>
                       <button
                         type="button"
                         onClick={handleMarkAllRead}
                         className="text-xs text-foreground hover:underline"
                       >
-                        Mark all read
+                        {t("header.markAllRead")}
                       </button>
                     </div>
                     <div className="max-h-80 overflow-y-auto">
                       {notificationItems.length === 0 ? (
                         <div className="px-2 py-4 text-center text-xs text-muted-foreground">
-                          No notifications yet.
+                          {t("header.noNotifications")}
                         </div>
                       ) : (
                         notificationItems.map((item) => (
@@ -445,7 +457,7 @@ export function Header() {
                             <span
                               className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${notificationBadgeClass(item.type)}`}
                             >
-                              {notificationBadgeLabel(item.type)}
+                              {t(notificationBadgeLabel(item.type))}
                             </span>
                             <span className="font-medium">{item.title}</span>
                             {item.body ? (
@@ -457,7 +469,7 @@ export function Header() {
                                   >
                                     {row.label ? (
                                       <span className="min-w-12 text-muted-foreground">
-                                        {row.label}:
+                                        {translateBodyLabel(row.label)}:
                                       </span>
                                     ) : null}
                                     <span className="text-foreground">{row.value}</span>
@@ -466,7 +478,9 @@ export function Header() {
                               </div>
                             ) : null}
                             <span className="text-[10px] text-muted-foreground">
-                              {new Date(item.created_at).toLocaleString("lv-LV")}
+                              {new Date(item.created_at).toLocaleString(
+                                toIntlLocale(user.locale),
+                              )}
                             </span>
                           </button>
                         ))
@@ -478,7 +492,7 @@ export function Header() {
                         className="text-foreground hover:underline"
                         onClick={() => setNotificationsOpen(false)}
                       >
-                        View all
+                        {t("header.viewAll")}
                       </Link>
                     </div>
                     </div>
@@ -489,7 +503,7 @@ export function Header() {
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 rounded-full"
-                aria-label="Help"
+                aria-label={t("header.help")}
               >
                 <HelpCircleIcon className="h-4 w-4" />
               </Button>
@@ -497,7 +511,7 @@ export function Header() {
 
             <div className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">
               {user.loading ? (
-                "Loading user..."
+                t("header.loadingUser")
               ) : user.isAuthenticated ? (
                 <div className="relative" ref={userMenuRef}>
                   <button
@@ -520,7 +534,11 @@ export function Header() {
                     )}
                     <span className="hidden text-foreground sm:inline">
                       {user.name} ({user.role}
-                      {user.isOwner ? " / Owner" : user.isAdmin ? " / Admin" : ""}
+                      {user.isOwner
+                        ? ` / ${t("header.owner")}`
+                        : user.isAdmin
+                          ? ` / ${t("header.admin")}`
+                          : ""}
                       )
                     </span>
                     <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
@@ -536,7 +554,7 @@ export function Header() {
                         role="menuitem"
                         onClick={() => setUserMenuOpen(false)}
                       >
-                        Profile
+                        {t("header.profile")}
                       </Link>
                       {user.isAdmin ? (
                         <Link
@@ -545,7 +563,7 @@ export function Header() {
                           role="menuitem"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          Company settings
+                          {t("header.companySettings")}
                         </Link>
                       ) : null}
                       <div className="my-1 h-px bg-border" />
@@ -560,14 +578,14 @@ export function Header() {
                           signOut();
                         }}
                       >
-                        Sign out
+                        {t("header.signOut")}
                       </button>
                     </div>
                   ) : null}
                 </div>
               ) : (
                 <Button size="sm" asChild>
-                  <Link href="/auth">Sign in</Link>
+                  <Link href="/auth">{t("header.signIn")}</Link>
                 </Button>
               )}
             </div>
