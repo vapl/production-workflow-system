@@ -32,6 +32,8 @@ type DataTableCellsModeProps<T> = DataTableBaseProps<T> & {
     index: number,
   ) => React.ReactNode;
   emptyState?: React.ReactNode;
+  isLoading?: boolean;
+  loadingState?: React.ReactNode;
   customBody?: never;
 };
 
@@ -92,7 +94,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
         <tbody>
           {props.mode === "custom" ? (
             props.customBody
-          ) : props.rows.length === 0 ? (
+          ) : !props.isLoading && props.rows.length === 0 ? (
             <tr>
               <td
                 colSpan={Math.max(1, columns.length)}
@@ -102,36 +104,48 @@ export function DataTable<T>(props: DataTableProps<T>) {
               </td>
             </tr>
           ) : (
-            props.rows.map((row, rowIndex) => (
-              <tr
-                key={props.getRowId(row, rowIndex)}
-                className={cn(
-                  "border-t border-border",
-                  typeof props.rowClassName === "function"
-                    ? props.rowClassName(row, rowIndex)
-                    : props.rowClassName,
-                )}
-              >
-                {columns.map((column, columnIndex) => (
+            <>
+              {props.rows.map((row, rowIndex) => (
+                <tr
+                  key={props.getRowId(row, rowIndex)}
+                  className={cn(
+                    "border-t border-border",
+                    typeof props.rowClassName === "function"
+                      ? props.rowClassName(row, rowIndex)
+                      : props.rowClassName,
+                  )}
+                >
+                  {columns.map((column, columnIndex) => (
+                    <td
+                      key={`${props.getRowId(row, rowIndex)}-${column.id}`}
+                      className={cn(
+                        "px-4 py-2 align-top whitespace-nowrap",
+                        props.bodyCellClassName,
+                        column.widthClassName,
+                        stickyFirstColumn && columnIndex === 0
+                          ? "sticky left-0 z-10 bg-background"
+                          : "",
+                        typeof column.cellClassName === "function"
+                          ? column.cellClassName(row)
+                          : column.cellClassName,
+                      )}
+                    >
+                      {props.renderCell(row, column, rowIndex)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {props.isLoading ? (
+                <tr>
                   <td
-                    key={`${props.getRowId(row, rowIndex)}-${column.id}`}
-                    className={cn(
-                      "px-4 py-2 align-top whitespace-nowrap",
-                      props.bodyCellClassName,
-                      column.widthClassName,
-                      stickyFirstColumn && columnIndex === 0
-                        ? "sticky left-0 z-10 bg-background"
-                        : "",
-                      typeof column.cellClassName === "function"
-                        ? column.cellClassName(row)
-                        : column.cellClassName,
-                    )}
+                    colSpan={Math.max(1, columns.length)}
+                    className="px-4 py-6 text-center text-muted-foreground"
                   >
-                    {props.renderCell(row, column, rowIndex)}
+                    {props.loadingState ?? "Loading..."}
                   </td>
-                ))}
-              </tr>
-            ))
+                </tr>
+              ) : null}
+            </>
           )}
         </tbody>
       </table>

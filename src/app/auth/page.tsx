@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
 import { normalizeUserRole, useCurrentUser } from "@/contexts/UserContext";
 import { supabase } from "@/lib/supabaseClient";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 export default function AuthPage() {
+  const { t } = useI18n();
   const user = useCurrentUser();
   const router = useRouter();
   const [tab, setTab] = useState("signin");
@@ -60,7 +62,7 @@ export default function AuthPage() {
         promise,
         new Promise<T>((_, reject) => {
           timeoutId = setTimeout(() => {
-            reject(new Error("Request timed out."));
+            reject(new Error(t("authPage.errors.requestTimedOut")));
           }, ms);
         }),
       ]);
@@ -160,7 +162,7 @@ export default function AuthPage() {
 
     if (code) {
       setStatus("sending");
-      setMessage("Signing you in...");
+      setMessage(t("authPage.messages.signingIn"));
       sb.auth
         .exchangeCodeForSession(code)
         .then(async ({ error }) => {
@@ -198,7 +200,7 @@ export default function AuthPage() {
         })
         .catch(() => {
           setStatus("error");
-          setMessage("Failed to complete sign in.");
+          setMessage(t("authPage.errors.failedCompleteSignIn"));
         });
       return;
     }
@@ -227,7 +229,7 @@ export default function AuthPage() {
         return;
       }
       setStatus("sending");
-      setMessage("Signing you in...");
+      setMessage(t("authPage.messages.signingIn"));
       sb.auth
         .setSession({ access_token: accessToken, refresh_token: refreshToken })
         .then(async ({ error }) => {
@@ -253,12 +255,12 @@ export default function AuthPage() {
         })
         .catch(() => {
           setStatus("error");
-          setMessage("Failed to complete sign in.");
+          setMessage(t("authPage.errors.failedCompleteSignIn"));
         });
       return;
     }
     setAuthModeChecked(true);
-  }, [router]);
+  }, [router, t]);
 
   useEffect(() => {
     if (!authModeChecked || typeof window === "undefined") {
@@ -353,7 +355,7 @@ export default function AuthPage() {
     return () => {
       active = false;
     };
-  }, [supabase, recoveryMode, recoveryTokens, recoverySessionReady]);
+  }, [recoveryMode, recoveryTokens, recoverySessionReady]);
 
   useEffect(() => {
     if (!supabase || !recoveryMode || recoverySessionReady || recoveryTokens) {
@@ -371,36 +373,36 @@ export default function AuthPage() {
         setRecoverySessionError("");
         return;
       }
-      setRecoverySessionError("Open the reset link again to continue.");
+      setRecoverySessionError(t("authPage.errors.openResetLinkAgain"));
     };
     checkSession();
     return () => {
       active = false;
     };
-  }, [supabase, recoveryMode, recoveryTokens, recoverySessionReady]);
+  }, [recoveryMode, recoveryTokens, recoverySessionReady, t]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
       setStatus("error");
-      setMessage("Enter a valid email.");
+      setMessage(t("authPage.errors.enterValidEmail"));
       return;
     }
     if (!password.trim()) {
       setStatus("error");
-      setMessage("Password is required.");
+      setMessage(t("authPage.errors.passwordRequired"));
       return;
     }
     if (tab === "signup") {
       if (!companyName.trim()) {
         setStatus("error");
-        setMessage("Company name is required.");
+        setMessage(t("authPage.errors.companyNameRequired"));
         return;
       }
       if (password !== confirmPassword) {
         setStatus("error");
-        setMessage("Passwords do not match.");
+        setMessage(t("authPage.errors.passwordsDoNotMatch"));
         return;
       }
       try {
@@ -417,7 +419,7 @@ export default function AuthPage() {
     }
     if (!supabase) {
       setStatus("error");
-      setMessage("Supabase is not configured.");
+      setMessage(t("authPage.errors.supabaseNotConfigured"));
       return;
     }
     const sb = supabase;
@@ -448,7 +450,7 @@ export default function AuthPage() {
           if (data.session?.user) {
             stopPoll();
             setStatus("sent");
-            setMessage("Signed in successfully.");
+            setMessage(t("authPage.messages.signedInSuccessfully"));
             router.replace("/orders");
           }
         } catch {
@@ -458,7 +460,7 @@ export default function AuthPage() {
       pollTimeout = setTimeout(() => {
         stopPoll();
         setStatus("error");
-        setMessage("Sign in took too long. Please try again.");
+        setMessage(t("authPage.errors.signInTookTooLong"));
       }, 15000);
     };
     try {
@@ -476,20 +478,22 @@ export default function AuthPage() {
       if (!accessCheck.ok) {
         const data = await accessCheck.json().catch(() => ({}));
         setStatus("error");
-        setMessage(data.error ?? "Access check failed.");
+        setMessage(data.error ?? t("authPage.errors.accessCheckFailed"));
         stopPoll();
         return;
       }
     } catch (error) {
       if (tab === "signup") {
         const messageText =
-          error instanceof Error ? error.message : "Access check failed.";
+          error instanceof Error
+            ? error.message
+            : t("authPage.errors.accessCheckFailed");
         setStatus("error");
         setMessage(messageText);
         stopPoll();
         return;
       }
-      setMessage("Access check timed out. Continuing sign in...");
+      setMessage(t("authPage.messages.accessCheckTimedOutContinue"));
     }
 
     const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -510,7 +514,7 @@ export default function AuthPage() {
         return;
       }
       setStatus("sent");
-      setMessage("Account created. Check your email to confirm.");
+      setMessage(t("authPage.messages.accountCreatedCheckEmail"));
       stopPoll();
       return;
     }
@@ -529,15 +533,15 @@ export default function AuthPage() {
         return;
       }
       setStatus("sent");
-      setMessage("Signed in successfully.");
+      setMessage(t("authPage.messages.signedInSuccessfully"));
       stopPoll();
       router.replace("/orders");
     } catch (error) {
       const messageText =
-        error instanceof Error ? error.message : "Sign in failed.";
+        error instanceof Error ? error.message : t("authPage.errors.signInFailed");
       if (messageText.toLowerCase().includes("timed out")) {
         setStatus("sending");
-        setMessage("Completing sign in...");
+        setMessage(t("authPage.messages.completingSignIn"));
         return;
       }
       setStatus("error");
@@ -550,12 +554,12 @@ export default function AuthPage() {
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
       setStatus("error");
-      setMessage("Enter your email first.");
+      setMessage(t("authPage.errors.enterEmailFirst"));
       return;
     }
     if (!supabase) {
       setStatus("error");
-      setMessage("Supabase is not configured.");
+      setMessage(t("authPage.errors.supabaseNotConfigured"));
       return;
     }
     setStatus("sending");
@@ -570,31 +574,31 @@ export default function AuthPage() {
       return;
     }
     setStatus("sent");
-    setMessage("Password reset email sent.");
+    setMessage(t("authPage.messages.passwordResetEmailSent"));
   }
 
   async function handleResetPassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!newPassword.trim()) {
       setStatus("error");
-      setMessage("Enter a new password.");
+      setMessage(t("authPage.errors.enterNewPassword"));
       return;
     }
     if (newPassword !== confirmNewPassword) {
       setStatus("error");
-      setMessage("Passwords do not match.");
+      setMessage(t("authPage.errors.passwordsDoNotMatch"));
       return;
     }
     if (!supabase) {
       setStatus("error");
-      setMessage("Supabase is not configured.");
+      setMessage(t("authPage.errors.supabaseNotConfigured"));
       return;
     }
     setStatus("sending");
     setMessage("");
     const updatePasswordDirect = async (accessToken: string) => {
       if (!supabaseUrl || !supabaseAnonKey) {
-        throw new Error("Supabase is not configured.");
+        throw new Error(t("authPage.errors.supabaseNotConfigured"));
       }
       const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
         method: "PUT",
@@ -608,26 +612,10 @@ export default function AuthPage() {
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(
-          data?.error_description || data?.message || "Reset failed.",
+          data?.error_description ||
+            data?.message ||
+            t("authPage.errors.resetFailed"),
         );
-      }
-    };
-
-    const withTimeout = async <T,>(promise: Promise<T>, ms: number) => {
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      try {
-        return await Promise.race<T>([
-          promise,
-          new Promise<T>((_, reject) => {
-            timeoutId = setTimeout(() => {
-              reject(new Error("Request timed out."));
-            }, ms);
-          }),
-        ]);
-      } finally {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
       }
     };
 
@@ -637,7 +625,7 @@ export default function AuthPage() {
         if (!data.session?.user) {
           setStatus("error");
           setMessage(
-            recoverySessionError || "Open the reset link again to continue.",
+            recoverySessionError || t("authPage.errors.openResetLinkAgain"),
           );
           return;
         }
@@ -650,14 +638,14 @@ export default function AuthPage() {
       if (!accessToken) {
         setStatus("error");
         setMessage(
-          recoverySessionError || "Open the reset link again to continue.",
+          recoverySessionError || t("authPage.errors.openResetLinkAgain"),
         );
         return;
       }
 
       await updatePasswordDirect(accessToken);
       setStatus("sent");
-      setMessage("Password updated.");
+      setMessage(t("authPage.messages.passwordUpdated"));
       try {
         window.sessionStorage.removeItem("pws_recovery_tokens");
       } catch {
@@ -672,7 +660,9 @@ export default function AuthPage() {
       }, 3000);
     } catch (err) {
       const messageText =
-        err instanceof Error ? err.message : "Reset failed. Try again.";
+        err instanceof Error
+          ? err.message
+          : t("authPage.errors.resetFailedTryAgain");
       setStatus("error");
       setMessage(messageText);
     }
@@ -682,15 +672,15 @@ export default function AuthPage() {
     event.preventDefault();
     setInviteError("");
     if (!invitePassword.trim()) {
-      setInviteError("Password is required.");
+      setInviteError(t("authPage.errors.passwordRequired"));
       return;
     }
     if (invitePassword !== inviteConfirmPassword) {
-      setInviteError("Passwords do not match.");
+      setInviteError(t("authPage.errors.passwordsDoNotMatch"));
       return;
     }
     if (!supabase) {
-      setInviteError("Supabase is not configured.");
+      setInviteError(t("authPage.errors.supabaseNotConfigured"));
       return;
     }
     setStatus("sending");
@@ -698,7 +688,7 @@ export default function AuthPage() {
       const { data } = await supabase.auth.getUser();
       const authUser = data.user;
       if (!authUser) {
-        setInviteError("Invite session expired. Open the invite link again.");
+        setInviteError(t("authPage.errors.inviteSessionExpired"));
         setStatus("error");
         return;
       }
@@ -729,7 +719,7 @@ export default function AuthPage() {
         fullNameFromInvite = inviteLookup?.full_name ?? fullNameFromInvite;
       }
       if (!tenantId) {
-        setInviteError("Invite metadata missing tenant.");
+        setInviteError(t("authPage.errors.inviteMissingTenant"));
         setStatus("error");
         return;
       }
@@ -738,7 +728,7 @@ export default function AuthPage() {
         inviteFullName.trim() ||
         fullNameFromInvite?.trim() ||
         authUser.email ||
-        "User";
+        t("authPage.userFallback");
 
       const { error: passwordError } = await supabase.auth.updateUser({
         password: invitePassword,
@@ -778,10 +768,11 @@ export default function AuthPage() {
       }
 
       setStatus("sent");
-      setMessage("Invite accepted. Redirecting...");
+      setMessage(t("authPage.messages.inviteAcceptedRedirecting"));
       router.replace("/orders");
     } catch (err) {
-      const messageText = err instanceof Error ? err.message : "Invite failed.";
+      const messageText =
+        err instanceof Error ? err.message : t("authPage.errors.inviteFailed");
       setInviteError(messageText);
       setStatus("error");
     }
@@ -791,9 +782,9 @@ export default function AuthPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-2xl space-y-6">
         <div className="text-center">
-          <h1 className="text-2xl font-semibold">Production Workflow System</h1>
+          <h1 className="text-2xl font-semibold">{t("authPage.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            Sign in to manage orders, engineering, and production.
+            {t("authPage.subtitle")}
           </p>
         </div>
 
@@ -801,37 +792,37 @@ export default function AuthPage() {
           <CardHeader>
             <CardTitle>
               {recoveryMode
-                ? "Reset password"
+                ? t("authPage.resetPassword")
                 : inviteMode
-                  ? "Complete invite"
-                  : "Access PWS"}
+                  ? t("authPage.completeInvite")
+                  : t("authPage.accessPws")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             {recoveryMode ? (
               <form onSubmit={handleResetPassword} className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Set a new password to continue.
+                  {t("authPage.setNewPasswordHint")}
                 </p>
                 <InputField
-                  label="New password"
+                  label={t("authPage.newPassword")}
                   type="password"
                   icon="lock"
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
-                  placeholder="Create a new password"
+                  placeholder={t("authPage.placeholders.createNewPassword")}
                   className="h-11 text-sm"
                   required
                 />
                 <InputField
-                  label="Confirm password"
+                  label={t("authPage.confirmPassword")}
                   type="password"
                   icon="lock"
                   value={confirmNewPassword}
                   onChange={(event) =>
                     setConfirmNewPassword(event.target.value)
                   }
-                  placeholder="Repeat new password"
+                  placeholder={t("authPage.placeholders.repeatNewPassword")}
                   className="h-11 text-sm"
                   required
                 />
@@ -840,49 +831,51 @@ export default function AuthPage() {
                   type="submit"
                   disabled={status === "sending"}
                 >
-                  {status === "sending" ? "Updating..." : "Update password"}
+                  {status === "sending"
+                    ? t("authPage.updating")
+                    : t("authPage.updatePassword")}
                 </Button>
               </form>
             ) : inviteMode ? (
               <form onSubmit={handleInviteComplete} className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Finish setting up your account to join the workspace.
+                  {t("authPage.finishSetupHint")}
                 </p>
                 <InputField
-                  label="Full name"
+                  label={t("authPage.fullName")}
                   icon="user"
                   value={inviteFullName}
                   onChange={(event) => setInviteFullName(event.target.value)}
-                  placeholder="Your name"
+                  placeholder={t("authPage.placeholders.yourName")}
                   className="h-11 text-sm"
                 />
                 <InputField
-                  label="Phone (optional)"
+                  label={t("authPage.phoneOptional")}
                   icon="phone"
                   value={invitePhone}
                   onChange={(event) => setInvitePhone(event.target.value)}
-                  placeholder="e.g. +371 20000000"
+                  placeholder={t("authPage.placeholders.phoneExample")}
                   className="h-11 text-sm"
                 />
                 <InputField
-                  label="Password"
+                  label={t("authPage.password")}
                   type="password"
                   icon="lock"
                   value={invitePassword}
                   onChange={(event) => setInvitePassword(event.target.value)}
-                  placeholder="Create a password"
+                  placeholder={t("authPage.placeholders.createPassword")}
                   className="h-11 text-sm"
                   required
                 />
                 <InputField
-                  label="Confirm password"
+                  label={t("authPage.confirmPassword")}
                   type="password"
                   icon="lock"
                   value={inviteConfirmPassword}
                   onChange={(event) =>
                     setInviteConfirmPassword(event.target.value)
                   }
-                  placeholder="Repeat password"
+                  placeholder={t("authPage.placeholders.repeatPassword")}
                   className="h-11 text-sm"
                   required
                 />
@@ -890,34 +883,36 @@ export default function AuthPage() {
                   <p className="text-sm text-destructive">{inviteError}</p>
                 ) : null}
                 <Button type="submit" disabled={status === "sending"}>
-                  {status === "sending" ? "Saving..." : "Complete setup"}
+                  {status === "sending"
+                    ? t("authPage.saving")
+                    : t("authPage.completeSetup")}
                 </Button>
               </form>
             ) : (
               <Tabs value={tab} onValueChange={setTab}>
                 <TabsList>
-                  <TabsTrigger value="signin">Sign in</TabsTrigger>
-                  <TabsTrigger value="signup">Create account</TabsTrigger>
+                  <TabsTrigger value="signin">{t("authPage.signIn")}</TabsTrigger>
+                  <TabsTrigger value="signup">{t("authPage.createAccount")}</TabsTrigger>
                 </TabsList>
                 <TabsContent value="signin" className="mt-6 space-y-4">
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <InputField
-                      label="Work email"
+                      label={t("authPage.workEmail")}
                       type="email"
                       icon="email"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
-                      placeholder="you@company.com"
+                      placeholder={t("authPage.placeholders.workEmail")}
                       className="h-11 text-sm"
                       required
                     />
                     <InputField
-                      label="Password"
+                      label={t("authPage.password")}
                       type="password"
                       icon="lock"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      placeholder="Your password"
+                      placeholder={t("authPage.placeholders.yourPassword")}
                       className="h-11 text-sm"
                       required
                     />
@@ -927,7 +922,9 @@ export default function AuthPage() {
                         disabled={status === "sending"}
                         className="mt-2"
                       >
-                        {status === "sending" ? "Signing in..." : "Sign in"}
+                        {status === "sending"
+                          ? t("authPage.signingIn")
+                          : t("authPage.signIn")}
                       </Button>
                       <Button
                         type="button"
@@ -936,74 +933,73 @@ export default function AuthPage() {
                         onClick={handleForgotPassword}
                         disabled={status === "sending"}
                       >
-                        Forgot password?
+                        {t("authPage.forgotPassword")}
                       </Button>
                     </div>
                   </form>
                   <p className="text-xs text-muted-foreground">
-                    Only invited users can access the workspace. If you are not
-                    invited, ask your admin.
+                    {t("authPage.inviteOnlyHint")}
                   </p>
                 </TabsContent>
                 <TabsContent value="signup" className="mt-6 space-y-4">
                   <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-                    Only the company owner should create an account. Team
-                    members will be invited by the admin.
+                    {t("authPage.ownerOnlySignupHint")}
                   </div>
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <InputField
-                      label="Full name"
+                      label={t("authPage.fullName")}
                       icon="user"
                       value={fullName}
                       onChange={(event) => setFullName(event.target.value)}
-                      placeholder="Jane Owner"
+                      placeholder={t("authPage.placeholders.ownerName")}
                       className="h-11 text-sm"
                     />
                     <InputField
-                      label="Company name"
+                      label={t("authPage.companyName")}
                       value={companyName}
                       onChange={(event) => setCompanyName(event.target.value)}
-                      placeholder="Demo Manufacturing Co."
+                      placeholder={t("authPage.placeholders.companyName")}
                       className="h-11 text-sm"
                     />
                     <InputField
-                      label="Work email"
+                      label={t("authPage.workEmail")}
                       type="email"
                       icon="email"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
-                      placeholder="owner@company.com"
+                      placeholder={t("authPage.placeholders.ownerEmail")}
                       className="h-11 text-sm"
                       required
                     />
                     <InputField
-                      label="Password"
+                      label={t("authPage.password")}
                       type="password"
                       icon="lock"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      placeholder="Create a password"
+                      placeholder={t("authPage.placeholders.createPassword")}
                       className="h-11 text-sm"
                       required
                     />
                     <InputField
-                      label="Confirm password"
+                      label={t("authPage.confirmPassword")}
                       type="password"
                       icon="lock"
                       value={confirmPassword}
                       onChange={(event) =>
                         setConfirmPassword(event.target.value)
                       }
-                      placeholder="Repeat password"
+                      placeholder={t("authPage.placeholders.repeatPassword")}
                       className="h-11 text-sm"
                       required
                     />
                     <div className="rounded-lg border border-border bg-background px-4 py-3 text-xs text-muted-foreground">
-                      Billing is coming soon. You can create an account now and
-                      enable subscription later.
+                      {t("authPage.billingComingSoonHint")}
                     </div>
                     <Button type="submit" disabled={status === "sending"}>
-                      {status === "sending" ? "Creating..." : "Create account"}
+                      {status === "sending"
+                        ? t("authPage.creating")
+                        : t("authPage.createAccount")}
                     </Button>
                   </form>
                 </TabsContent>
@@ -1030,7 +1026,7 @@ export default function AuthPage() {
                       router.replace("/auth");
                     }}
                   >
-                    Sign in
+                    {t("authPage.signIn")}
                   </Button>
                 ) : null}
               </p>

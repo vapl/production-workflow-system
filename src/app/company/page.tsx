@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { ArrowLeftIcon } from "lucide-react";
 import {
@@ -21,6 +22,7 @@ import {
   hasTenantCapability,
   type TenantPlanCode,
 } from "@/lib/subscription";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 function getStoragePathFromUrl(url: string, bucket: string) {
   if (!url) {
@@ -43,6 +45,7 @@ function getStoragePathFromUrl(url: string, bucket: string) {
 }
 
 export default function CompanyPage() {
+  const { t } = useI18n();
   const currentUser = useCurrentUser();
   const router = useRouter();
   const [copyMessage, setCopyMessage] = useState("");
@@ -175,7 +178,7 @@ export default function CompanyPage() {
       return;
     }
     setCompanyState("saved");
-    setCompanyMessage("Company details saved.");
+    setCompanyMessage(t("companyPage.messages.companySaved"));
   }
 
   async function handleUploadCompanyLogo() {
@@ -190,10 +193,13 @@ export default function CompanyPage() {
     );
     if (!result.url || result.error) {
       setCompanyLogoState("error");
-      const rawMessage = result.error ?? "Upload failed.";
+      const rawMessage = result.error ?? t("companyPage.errors.uploadFailed");
       if (rawMessage.toLowerCase().includes("bucket")) {
         setCompanyLogoMessage(
-          `Bucket not found. Create a "${process.env.NEXT_PUBLIC_SUPABASE_TENANT_BUCKET || "tenant-logos"}" bucket in Supabase Storage.`,
+          t("companyPage.errors.bucketNotFound", {
+            bucket:
+              process.env.NEXT_PUBLIC_SUPABASE_TENANT_BUCKET || "tenant-logos",
+          }),
         );
       } else {
         setCompanyLogoMessage(rawMessage);
@@ -201,7 +207,7 @@ export default function CompanyPage() {
       return;
     }
     setCompanyLogoState("uploaded");
-    setCompanyLogoMessage("Logo uploaded.");
+    setCompanyLogoMessage(t("companyPage.messages.logoUploaded"));
     setCompanyLogoUrl(result.url);
     if (supabase) {
       const storagePath = getStoragePathFromUrl(
@@ -263,7 +269,7 @@ export default function CompanyPage() {
       setCompanyLogoPreview(null);
     }
     setCompanyLogoState("uploaded");
-    setCompanyLogoMessage("Logo removed.");
+    setCompanyLogoMessage(t("companyPage.messages.logoRemoved"));
   }
 
   async function handleSaveSubscription() {
@@ -286,7 +292,7 @@ export default function CompanyPage() {
       return;
     }
     setSubscriptionStatus("saved");
-    setSubscriptionMessage("Subscription updated.");
+    setSubscriptionMessage(t("companyPage.messages.subscriptionUpdated"));
   }
 
   const companyId = currentUser.tenantId ?? "";
@@ -301,10 +307,10 @@ export default function CompanyPage() {
     }
     try {
       await navigator.clipboard.writeText(companyId);
-      setCopyMessage("Copied");
+      setCopyMessage(t("companyPage.messages.copied"));
       window.setTimeout(() => setCopyMessage(""), 1500);
     } catch {
-      setCopyMessage("Copy failed");
+      setCopyMessage(t("companyPage.messages.copyFailed"));
       window.setTimeout(() => setCopyMessage(""), 1500);
     }
   };
@@ -324,19 +330,19 @@ export default function CompanyPage() {
           }}
         >
           <ArrowLeftIcon className="h-4 w-4" />
-          Back
+          {t("companyPage.back")}
         </button>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Company Profile</CardTitle>
+          <CardTitle>{t("companyPage.profileTitle")}</CardTitle>
           <CardDescription>
-            Admins can manage company data, billing, and legal details.
+            {t("companyPage.profileDescription")}
           </CardDescription>
           {companyId ? (
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="rounded-full border border-border bg-muted/40 px-3 py-1">
-                Company ID: {companyId}
+                {t("companyPage.companyId")}: {companyId}
               </span>
               <Button
                 type="button"
@@ -344,7 +350,7 @@ export default function CompanyPage() {
                 size="sm"
                 onClick={handleCopyCompanyId}
               >
-                Copy
+                {t("companyPage.copy")}
               </Button>
               {copyMessage ? <span>{copyMessage}</span> : null}
             </div>
@@ -353,35 +359,35 @@ export default function CompanyPage() {
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <InputField
-              label="Company name"
+              label={t("companyPage.companyName")}
               value={companyName}
               onChange={(event) => setCompanyName(event.target.value)}
               className="h-11 text-sm"
               disabled={!currentUser.isAdmin}
             />
             <InputField
-              label="Legal name"
+              label={t("companyPage.legalName")}
               value={companyLegalName}
               onChange={(event) => setCompanyLegalName(event.target.value)}
               className="h-11 text-sm"
               disabled={!currentUser.isAdmin}
             />
             <InputField
-              label="Registration no."
+              label={t("companyPage.registrationNo")}
               value={companyRegistrationNo}
               onChange={(event) => setCompanyRegistrationNo(event.target.value)}
               className="h-11 text-sm"
               disabled={!currentUser.isAdmin}
             />
             <InputField
-              label="VAT no."
+              label={t("companyPage.vatNo")}
               value={companyVatNo}
               onChange={(event) => setCompanyVatNo(event.target.value)}
               className="h-11 text-sm"
               disabled={!currentUser.isAdmin}
             />
             <InputField
-              label="Billing email"
+              label={t("companyPage.billingEmail")}
               type="email"
               icon="email"
               value={companyBillingEmail}
@@ -390,26 +396,29 @@ export default function CompanyPage() {
               disabled={!currentUser.isAdmin}
             />
             <InputField
-              label="Address"
+              label={t("companyPage.address")}
               value={companyAddress}
               onChange={(event) => setCompanyAddress(event.target.value)}
               className="h-11 text-sm"
               disabled={!currentUser.isAdmin}
             />
             <div className="space-y-3 text-sm font-medium">
-              Upload logo
+              {t("companyPage.uploadLogo")}
               <div className="flex flex-wrap items-center gap-4 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
                 <div className="flex items-center gap-3">
                   <div className="h-16 w-16 overflow-hidden rounded-full border border-border bg-background">
                     {companyLogoPreview || companyLogoDisplayUrl ? (
-                      <img
+                      <Image
                         src={companyLogoPreview ?? companyLogoDisplayUrl}
-                        alt="Logo preview"
+                        alt={t("companyPage.logoPreview")}
+                        width={64}
+                        height={64}
+                        unoptimized
                         className="h-full w-full object-cover"
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                        Logo
+                        {t("companyPage.logo")}
                       </div>
                     )}
                   </div>
@@ -417,14 +426,14 @@ export default function CompanyPage() {
                     <div>
                       {companyLogoFile
                         ? companyLogoFile.name
-                        : "Choose an image file to upload."}
+                        : t("companyPage.chooseImage")}
                     </div>
-                    <div>PNG or JPG up to 2MB.</div>
+                    <div>{t("companyPage.imageHint")}</div>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <FileField
-                    label="Select file"
+                    label={t("companyPage.selectFile")}
                     accept="image/*"
                     onChange={(event) => {
                       const file = event.target.files?.[0];
@@ -436,7 +445,7 @@ export default function CompanyPage() {
                         setCompanyLogoPreview(null);
                         setCompanyLogoState("error");
                         setCompanyLogoMessage(
-                          "Logo file is too large. Max 2MB.",
+                          t("companyPage.errors.logoTooLarge"),
                         );
                         return;
                       }
@@ -460,8 +469,8 @@ export default function CompanyPage() {
                     }
                   >
                     {companyLogoState === "uploading"
-                      ? "Uploading..."
-                      : "Upload logo"}
+                      ? t("companyPage.uploading")
+                      : t("companyPage.uploadLogoButton")}
                   </Button>
                   <Button
                     variant="ghost"
@@ -472,7 +481,7 @@ export default function CompanyPage() {
                       companyLogoState === "uploading"
                     }
                   >
-                    Delete
+                    {t("companyPage.delete")}
                   </Button>
                 </div>
               </div>
@@ -494,7 +503,9 @@ export default function CompanyPage() {
               onClick={handleSaveCompany}
               disabled={!currentUser.isAdmin || companyState === "saving"}
             >
-              {companyState === "saving" ? "Saving..." : "Save company"}
+              {companyState === "saving"
+                ? t("companyPage.saving")
+                : t("companyPage.saveCompany")}
             </Button>
             {companyMessage && (
               <span
@@ -513,15 +524,14 @@ export default function CompanyPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Subscription</CardTitle>
+          <CardTitle>{t("companyPage.subscriptionTitle")}</CardTitle>
           <CardDescription>
-            Plan switch for feature gating. Billing integration can be added
-            later.
+            {t("companyPage.subscriptionDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <div className="text-sm font-medium">Plan</div>
+            <div className="text-sm font-medium">{t("companyPage.plan")}</div>
             <div className="grid gap-2 sm:grid-cols-2">
               <button
                 type="button"
@@ -535,9 +545,9 @@ export default function CompanyPage() {
                   !currentUser.isAdmin || subscriptionStatus === "saving"
                 }
               >
-                <div className="font-medium">Basic</div>
+                <div className="font-medium">{t("companyPage.basic")}</div>
                 <div className="text-xs text-muted-foreground">
-                  Manual external jobs only
+                  {t("companyPage.basicDescription")}
                 </div>
               </button>
               <button
@@ -552,9 +562,9 @@ export default function CompanyPage() {
                   !currentUser.isAdmin || subscriptionStatus === "saving"
                 }
               >
-                <div className="font-medium">Pro</div>
+                <div className="font-medium">{t("companyPage.pro")}</div>
                 <div className="text-xs text-muted-foreground">
-                  Includes Send to partner
+                  {t("companyPage.proDescription")}
                 </div>
               </button>
             </div>
@@ -563,12 +573,14 @@ export default function CompanyPage() {
           <div className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
             <div>
               externalJobs.manualEntry:{" "}
-              <span className="font-medium">enabled</span>
+              <span className="font-medium">{t("companyPage.enabled")}</span>
             </div>
             <div>
               externalJobs.sendToPartner:{" "}
               <span className="font-medium">
-                {sendToPartnerEnabled ? "enabled" : "disabled"}
+                {sendToPartnerEnabled
+                  ? t("companyPage.enabled")
+                  : t("companyPage.disabled")}
               </span>
             </div>
           </div>
@@ -579,8 +591,8 @@ export default function CompanyPage() {
               disabled={!currentUser.isAdmin || subscriptionStatus === "saving"}
             >
               {subscriptionStatus === "saving"
-                ? "Saving..."
-                : "Save subscription"}
+                ? t("companyPage.saving")
+                : t("companyPage.saveSubscription")}
             </Button>
             {subscriptionMessage ? (
               <span

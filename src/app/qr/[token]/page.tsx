@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 const productionAttachmentCategory = "production_report";
 
@@ -90,6 +91,7 @@ export default function QrTokenPage({
 }: {
   params: { token: string };
 }) {
+  const { t } = useI18n();
   const user = useCurrentUser();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +112,7 @@ export default function QrTokenPage({
     }
     if (!user.isAuthenticated) {
       setIsLoading(false);
-      setError("Please sign in to view this QR code.");
+      setError(t("qrTokenPage.errors.signInRequired"));
       return;
     }
     let isMounted = true;
@@ -127,7 +129,7 @@ export default function QrTokenPage({
           return;
         }
         if (qrError || !qrData) {
-          setError(qrError?.message ?? "QR code not found.");
+          setError(qrError?.message ?? t("qrTokenPage.errors.notFound"));
           return;
         }
         setQrRow(qrData);
@@ -213,7 +215,7 @@ export default function QrTokenPage({
         if (!isMounted) {
           return;
         }
-        setError("Failed to load QR details.");
+        setError(t("qrTokenPage.errors.loadFailed"));
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -224,7 +226,7 @@ export default function QrTokenPage({
     return () => {
       isMounted = false;
     };
-  }, [params.token, user.id, user.isAuthenticated]);
+  }, [params.token, t, user.id, user.isAuthenticated]);
 
   useEffect(() => {
     if (!attachments.length) {
@@ -279,15 +281,21 @@ export default function QrTokenPage({
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">QR Construction</h1>
+          <h1 className="text-2xl font-semibold">
+            {t("qrTokenPage.title")}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            {order?.order_number ? `Order ${order.order_number}` : "Order"}
+            {order?.order_number
+              ? t("qrTokenPage.orderWithNumber", {
+                  orderNumber: order.order_number,
+                })
+              : t("qrTokenPage.order")}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {order?.id ? (
             <Link href={`/orders/${order.id}`}>
-              <Button variant="outline">Open order</Button>
+              <Button variant="outline">{t("qrTokenPage.openOrder")}</Button>
             </Link>
           ) : null}
         </div>
@@ -295,7 +303,7 @@ export default function QrTokenPage({
 
       {isLoading ? (
         <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-          Loading QR details...
+          {t("qrTokenPage.loading")}
         </div>
       ) : null}
       {error ? (
@@ -308,25 +316,26 @@ export default function QrTokenPage({
         <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
           <div className="space-y-6">
             <div className="rounded-xl border border-border bg-card p-4">
-              <div className="text-sm font-semibold">Order</div>
+              <div className="text-sm font-semibold">{t("qrTokenPage.order")}</div>
               <div className="mt-2 text-sm text-muted-foreground">
-                {order?.customer_name ?? "Customer"}
+                {order?.customer_name ?? t("qrTokenPage.customer")}
               </div>
               <div className="mt-1 text-sm text-muted-foreground">
-                Due {order?.due_date ? new Date(order.due_date).toLocaleDateString() : "-"}
+                {t("qrTokenPage.due")}{" "}
+                {order?.due_date ? new Date(order.due_date).toLocaleDateString() : "-"}
               </div>
               <div className="mt-1 text-sm text-muted-foreground">
-                Priority: {order?.priority ?? "normal"}
+                {t("qrTokenPage.priority")}: {order?.priority ?? t("qrTokenPage.normal")}
               </div>
             </div>
 
             <div className="rounded-xl border border-border bg-card p-4">
               <div className="text-sm font-semibold">
-                {field?.label ?? "Construction"}
+                {field?.label ?? t("qrTokenPage.construction")}
               </div>
               {rowDetails.length === 0 ? (
                 <div className="mt-2 text-sm text-muted-foreground">
-                  No construction details.
+                  {t("qrTokenPage.noConstructionDetails")}
                 </div>
               ) : (
                 <div className="mt-3 space-y-2 text-sm">
@@ -343,10 +352,10 @@ export default function QrTokenPage({
             </div>
 
             <div className="rounded-xl border border-border bg-card p-4">
-              <div className="text-sm font-semibold">Production files</div>
+              <div className="text-sm font-semibold">{t("qrTokenPage.productionFiles")}</div>
               {attachments.length === 0 ? (
                 <div className="mt-2 text-sm text-muted-foreground">
-                  No production files uploaded.
+                  {t("qrTokenPage.noProductionFiles")}
                 </div>
               ) : (
                 <div className="mt-3 space-y-2">
@@ -357,7 +366,7 @@ export default function QrTokenPage({
                     >
                       <div className="min-w-0">
                         <div className="truncate font-medium">
-                          {file.name ?? "File"}
+                          {file.name ?? t("qrTokenPage.file")}
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {new Date(file.created_at).toLocaleString()}
@@ -370,11 +379,11 @@ export default function QrTokenPage({
                           rel="noreferrer"
                           className="text-sm text-primary hover:underline"
                         >
-                          Open
+                          {t("qrTokenPage.open")}
                         </a>
                       ) : (
                         <span className="text-xs text-muted-foreground">
-                          No url
+                          {t("qrTokenPage.noUrl")}
                         </span>
                       )}
                     </div>
@@ -386,10 +395,10 @@ export default function QrTokenPage({
 
           <div className="space-y-6">
             <div className="rounded-xl border border-border bg-card p-4">
-              <div className="text-sm font-semibold">My station tasks</div>
+              <div className="text-sm font-semibold">{t("qrTokenPage.myStationTasks")}</div>
               {productionItems.length === 0 ? (
                 <div className="mt-2 text-sm text-muted-foreground">
-                  No tasks assigned to your stations for this construction.
+                  {t("qrTokenPage.noStationTasks")}
                 </div>
               ) : (
                 <div className="mt-3 space-y-2 text-sm">
@@ -400,7 +409,7 @@ export default function QrTokenPage({
                     >
                       <div className="font-medium">{item.item_name}</div>
                       <div className="text-xs text-muted-foreground">
-                        Qty {item.qty} • {item.status}
+                        {t("qrTokenPage.qty")} {item.qty} • {item.status}
                       </div>
                     </div>
                   ))}
@@ -408,7 +417,7 @@ export default function QrTokenPage({
               )}
             </div>
             <div className="rounded-xl border border-dashed border-border px-4 py-4 text-xs text-muted-foreground">
-              QR token: {qrRow.token}
+              {t("qrTokenPage.qrToken")}: {qrRow.token}
             </div>
           </div>
         </div>

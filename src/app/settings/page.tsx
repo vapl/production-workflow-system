@@ -58,8 +58,7 @@ import {
   permissionDefinitions,
   type PermissionKey,
 } from "@/lib/auth/permissions";
-import { supabase, supabaseTenantLogoBucket } from "@/lib/supabaseClient";
-import { uploadTenantLogo } from "@/lib/uploadTenantLogo";
+import { supabase } from "@/lib/supabaseClient";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 import type { StationTrackingMode, WorkStation } from "@/types/workstation";
 import type {
@@ -100,26 +99,6 @@ function slugify(value: string) {
     .replace(/(^-|-$)+/g, "");
 }
 
-function getStoragePathFromUrl(url: string, bucket: string) {
-  if (!url) {
-    return null;
-  }
-  if (!url.startsWith("http")) {
-    return url;
-  }
-  try {
-    const parsed = new URL(url);
-    const marker = `/storage/v1/object/public/${bucket}/`;
-    const idx = parsed.pathname.indexOf(marker);
-    if (idx === -1) {
-      return null;
-    }
-    return parsed.pathname.slice(idx + marker.length);
-  } catch {
-    return null;
-  }
-}
-
 const integrations = [
   { id: "int-1", name: "Horizon", status: "Coming soon" },
   { id: "int-2", name: "Odoo", status: "Coming soon" },
@@ -131,26 +110,26 @@ const integrations = [
 const defaultExternalRequestEmailSubjectTemplate =
   "PWS request {{order_number}} - action required";
 const defaultExternalRequestEmailHtmlTemplate = `
-<p>Hello,</p>
-<p>You have received a new external job request from {{customer_name}}.</p>
-<p><strong>Order:</strong> {{order_number}}</p>
-<p><strong>External order:</strong> {{external_order_number}}</p>
-<p><strong>Due date:</strong> {{due_date}}</p>
+<p>Sveiki,</p>
+<p>Jūs saņēmāt jaunu ārējā darba pieprasījumu no {{customer_name}}.</p>
+<p><strong>Pasūtījums:</strong> {{order_number}}</p>
+<p><strong>Ārējais pasūtījums:</strong> {{external_order_number}}</p>
+<p><strong>Termiņš:</strong> {{due_date}}</p>
 {{comment_block}}
 {{attachments_block}}
-<p><a href="{{secure_form_link}}">Open secure form</a></p>
-<p>This link expires on {{expires_at}}.</p>
+<p><a href="{{secure_form_link}}">Atvērt drošo formu</a></p>
+<p>Šī saite beidzas {{expires_at}}.</p>
 `.trim();
 const defaultExternalRequestEmailTextTemplate = [
-  "Hello,",
-  "Order: {{order_number}}",
-  "Customer: {{customer_name}}",
-  "External order: {{external_order_number}}",
-  "Due date: {{due_date}}",
+  "Sveiki,",
+  "Pasūtījums: {{order_number}}",
+  "Klients: {{customer_name}}",
+  "Ārējais pasūtījums: {{external_order_number}}",
+  "Termiņš: {{due_date}}",
   "{{comment_line}}",
   "{{attachments_line}}",
-  "Secure form: {{secure_form_link}}",
-  "Link expires: {{expires_at}}",
+  "Drošā forma: {{secure_form_link}}",
+  "Saite beidzas: {{expires_at}}",
 ].join("\n");
 
 const workflowStatusOptions: { value: OrderStatus; label: string }[] = [
@@ -761,24 +740,6 @@ export default function SettingsPage() {
     };
   }, [currentUser.tenantId]);
   const [companyName, setCompanyName] = useState("");
-  const [companyLegalName, setCompanyLegalName] = useState("");
-  const [companyRegistrationNo, setCompanyRegistrationNo] = useState("");
-  const [companyVatNo, setCompanyVatNo] = useState("");
-  const [companyBillingEmail, setCompanyBillingEmail] = useState("");
-  const [companyAddress, setCompanyAddress] = useState("");
-  const [companyLogoUrl, setCompanyLogoUrl] = useState("");
-  const [companyLogoFile, setCompanyLogoFile] = useState<File | null>(null);
-  const [companyLogoPreview, setCompanyLogoPreview] = useState<string | null>(
-    null,
-  );
-  const [companyLogoState, setCompanyLogoState] = useState<
-    "idle" | "uploading" | "uploaded" | "error"
-  >("idle");
-  const [companyLogoMessage, setCompanyLogoMessage] = useState("");
-  const [companyState, setCompanyState] = useState<
-    "idle" | "saving" | "saved" | "error"
-  >("idle");
-  const [companyMessage, setCompanyMessage] = useState("");
   const [outboundFromName, setOutboundFromName] = useState("");
   const [outboundFromEmail, setOutboundFromEmail] = useState("");
   const [outboundReplyToEmail, setOutboundReplyToEmail] = useState("");
@@ -917,7 +878,6 @@ export default function SettingsPage() {
     [externalJobStatusConfigDrafts, rules.externalJobStatusConfig],
   );
 
-  const maxLogoBytes = 2 * 1024 * 1024;
   const hasAssignmentLabelChanges =
     assignmentLabelDrafts.engineer.trim() !==
       (rules.assignmentLabels?.engineer ?? "Engineer") ||
@@ -1055,12 +1015,6 @@ export default function SettingsPage() {
           return;
         }
         setCompanyName(data.name ?? "");
-        setCompanyLegalName(data.legal_name ?? "");
-        setCompanyRegistrationNo(data.registration_no ?? "");
-        setCompanyVatNo(data.vat_no ?? "");
-        setCompanyBillingEmail(data.billing_email ?? "");
-        setCompanyAddress(data.address ?? "");
-        setCompanyLogoUrl(data.logo_url ?? "");
         setOutboundFromName(data.outbound_from_name ?? "");
         setOutboundFromEmail(data.outbound_from_email ?? "");
         setOutboundReplyToEmail(data.outbound_reply_to_email ?? "");
@@ -1089,14 +1043,6 @@ export default function SettingsPage() {
       isMounted = false;
     };
   }, [currentUser.tenantId]);
-
-  useEffect(() => {
-    return () => {
-      if (companyLogoPreview) {
-        URL.revokeObjectURL(companyLogoPreview);
-      }
-    };
-  }, [companyLogoPreview]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1281,33 +1227,6 @@ export default function SettingsPage() {
     setAttachmentCategoryMessage("Attachment categories saved.");
   }
 
-  async function handleSaveCompany() {
-    if (!supabase || !currentUser.tenantId) {
-      return;
-    }
-    setCompanyState("saving");
-    setCompanyMessage("");
-    const { error } = await supabase
-      .from("tenants")
-      .update({
-        name: companyName.trim(),
-        legal_name: companyLegalName.trim() || null,
-        registration_no: companyRegistrationNo.trim() || null,
-        vat_no: companyVatNo.trim() || null,
-        billing_email: companyBillingEmail.trim() || null,
-        address: companyAddress.trim() || null,
-        logo_url: companyLogoUrl.trim() || null,
-      })
-      .eq("id", currentUser.tenantId);
-    if (error) {
-      setCompanyState("error");
-      setCompanyMessage(error.message);
-      return;
-    }
-    setCompanyState("saved");
-    setCompanyMessage("Company details saved.");
-  }
-
   async function handleInviteUser() {
     const trimmed = inviteEmail.trim().toLowerCase();
     if (!supabase || !currentUser.tenantId || !trimmed) {
@@ -1368,79 +1287,6 @@ export default function SettingsPage() {
       },
       ...prev,
     ]);
-  }
-
-  async function handleUploadCompanyLogo() {
-    if (!companyLogoFile || !currentUser.tenantId) {
-      return;
-    }
-    setCompanyLogoState("uploading");
-    setCompanyLogoMessage("");
-    const result = await uploadTenantLogo(
-      companyLogoFile,
-      currentUser.tenantId,
-    );
-    if (!result.url || result.error) {
-      setCompanyLogoState("error");
-      const rawMessage = result.error ?? "Upload failed.";
-      if (rawMessage.toLowerCase().includes("bucket")) {
-        setCompanyLogoMessage(
-          `Bucket not found. Create a "${process.env.NEXT_PUBLIC_SUPABASE_TENANT_BUCKET || "tenant-logos"}" bucket in Supabase Storage.`,
-        );
-      } else {
-        setCompanyLogoMessage(rawMessage);
-      }
-      return;
-    }
-    setCompanyLogoState("uploaded");
-    setCompanyLogoMessage("Logo uploaded.");
-    setCompanyLogoUrl(result.url);
-    setCompanyLogoFile(null);
-    if (companyLogoPreview) {
-      URL.revokeObjectURL(companyLogoPreview);
-      setCompanyLogoPreview(null);
-    }
-    if (!supabase) {
-      return;
-    }
-    await supabase
-      .from("tenants")
-      .update({ logo_url: result.url })
-      .eq("id", currentUser.tenantId);
-  }
-
-  async function handleDeleteCompanyLogo() {
-    if (!supabase || !currentUser.tenantId || !companyLogoUrl) {
-      return;
-    }
-    setCompanyLogoState("uploading");
-    setCompanyLogoMessage("");
-    const storagePath = getStoragePathFromUrl(
-      companyLogoUrl,
-      supabaseTenantLogoBucket,
-    );
-    if (storagePath) {
-      await supabase.storage
-        .from(supabaseTenantLogoBucket)
-        .remove([storagePath]);
-    }
-    const { error } = await supabase
-      .from("tenants")
-      .update({ logo_url: null })
-      .eq("id", currentUser.tenantId);
-    if (error) {
-      setCompanyLogoState("error");
-      setCompanyLogoMessage(error.message);
-      return;
-    }
-    setCompanyLogoUrl("");
-    setCompanyLogoFile(null);
-    if (companyLogoPreview) {
-      URL.revokeObjectURL(companyLogoPreview);
-      setCompanyLogoPreview(null);
-    }
-    setCompanyLogoState("uploaded");
-    setCompanyLogoMessage("Logo removed.");
   }
 
   async function handleResendInvite(email: string) {

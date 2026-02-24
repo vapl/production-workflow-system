@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type {
   Order,
   OrderAttachment,
@@ -18,6 +18,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import { useNotifications } from "@/components/ui/Notifications";
 import { getAccountingAdapter } from "@/lib/integrations/accounting/getAdapter";
 import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 interface OrdersContextValue {
   orders: Order[];
@@ -143,9 +144,18 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
   const { notify } = useNotifications();
   const { levels } = useHierarchy();
+  const { t } = useI18n();
   const [orders, setOrders] = useState<Order[]>(mockOrders);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const unknownLabel = t("orders.context.unknown");
+  const systemLabel = t("orders.context.system");
+  const partnerLabel = t("orders.context.partner");
+  const managerLabel = t("orders.context.manager");
+  const userLabel = t("orders.context.user");
+  const missingTenantAssignment = t(
+    "orders.context.errors.missingTenantAssignment",
+  );
 
   const normalizeOrderStatus = (value: string): OrderStatus => {
     switch (value) {
@@ -183,7 +193,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     id: row.id,
     name: row.name,
     url: row.url ?? undefined,
-    addedBy: row.added_by_name ?? "Unknown",
+    addedBy: row.added_by_name ?? unknownLabel,
     addedByRole: row.added_by_role ?? undefined,
     createdAt: row.created_at,
     size: row.size ?? undefined,
@@ -205,7 +215,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     id: row.id,
     name: row.name,
     url: row.url ?? undefined,
-    addedBy: row.added_by_name ?? "Unknown",
+    addedBy: row.added_by_name ?? unknownLabel,
     addedByRole: row.added_by_role ?? undefined,
     createdAt: row.created_at,
     size: row.size ?? undefined,
@@ -222,7 +232,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
   }): ExternalJobStatusEntry => ({
     id: row.id,
     status: row.status,
-    changedBy: row.changed_by_name ?? "Unknown",
+    changedBy: row.changed_by_name ?? unknownLabel,
     changedByRole: row.changed_by_role ?? undefined,
     changedAt: row.changed_at,
   });
@@ -238,7 +248,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     id: row.id,
     message: row.message,
     authorId: row.author ?? undefined,
-    author: row.author_name ?? "Unknown",
+    author: row.author_name ?? unknownLabel,
     authorRole: row.author_role ?? undefined,
     createdAt: row.created_at,
   });
@@ -252,7 +262,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
   }): OrderStatusEntry => ({
     id: row.id,
     status: normalizeOrderStatus(row.status),
-    changedBy: row.changed_by_name ?? "Unknown",
+    changedBy: row.changed_by_name ?? unknownLabel,
     changedByRole: row.changed_by_role ?? undefined,
     changedAt: row.changed_at,
   });
@@ -301,7 +311,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     id: row.id,
     orderId: row.order_id,
     partnerId: row.partner_id ?? undefined,
-    partnerName: row.partner_name ?? "Partner",
+    partnerName: row.partner_name ?? partnerLabel,
     partnerEmail: row.partner_email ?? undefined,
     externalOrderNumber: row.external_order_number,
     quantity: row.quantity ?? undefined,
@@ -552,20 +562,24 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     setOrders((data ?? []).map(mapOrder));
     setIsLoading(false);
   };
-
   useEffect(() => {
     if (!supabase) {
-      setOrders(mockOrders);
+      queueMicrotask(() => {
+        setOrders(mockOrders);
+      });
       return;
     }
     if (user.loading) {
       return;
     }
     if (!user.isAuthenticated) {
-      setOrders([]);
+      queueMicrotask(() => {
+        setOrders([]);
+      });
       return;
     }
     void refreshOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.isAuthenticated, user.loading, user.tenantId]);
 
   const syncAccountingOrders = async () => {
@@ -574,7 +588,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
     if (accountingOrders.length === 0) {
       notify({
-        title: "No accounting orders found",
+        title: t("orders.context.notifications.noAccountingOrdersFound"),
         variant: "info",
       });
       return 0;
@@ -623,10 +637,10 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!user.tenantId) {
-      setError("Missing tenant assignment for this user.");
+      setError(missingTenantAssignment);
       notify({
-        title: "Accounting sync failed",
-        description: "Missing tenant assignment.",
+        title: t("orders.context.notifications.accountingSyncFailed"),
+        description: t("orders.context.notifications.missingTenantAssignment"),
         variant: "error",
       });
       return 0;
@@ -640,7 +654,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     if (existingError) {
       setError(existingError.message);
       notify({
-        title: "Accounting sync failed",
+        title: t("orders.context.notifications.accountingSyncFailed"),
         description: existingError.message,
         variant: "error",
       });
@@ -684,8 +698,10 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
     if (rows.length === 0) {
       notify({
-        title: "Accounting sync skipped",
-        description: "All accounting orders have manual overrides.",
+        title: t("orders.context.notifications.accountingSyncSkipped"),
+        description: t(
+          "orders.context.notifications.accountingSyncAllManualOverrides",
+        ),
         variant: "info",
       });
       return 0;
@@ -698,7 +714,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     if (upsertError) {
       setError(upsertError.message);
       notify({
-        title: "Accounting sync failed",
+        title: t("orders.context.notifications.accountingSyncFailed"),
         description: upsertError.message,
         variant: "error",
       });
@@ -707,7 +723,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
     await refreshOrders();
     notify({
-      title: `Synced ${rows.length} accounting orders`,
+      title: t("orders.context.notifications.accountingSyncedCount", {
+        count: rows.length,
+      }),
       variant: "success",
     });
     return rows.length;
@@ -716,7 +734,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
   const importOrdersFromExcel = async (rows: OrderImportPayload[]) => {
     if (rows.length === 0) {
       notify({
-        title: "No rows to import",
+        title: t("orders.context.notifications.noRowsToImport"),
         variant: "info",
       });
       return { inserted: 0, updated: 0 };
@@ -748,10 +766,10 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!user.tenantId) {
-      setError("Missing tenant assignment for this user.");
+      setError(missingTenantAssignment);
       notify({
-        title: "Excel import failed",
-        description: "Missing tenant assignment.",
+        title: t("orders.context.notifications.excelImportFailed"),
+        description: t("orders.context.notifications.missingTenantAssignment"),
         variant: "error",
       });
       return { inserted: 0, updated: 0 };
@@ -765,7 +783,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
     if (existingError) {
       notify({
-        title: "Excel import failed",
+        title: t("orders.context.notifications.excelImportFailed"),
         description: existingError.message,
         variant: "error",
       });
@@ -799,7 +817,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
     if (upsertError) {
       notify({
-        title: "Excel import failed",
+        title: t("orders.context.notifications.excelImportFailed"),
         description: upsertError.message,
         variant: "error",
       });
@@ -820,7 +838,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         order_id: orderIdByNumber.get(row.orderNumber),
         tenant_id: user.tenantId,
         message: row.notes?.trim() ?? "",
-        author_name: user.name ?? "System",
+        author_name: user.name ?? systemLabel,
         author_role: user.role ?? null,
       }))
       .filter((row) => row.order_id);
@@ -831,16 +849,22 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
     await refreshOrders();
     notify({
-      title: `Imported ${inserted + updated} orders`,
+      title: t("orders.context.notifications.importedOrdersCount", {
+        count: inserted + updated,
+      }),
       description:
-        updated > 0 ? `${updated} updated, ${inserted} inserted.` : undefined,
+        updated > 0
+          ? t("orders.context.notifications.importResultBreakdown", {
+              updated,
+              inserted,
+            })
+          : undefined,
       variant: "success",
     });
     return { inserted, updated };
   };
 
-  const value = useMemo<OrdersContextValue>(
-    () => ({
+  const value: OrdersContextValue = {
       orders,
       isLoading,
       error,
@@ -864,7 +888,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             assignedManagerName:
               order.assignedManagerName ??
               (user.role === "Sales" || user.isAdmin
-                ? user.name ?? "Manager"
+                ? user.name ?? managerLabel
                 : undefined),
             assignedManagerAt:
               order.assignedManagerAt ??
@@ -877,7 +901,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
                   {
                     id: `cmt-${Date.now()}`,
                     message: order.notes,
-                    author: order.authorName ?? "System",
+                    author: order.authorName ?? systemLabel,
                     authorRole: order.authorRole,
                     createdAt: new Date().toISOString(),
                   },
@@ -888,10 +912,10 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           return fallback;
         }
         if (!user.tenantId) {
-          setError("Missing tenant assignment for this user.");
+          setError(missingTenantAssignment);
           notify({
-            title: "Order not created",
-            description: "Missing tenant assignment.",
+            title: t("orders.context.notifications.orderNotCreated"),
+            description: t("orders.context.notifications.missingTenantAssignment"),
             variant: "error",
           });
           return null;
@@ -1012,7 +1036,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (insertError) {
           setError(insertError.message);
           notify({
-            title: "Order not created",
+            title: t("orders.context.notifications.orderNotCreated"),
             description: insertError.message,
             variant: "error",
           });
@@ -1027,7 +1051,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
               tenant_id: user.tenantId,
               message: order.notes.trim(),
               author: user.id ?? null,
-              author_name: order.authorName ?? "System",
+              author_name: order.authorName ?? systemLabel,
               author_role: order.authorRole ?? null,
             })
             .select(
@@ -1052,7 +1076,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         setOrders((prev) => [mapped, ...prev]);
         await refreshOrders();
         notify({
-          title: `Order ${mapped.orderNumber} created`,
+          title: t("orders.context.notifications.orderCreated", {
+            orderNumber: mapped.orderNumber,
+          }),
           variant: "success",
         });
         return mapped;
@@ -1065,7 +1091,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
                   {
                     id: `hst-${Date.now()}`,
                     status: patch.status,
-                    changedBy: user.name ?? "System",
+                    changedBy: user.name ?? systemLabel,
                     changedByRole: user.role ?? undefined,
                     changedAt: new Date().toISOString(),
                   },
@@ -1256,7 +1282,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (updateError) {
           setError(updateError.message);
           notify({
-            title: "Order not updated",
+            title: t("orders.context.notifications.orderNotUpdated"),
             description: updateError.message,
             variant: "error",
           });
@@ -1264,10 +1290,12 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         }
         const data = updatedRows?.[0] ?? null;
         if (!data) {
-          const description = "Order was not found or no access to update.";
+          const description = t(
+            "orders.context.notifications.orderNotFoundOrNoAccess",
+          );
           setError(description);
           notify({
-            title: "Order not updated",
+            title: t("orders.context.notifications.orderNotUpdated"),
             description,
             variant: "error",
           });
@@ -1278,7 +1306,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             order_id: orderId,
             tenant_id: user.tenantId,
             status: patch.status,
-            changed_by_name: user.name ?? "System",
+            changed_by_name: user.name ?? systemLabel,
             changed_by_role: user.role ?? null,
             changed_at: patch.statusChangedAt ?? new Date().toISOString(),
           });
@@ -1289,7 +1317,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         );
         await refreshOrders();
         notify({
-          title: `Order ${mapped.orderNumber} updated`,
+          title: t("orders.context.notifications.orderUpdated", {
+            orderNumber: mapped.orderNumber,
+          }),
           variant: "success",
         });
         return mapped;
@@ -1306,7 +1336,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (deleteError) {
           setError(deleteError.message);
           notify({
-            title: "Order not deleted",
+            title: t("orders.context.notifications.orderNotDeleted"),
             description: deleteError.message,
             variant: "error",
           });
@@ -1315,7 +1345,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         setOrders((prev) => prev.filter((order) => order.id !== orderId));
         await refreshOrders();
         notify({
-          title: "Order deleted",
+          title: t("orders.context.notifications.orderDeleted"),
           variant: "success",
         });
         return true;
@@ -1340,7 +1370,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           return fallback;
         }
         if (!user.tenantId) {
-          setError("Missing tenant assignment for this user.");
+          setError(missingTenantAssignment);
           return null;
         }
         const { data, error: insertError } = await supabase
@@ -1446,7 +1476,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           return fallback;
         }
         if (!user.tenantId) {
-          setError("Missing tenant assignment for this user.");
+          setError(missingTenantAssignment);
           return null;
         }
         const { data, error: insertError } = await supabase
@@ -1493,7 +1523,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         const canRemove =
           user.isAdmin || user.isOwner || comment?.authorId === user.id;
         if (!canRemove) {
-          setError("You can only remove your own comments.");
+          setError(t("orders.context.errors.removeOwnCommentsOnly"));
           return false;
         }
         if (!supabase) {
@@ -1552,7 +1582,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
               {
                 id: `ext-h-${Date.now()}`,
                 status: payload.status,
-                changedBy: user.name || "User",
+                changedBy: user.name || userLabel,
                 changedByRole: user.role,
                 changedAt: new Date().toISOString(),
               },
@@ -1605,7 +1635,10 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           )
           .single();
         if (insertError || !data) {
-          setError(insertError?.message ?? "Failed to add external job.");
+          setError(
+            insertError?.message ??
+              t("orders.context.errors.failedToAddExternalJob"),
+          );
           return null;
         }
         await supabase.from("external_job_status_history").insert({
@@ -1659,7 +1692,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
                           {
                             id: `ext-h-${Date.now()}`,
                             status: patch.status,
-                            changedBy: user.name || "User",
+                            changedBy: user.name || userLabel,
                             changedByRole: user.role,
                             changedAt: new Date().toISOString(),
                           },
@@ -1741,7 +1774,10 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           )
           .single();
         if (updateError || !data) {
-          setError(updateError?.message ?? "Failed to update external job.");
+          setError(
+            updateError?.message ??
+              t("orders.context.errors.failedToUpdateExternalJob"),
+          );
           return null;
         }
         if (patch.status !== undefined) {
@@ -1851,7 +1887,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           )
           .single();
         if (insertError || !data) {
-          setError(insertError?.message ?? "Failed to add attachment.");
+          setError(
+            insertError?.message ?? t("orders.context.errors.failedToAddAttachment"),
+          );
           return null;
         }
         const mapped = mapExternalJobAttachment(data);
@@ -1915,19 +1953,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         return true;
       },
       syncAccountingOrders,
-    }),
-    [
-      orders,
-      isLoading,
-      error,
-      user.tenantId,
-      user.name,
-      user.role,
-      levels,
-      syncAccountingOrders,
-      importOrdersFromExcel,
-    ],
-  );
+    };
 
   return (
     <OrdersContext.Provider value={value}>{children}</OrdersContext.Provider>

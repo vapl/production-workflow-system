@@ -24,6 +24,7 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
+import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
@@ -277,6 +278,7 @@ function rowKeyForProductionItem(item: ProductionItemRow) {
 }
 
 export default function ProductionPage() {
+  const { t } = useI18n();
   const user = useCurrentUser();
   const { rules } = useWorkflowRules();
   const [selectedBatchKeys, setSelectedBatchKeys] = useState<string[]>([]);
@@ -416,10 +418,14 @@ export default function ProductionPage() {
   const productionAttachmentCategory =
     rules.attachmentCategoryDefaults?.Production ??
     productionAttachmentFallbackCategory;
+  const statusLabel = (status: BatchRunRow["status"]) =>
+    t(`production.main.status.${status}`);
+  const priorityLabel = (priority: Priority) =>
+    t(`production.main.priority.${priority}`);
 
   useEffect(() => {
     if (!supabase) {
-      setDataError("Supabase is not configured.");
+      setDataError(t("production.main.errors.supabaseNotConfigured"));
       return;
     }
     let isMounted = true;
@@ -428,7 +434,7 @@ export default function ProductionPage() {
       setDataError("");
       const sb = supabase;
       if (!sb) {
-        setDataError("Supabase is not configured.");
+        setDataError(t("production.main.errors.supabaseNotConfigured"));
         setIsLoading(false);
         return;
       }
@@ -471,7 +477,7 @@ export default function ProductionPage() {
         runsResult.error ||
         ordersResult.error
       ) {
-        setDataError("Failed to load production data.");
+        setDataError(t("production.main.errors.loadFailed"));
         setIsLoading(false);
         return;
       }
@@ -1606,7 +1612,9 @@ export default function ProductionPage() {
       setQrState("ready");
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to prepare QR codes.";
+        err instanceof Error
+          ? err.message
+          : t("production.main.errors.failedPrepareQrCodes");
       setQrError(message);
       setQrState("error");
     }
@@ -1680,7 +1688,7 @@ export default function ProductionPage() {
     }
     const selectedRowKeys = new Set(queueConstructionSelections[item.id] ?? []);
     if (selectedRowKeys.size === 0) {
-      setDataError("Select at least one construction row to replan.");
+      setDataError(t("production.main.errors.selectAtLeastOneForReplan"));
       return;
     }
     const selectedRows = item.items
@@ -1772,7 +1780,7 @@ export default function ProductionPage() {
       (row) => (splitSelections[row.id] ?? []).length > 0,
     );
     if (selectedRows.length === 0) {
-      setDataError("Select at least one construction row.");
+      setDataError(t("production.main.errors.selectAtLeastOneConstruction"));
       setIsCreatingWorkOrders(false);
       return;
     }
@@ -1781,7 +1789,7 @@ export default function ProductionPage() {
     for (const row of selectedRows) {
       const date = splitPlannedDates[row.id] ?? plannedDate;
       if (!date) {
-        setDataError("Planned date is required for selected constructions.");
+        setDataError(t("production.main.errors.plannedDateRequired"));
         setIsCreatingWorkOrders(false);
         return;
       }
@@ -1879,7 +1887,7 @@ export default function ProductionPage() {
           "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, orders (order_number, due_date, priority, customer_name)",
         );
       if (error) {
-        setDataError("Failed to create production items.");
+        setDataError(t("production.main.errors.failedCreateProductionItems"));
         setIsCreatingWorkOrders(false);
         return;
       }
@@ -1921,7 +1929,7 @@ export default function ProductionPage() {
         "id, order_id, batch_code, station_id, route_key, step_index, status, started_at, done_at, orders (order_number, due_date, priority, customer_name)",
       );
     if (error) {
-      setDataError("Failed to create batch runs.");
+      setDataError(t("production.main.errors.failedCreateBatchRuns"));
       setIsCreatingWorkOrders(false);
       return;
     }
@@ -1956,7 +1964,7 @@ export default function ProductionPage() {
         if (removeItemsError) {
           setDataError(
             removeItemsError.message ??
-              "Failed to remove old construction rows from source batch.",
+              t("production.main.errors.failedRemoveOldConstructionRows"),
           );
           setIsCreatingWorkOrders(false);
           return;
@@ -1997,7 +2005,7 @@ export default function ProductionPage() {
           if (removeRunsError) {
             setDataError(
               removeRunsError.message ??
-                "Failed to clean up empty source batch runs.",
+                t("production.main.errors.failedCleanupEmptyRuns"),
             );
             setIsCreatingWorkOrders(false);
             return;
@@ -2227,7 +2235,7 @@ export default function ProductionPage() {
     }
 
     if (hadError) {
-      setDataError("Some queue entries could not be removed.");
+      setDataError(t("production.main.errors.someQueueEntriesNotRemoved"));
     }
   };
 
@@ -2248,20 +2256,24 @@ export default function ProductionPage() {
     }
     const description =
       descriptionParts.length > 0
-        ? `This will remove ${descriptionParts.join(" from ")} from the queue.`
-        : "This will remove the work order from the station queue.";
+        ? t("production.main.queue.removeDescriptionWithParts", {
+            target: descriptionParts.join(
+              t("production.main.queue.removeDescriptionFrom"),
+            ),
+          })
+        : t("production.main.queue.removeDescriptionSingle");
     const ok = await confirm({
-      title: "Remove work order?",
+      title: t("production.main.queue.removeWorkOrderTitle"),
       description,
-      confirmLabel: "Remove",
-      cancelLabel: "Cancel",
+      confirmLabel: t("production.main.common.remove"),
+      cancelLabel: t("production.main.common.cancel"),
       destructive: true,
     });
     if (!ok) {
       return;
     }
     if (!canManageQueue) {
-      setDataError("Missing permission to edit station queue.");
+      setDataError(t("production.main.errors.missingQueuePermission"));
       return;
     }
     setRemovingQueueId(id);
@@ -2286,7 +2298,7 @@ export default function ProductionPage() {
     orderLabel?: string,
   ) => {
     if (!canManageQueue) {
-      setDataError("Missing permission to edit station queue.");
+      setDataError(t("production.main.errors.missingQueuePermission"));
       return;
     }
     const run = batchRuns.find((item) => item.id === runId);
@@ -2300,7 +2312,7 @@ export default function ProductionPage() {
     );
     const removableRuns = relatedRuns.filter(canRunBeRemoved);
     if (removableRuns.length === 0) {
-      setDataError("Cannot clear: work has already started on these stations.");
+      setDataError(t("production.main.errors.cannotClearStationsStarted"));
       return;
     }
     const fallbackLabel = run.orders?.order_number
@@ -2308,10 +2320,13 @@ export default function ProductionPage() {
       : run.batch_code;
     const label = orderLabel ?? fallbackLabel;
     const ok = await confirm({
-      title: "Clear from all stations?",
-      description: `This will remove ${label} from ${removableRuns.length} station queue item(s).`,
-      confirmLabel: "Clear all",
-      cancelLabel: "Cancel",
+      title: t("production.main.queue.clearAllStationsTitle"),
+      description: t("production.main.queue.clearAllStationsDescription", {
+        label,
+        count: removableRuns.length,
+      }),
+      confirmLabel: t("production.main.queue.clearAllStations"),
+      cancelLabel: t("production.main.common.cancel"),
       destructive: true,
     });
     if (!ok) return;
@@ -2325,7 +2340,7 @@ export default function ProductionPage() {
       return;
     }
     if (!canManageQueue) {
-      setDataError("Missing permission to edit station queue.");
+      setDataError(t("production.main.errors.missingQueuePermission"));
       return;
     }
     const runs = batchRuns.filter((run) =>
@@ -2338,18 +2353,25 @@ export default function ProductionPage() {
         run.status === "blocked",
     );
     if (movable.length === 0) {
-      setDataError("Selected items cannot be moved by date.");
+      setDataError(t("production.main.errors.selectedItemsCannotMoveDate"));
       return;
     }
     const skipped = runs.length - movable.length;
     const ok = await confirm({
-      title: "Move selected queue items?",
+      title: t("production.main.queue.moveSelectedTitle"),
       description:
         skipped > 0
-          ? `Move ${movable.length} item(s) to ${formatDateInput(queueActionDate)}. ${skipped} item(s) will be skipped.`
-          : `Move ${movable.length} item(s) to ${formatDateInput(queueActionDate)}.`,
-      confirmLabel: "Move date",
-      cancelLabel: "Cancel",
+          ? t("production.main.queue.moveSelectedDescriptionWithSkip", {
+              moveCount: movable.length,
+              date: formatDateInput(queueActionDate),
+              skipCount: skipped,
+            })
+          : t("production.main.queue.moveSelectedDescription", {
+              moveCount: movable.length,
+              date: formatDateInput(queueActionDate),
+            }),
+      confirmLabel: t("production.main.queue.moveDate"),
+      cancelLabel: t("production.main.common.cancel"),
     });
     if (!ok) {
       return;
@@ -2364,7 +2386,7 @@ export default function ProductionPage() {
       );
     setIsQueueBulkApplying(false);
     if (error) {
-      setDataError("Failed to move selected queue date.");
+      setDataError(t("production.main.errors.failedMoveSelectedQueueDate"));
       return;
     }
     setBatchRuns((prev) =>
@@ -2378,7 +2400,7 @@ export default function ProductionPage() {
 
   const handleClearSelectedQueue = async () => {
     if (!canManageQueue) {
-      setDataError("Missing permission to edit station queue.");
+      setDataError(t("production.main.errors.missingQueuePermission"));
       return;
     }
     const runs = batchRuns.filter((run) =>
@@ -2386,18 +2408,23 @@ export default function ProductionPage() {
     );
     const removable = runs.filter(canRunBeRemoved);
     if (removable.length === 0) {
-      setDataError("Cannot clear: selected items already started.");
+      setDataError(t("production.main.errors.cannotClearSelectedStarted"));
       return;
     }
     const skipped = runs.length - removable.length;
     const ok = await confirm({
-      title: "Clear selected queue items?",
+      title: t("production.main.queue.clearSelectedTitle"),
       description:
         skipped > 0
-          ? `Clear ${removable.length} selected item(s). ${skipped} item(s) will be skipped.`
-          : `Clear ${removable.length} selected item(s) from station queues.`,
-      confirmLabel: "Clear selected",
-      cancelLabel: "Cancel",
+          ? t("production.main.queue.clearSelectedDescriptionWithSkip", {
+              clearCount: removable.length,
+              skipCount: skipped,
+            })
+          : t("production.main.queue.clearSelectedDescription", {
+              clearCount: removable.length,
+            }),
+      confirmLabel: t("production.main.queue.clearSelected"),
+      cancelLabel: t("production.main.common.cancel"),
       destructive: true,
     });
     if (!ok) {
@@ -2643,7 +2670,7 @@ export default function ProductionPage() {
           size="icon"
           className="h-11 w-11 rounded-full shadow-lg"
           onClick={() => setIsMobileSectionsOpen(true)}
-          aria-label="Open production sections"
+          aria-label={t("production.main.mobile.openSections")}
           aria-haspopup="dialog"
           aria-expanded={isMobileSectionsOpen}
           aria-controls="production-sections-drawer"
@@ -2661,11 +2688,11 @@ export default function ProductionPage() {
                 className="h-11 rounded-full px-3 text-xs"
                 onClick={() => setIsMobilePlanningRouteOpen(true)}
               >
-                Route
+                {t("production.main.common.route")}
               </Button>
             ) : (
               <div className="h-11 rounded-full border border-border bg-muted/20 px-3 text-xs text-muted-foreground inline-flex items-center">
-                {routes[0]?.label ?? "Default route"}
+                {routes[0]?.label ?? t("production.main.common.defaultRoute")}
               </div>
             )}
             <Button
@@ -2689,7 +2716,7 @@ export default function ProductionPage() {
               onClick={() => setIsMobileQueueFiltersOpen(true)}
             >
               <SlidersHorizontalIcon className="h-4 w-4" />
-              Queue filters
+              {t("production.main.queue.filtersTitle")}
             </Button>
           </div>
         </div>
@@ -2699,9 +2726,9 @@ export default function ProductionPage() {
           id="production-sections-drawer"
           open={isMobileSectionsOpen}
           onClose={() => setIsMobileSectionsOpen(false)}
-          ariaLabel="Production sections"
-          closeButtonLabel="Close production sections"
-          title="Production sections"
+          ariaLabel={t("production.main.mobile.sectionsTitle")}
+          closeButtonLabel={t("production.main.mobile.closeSections")}
+          title={t("production.main.mobile.sectionsTitle")}
           enableSwipeToClose
         >
           <div className="flex-1 overflow-y-auto p-3">
@@ -2709,11 +2736,15 @@ export default function ProductionPage() {
               {[
                 {
                   value: "planning",
-                  label: "Planning",
+                  label: t("production.main.tabs.planning"),
                   icon: ClipboardListIcon,
                 },
-                { value: "list", label: "Orders", icon: ListIcon },
-                { value: "calendar", label: "Calendar", icon: CalendarIcon },
+                { value: "list", label: t("production.main.tabs.orders"), icon: ListIcon },
+                {
+                  value: "calendar",
+                  label: t("production.main.tabs.calendar"),
+                  icon: CalendarIcon,
+                },
               ].map((section) => {
                 const isActive = activeProductionTab === section.value;
                 const SectionIcon = section.icon;
@@ -2738,7 +2769,9 @@ export default function ProductionPage() {
                       {SectionIcon ? <SectionIcon className="h-4 w-4" /> : null}
                       {section.label}
                     </span>
-                    {isActive ? <span className="text-xs">Active</span> : null}
+                    {isActive ? (
+                      <span className="text-xs">{t("production.main.common.active")}</span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -2748,9 +2781,9 @@ export default function ProductionPage() {
         <BottomSheet
           open={isMobilePlanningRouteOpen}
           onClose={() => setIsMobilePlanningRouteOpen(false)}
-          ariaLabel="Route options"
-          closeButtonLabel="Close route options"
-          title="Route"
+          ariaLabel={t("production.main.mobile.routeOptions")}
+          closeButtonLabel={t("production.main.mobile.closeRouteOptions")}
+          title={t("production.main.common.route")}
           enableSwipeToClose
         >
           <div className="space-y-3 px-4 pt-3">
@@ -2774,7 +2807,7 @@ export default function ProductionPage() {
               </Select>
             ) : (
               <div className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm text-foreground flex items-center">
-                {routes[0]?.label ?? "Default route"}
+                {routes[0]?.label ?? t("production.main.common.defaultRoute")}
               </div>
             )}
             <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
@@ -2790,7 +2823,7 @@ export default function ProductionPage() {
                   ))}
                 </div>
               ) : (
-                "No matching stations for default route."
+                t("production.main.mobile.noRouteStations")
               )}
             </div>
             <div className="flex items-center justify-between gap-2 pt-1">
@@ -2799,10 +2832,10 @@ export default function ProductionPage() {
                 onClick={() => setSelectedBatchKeys([])}
                 disabled={selectedBatchKeys.length === 0}
               >
-                Clear
+                {t("production.main.common.clear")}
               </Button>
               <Button onClick={() => setIsMobilePlanningRouteOpen(false)}>
-                Done
+                {t("production.main.common.done")}
               </Button>
             </div>
           </div>
@@ -2810,20 +2843,20 @@ export default function ProductionPage() {
         <BottomSheet
           open={isMobileQueueFiltersOpen}
           onClose={() => setIsMobileQueueFiltersOpen(false)}
-          ariaLabel="Queue filters"
-          closeButtonLabel="Close queue filters"
-          title="Queue filters"
+          ariaLabel={t("production.main.queue.filtersTitle")}
+          closeButtonLabel={t("production.main.queue.closeFilters")}
+          title={t("production.main.queue.filtersTitle")}
           enableSwipeToClose
         >
           <div className="space-y-3 px-4 pt-3">
             <DatePicker
-              label="View date"
+              label={t("production.main.queue.viewDate")}
               value={viewDate}
               onChange={setViewDate}
               className="space-y-1 text-xs text-muted-foreground"
             />
             <SelectField
-              label="Range"
+              label={t("production.main.common.range")}
               labelClassName="text-xs text-muted-foreground"
               value={String(plannedRangeDays)}
               onValueChange={(value) => setPlannedRangeDays(Number(value))}
@@ -2836,16 +2869,16 @@ export default function ProductionPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Today</SelectItem>
-                  <SelectItem value="3">3 days</SelectItem>
-                  <SelectItem value="7">7 days</SelectItem>
-                  <SelectItem value="14">14 days</SelectItem>
+                  <SelectItem value="1">{t("production.main.range.today")}</SelectItem>
+                  <SelectItem value="3">{t("production.main.range.days3")}</SelectItem>
+                  <SelectItem value="7">{t("production.main.range.days7")}</SelectItem>
+                  <SelectItem value="14">{t("production.main.range.days14")}</SelectItem>
                 </SelectContent>
               </Select>
             </SelectField>
             <div className="flex justify-end">
               <Button onClick={() => setIsMobileQueueFiltersOpen(false)}>
-                Done
+                {t("production.main.common.done")}
               </Button>
             </div>
           </div>
@@ -2853,9 +2886,9 @@ export default function ProductionPage() {
         <BottomSheet
           open={Boolean(queueRemoveChoice)}
           onClose={closeQueueRemoveChoice}
-          ariaLabel="Queue remove options"
-          closeButtonLabel="Close remove options"
-          title="Remove from queue"
+          ariaLabel={t("production.main.queue.removeOptions")}
+          closeButtonLabel={t("production.main.queue.closeRemoveOptions")}
+          title={t("production.main.queue.removeFromQueue")}
           enableSwipeToClose
         >
           <div className="space-y-3 px-4 pb-4 pt-3 md:hidden">
@@ -2879,7 +2912,7 @@ export default function ProductionPage() {
                 );
               }}
             >
-              Clear current station
+              {t("production.main.queue.clearCurrentStation")}
             </Button>
             <Button
               type="button"
@@ -2895,7 +2928,7 @@ export default function ProductionPage() {
                 );
               }}
             >
-              Clear all stations
+              {t("production.main.queue.clearAllStations")}
             </Button>
             <Button
               type="button"
@@ -2903,7 +2936,7 @@ export default function ProductionPage() {
               className="w-full"
               onClick={closeQueueRemoveChoice}
             >
-              Cancel
+              {t("production.main.common.cancel")}
             </Button>
           </div>
         </BottomSheet>
@@ -2911,13 +2944,15 @@ export default function ProductionPage() {
           <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 px-4 md:flex">
             <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Remove from queue</h3>
+                <h3 className="text-sm font-semibold">
+                  {t("production.main.queue.removeFromQueue")}
+                </h3>
                 <button
                   type="button"
                   className="text-sm text-muted-foreground"
                   onClick={closeQueueRemoveChoice}
                 >
-                  Close
+                  {t("production.main.common.close")}
                 </button>
               </div>
               <div className="mt-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
@@ -2938,7 +2973,7 @@ export default function ProductionPage() {
                     );
                   }}
                 >
-                  Clear current station
+                  {t("production.main.queue.clearCurrentStation")}
                 </Button>
                 <Button
                   type="button"
@@ -2953,7 +2988,7 @@ export default function ProductionPage() {
                     );
                   }}
                 >
-                  Clear all stations
+                  {t("production.main.queue.clearAllStations")}
                 </Button>
                 <Button
                   type="button"
@@ -2961,7 +2996,7 @@ export default function ProductionPage() {
                   className="w-full"
                   onClick={closeQueueRemoveChoice}
                 >
-                  Cancel
+                  {t("production.main.common.cancel")}
                 </Button>
               </div>
             </div>
@@ -2977,29 +3012,29 @@ export default function ProductionPage() {
         className="space-y-0 md:space-y-4 pt-16 md:pt-0"
       >
         <MobilePageTitle
-          title="Production"
+          title={t("production.main.header.title")}
           showCompact={showCompactMobileTitle}
-          subtitle="Plan work orders, batch similar items, and assign to stations."
+          subtitle={t("production.main.header.subtitle")}
           className="pt-6 pb-6"
         />
         <DesktopPageHeader
           sticky
-          title="Production"
-          subtitle="Plan work orders, batch similar items, and assign to stations."
+          title={t("production.main.header.title")}
+          subtitle={t("production.main.header.subtitle")}
           className="md:z-20"
           actions={
             <TabsList className="hidden md:flex">
               <TabsTrigger value="planning" className="gap-2">
                 <ClipboardListIcon className="h-4 w-4" />
-                Planning
+                {t("production.main.tabs.planning")}
               </TabsTrigger>
               <TabsTrigger value="list" className="gap-2">
                 <ListIcon className="h-4 w-4" />
-                Orders
+                {t("production.main.tabs.orders")}
               </TabsTrigger>
               <TabsTrigger value="calendar" className="gap-2">
                 <CalendarIcon className="h-4 w-4" />
-                Calendar
+                {t("production.main.tabs.calendar")}
               </TabsTrigger>
             </TabsList>
           }
@@ -3017,7 +3052,7 @@ export default function ProductionPage() {
                 }`}
                 onClick={() => switchMobilePlanningView("ready")}
               >
-                Ready
+                {t("production.main.planning.ready")}
                 <span className="ml-1 text-[11px] text-muted-foreground">
                   {filteredReadyGroups.length}
                 </span>
@@ -3031,7 +3066,7 @@ export default function ProductionPage() {
                 }`}
                 onClick={() => switchMobilePlanningView("queues")}
               >
-                Queues
+                {t("production.main.planning.queues")}
                 <span className="ml-1 text-[11px] text-muted-foreground">
                   {queueItemsCount}
                 </span>
@@ -3068,7 +3103,7 @@ export default function ProductionPage() {
                 }
               >
                 <CardHeader>
-                  <CardTitle>Ready for production</CardTitle>
+                  <CardTitle>{t("production.main.planning.readyForProduction")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {dataError ? (
@@ -3079,25 +3114,25 @@ export default function ProductionPage() {
                   {isReadyLoading ? (
                     <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                      Loading ready batches...
+                      {t("production.main.planning.loadingReadyBatches")}
                     </div>
                   ) : null}
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-start gap-2">
                       <label className="flex-1 space-y-1 text-xs text-muted-foreground">
-                        Search
+                        {t("production.main.common.search")}
                         <Input
                           icon="search"
                           value={readySearch}
                           onChange={(event) =>
                             setReadySearch(event.target.value)
                           }
-                          placeholder="Order, customer..."
+                          placeholder={t("production.main.planning.orderCustomerPlaceholder")}
                           className="h-9 text-sm text-foreground"
                         />
                       </label>
                       <SelectField
-                        label="Priority"
+                        label={t("production.main.common.priority")}
                         labelClassName="text-xs text-muted-foreground"
                         value={readyPriority}
                         onValueChange={(value) =>
@@ -3114,11 +3149,21 @@ export default function ProductionPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="all">All</SelectItem>
-                            <SelectItem value="urgent">Urgent</SelectItem>
-                            <SelectItem value="high">High</SelectItem>
-                            <SelectItem value="normal">Normal</SelectItem>
-                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="all">
+                              {t("production.main.common.all")}
+                            </SelectItem>
+                            <SelectItem value="urgent">
+                              {t("production.main.priority.urgent")}
+                            </SelectItem>
+                            <SelectItem value="high">
+                              {t("production.main.priority.high")}
+                            </SelectItem>
+                            <SelectItem value="normal">
+                              {t("production.main.priority.normal")}
+                            </SelectItem>
+                            <SelectItem value="low">
+                              {t("production.main.priority.low")}
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </SelectField>
@@ -3187,7 +3232,7 @@ export default function ProductionPage() {
                                   href={`/orders/${group.orderId}`}
                                   onClick={(event) => event.stopPropagation()}
                                   className="inline-flex"
-                                  aria-label="Open order"
+                                  aria-label={t("production.main.common.openOrder")}
                                 >
                                   <span className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground">
                                     <ExternalLinkIcon className="h-4 w-4" />
@@ -3208,13 +3253,15 @@ export default function ProductionPage() {
                                       files: productionFiles,
                                     });
                                   }}
-                                  aria-label="View production files"
+                                  aria-label={t(
+                                    "production.main.files.viewProductionFiles",
+                                  )}
                                   disabled={productionFiles.length === 0}
                                 >
                                   <PaperclipIcon className="h-4 w-4" />
                                 </Button>
                                 <Badge variant={priorityBadge(group.priority)}>
-                                  {group.priority}
+                                  {priorityLabel(group.priority)}
                                 </Badge>
                               </div>
                             </div>
@@ -3222,7 +3269,13 @@ export default function ProductionPage() {
                               {group.customerName}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              {group.totalQty} pcs - Due {group.dueDate}
+                              {t("production.main.queue.pieces", {
+                                count: group.totalQty,
+                              })}{" "}
+                              -{" "}
+                              {t("production.main.queue.dueDate", {
+                                date: group.dueDate,
+                              })}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
                               {group.material}
@@ -3275,7 +3328,7 @@ export default function ProductionPage() {
                                   ) : (
                                     <ChevronDownIcon className="h-3.5 w-3.5" />
                                   )}
-                                  Konstrukcijas
+                                  {t("production.main.common.constructions")}
                                 </Button>
                                 {expandedReadyItems.has(group.key) ? (
                                   <div className="mt-2 space-y-2 text-xs text-muted-foreground">
@@ -3304,7 +3357,7 @@ export default function ProductionPage() {
                     })}
                     {filteredReadyGroups.length === 0 && !isLoading ? (
                       <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                        No batches ready for release.
+                        {t("production.main.planning.noBatchesReady")}
                       </div>
                     ) : null}
                   </div>
@@ -3313,21 +3366,23 @@ export default function ProductionPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-sm font-medium">
-                          Release to production
+                          {t("production.main.planning.releaseToProduction")}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          Unit of work: Selected construction rows
+                          {t("production.main.planning.unitOfWork")}
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {selectedBatchKeys.length > 0
-                          ? `${selectedBatchKeys.length} selected`
-                          : "No selection"}
+                          ? t("production.main.queue.selectedCount", {
+                              count: selectedBatchKeys.length,
+                            })
+                          : t("production.main.queue.noSelection")}
                       </div>
                     </div>
                     {routes.length > 1 ? (
                       <SelectField
-                        label="Route"
+                        label={t("production.main.common.route")}
                         labelClassName="text-xs text-muted-foreground"
                         value={selectedRouteKey}
                         onValueChange={setSelectedRouteKey}
@@ -3361,7 +3416,7 @@ export default function ProductionPage() {
                               ))}
                             </div>
                           ) : (
-                            "No matching stations for default route."
+                            t("production.main.mobile.noRouteStations")
                           )}
                         </div>
                       </SelectField>
@@ -3375,7 +3430,7 @@ export default function ProductionPage() {
                         onClick={() => setSelectedBatchKeys([])}
                         disabled={selectedBatchKeys.length === 0}
                       >
-                        Clear
+                        {t("production.main.common.clear")}
                       </Button>
                     </div>
                   </div>
@@ -3402,16 +3457,16 @@ export default function ProductionPage() {
                 }
               >
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/95 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm backdrop-blur">
-                  <span>Station queues</span>
+                  <span>{t("production.main.queue.stationQueues")}</span>
                   <div className="hidden flex-wrap items-center gap-2 text-sm font-normal text-muted-foreground md:flex">
                     <DatePicker
-                      label="View date"
+                      label={t("production.main.queue.viewDate")}
                       value={viewDate}
                       onChange={setViewDate}
                       className="flex items-center gap-2 whitespace-nowrap text-sm"
                     />
                     <SelectField
-                      label="Range"
+                      label={t("production.main.common.range")}
                       labelClassName="text-sm font-normal text-muted-foreground"
                       value={String(plannedRangeDays)}
                       onValueChange={(value) =>
@@ -3429,23 +3484,25 @@ export default function ProductionPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="1">Today</SelectItem>
-                          <SelectItem value="3">3 days</SelectItem>
-                          <SelectItem value="7">7 days</SelectItem>
-                          <SelectItem value="14">14 days</SelectItem>
+                          <SelectItem value="1">{t("production.main.range.today")}</SelectItem>
+                          <SelectItem value="3">{t("production.main.range.days3")}</SelectItem>
+                          <SelectItem value="7">{t("production.main.range.days7")}</SelectItem>
+                          <SelectItem value="14">{t("production.main.range.days14")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </SelectField>
                   </div>
                   <div className="text-xs font-normal text-muted-foreground md:hidden">
-                    {formatDateInput(viewDate)} - {plannedRangeDays} day
-                    {plannedRangeDays === 1 ? "" : "s"}
+                    {t("production.main.queue.rangeSummary", {
+                      date: formatDateInput(viewDate),
+                      days: plannedRangeDays,
+                    })}
                   </div>
                 </div>
                 <div className="hidden items-end justify-between gap-3 rounded-lg border border-border bg-muted/10 px-3 py-2 md:flex">
                   <div className="flex items-end gap-3">
                     <DatePicker
-                      label="Move date"
+                      label={t("production.main.queue.moveDate")}
                       value={queueActionDate}
                       onChange={(value) =>
                         setQueueActionDate(value || queueActionDate)
@@ -3454,8 +3511,10 @@ export default function ProductionPage() {
                     />
                     <span className="mb-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground">
                       {selectedQueueRunIds.length > 0
-                        ? `${selectedQueueRunIds.length} selected`
-                        : "No selection"}
+                        ? t("production.main.queue.selectedCount", {
+                            count: selectedQueueRunIds.length,
+                          })
+                        : t("production.main.queue.noSelection")}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -3470,8 +3529,8 @@ export default function ProductionPage() {
                       }
                     >
                       {allVisibleQueueSelected
-                        ? "Unselect all visible"
-                        : "Select all visible"}
+                        ? t("production.main.queue.unselectAllVisible")
+                        : t("production.main.queue.selectAllVisible")}
                     </Button>
                     <Button
                       type="button"
@@ -3482,7 +3541,7 @@ export default function ProductionPage() {
                       }
                       onClick={() => void handleMoveSelectedQueueDate()}
                     >
-                      Move selected
+                      {t("production.main.queue.moveSelected")}
                     </Button>
                     <Button
                       type="button"
@@ -3493,15 +3552,17 @@ export default function ProductionPage() {
                       }
                       onClick={() => void handleClearSelectedQueue()}
                     >
-                      Clear selected
+                      {t("production.main.queue.clearSelected")}
                     </Button>
                   </div>
                 </div>
                 <div className="space-y-2 rounded-lg border border-border bg-muted/10 px-3 py-2 md:hidden">
                   <div className="text-xs text-muted-foreground">
                     {selectedQueueRunIds.length > 0
-                      ? `${selectedQueueRunIds.length} selected`
-                      : "No selection"}
+                      ? t("production.main.queue.selectedCount", {
+                          count: selectedQueueRunIds.length,
+                        })
+                      : t("production.main.queue.noSelection")}
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -3515,7 +3576,9 @@ export default function ProductionPage() {
                         )
                       }
                     >
-                      {allVisibleQueueSelected ? "Clear" : "Select all"}
+                      {allVisibleQueueSelected
+                        ? t("production.main.common.clear")
+                        : t("production.main.queue.selectAll")}
                     </Button>
                     <DatePicker
                       value={queueActionDate}
@@ -3536,7 +3599,7 @@ export default function ProductionPage() {
                       }
                       onClick={() => void handleMoveSelectedQueueDate()}
                     >
-                      Move selected
+                      {t("production.main.queue.moveSelected")}
                     </Button>
                     <Button
                       type="button"
@@ -3548,14 +3611,14 @@ export default function ProductionPage() {
                       }
                       onClick={() => void handleClearSelectedQueue()}
                     >
-                      Clear selected
+                      {t("production.main.queue.clearSelected")}
                     </Button>
                   </div>
                 </div>
                 {isQueuesLoading ? (
                   <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                    Loading station queues...
+                    {t("production.main.queue.loadingStationQueues")}
                   </div>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -3582,13 +3645,19 @@ export default function ProductionPage() {
                               <Link
                                 href={`/production/operator?station=${station.id}`}
                                 className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                                aria-label={`Open ${station.name} in operator view`}
+                                aria-label={t("production.main.queue.openInOperator", {
+                                  station: station.name,
+                                })}
                               >
                                 <ExternalLinkIcon className="h-4 w-4" />
                               </Link>
                             </div>
                             <div className="text-right text-xs text-muted-foreground">
-                              <div>{queue.length} items</div>
+                              <div>
+                                {t("production.main.queue.itemsCount", {
+                                  count: queue.length,
+                                })}
+                              </div>
                               {stationTotalMinutes > 0 ? (
                                 <div>{formatDuration(stationTotalMinutes)}</div>
                               ) : null}
@@ -3598,7 +3667,7 @@ export default function ProductionPage() {
                         <CardContent className="space-y-3">
                           {queue.length === 0 ? (
                             <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                              No work queued
+                              {t("production.main.queue.noWorkQueued")}
                             </div>
                           ) : (
                             queue.map((item) => (
@@ -3625,7 +3694,7 @@ export default function ProductionPage() {
                                   return (
                                     <button
                                       type="button"
-                                      aria-label="Remove from queue"
+                                      aria-label={t("production.main.queue.removeFromQueue")}
                                       className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full border border-border bg-foreground text-[16px] text-background shadow-sm transition ${
                                         canRemove && removeHintId === item.id
                                           ? "flex"
@@ -3699,7 +3768,7 @@ export default function ProductionPage() {
                                           <Link
                                             href={`/orders/${item.orderId}`}
                                             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                                            aria-label="Open order"
+                                            aria-label={t("production.main.common.openOrder")}
                                           >
                                             <ExternalLinkIcon className="h-4 w-4" />
                                           </Link>
@@ -3719,7 +3788,7 @@ export default function ProductionPage() {
                                                 files: productionFiles,
                                               });
                                             }}
-                                            aria-label="View production files"
+                                            aria-label={t("production.main.files.viewProductionFiles")}
                                             disabled={
                                               productionFiles.length === 0
                                             }
@@ -3751,7 +3820,7 @@ export default function ProductionPage() {
                                         <Badge
                                           variant={priorityBadge(item.priority)}
                                         >
-                                          {item.priority}
+                                          {priorityLabel(item.priority)}
                                         </Badge>
                                         <Badge
                                           variant={
@@ -3760,9 +3829,7 @@ export default function ProductionPage() {
                                               : statusBadge(item.status)
                                           }
                                         >
-                                          {String(
-                                            item.status ?? "queued",
-                                          ).replace("_", " ")}
+                                          {statusLabel(item.status ?? "queued")}
                                         </Badge>
                                       </div>
                                     );
@@ -3771,10 +3838,18 @@ export default function ProductionPage() {
                                 {(() => {
                                   const metaParts: string[] = [];
                                   if (item.totalQty > 0) {
-                                    metaParts.push(`${item.totalQty} pcs`);
+                                    metaParts.push(
+                                      t("production.main.queue.pieces", {
+                                        count: item.totalQty,
+                                      }),
+                                    );
                                   }
                                   if (item.dueDate) {
-                                    metaParts.push(`Due ${item.dueDate}`);
+                                    metaParts.push(
+                                      t("production.main.queue.dueDate", {
+                                        date: item.dueDate,
+                                      }),
+                                    );
                                   }
                                   const metaLine = metaParts.join(" - ");
                                   const stationDurationMinutes =
@@ -3803,7 +3878,7 @@ export default function ProductionPage() {
                                       ) : null}
                                       {stationDurationMinutes > 0 ? (
                                         <div className="mt-1 text-[11px] text-muted-foreground">
-                                          Station time:{" "}
+                                          {t("production.main.queue.stationTime")}{" "}
                                           {formatDuration(
                                             stationDurationMinutes,
                                           )}
@@ -3811,7 +3886,9 @@ export default function ProductionPage() {
                                       ) : null}
                                       {elapsedLabel ? (
                                         <div className="mt-1 text-[11px] text-muted-foreground">
-                                          Time: {elapsedLabel}
+                                          {t("production.main.queue.time", {
+                                            value: elapsedLabel,
+                                          })}
                                         </div>
                                       ) : null}
                                     </>
@@ -3846,8 +3923,8 @@ export default function ProductionPage() {
                                         <ChevronDownIcon className="h-3.5 w-3.5" />
                                       )}
                                       {expandedQueueItems.has(item.id)
-                                        ? "Hide constructions"
-                                        : "Show constructions"}
+                                        ? t("production.main.queue.hideConstructions")
+                                        : t("production.main.queue.showConstructions")}
                                     </Button>
                                   ) : null}
                                 </div>
@@ -3858,7 +3935,7 @@ export default function ProductionPage() {
                                         <span className="text-[11px] text-muted-foreground">
                                           {(queueConstructionSelections[item.id] ?? [])
                                             .length}{" "}
-                                          selected
+                                          {t("production.main.common.selected")}
                                         </span>
                                         <Button
                                           type="button"
@@ -3874,7 +3951,7 @@ export default function ProductionPage() {
                                             handleOpenQueueReplan(item)
                                           }
                                         >
-                                          Replan selected rows
+                                          {t("production.main.split.replanSelectedRows")}
                                         </Button>
                                       </div>
                                       {item.items.map((row) => {
@@ -3936,8 +4013,9 @@ export default function ProductionPage() {
                                                   {row.item_name}
                                                   {isLockedForReplan ? (
                                                     <div className="text-[10px] text-amber-700">
-                                                      Started/done rows cannot
-                                                      be replanned
+                                                      {t(
+                                                        "production.main.split.startedDoneCannotReplan",
+                                                      )}
                                                     </div>
                                                   ) : null}
                                                 </div>
@@ -3949,9 +4027,9 @@ export default function ProductionPage() {
                                                       row.status,
                                                     )}
                                                   >
-                                                    {String(
+                                                    {statusLabel(
                                                       row.status ?? "queued",
-                                                    ).replace("_", " ")}
+                                                    )}
                                                   </Badge>
                                                   {entry.status === "blocked" &&
                                                   entry.blockedReason ? (
@@ -3973,7 +4051,9 @@ export default function ProductionPage() {
                                             </div>
 
                                             <div className="mt-1 text-[11px] text-muted-foreground">
-                                              Qty: {row.qty}
+                                              {t("production.main.queue.qty", {
+                                                qty: row.qty,
+                                              })}
                                               {row.material
                                                 ? ` - ${row.material}`
                                                 : ""}
@@ -4002,13 +4082,13 @@ export default function ProductionPage() {
                   <div>
                     <h2 className="text-lg font-semibold">
                       {splitMode === "replan"
-                        ? "Replan constructions"
-                        : "Split by stations"}
+                        ? t("production.main.split.replanConstructions")
+                        : t("production.main.split.splitByStations")}
                     </h2>
                     <p className="text-sm text-muted-foreground">
                       {splitMode === "replan"
-                        ? "Move selected construction rows into a new batch and date."
-                        : "Select which stations should process each construction row."}
+                        ? t("production.main.split.replanDescription")
+                        : t("production.main.split.splitDescription")}
                     </p>
                   </div>
                   <Button
@@ -4020,7 +4100,7 @@ export default function ProductionPage() {
                       setSplitGlobalPlannedDate("");
                       setSplitMode("release");
                     }}
-                    aria-label="Close split"
+                    aria-label={t("production.main.split.close")}
                   >
                     <XIcon className="h-4 w-4" />
                   </Button>
@@ -4040,7 +4120,7 @@ export default function ProductionPage() {
                       setSplitSelections(next);
                     }}
                   >
-                    Select all stations
+                    {t("production.main.split.selectAllStations")}
                   </Button>
                   <Button
                     size="sm"
@@ -4053,11 +4133,11 @@ export default function ProductionPage() {
                       setSplitSelections(next);
                     }}
                   >
-                    Clear all
+                    {t("production.main.split.clearAll")}
                   </Button>
                   <div className="w-full max-w-56">
                     <DatePicker
-                      label="Common planned date"
+                      label={t("production.main.split.commonPlannedDate")}
                       labelClassName="text-[11px] text-muted-foreground"
                       value={splitGlobalPlannedDate || plannedDate}
                       onChange={(value) => {
@@ -4081,7 +4161,7 @@ export default function ProductionPage() {
                 <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto">
                   {splitRows.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                      No construction rows found for this selection.
+                      {t("production.main.split.noRowsFound")}
                     </div>
                   ) : (
                     Array.from(
@@ -4115,7 +4195,7 @@ export default function ProductionPage() {
                               <div className="font-medium">{row.itemName}</div>
                               <div className="mt-2 max-w-56">
                                 <DatePicker
-                                  label="Planned date"
+                                  label={t("production.main.split.plannedDate")}
                                   labelClassName="text-[11px] text-muted-foreground"
                                   value={
                                     splitPlannedDates[row.id] ?? plannedDate
@@ -4189,7 +4269,7 @@ export default function ProductionPage() {
                       setSplitMode("release");
                     }}
                   >
-                    Cancel
+                    {t("production.main.common.cancel")}
                   </Button>
                   <Button
                     onClick={handleConfirmSplit}
@@ -4199,8 +4279,8 @@ export default function ProductionPage() {
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                     )}
                     {splitMode === "replan"
-                      ? "Replan selected rows"
-                      : "Create work orders"}
+                      ? t("production.main.split.replanSelectedRows")
+                      : t("production.main.split.createWorkOrders")}
                   </Button>
                 </div>
               </div>
@@ -4213,23 +4293,23 @@ export default function ProductionPage() {
         <TabsContent value="list">
           <Card>
             <CardHeader>
-              <CardTitle>Orders & constructions</CardTitle>
+              <CardTitle>{t("production.main.list.title")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {isLoading ? (
                 <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                  Loading orders...
+                  {t("production.main.list.loadingOrders")}
                 </div>
               ) : null}
               <div className="space-y-3">
                 <label className="block w-full space-y-1 text-xs text-muted-foreground">
-                  Search
+                  {t("production.main.common.search")}
                   <Input
                     icon="search"
                     value={qrSearch}
                     onChange={(event) => setQrSearch(event.target.value)}
-                    placeholder="Order, customer, batch, construction..."
+                    placeholder={t("production.main.list.searchPlaceholder")}
                     className="h-9 text-sm text-foreground"
                   />
                 </label>
@@ -4238,7 +4318,7 @@ export default function ProductionPage() {
                     <FiltersDropdown contentClassName="w-[min(360px,calc(100vw-2rem))] p-4">
                       <div className="space-y-4">
                         <DatePicker
-                          label="Date"
+                          label={t("production.main.common.date")}
                           value={qrFilterDate}
                           onChange={setQrFilterDate}
                           className="space-y-1 text-xs text-muted-foreground"
@@ -4246,53 +4326,56 @@ export default function ProductionPage() {
                         />
                         <div className="h-px bg-border/70" />
                         <FilterOptionSelector
-                          title="Status"
+                          title={t("production.main.common.status")}
                           value={qrFilterStatus}
                           onChange={setQrFilterStatus}
                           chipsClassName="gap-3"
                           options={[
                             {
                               value: "all",
-                              label: "All",
+                              label: t("production.main.common.all"),
                               count: qrStatusCounts.all,
                             },
                             {
                               value: "queued",
-                              label: "Queued",
+                              label: t("production.main.status.queued"),
                               count: qrStatusCounts.queued,
                             },
                             {
                               value: "pending",
-                              label: "Pending",
+                              label: t("production.main.status.pending"),
                               count: qrStatusCounts.pending,
                             },
                             {
                               value: "in_progress",
-                              label: "In progress",
+                              label: t("production.main.status.in_progress"),
                               count: qrStatusCounts.in_progress,
                             },
                             {
                               value: "blocked",
-                              label: "Blocked",
+                              label: t("production.main.status.blocked"),
                               count: qrStatusCounts.blocked,
                             },
                             {
                               value: "done",
-                              label: "Done",
+                              label: t("production.main.status.done"),
                               count: qrStatusCounts.done,
                             },
                           ]}
                         />
                         <div className="h-px bg-border/70" />
                         <FilterOptionSelector
-                          title="Station"
+                          title={t("production.main.common.station")}
                           mode="chips"
-                          selectPlaceholder="All stations"
+                          selectPlaceholder={t("production.main.list.allStations")}
                           value={qrFilterStation}
                           onChange={setQrFilterStation}
                           chipsClassName="gap-3"
                           options={[
-                            { value: "all", label: "All stations" },
+                            {
+                              value: "all",
+                              label: t("production.main.list.allStations"),
+                            },
                             ...stations.map((station) => ({
                               value: station.id,
                               label: station.name,
@@ -4309,7 +4392,7 @@ export default function ProductionPage() {
                               )
                             }
                           >
-                            Today
+                            {t("production.main.range.today")}
                           </Button>
                           <Button
                             variant="outline"
@@ -4320,7 +4403,7 @@ export default function ProductionPage() {
                               setQrFilterStation("all");
                             }}
                           >
-                            Clear filters
+                            {t("production.main.common.clearFilters")}
                           </Button>
                         </div>
                       </div>
@@ -4332,7 +4415,7 @@ export default function ProductionPage() {
                       onClick={() => setQrSelectedRowIds([])}
                       disabled={qrSelectedRowIds.length === 0}
                     >
-                      Clear selection
+                      {t("production.main.common.clearSelection")}
                     </Button>
                     <Button
                       onClick={() =>
@@ -4350,7 +4433,7 @@ export default function ProductionPage() {
                       {qrState === "loading" ? (
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                       ) : null}
-                      Print QR
+                      {t("production.main.qr.print")}
                     </Button>
                   </div>
                 </div>
@@ -4373,26 +4456,29 @@ export default function ProductionPage() {
                     }
                   }}
                   disabled={filteredSelectableRows.length === 0}
-                  label="Select all"
+                  label={t("production.main.common.selectAll")}
                 />
                 <span>
                   {qrSelectedRowIds.length > 0
-                    ? `${qrSelectedRowIds.length} selected`
-                    : `${filteredQrRows.length} rows`}
+                    ? t("production.main.queue.selectedCount", {
+                        count: qrSelectedRowIds.length,
+                      })
+                    : t("production.main.list.rowsCount", {
+                        count: filteredQrRows.length,
+                      })}
                 </span>
               </div>
 
               {orderConstructionRows.length > 0 &&
               selectableConstructionRows.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                  No selectable construction rows found. Make sure your
-                  construction tables are marked as Production in Settings.
+                  {t("production.main.list.noSelectableRows")}
                 </div>
               ) : null}
 
               {filteredQrRows.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                  No construction rows found for the current filters.
+                  {t("production.main.list.noRowsForFilters")}
                 </div>
               ) : (
                 <>
@@ -4450,27 +4536,31 @@ export default function ProductionPage() {
                               </div>
                             </label>
                             <Badge variant={priorityBadge(row.priority)}>
-                              {row.priority}
+                              {priorityLabel(row.priority)}
                             </Badge>
                           </div>
 
                           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                             <div>
                               <div className="text-muted-foreground">
-                                Construction
+                                {t("production.main.common.construction")}
                               </div>
                               <div className="font-medium text-foreground">
                                 {row.itemName}
                               </div>
                             </div>
                             <div>
-                              <div className="text-muted-foreground">Qty</div>
+                              <div className="text-muted-foreground">
+                                {t("production.main.common.qty")}
+                              </div>
                               <div className="font-medium text-foreground">
                                 {row.qty}
                               </div>
                             </div>
                             <div>
-                              <div className="text-muted-foreground">Due</div>
+                              <div className="text-muted-foreground">
+                                {t("production.main.common.due")}
+                              </div>
                               <div className="font-medium text-foreground">
                                 {row.dueDate
                                   ? formatDateInput(row.dueDate)
@@ -4479,7 +4569,7 @@ export default function ProductionPage() {
                             </div>
                             <div>
                               <div className="text-muted-foreground">
-                                Started
+                                {t("production.main.common.started")}
                               </div>
                               <div className="font-medium text-foreground">
                                 {startedDate || "-"}
@@ -4487,7 +4577,7 @@ export default function ProductionPage() {
                             </div>
                             <div className="col-span-2">
                               <div className="text-muted-foreground">
-                                Total time
+                                {t("production.main.common.totalTime")}
                               </div>
                               <div className="font-medium text-foreground">
                                 {hasTimeData
@@ -4520,7 +4610,9 @@ export default function ProductionPage() {
                                             entry.status as BatchRunRow["status"],
                                           )}
                                         >
-                                          {entry.status.replace("_", " ")}
+                                          {statusLabel(
+                                            entry.status as BatchRunRow["status"],
+                                          )}
                                         </Badge>
                                         {entry.status === "blocked" &&
                                         entry.blockedReason ? (
@@ -4555,14 +4647,30 @@ export default function ProductionPage() {
                       <thead className="bg-muted/40 text-xs text-muted-foreground">
                         <tr>
                           <th className="px-3 py-2"></th>
-                          <th className="px-3 py-2">Order</th>
-                          <th className="px-3 py-2">Customer</th>
-                          <th className="px-3 py-2">Construction</th>
-                          <th className="px-3 py-2">Due</th>
-                          <th className="px-3 py-2">Started</th>
-                          <th className="px-3 py-2">Qty</th>
-                          <th className="px-3 py-2">Batch</th>
-                          <th className="px-3 py-2 text-right">Total time</th>
+                          <th className="px-3 py-2">
+                            {t("production.main.common.order")}
+                          </th>
+                          <th className="px-3 py-2">
+                            {t("production.main.common.customer")}
+                          </th>
+                          <th className="px-3 py-2">
+                            {t("production.main.common.construction")}
+                          </th>
+                          <th className="px-3 py-2">
+                            {t("production.main.common.due")}
+                          </th>
+                          <th className="px-3 py-2">
+                            {t("production.main.common.started")}
+                          </th>
+                          <th className="px-3 py-2">
+                            {t("production.main.common.qty")}
+                          </th>
+                          <th className="px-3 py-2">
+                            {t("production.main.common.batch")}
+                          </th>
+                          <th className="px-3 py-2 text-right">
+                            {t("production.main.common.totalTime")}
+                          </th>
                           {stations.map((station) => (
                             <th
                               key={station.id}
@@ -4690,18 +4798,18 @@ export default function ProductionPage() {
         <TabsContent value="calendar">
           <Card>
             <CardHeader>
-              <CardTitle>Production calendar</CardTitle>
+              <CardTitle>{t("production.main.calendar.title")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                 <DatePicker
-                  label="Start date"
+                  label={t("production.main.calendar.startDate")}
                   value={viewDate}
                   onChange={setViewDate}
                   className="flex items-center gap-2"
                 />
                 <SelectField
-                  label="Range"
+                  label={t("production.main.common.range")}
                   labelClassName="text-xs font-medium text-muted-foreground"
                   value={String(plannedRangeDays)}
                   onValueChange={(value) => setPlannedRangeDays(Number(value))}
@@ -4717,10 +4825,10 @@ export default function ProductionPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="1">1 day</SelectItem>
-                      <SelectItem value="3">3 days</SelectItem>
-                      <SelectItem value="7">7 days</SelectItem>
-                      <SelectItem value="14">14 days</SelectItem>
+                      <SelectItem value="1">{t("production.main.range.days1")}</SelectItem>
+                      <SelectItem value="3">{t("production.main.range.days3")}</SelectItem>
+                      <SelectItem value="7">{t("production.main.range.days7")}</SelectItem>
+                      <SelectItem value="14">{t("production.main.range.days14")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </SelectField>
@@ -4728,14 +4836,16 @@ export default function ProductionPage() {
 
               {calendarDates.length === 0 || stations.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                  No calendar data available.
+                  {t("production.main.calendar.noData")}
                 </div>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-border">
                   <table className="min-w-full text-left text-sm">
                     <thead className="bg-muted/40 text-xs text-muted-foreground">
                       <tr>
-                        <th className="px-3 py-2">Station</th>
+                        <th className="px-3 py-2">
+                          {t("production.main.calendar.station")}
+                        </th>
                         {calendarDates.map((date) => {
                           const key = date.toISOString().slice(0, 10);
                           return (
@@ -4764,11 +4874,15 @@ export default function ProductionPage() {
                               >
                                 {cell ? (
                                   <div className="space-y-1">
-                                    <div className="font-medium text-foreground">
-                                      {cell.count} runs
+                                      <div className="font-medium text-foreground">
+                                      {t("production.main.calendar.runsCount", {
+                                        count: cell.count,
+                                      })}
                                     </div>
                                     <div className="text-[11px] text-muted-foreground">
-                                      {cell.orders.size} orders
+                                      {t("production.main.calendar.ordersCount", {
+                                        count: cell.orders.size,
+                                      })}
                                     </div>
                                     {cell.minutes > 0 ? (
                                       <div className="text-[11px] text-muted-foreground">
@@ -4799,16 +4913,20 @@ export default function ProductionPage() {
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold">Production files</h2>
+                <h2 className="text-lg font-semibold">
+                  {t("production.main.files.title")}
+                </h2>
                 <p className="text-sm text-muted-foreground">
-                  Order {filesPreview.orderNumber}
+                  {t("production.main.files.order", {
+                    orderNumber: filesPreview.orderNumber,
+                  })}
                 </p>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setFilesPreview(null)}
-                aria-label="Close files"
+                aria-label={t("production.main.files.close")}
               >
                 <XIcon className="h-4 w-4" />
               </Button>
@@ -4816,7 +4934,7 @@ export default function ProductionPage() {
             <div className="mt-4 space-y-2">
               {filesPreview.files.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No production files uploaded.
+                  {t("production.main.files.empty")}
                 </p>
               ) : (
                 filesPreview.files.map((file) => (
@@ -4826,7 +4944,7 @@ export default function ProductionPage() {
                   >
                     <div className="min-w-0">
                       <div className="truncate font-medium">
-                        {file.name ?? "File"}
+                        {file.name ?? t("production.main.files.fileFallback")}
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {new Date(file.created_at).toLocaleString()}
@@ -4839,11 +4957,11 @@ export default function ProductionPage() {
                         rel="noreferrer"
                         className="text-sm text-primary hover:underline"
                       >
-                        Open
+                        {t("production.main.common.open")}
                       </a>
                     ) : (
                       <span className="text-xs text-muted-foreground">
-                        No url
+                        {t("production.main.files.noUrl")}
                       </span>
                     )}
                   </div>
@@ -4852,7 +4970,7 @@ export default function ProductionPage() {
             </div>
             <div className="mt-4 flex justify-end">
               <Button variant="outline" onClick={() => setFilesPreview(null)}>
-                Close
+                {t("production.main.common.close")}
               </Button>
             </div>
           </div>
@@ -4904,9 +5022,13 @@ export default function ProductionPage() {
           <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-background shadow-xl">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <div>
-                <div className="text-lg font-semibold">Print QR codes</div>
+                <div className="text-lg font-semibold">
+                  {t("production.main.qr.printTitle")}
+                </div>
                 <div className="text-xs text-muted-foreground">
-                  {qrRows.length} label(s) ready
+                  {t("production.main.qr.labelsReady", {
+                    count: qrRows.length,
+                  })}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -4915,17 +5037,17 @@ export default function ProductionPage() {
                   onClick={() => window.print()}
                   disabled={qrState !== "ready" || qrRows.length === 0}
                 >
-                  Print
+                  {t("production.main.qr.print")}
                 </Button>
                 <Button variant="outline" onClick={handleCloseQrModal}>
-                  Close
+                  {t("production.main.common.close")}
                 </Button>
               </div>
             </div>
             <div className="grid h-[calc(90vh-72px)] gap-6 overflow-hidden px-6 py-4 lg:grid-cols-[320px_1fr]">
               <div className="space-y-4 overflow-y-auto pr-2">
                 <SelectField
-                  label="Label size"
+                  label={t("production.main.qr.labelSize")}
                   value={qrSize}
                   onValueChange={setQrSize}
                 >
@@ -4936,20 +5058,27 @@ export default function ProductionPage() {
                     <SelectContent>
                       {qrEnabledSizes.map((size) => (
                         <SelectItem key={size} value={size}>
-                          {qrLabelSizePresets[size]?.label ?? size}
+                          {t(`settings.options.qrSize.${size}`)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </SelectField>
                 <div className="space-y-2">
-                  <div className="text-sm font-medium">Content fields</div>
+                  <div className="text-sm font-medium">
+                    {t("production.main.qr.contentFields")}
+                  </div>
                   <div className="text-xs text-muted-foreground">
-                    Drag to reorder. Checked fields appear on the label.
+                    {t("production.main.qr.contentFieldsHint")}
                   </div>
                   <div className="flex flex-col gap-2 text-sm text-muted-foreground">
                     {qrFieldOrder.map((value) => {
-                      const label = qrFieldLabels[value] ?? value;
+                      const key = `settings.options.qrContentField.${value}`;
+                      const translated = t(key);
+                      const label =
+                        translated === key
+                          ? (qrFieldLabels[value] ?? value)
+                          : translated;
                       const checked = qrFieldSelection.includes(value);
                       return (
                         <div
@@ -5011,7 +5140,7 @@ export default function ProductionPage() {
                 </div>
                 <div className="grid gap-3">
                   <SelectField
-                    label="Orientation"
+                    label={t("production.main.qr.orientation")}
                     value={qrOrientation}
                     onValueChange={(value) =>
                       setQrOrientation(value as "portrait" | "landscape")
@@ -5027,13 +5156,17 @@ export default function ProductionPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="portrait">Vertical</SelectItem>
-                        <SelectItem value="landscape">Horizontal</SelectItem>
+                        <SelectItem value="portrait">
+                          {t("production.main.qr.vertical")}
+                        </SelectItem>
+                        <SelectItem value="landscape">
+                          {t("production.main.qr.horizontal")}
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </SelectField>
                   <RangeField
-                    label="Preview zoom"
+                    label={t("production.main.qr.previewZoom")}
                     min={0.5}
                     max={1.5}
                     step={0.1}
@@ -5046,7 +5179,7 @@ export default function ProductionPage() {
                 </div>
                 {qrState === "loading" ? (
                   <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                    Generating QR codes...
+                    {t("production.main.qr.generating")}
                   </div>
                 ) : null}
                 {qrState === "error" && qrError ? (
@@ -5058,7 +5191,7 @@ export default function ProductionPage() {
               <div className="qr-print-root overflow-y-auto rounded-xl border border-border bg-muted/10 p-4">
                 {qrRows.length === 0 ? (
                   <div className="text-center text-xs text-muted-foreground">
-                    No QR labels to preview.
+                    {t("production.main.qr.noLabelsToPreview")}
                   </div>
                 ) : (
                   <div

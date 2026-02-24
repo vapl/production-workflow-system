@@ -30,6 +30,7 @@ import { uploadExternalJobAttachment } from "@/lib/uploadExternalJobAttachment";
 import type { ExternalJobStatus } from "@/types/orders";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { canReceiveExternalOrders } from "@/lib/auth/permissions";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type ReceiveJob = {
   id: string;
@@ -70,15 +71,6 @@ type AiExtractFieldConfig = {
   aiAliases: string[];
 };
 
-const statusLabels: Record<ExternalJobStatus, string> = {
-  requested: "Requested",
-  ordered: "Ordered",
-  in_progress: "In progress",
-  delivered: "In Stock",
-  approved: "Approved",
-  cancelled: "Cancelled",
-};
-
 const statusVariant = (status: ExternalJobStatus) => {
   switch (status) {
     case "requested":
@@ -98,6 +90,7 @@ const statusVariant = (status: ExternalJobStatus) => {
 };
 
 export default function ExternalJobsReceivePage() {
+  const { t } = useI18n();
   const pathname = usePathname();
   const { updateExternalJob, addExternalJobAttachment } = useOrders();
   const user = useCurrentUser();
@@ -132,6 +125,17 @@ export default function ExternalJobsReceivePage() {
   const [isQuickScanMatching, setIsQuickScanMatching] = useState(false);
   const [quickScanMessage, setQuickScanMessage] = useState("");
   const [matchedJobId, setMatchedJobId] = useState<string | null>(null);
+  const statusLabels = useMemo<Record<ExternalJobStatus, string>>(
+    () => ({
+      requested: t("orders.externalReceivePage.status.requested"),
+      ordered: t("orders.externalReceivePage.status.ordered"),
+      in_progress: t("orders.externalReceivePage.status.inProgress"),
+      delivered: t("orders.externalReceivePage.status.delivered"),
+      approved: t("orders.externalReceivePage.status.approved"),
+      cancelled: t("orders.externalReceivePage.status.cancelled"),
+    }),
+    [t],
+  );
 
   useEffect(() => {
     const handleScroll = () => {
@@ -403,7 +407,9 @@ export default function ExternalJobsReceivePage() {
       error?: string;
     };
     if (!response.ok || !payload.fields) {
-      return { error: payload.error ?? "AI extraction failed." } as const;
+      return {
+        error: payload.error ?? t("orders.externalReceivePage.aiExtractFailed"),
+      } as const;
     }
     return { fields: payload.fields } as const;
   };
@@ -446,7 +452,9 @@ export default function ExternalJobsReceivePage() {
         ...prev,
         [job.id]: {
           ...prev[job.id],
-          error: `Fill required field: ${missingRequiredField.label}.`,
+          error: t("orders.externalReceivePage.fillRequiredField", {
+            field: missingRequiredField.label,
+          }),
         },
       }));
       return;
@@ -470,7 +478,11 @@ export default function ExternalJobsReceivePage() {
     if (!updated) {
       setActionState((prev) => ({
         ...prev,
-        [job.id]: { ...prev[job.id], isSaving: false, error: "Save failed." },
+        [job.id]: {
+          ...prev[job.id],
+          isSaving: false,
+          error: t("orders.externalReceivePage.saveFailed"),
+        },
       }));
       return;
     }
@@ -484,7 +496,11 @@ export default function ExternalJobsReceivePage() {
             [job.id]: {
               ...prev[job.id],
               isSaving: false,
-              error: upload.error ?? `Upload failed for ${file.name}.`,
+              error:
+                upload.error ??
+                t("orders.externalReceivePage.uploadFailedForFile", {
+                  file: file.name,
+                }),
             },
           }));
           return;
@@ -504,7 +520,9 @@ export default function ExternalJobsReceivePage() {
             [job.id]: {
               ...prev[job.id],
               isSaving: false,
-              error: `Failed to attach ${file.name}.`,
+              error: t("orders.externalReceivePage.attachFailedForFile", {
+                file: file.name,
+              }),
             },
           }));
           return;
@@ -560,7 +578,7 @@ export default function ExternalJobsReceivePage() {
             [job.id]: {
               ...prev[job.id],
               isSaving: false,
-              error: "Failed to save AI extracted fields.",
+              error: t("orders.externalReceivePage.failedToSaveAiFields"),
             },
           }));
           return;
@@ -627,12 +645,12 @@ export default function ExternalJobsReceivePage() {
   const handleQuickScanMatch = async () => {
     const firstFile = quickScanFiles[0];
     if (!firstFile) {
-      setQuickScanMessage("Attach or scan a document first.");
+      setQuickScanMessage(t("orders.externalReceivePage.attachOrScanFirst"));
       return;
     }
     if (aiExtractFields.length === 0) {
       setQuickScanMessage(
-        "Enable AI extract fields in Settings -> External job schema.",
+        t("orders.externalReceivePage.enableAiFields"),
       );
       return;
     }
@@ -641,7 +659,9 @@ export default function ExternalJobsReceivePage() {
     try {
       const result = await extractWithAiForFile(firstFile);
       if ("error" in result) {
-        setQuickScanMessage(result.error ?? "AI extraction failed.");
+        setQuickScanMessage(
+          result.error ?? t("orders.externalReceivePage.aiExtractFailed"),
+        );
         setIsQuickScanMatching(false);
         return;
       }
@@ -657,7 +677,9 @@ export default function ExternalJobsReceivePage() {
         (value) => value.length > 0,
       );
       if (uniqueIdentifiers.length === 0) {
-        setQuickScanMessage("No matching identifier extracted from document.");
+        setQuickScanMessage(
+          t("orders.externalReceivePage.noMatchingIdentifier"),
+        );
         setIsQuickScanMatching(false);
         return;
       }
@@ -671,7 +693,7 @@ export default function ExternalJobsReceivePage() {
       });
       if (matched.length === 0) {
         setQuickScanMessage(
-          "No matching partner order found. Use manual search.",
+          t("orders.externalReceivePage.noMatchingPartnerOrder"),
         );
         setIsQuickScanMatching(false);
         return;
@@ -679,7 +701,7 @@ export default function ExternalJobsReceivePage() {
       if (matched.length > 1) {
         setSearch(uniqueIdentifiers[0] ?? "");
         setQuickScanMessage(
-          "Multiple matches found. Refine using search and confirm manually.",
+          t("orders.externalReceivePage.multipleMatchesFound"),
         );
         setIsQuickScanMatching(false);
         return;
@@ -695,8 +717,12 @@ export default function ExternalJobsReceivePage() {
           : target.externalOrderNumber;
       setQuickScanMessage(
         matchedDocNo
-          ? `Matched invoice/document no: ${matchedDocNo}`
-          : `Matched Ext. Order: ${matchedExtOrder || "--"}`,
+          ? t("orders.externalReceivePage.matchedDocumentNo", {
+              value: matchedDocNo,
+            })
+          : t("orders.externalReceivePage.matchedExternalOrder", {
+              value: matchedExtOrder || "--",
+            }),
       );
       setQuickScanFiles([]);
     } finally {
@@ -732,17 +758,19 @@ export default function ExternalJobsReceivePage() {
       <section className="space-y-4 pt-16 md:pt-0">
         <DesktopPageHeader
           sticky
-          title="Partner Orders - Receive"
-          subtitle="Mark delivered items as In Stock and attach delivery notes."
+          title={t("orders.externalReceivePage.title")}
+          subtitle={t("orders.externalReceivePage.subtitle")}
           className="md:z-20"
           actions={
             <Link href={externalListHref}>
-              <Button variant="outline">Back to Partner Orders</Button>
+              <Button variant="outline">
+                {t("orders.externalReceivePage.backToPartnerOrders")}
+              </Button>
             </Link>
           }
         />
         <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-          You do not have access to receive partner orders.
+          {t("orders.externalReceivePage.noAccess")}
         </div>
       </section>
     );
@@ -756,7 +784,7 @@ export default function ExternalJobsReceivePage() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label="Back to partner orders"
+              aria-label={t("orders.externalReceivePage.backToPartnerOrders")}
             >
               <ArrowLeftIcon className="h-4 w-4" />
             </Button>
@@ -770,7 +798,7 @@ export default function ExternalJobsReceivePage() {
             variant="outline"
             size="icon"
             className="h-12 w-12 rounded-full bg-card shadow-lg"
-            aria-label="Open receive search"
+            aria-label={t("orders.externalReceivePage.openReceiveSearch")}
             onClick={() => setIsMobileSearchOpen(true)}
           >
             <SearchIcon className="h-5 w-5" />
@@ -781,9 +809,9 @@ export default function ExternalJobsReceivePage() {
       <BottomSheet
         open={isMobileSearchOpen}
         onClose={() => setIsMobileSearchOpen(false)}
-        ariaLabel="Search partner orders to receive"
-        closeButtonLabel="Close search"
-        title="Search"
+        ariaLabel={t("orders.externalReceivePage.searchAria")}
+        closeButtonLabel={t("orders.externalReceivePage.closeSearch")}
+        title={t("orders.externalReceivePage.search")}
         enableSwipeToClose
       >
         <div className="px-4 pt-3">
@@ -792,7 +820,7 @@ export default function ExternalJobsReceivePage() {
             icon="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Order #, partner, customer, external order..."
+            placeholder={t("orders.externalReceivePage.searchPlaceholder")}
             className="text-[16px] md:text-sm"
           />
         </div>
@@ -800,21 +828,21 @@ export default function ExternalJobsReceivePage() {
 
       <div className="space-y-0 pt-16 pb-[calc(6.75rem+env(safe-area-inset-bottom))] md:space-y-4 md:pt-0 md:pb-0">
         <MobilePageTitle
-          title="Receive partner orders"
+          title={t("orders.externalReceivePage.title")}
           showCompact={showCompactMobileTitle}
-          subtitle="Mark delivered items as In Stock and attach delivery notes."
+          subtitle={t("orders.externalReceivePage.subtitle")}
           className="pt-6 pb-6"
         />
         <DesktopPageHeader
           sticky
-          title="Partner Orders - Receive"
-          subtitle="Mark delivered items as In Stock and attach delivery notes."
+          title={t("orders.externalReceivePage.title")}
+          subtitle={t("orders.externalReceivePage.subtitle")}
           className="md:z-20"
           actions={
             <div className="hidden items-center gap-2 md:flex">
               <Link href={externalListHref}>
                 <Button variant="outline" size="lg">
-                  Back to Partner Orders
+                  {t("orders.externalReceivePage.backToPartnerOrders")}
                 </Button>
               </Link>
             </div>
@@ -822,21 +850,23 @@ export default function ExternalJobsReceivePage() {
         />
         <div className="hidden md:block">
           <InputField
-            label="Search"
+            label={t("orders.externalReceivePage.search")}
             icon="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Order #, partner, customer, external order..."
+            placeholder={t("orders.externalReceivePage.searchPlaceholder")}
             className="h-10 text-sm"
           />
         </div>
         <Card>
           <CardContent className="space-y-3 pt-5">
-            <div className="text-sm font-medium">Quick receive scanner</div>
+            <div className="text-sm font-medium">
+              {t("orders.externalReceivePage.quickReceiveScanner")}
+            </div>
             <FileField
-              label="Scan or upload supplier document"
+              label={t("orders.externalReceivePage.scanOrUploadSupplierDocument")}
               enableScan
-              scanButtonLabel="Scan document"
+              scanButtonLabel={t("orders.externalReceivePage.scanDocument")}
               onChange={(event) =>
                 setQuickScanFiles(
                   event.target.files ? Array.from(event.target.files) : [],
@@ -844,8 +874,10 @@ export default function ExternalJobsReceivePage() {
               }
               description={
                 quickScanFiles.length > 0
-                  ? `Attached: ${quickScanFiles.map((file) => file.name).join(", ")}`
-                  : "Scan once to auto-match and prefill a partner order card."
+                  ? t("orders.externalReceivePage.attachedFiles", {
+                      files: quickScanFiles.map((file) => file.name).join(", "),
+                    })
+                  : t("orders.externalReceivePage.scanOnceHint")
               }
             />
             <div className="flex flex-wrap items-center gap-2">
@@ -855,7 +887,9 @@ export default function ExternalJobsReceivePage() {
                 disabled={isQuickScanMatching}
               >
                 <SparklesIcon className="h-4 w-4" />
-                {isQuickScanMatching ? "Matching..." : "Scan and match"}
+                {isQuickScanMatching
+                  ? t("orders.externalReceivePage.matching")
+                  : t("orders.externalReceivePage.scanAndMatch")}
               </Button>
               {quickScanMessage ? (
                 <span className="text-xs text-muted-foreground">
@@ -868,11 +902,11 @@ export default function ExternalJobsReceivePage() {
         <div className="space-y-3">
           {isLoading ? (
             <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-              Loading partner orders...
+              {t("orders.externalReceivePage.loadingPartnerOrders")}
             </div>
           ) : filteredJobs.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-              No partner orders waiting for receive.
+              {t("orders.externalReceivePage.noPartnerOrdersWaiting")}
             </div>
           ) : (
             filteredJobs.map((job) => {
@@ -913,18 +947,22 @@ export default function ExternalJobsReceivePage() {
                         ))}
                         <div>
                           <div className="text-xs text-muted-foreground">
-                            Order #
+                            {t("orders.externalReceivePage.orderNumber")}
                           </div>
                           <div className="text-sm font-medium leading-tight">
                             {job.orderNumber && job.orderNumber !== "-"
                               ? job.orderNumber
-                              : "Not linked"}
+                              : t("orders.externalReceivePage.notLinked")}
                           </div>
                         </div>
                         <div className="text-xs text-muted-foreground sm:pt-4">
-                          Customer: {job.customerName || "--"} · Partner:{" "}
-                          {job.partnerName} · Due: {job.dueDate}
-                          {job.quantity ? ` · Qty ${job.quantity}` : ""}
+                          {t("orders.externalReceivePage.customer")}:{" "}
+                          {job.customerName || "--"} ·{" "}
+                          {t("orders.externalReceivePage.partner")}: {job.partnerName} ·{" "}
+                          {t("orders.externalReceivePage.due")}: {job.dueDate}
+                          {job.quantity
+                            ? ` · ${t("orders.externalReceivePage.qty")} ${job.quantity}`
+                            : ""}
                         </div>
                       </div>
                       <Badge variant={statusVariant(job.status)}>
@@ -934,16 +972,20 @@ export default function ExternalJobsReceivePage() {
                     <div className="grid gap-3 md:grid-cols-1 md:items-start">
                       <div className="grid md:grid-cols-1 gap-3">
                         <FileField
-                          label="Delivery note file (optional)"
+                          label={t("orders.externalReceivePage.deliveryNoteFile")}
                           multiple
                           enableScan
-                          scanButtonLabel="Scan document"
+                          scanButtonLabel={t("orders.externalReceivePage.scanDocument")}
                           onChange={(event) =>
                             handleFileChange(job.id, event.target.files)
                           }
                           description={
                             state?.files && state.files.length > 0
-                              ? `Attached: ${state.files.map((file) => file.name).join(", ")}`
+                              ? t("orders.externalReceivePage.attachedFiles", {
+                                  files: state.files
+                                    .map((file) => file.name)
+                                    .join(", "),
+                                })
                               : undefined
                           }
                           className="min-h-20 py-3 text-sm"
@@ -952,7 +994,7 @@ export default function ExternalJobsReceivePage() {
                         state.aiSuggestedKeys.length > 0 ? (
                           <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
                             <div className="mb-1 text-foreground">
-                              AI extracted
+                              {t("orders.externalReceivePage.aiExtracted")}
                             </div>
                             <div className="flex flex-wrap gap-x-4 gap-y-1">
                               {aiExtractFields
@@ -984,7 +1026,9 @@ export default function ExternalJobsReceivePage() {
                                 state?.aiSuggestedKeys?.includes(field.key) ??
                                 false;
                               const label = isAiSuggested
-                                ? `${field.label} (AI suggestion)`
+                                ? t("orders.externalReceivePage.aiSuggestionLabel", {
+                                    label: field.label,
+                                  })
                                 : field.label;
                               if (field.fieldType === "textarea") {
                                 return (
@@ -1032,7 +1076,7 @@ export default function ExternalJobsReceivePage() {
                                       </SelectTrigger>
                                       <SelectContent>
                                         <SelectItem value="__empty__">
-                                          Select value
+                                          {t("orders.externalReceivePage.selectValue")}
                                         </SelectItem>
                                         {(field.options ?? []).map((option) => (
                                           <SelectItem
@@ -1067,7 +1111,11 @@ export default function ExternalJobsReceivePage() {
                                             : "false",
                                         )
                                       }
-                                      label={value === "true" ? "Yes" : "No"}
+                                      label={
+                                        value === "true"
+                                          ? t("orders.externalReceivePage.yes")
+                                          : t("orders.externalReceivePage.no")
+                                      }
                                     />
                                   </div>
                                 );
@@ -1098,12 +1146,14 @@ export default function ExternalJobsReceivePage() {
                           </div>
                         ) : null}
                         <TextAreaField
-                          label="Comment (optional)"
+                          label={t("orders.externalReceivePage.commentOptional")}
                           value={state?.note ?? job.partnerResponseNote ?? ""}
                           onChange={(event) =>
                             handleNoteChange(job.id, event.target.value)
                           }
-                          placeholder="Add comment for receiving"
+                          placeholder={t(
+                            "orders.externalReceivePage.addCommentForReceiving",
+                          )}
                           className="min-h-20 text-sm"
                         />
                       </div>
@@ -1116,11 +1166,11 @@ export default function ExternalJobsReceivePage() {
                           >
                             {state?.isSaving ? (
                               <LoadingSpinner
-                                label="Save"
+                                label={t("orders.externalReceivePage.save")}
                                 className="mr-2 flex"
                               />
                             ) : (
-                              <span>Mark In Stock</span>
+                              <span>{t("orders.externalReceivePage.markInStock")}</span>
                             )}
                           </Button>
                         </div>

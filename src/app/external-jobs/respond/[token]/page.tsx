@@ -11,6 +11,7 @@ import { SelectField } from "@/components/ui/SelectField";
 import { TextAreaField } from "@/components/ui/TextAreaField";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type RequestPayload = {
   partnerName: string;
@@ -84,6 +85,7 @@ function getFieldSemantic(field: { key: string; label: string }) {
 }
 
 export default function ExternalJobRespondPage() {
+  const { t } = useI18n();
   const params = useParams<{ token?: string }>();
   const token = params?.token ?? "";
   const hasToken = token.trim().length > 0;
@@ -117,7 +119,7 @@ export default function ExternalJobRespondPage() {
         return;
       }
       if (!response.ok || !payload.request) {
-        setError(payload.error ?? "Failed to load request.");
+        setError(payload.error ?? t("externalRespondPage.errors.loadFailed"));
         setIsLoading(false);
         return;
       }
@@ -151,7 +153,7 @@ export default function ExternalJobRespondPage() {
     return () => {
       isMounted = false;
     };
-  }, [hasToken, token]);
+  }, [hasToken, t, token]);
 
   const externalOrderField = useMemo(
     () =>
@@ -179,11 +181,11 @@ export default function ExternalJobRespondPage() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!partnerOrderNumber.trim()) {
-      setError("Your order number is required.");
+      setError(t("externalRespondPage.errors.orderNumberRequired"));
       return;
     }
     if (!completionDate.trim()) {
-      setError("Completion date is required.");
+      setError(t("externalRespondPage.errors.completionDateRequired"));
       return;
     }
     setIsSubmitting(true);
@@ -225,7 +227,7 @@ export default function ExternalJobRespondPage() {
       error?: string;
     };
     if (!response.ok) {
-      setError(payload.error ?? "Failed to submit response.");
+      setError(payload.error ?? t("externalRespondPage.errors.submitFailed"));
       setIsSubmitting(false);
       return;
     }
@@ -238,7 +240,7 @@ export default function ExternalJobRespondPage() {
       <div className="mx-auto w-full max-w-2xl p-4 md:p-8">
         <Card>
           <CardContent className="py-8 text-sm text-destructive">
-            Invalid link.
+            {t("externalRespondPage.invalidLink")}
           </CardContent>
         </Card>
       </div>
@@ -250,7 +252,7 @@ export default function ExternalJobRespondPage() {
       <div className="mx-auto w-full max-w-2xl p-4 md:p-8">
         <Card>
           <CardContent className="py-8 text-sm text-muted-foreground">
-            Loading request...
+            {t("externalRespondPage.loadingRequest")}
           </CardContent>
         </Card>
       </div>
@@ -278,16 +280,20 @@ export default function ExternalJobRespondPage() {
       <div className="mx-auto w-full max-w-2xl p-4 md:p-8">
         <Card>
           <CardHeader>
-            <CardTitle>Thank you</CardTitle>
+            <CardTitle>{t("externalRespondPage.thankYou")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>Your response was received.</p>
-            <p>Order: {requestData.request.orderNumber}</p>
+            <p>{t("externalRespondPage.responseReceived")}</p>
             <p>
-              {externalOrderField?.label ?? "Your order number"}:{" "}
+              {t("externalRespondPage.order")}: {requestData.request.orderNumber}
+            </p>
+            <p>
+              {externalOrderField?.label ?? t("externalRespondPage.yourOrderNumber")}:{" "}
               {partnerOrderNumber}
             </p>
-            <p>Completion date: {formatDate(completionDate)}</p>
+            <p>
+              {t("externalRespondPage.completionDate")}: {formatDate(completionDate)}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -298,7 +304,7 @@ export default function ExternalJobRespondPage() {
     <div className="mx-auto w-full max-w-2xl space-y-4 p-4 md:p-8">
       <Card>
         <CardHeader>
-          <CardTitle>External Job Response</CardTitle>
+          <CardTitle>{t("externalRespondPage.title")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div className="flex items-center gap-3">
@@ -307,7 +313,7 @@ export default function ExternalJobRespondPage() {
                 src={requestData.request.companyLogoUrl}
                 alt={
                   displayCompanyName === "-"
-                    ? "Company logo"
+                    ? t("externalRespondPage.companyLogo")
                     : displayCompanyName
                 }
                 width={40}
@@ -317,9 +323,9 @@ export default function ExternalJobRespondPage() {
               />
             ) : (
               <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted text-xs font-semibold text-muted-foreground">
-                {(requestData.request.companyName ?? "Co")
+                {(requestData.request.companyName ?? t("externalRespondPage.companyShort"))
                   .trim()
-                  .replace(/^$/, "Co")
+                  .replace(/^$/, t("externalRespondPage.companyShort"))
                   .split(" ")
                   .filter(Boolean)
                   .map((part) => part[0])
@@ -333,36 +339,48 @@ export default function ExternalJobRespondPage() {
             </div>
           </div>
           <p>
-            <span className="text-muted-foreground">Order:</span>{" "}
+            <span className="text-muted-foreground">
+              {t("externalRespondPage.order")}:
+            </span>{" "}
             {requestData.request.orderNumber}
           </p>
           {requestData.request.companyBillingEmail ? (
             <p>
-              <span className="text-muted-foreground">Email:</span>{" "}
+              <span className="text-muted-foreground">
+                {t("externalRespondPage.email")}:
+              </span>{" "}
               {requestData.request.companyBillingEmail}
             </p>
           ) : null}
           {requestData.request.companyAddress ? (
             <p>
-              <span className="text-muted-foreground">Address:</span>{" "}
+              <span className="text-muted-foreground">
+                {t("externalRespondPage.address")}:
+              </span>{" "}
               {requestData.request.companyAddress}
             </p>
           ) : null}
           {requestData.request.senderName ? (
             <p>
-              <span className="text-muted-foreground">Sent by:</span>{" "}
+              <span className="text-muted-foreground">
+                {t("externalRespondPage.sentBy")}:
+              </span>{" "}
               {requestData.request.senderName}
             </p>
           ) : null}
           {requestData.request.senderEmail ? (
             <p>
-              <span className="text-muted-foreground">Contact email:</span>{" "}
+              <span className="text-muted-foreground">
+                {t("externalRespondPage.contactEmail")}:
+              </span>{" "}
               {requestData.request.senderEmail}
             </p>
           ) : null}
           {requestData.request.senderPhone ? (
             <p>
-              <span className="text-muted-foreground">Contact phone:</span>{" "}
+              <span className="text-muted-foreground">
+                {t("externalRespondPage.contactPhone")}:
+              </span>{" "}
               {requestData.request.senderPhone}
             </p>
           ) : null}
@@ -372,7 +390,7 @@ export default function ExternalJobRespondPage() {
       {requestData.attachments.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Attachments</CardTitle>
+            <CardTitle>{t("externalRespondPage.attachments")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {requestData.attachments.map((item) => (
@@ -392,13 +410,13 @@ export default function ExternalJobRespondPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Submit Response</CardTitle>
+          <CardTitle>{t("externalRespondPage.submitResponse")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {!externalOrderField ? (
               <InputField
-                label="Your order number"
+                label={t("externalRespondPage.yourOrderNumber")}
                 value={fallbackPartnerOrderNumber}
                 onChange={(event) =>
                   setFallbackPartnerOrderNumber(event.target.value)
@@ -409,7 +427,7 @@ export default function ExternalJobRespondPage() {
             ) : null}
             {!completionDateField ? (
               <DatePicker
-                label="Completion date"
+                label={t("externalRespondPage.completionDate")}
                 value={fallbackCompletionDate}
                 onChange={setFallbackCompletionDate}
                 className="space-y-2 text-sm font-medium"
@@ -469,7 +487,10 @@ export default function ExternalJobRespondPage() {
                       }))
                     }
                     options={[
-                      { value: "__none__", label: "Select value" },
+                      {
+                        value: "__none__",
+                        label: t("externalRespondPage.selectValue"),
+                      },
                       ...((field.options ?? []).map((option) => ({
                         value: option,
                         label: option,
@@ -520,19 +541,21 @@ export default function ExternalJobRespondPage() {
               );
             })}
             <TextAreaField
-              label="Note (optional)"
+              label={t("externalRespondPage.noteOptional")}
               value={note}
               onChange={(event) => setNote(event.target.value)}
               className="min-h-25"
             />
             <FileField
-              label="Attachment (optional)"
+              label={t("externalRespondPage.attachmentOptional")}
               onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               className="text-sm"
             />
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Submitting..." : "Submit"}
+              {isSubmitting
+                ? t("externalRespondPage.submitting")
+                : t("externalRespondPage.submit")}
             </Button>
           </form>
         </CardContent>

@@ -36,19 +36,12 @@ import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatDate } from "@/lib/domain/formatters";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
+import { useI18n } from "@/lib/i18n/useI18n";
 import {
   canReceiveExternalOrders,
   canViewExternalOrders,
 } from "@/lib/auth/permissions";
 
-const defaultExternalStatusLabels: Record<ExternalJobStatus, string> = {
-  requested: "Requested",
-  ordered: "Ordered",
-  in_progress: "In progress",
-  delivered: "In Stock",
-  approved: "Approved",
-  cancelled: "Cancelled",
-};
 const externalStatusValues: ExternalJobStatus[] = [
   "requested",
   "ordered",
@@ -203,6 +196,7 @@ function isEmptyValue(value: unknown) {
 }
 
 export default function ExternalJobsPage() {
+  const { t } = useI18n();
   const pathname = usePathname();
   const { orders } = useOrders();
   const { activeGroups, activePartners } = usePartners();
@@ -214,13 +208,27 @@ export default function ExternalJobsPage() {
     ? "/warehouse/receive"
     : "/orders/external/receive";
   const backOrdersHref = inWarehouseModule ? "/warehouse/queue" : "/orders";
+  const defaultExternalStatusLabels = useMemo<
+    Record<ExternalJobStatus, string>
+  >(
+    () => ({
+      requested: t("orders.externalPage.status.requested"),
+      ordered: t("orders.externalPage.status.ordered"),
+      in_progress: t("orders.externalPage.status.inProgress"),
+      delivered: t("orders.externalPage.status.delivered"),
+      approved: t("orders.externalPage.status.approved"),
+      cancelled: t("orders.externalPage.status.cancelled"),
+    }),
+    [t],
+  );
+
   const { rules } = useWorkflowRules();
   const externalStatusLabels = useMemo(
     () => ({
       ...defaultExternalStatusLabels,
       ...rules.externalJobStatusLabels,
     }),
-    [rules.externalJobStatusLabels],
+    [defaultExternalStatusLabels, rules.externalJobStatusLabels],
   );
   const visibleExternalStatuses = useMemo(
     () =>
@@ -231,14 +239,14 @@ export default function ExternalJobsPage() {
   );
   const statusOptions = useMemo(
     () => [
-      { value: "all" as const, label: "All" },
+      { value: "all" as const, label: t("orders.externalPage.all") },
       ...visibleExternalStatuses.map((status) => ({
         value: status,
         label:
           externalStatusLabels[status] ?? defaultExternalStatusLabels[status],
       })),
     ],
-    [externalStatusLabels, visibleExternalStatuses],
+    [defaultExternalStatusLabels, externalStatusLabels, t, visibleExternalStatuses],
   );
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ExternalJobStatus | "all">(
@@ -295,7 +303,7 @@ export default function ExternalJobsPage() {
   const [externalTableColumnsConfig, setExternalTableColumnsConfig] = useState<
     ExternalTableColumnSetting[]
   >([]);
-  const mapExternalJobRow = (row: {
+  const mapExternalJobRow = useCallback((row: {
     id: string;
     partner_id?: string | null;
     partner_name?: string | null;
@@ -339,12 +347,12 @@ export default function ExternalJobsPage() {
       statusHistory: (row.external_job_status_history ?? []).map((entry) => ({
         id: entry.id,
         status: entry.status,
-        changedBy: entry.changed_by_name ?? "Unknown",
+        changedBy: entry.changed_by_name ?? t("orders.externalPage.unknown"),
         changedByRole: entry.changed_by_role ?? undefined,
         changedAt: entry.changed_at,
       })),
     };
-  };
+  }, [t]);
   const getEffectiveDueDate = useCallback(
     (job: { dueDate: string; partnerResponseDueDate?: string }) =>
       job.partnerResponseDueDate || job.dueDate,
@@ -353,26 +361,29 @@ export default function ExternalJobsPage() {
   const getDisplayExternalOrder = useCallback((job: (typeof jobs)[number]) => {
     if (job.requestMode === "partner_portal") {
       return (
-        job.partnerResponseOrderNumber || `pending from ${job.partnerName}`
+        job.partnerResponseOrderNumber ||
+        t("orders.externalPage.pendingFrom", { partner: job.partnerName })
       );
     }
     return job.externalOrderNumber || "--";
-  }, []);
+  }, [t]);
   const getDisplayDueDate = useCallback(
     (job: (typeof jobs)[number]) => {
       if (job.requestMode === "partner_portal" && !job.partnerResponseDueDate) {
-        return `pending from ${job.partnerName}`;
+        return t("orders.externalPage.pendingFrom", { partner: job.partnerName });
       }
       const dateValue = getEffectiveDueDate(job);
       return dateValue ? formatDate(dateValue) : "--";
     },
-    [getEffectiveDueDate],
+    [getEffectiveDueDate, t],
   );
   const getFieldDisplayValue = useCallback(
     (job: (typeof jobs)[number], field: ExternalListField) => {
       const rawValue = externalFieldValuesByJobId[job.id]?.[field.id];
       const isPortal = job.requestMode === "partner_portal";
-      const pendingLabel = `pending from ${job.partnerName}`;
+      const pendingLabel = t("orders.externalPage.pendingFrom", {
+        partner: job.partnerName,
+      });
       if (field.semantic === "external_order") {
         const fallback = isPortal
           ? job.partnerResponseOrderNumber
@@ -398,7 +409,9 @@ export default function ExternalJobsPage() {
         return "--";
       }
       if (field.fieldType === "toggle") {
-        return rawValue === true ? "Yes" : "No";
+        return rawValue === true
+          ? t("orders.externalPage.yes")
+          : t("orders.externalPage.no");
       }
       if (field.fieldType === "date") {
         return formatDate(String(rawValue));
@@ -406,7 +419,7 @@ export default function ExternalJobsPage() {
       const text = String(rawValue);
       return field.unit ? `${text} ${field.unit}` : text;
     },
-    [externalFieldValuesByJobId],
+    [externalFieldValuesByJobId, t],
   );
 
   const parseAmount = useCallback((value: unknown): number | null => {
@@ -466,24 +479,24 @@ export default function ExternalJobsPage() {
 
   const tableColumnDefs = useMemo(() => {
     const defs: Array<{ id: string; label: string }> = [
-      { id: "sys.order_number", label: "Order #" },
-      { id: "sys.customer_name", label: "Customer" },
-      { id: "sys.partner_name", label: "Partner" },
+      { id: "sys.order_number", label: t("orders.externalPage.columns.orderNumber") },
+      { id: "sys.customer_name", label: t("orders.externalPage.columns.customer") },
+      { id: "sys.partner_name", label: t("orders.externalPage.columns.partner") },
       ...externalListFields.map((field) => ({
         id: `field.${field.id}`,
         label: field.label,
       })),
     ];
     if (showPriceDifferenceColumn) {
-      defs.push({ id: "cmp.price_diff", label: "Price diff" });
+      defs.push({ id: "cmp.price_diff", label: t("orders.externalPage.columns.priceDiff") });
     }
     defs.push(
-      { id: "sys.received_at", label: "Received" },
-      { id: "sys.added_by", label: "Added by" },
-      { id: "sys.status", label: "Status" },
+      { id: "sys.received_at", label: t("orders.externalPage.columns.received") },
+      { id: "sys.added_by", label: t("orders.externalPage.columns.addedBy") },
+      { id: "sys.status", label: t("orders.externalPage.columns.status") },
     );
     return defs;
-  }, [externalListFields, showPriceDifferenceColumn]);
+  }, [externalListFields, showPriceDifferenceColumn, t]);
   const externalFieldById = useMemo(
     () =>
       Object.fromEntries(externalListFields.map((field) => [field.id, field])),
@@ -716,6 +729,7 @@ export default function ExternalJobsPage() {
 
   useEffect(() => {
     if (!supabase || user.loading || !user.isAuthenticated) {
+      setIsLoading(false);
       queueMicrotask(() => {
         setJobs(fallbackJobs.slice(0, pageSize));
         setTotalJobs(fallbackJobs.length);
@@ -795,8 +809,6 @@ export default function ExternalJobsPage() {
     };
   }, [
     activePartners,
-    externalListFields,
-    fallbackJobs,
     loadFieldValuesForJobs,
     overdueOnly,
     partnerFilter,
@@ -911,17 +923,17 @@ export default function ExternalJobsPage() {
             onChange={(event) =>
               setStatusFilter(event.target.checked ? "delivered" : "all")
             }
-            label="In Stock"
+            label={t("orders.externalPage.inStock")}
           />
           <Checkbox
             checked={overdueOnly}
             onChange={(event) => setOverdueOnly(event.target.checked)}
-            label="Overdue only"
+            label={t("orders.externalPage.overdueOnly")}
           />
         </div>
       ) : null}
       <FilterOptionSelector
-        title="Status"
+        title={t("orders.externalPage.columns.status")}
         value={statusFilter}
         onChange={(value) =>
           setStatusFilter(value as ExternalJobStatus | "all")
@@ -932,7 +944,7 @@ export default function ExternalJobsPage() {
         }))}
       />
       <SelectField
-        label="Partner group"
+        label={t("orders.externalPage.partnerGroup")}
         value={partnerGroupFilter || "__all__"}
         onValueChange={(value) =>
           setPartnerGroupFilter(value === "__all__" ? "" : value)
@@ -948,7 +960,9 @@ export default function ExternalJobsPage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">All groups</SelectItem>
+            <SelectItem value="__all__">
+              {t("orders.externalPage.allGroups")}
+            </SelectItem>
             {activeGroups.map((group) => (
               <SelectItem key={group.id} value={group.id}>
                 {group.name}
@@ -958,7 +972,7 @@ export default function ExternalJobsPage() {
         </Select>
       </SelectField>
       <SelectField
-        label="Partner"
+        label={t("orders.externalPage.columns.partner")}
         value={partnerFilter || "__all__"}
         onValueChange={(value) =>
           setPartnerFilter(value === "__all__" ? "" : value)
@@ -974,7 +988,9 @@ export default function ExternalJobsPage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">All partners</SelectItem>
+            <SelectItem value="__all__">
+              {t("orders.externalPage.allPartners")}
+            </SelectItem>
             {activePartners
               .filter((partner) =>
                 partnerGroupFilter
@@ -991,7 +1007,7 @@ export default function ExternalJobsPage() {
       </SelectField>
       <div className="flex justify-end">
         <Button type="button" variant="ghost" onClick={resetFilters}>
-          Clear filters
+          {t("orders.externalPage.clearFilters")}
         </Button>
       </div>
     </div>
@@ -1002,17 +1018,19 @@ export default function ExternalJobsPage() {
       <section className="space-y-4 pt-16 md:pt-0">
         <DesktopPageHeader
           sticky
-          title="Outsource Orders"
-          subtitle="Track outsourced partner orders, delivery dates, and receive flow."
+          title={t("orders.externalPage.title")}
+          subtitle={t("orders.externalPage.subtitle")}
           className="md:z-20"
           actions={
             <Link href={backOrdersHref}>
-              <Button variant="outline">Back to Orders</Button>
+              <Button variant="outline">
+                {t("orders.externalPage.backToOrders")}
+              </Button>
             </Link>
           }
         />
         <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-          You do not have access to partner orders.
+          {t("orders.externalPage.noAccess")}
         </div>
       </section>
     );
@@ -1023,7 +1041,11 @@ export default function ExternalJobsPage() {
       <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+0.75rem)] z-40 md:hidden">
         <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
           <Link href={backOrdersHref}>
-            <Button variant="ghost" size="icon" aria-label="Back to orders">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("orders.externalPage.backToOrders")}
+            >
               <ArrowLeftIcon className="h-4 w-4" />
             </Button>
           </Link>
@@ -1037,7 +1059,7 @@ export default function ExternalJobsPage() {
               variant="outline"
               size="icon"
               className="h-12 w-12 rounded-full bg-card shadow-lg"
-              aria-label="Open external filters"
+              aria-label={t("orders.externalPage.openFilters")}
               onClick={() => setIsMobileFiltersOpen(true)}
             >
               <SlidersHorizontalIcon className="h-5 w-5" />
@@ -1046,7 +1068,7 @@ export default function ExternalJobsPage() {
               variant="outline"
               size="icon"
               className="h-12 w-12 rounded-full bg-card shadow-lg"
-              aria-label="Open external search"
+              aria-label={t("orders.externalPage.openSearch")}
               onClick={() => setIsMobileSearchOpen(true)}
             >
               <SearchIcon className="h-5 w-5" />
@@ -1055,7 +1077,7 @@ export default function ExternalJobsPage() {
           {canOpenReceivePage ? (
             <Link href={receiveHref}>
               <Button className="h-12 rounded-full px-5 text-sm shadow-lg">
-                Receive
+                {t("orders.externalPage.receive")}
               </Button>
             </Link>
           ) : null}
@@ -1065,9 +1087,9 @@ export default function ExternalJobsPage() {
       <BottomSheet
         open={isMobileFiltersOpen}
         onClose={() => setIsMobileFiltersOpen(false)}
-        ariaLabel="External order filters"
-        closeButtonLabel="Close filters"
-        title="Filters"
+        ariaLabel={t("orders.externalPage.filtersAria")}
+        closeButtonLabel={t("orders.externalPage.closeFilters")}
+        title={t("orders.externalPage.filtersTitle")}
         enableSwipeToClose
       >
         <div className="p-4">{renderFilterControls(true)}</div>
@@ -1076,9 +1098,9 @@ export default function ExternalJobsPage() {
       <BottomSheet
         open={isMobileSearchOpen}
         onClose={() => setIsMobileSearchOpen(false)}
-        ariaLabel="Search external orders"
-        closeButtonLabel="Close search"
-        title="Search"
+        ariaLabel={t("orders.externalPage.searchAria")}
+        closeButtonLabel={t("orders.externalPage.closeSearch")}
+        title={t("orders.externalPage.search")}
         enableSwipeToClose
       >
         <div className="px-4 pt-3">
@@ -1087,7 +1109,7 @@ export default function ExternalJobsPage() {
             icon="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Order, partner, customer..."
+            placeholder={t("orders.externalPage.searchPlaceholder")}
             className="text-[16px] md:text-sm"
           />
         </div>
@@ -1095,25 +1117,27 @@ export default function ExternalJobsPage() {
 
       <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
         <MobilePageTitle
-          title="Outsource Orders"
+          title={t("orders.externalPage.title")}
           showCompact={showCompactMobileTitle}
-          subtitle="Track outsourced partner orders, delivery dates, and receive flow."
+          subtitle={t("orders.externalPage.subtitle")}
           className="pt-6 pb-6"
         />
         <DesktopPageHeader
           sticky
-          title="Outsource Orders"
-          subtitle="Track outsourced partner orders, delivery dates, and receive flow."
+          title={t("orders.externalPage.title")}
+          subtitle={t("orders.externalPage.subtitle")}
           className="md:z-20"
           actions={
             <div className="hidden items-center gap-2 md:flex">
               {canOpenReceivePage ? (
                 <Link href={receiveHref}>
-                  <Button>Receive</Button>
+                  <Button>{t("orders.externalPage.receive")}</Button>
                 </Link>
               ) : null}
               <Link href={backOrdersHref}>
-                <Button variant="outline">Back to Orders</Button>
+                <Button variant="outline">
+                  {t("orders.externalPage.backToOrders")}
+                </Button>
               </Link>
             </div>
           }
@@ -1122,17 +1146,23 @@ export default function ExternalJobsPage() {
         <div className="space-y-4">
           <div className="grid gap-3 grid-cols-3">
             <div className="rounded-lg border border-border px-4 py-3">
-              <div className="text-xs text-muted-foreground">Total</div>
+              <div className="text-xs text-muted-foreground">
+                {t("orders.externalPage.total")}
+              </div>
               <div className="text-2xl font-semibold">{stats.total}</div>
             </div>
             <div className="rounded-lg border border-border px-4 py-3">
-              <div className="text-xs text-muted-foreground">Overdue</div>
+              <div className="text-xs text-muted-foreground">
+                {t("orders.externalPage.overdue")}
+              </div>
               <div className="text-2xl font-semibold text-rose-600">
                 {stats.overdue}
               </div>
             </div>
             <div className="rounded-lg border border-border px-4 py-3">
-              <div className="text-xs text-muted-foreground">Due in 7 days</div>
+              <div className="text-xs text-muted-foreground">
+                {t("orders.externalPage.dueIn7Days")}
+              </div>
               <div className="text-2xl font-semibold">{stats.dueSoon}</div>
             </div>
           </div>
@@ -1140,10 +1170,10 @@ export default function ExternalJobsPage() {
           <div className="hidden flex-wrap items-end gap-3 md:flex">
             <div className="min-w-65 flex-1">
               <InputField
-                label="Search"
+                label={t("orders.externalPage.search")}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Order, partner, customer..."
+                placeholder={t("orders.externalPage.searchPlaceholder")}
                 className="h-10 text-sm"
               />
             </div>
@@ -1153,12 +1183,12 @@ export default function ExternalJobsPage() {
                 onChange={(event) =>
                   setStatusFilter(event.target.checked ? "delivered" : "all")
                 }
-                label="In Stock"
+                label={t("orders.externalPage.inStock")}
               />
               <Checkbox
                 checked={overdueOnly}
                 onChange={(event) => setOverdueOnly(event.target.checked)}
-                label="Overdue only"
+                label={t("orders.externalPage.overdueOnly")}
               />
               <FiltersDropdown contentClassName="w-[360px]">
                 {renderFilterControls(false)}
@@ -1169,9 +1199,15 @@ export default function ExternalJobsPage() {
           <DataTable
             columns={visibleTableColumnDefs}
             rows={filteredJobs}
+            isLoading={isLoading}
+            loadingState={
+              <div className="flex justify-center">
+                <LoadingSpinner label={t("orders.externalPage.loadingPartnerOrders")} />
+              </div>
+            }
             getRowId={(job) => job.id}
             tableClassName="w-max min-w-full"
-            emptyState="No partner orders found."
+            emptyState={t("orders.externalPage.noPartnerOrders")}
             renderCell={(job, column) => {
               const createdBy = job.statusHistory
                 ? [...job.statusHistory].sort((a, b) =>
@@ -1293,28 +1329,23 @@ export default function ExternalJobsPage() {
               return "--";
             }}
           />
-          {isLoading ? (
-            <LoadingSpinner label="Loading partner orders..." />
-          ) : (
-            filteredJobs.length < totalJobs && (
-              <div className="flex justify-center">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    const nextOffset = offset + pageSize;
-                    setOffset(nextOffset);
-                    if (!supabase || user.loading || !user.isAuthenticated) {
-                      setJobs((prev) => [
-                        ...prev,
-                        ...fallbackJobs.slice(
-                          nextOffset,
-                          nextOffset + pageSize,
-                        ),
-                      ]);
-                      return;
-                    }
-                    const sb = supabase;
-                    setIsLoading(true);
+          {!isLoading && filteredJobs.length < totalJobs ? (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  const nextOffset = offset + pageSize;
+                  setOffset(nextOffset);
+                  if (!supabase || user.loading || !user.isAuthenticated) {
+                    setJobs((prev) => [
+                      ...prev,
+                      ...fallbackJobs.slice(nextOffset, nextOffset + pageSize),
+                    ]);
+                    return;
+                  }
+                  const sb = supabase;
+                  setIsLoading(true);
+                  try {
                     const query = sb
                       .from("external_jobs")
                       .select(externalJobsSelect, { count: "exact" })
@@ -1335,7 +1366,6 @@ export default function ExternalJobsPage() {
                       if (ids.length > 0) {
                         query.in("partner_id", ids);
                       } else {
-                        setIsLoading(false);
                         return;
                       }
                     }
@@ -1358,22 +1388,25 @@ export default function ExternalJobsPage() {
                         '("delivered","approved","cancelled")',
                       );
                     }
-                    query.then(async ({ data }) => {
-                      const mapped = (data ?? []).map(mapExternalJobRow);
-                      await loadFieldValuesForJobs(
-                        mapped.map((item) => item.id),
-                        true,
-                      );
-                      setJobs((prev) => [...prev, ...mapped]);
-                      setIsLoading(false);
-                    });
-                  }}
-                >
-                  Load more
-                </Button>
-              </div>
-            )
-          )}
+                    const { data, error } = await query;
+                    if (error) {
+                      return;
+                    }
+                    const mapped = (data ?? []).map(mapExternalJobRow);
+                    await loadFieldValuesForJobs(
+                      mapped.map((item) => item.id),
+                      true,
+                    );
+                    setJobs((prev) => [...prev, ...mapped]);
+                  } finally {
+                    setIsLoading(false);
+                  }
+                }}
+              >
+                {t("orders.page.loadMore")}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </section>
     </>

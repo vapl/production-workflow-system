@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import {
   Select,
@@ -174,13 +174,16 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     setStep("map");
   }
 
-  function getMappedValue(row: Record<string, unknown>, fieldKey: string) {
-    const header = mapping[fieldKey];
-    if (!header) {
-      return "";
-    }
-    return row[header] ?? "";
-  }
+  const getMappedValue = useCallback(
+    (row: Record<string, unknown>, fieldKey: string) => {
+      const header = mapping[fieldKey];
+      if (!header) {
+        return "";
+      }
+      return row[header] ?? "";
+    },
+    [mapping],
+  );
 
   const statusColumn = mapping.status ?? "";
   const priorityColumn = mapping.priority ?? "";
@@ -267,7 +270,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     });
   }, [priorityColumn, uniquePriorityValues]);
 
-  function buildImportRows() {
+  const buildImportRows = useCallback(() => {
     const missingMapping = requiredFields.filter((field) => !mapping[field.key]);
     if (missingMapping.length > 0) {
       return {
@@ -399,7 +402,15 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     });
 
     return { rows: importRows, errors: rowErrors };
-  }
+  }, [
+    getMappedValue,
+    hierarchyFields,
+    mapping,
+    priorityMapping,
+    rows,
+    statusMapping,
+    t,
+  ]);
 
   async function handleImport() {
     const { rows: importRows, errors } = buildImportRows();
@@ -514,7 +525,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     }
     const result = buildImportRows();
     setPreviewErrors(result.errors);
-  }, [step, rows, mapping, statusMapping, priorityMapping, hierarchyFields]);
+  }, [buildImportRows, step]);
 
   function downloadErrors() {
     if (previewErrors.length === 0) {
@@ -727,21 +738,23 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="draft">draft</SelectItem>
+                              <SelectItem value="draft">
+                                {t("orders.import.statusOptions.draft")}
+                              </SelectItem>
                               <SelectItem value="ready_for_engineering">
-                                ready for engineering
+                                {t("orders.import.statusOptions.readyForEngineering")}
                               </SelectItem>
                               <SelectItem value="in_engineering">
-                                in engineering
+                                {t("orders.import.statusOptions.inEngineering")}
                               </SelectItem>
                               <SelectItem value="engineering_blocked">
-                                engineering blocked
+                                {t("orders.import.statusOptions.engineeringBlocked")}
                               </SelectItem>
                               <SelectItem value="ready_for_production">
-                                ready for production
+                                {t("orders.import.statusOptions.readyForProduction")}
                               </SelectItem>
                               <SelectItem value="in_production">
-                                in production
+                                {t("orders.import.statusOptions.inProduction")}
                               </SelectItem>
                             </SelectContent>
                           </Select>
@@ -790,10 +803,18 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="low">low</SelectItem>
-                              <SelectItem value="normal">normal</SelectItem>
-                              <SelectItem value="high">high</SelectItem>
-                              <SelectItem value="urgent">urgent</SelectItem>
+                              <SelectItem value="low">
+                                {t("orders.modal.priority.low")}
+                              </SelectItem>
+                              <SelectItem value="normal">
+                                {t("orders.modal.priority.normal")}
+                              </SelectItem>
+                              <SelectItem value="high">
+                                {t("orders.modal.priority.high")}
+                              </SelectItem>
+                              <SelectItem value="urgent">
+                                {t("orders.modal.priority.urgent")}
+                              </SelectItem>
                             </SelectContent>
                           </Select>
                         </SelectField>
