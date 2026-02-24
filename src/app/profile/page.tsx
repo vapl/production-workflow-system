@@ -12,10 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import {
-  supabase,
-  supabaseAvatarBucket,
-} from "@/lib/supabaseClient";
+import { supabase, supabaseAvatarBucket } from "@/lib/supabaseClient";
 import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import Link from "next/link";
@@ -148,10 +145,7 @@ export default function ProfilePage() {
       setAvatarMessage(result.error ?? t("profile.uploadFailed"));
       return;
     }
-    const storagePath = getStoragePathFromUrl(
-      result.url,
-      supabaseAvatarBucket,
-    );
+    const storagePath = getStoragePathFromUrl(result.url, supabaseAvatarBucket);
     let displayUrl = result.url;
     if (storagePath && supabase) {
       const { data } = await supabase.storage
@@ -177,10 +171,7 @@ export default function ProfilePage() {
     setAvatarState("uploading");
     setAvatarMessage("");
     const { supabaseAvatarBucket } = await import("@/lib/supabaseClient");
-    const storagePath = getStoragePathFromUrl(
-      avatarUrl,
-      supabaseAvatarBucket,
-    );
+    const storagePath = getStoragePathFromUrl(avatarUrl, supabaseAvatarBucket);
     if (storagePath) {
       await supabase.storage.from(supabaseAvatarBucket).remove([storagePath]);
     }
@@ -240,8 +231,26 @@ export default function ProfilePage() {
     phone.trim() !== initialProfile.phone.trim();
 
   return (
-    <section className="space-y-6">
-      <div className="flex items-center">
+    <section className="space-y-6 pt-20 md:pt-0">
+      <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+1.25rem)] z-40 md:hidden">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="pointer-events-auto h-12 w-12 rounded-xl border border-border/80 bg-card/95 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80"
+          aria-label={t("profile.back")}
+          onClick={() => {
+            if (typeof window !== "undefined" && window.history.length > 1) {
+              router.back();
+              return;
+            }
+            router.replace("/orders");
+          }}
+        >
+          <ArrowLeftIcon className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="hidden items-center md:flex">
         <button
           type="button"
           className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
@@ -334,7 +343,7 @@ export default function ProfilePage() {
                 value={normalizeAppLocale(user.locale)}
                 onValueChange={handleUserLocaleChange}
               >
-                <SelectTrigger className="h-11 w-full min-w-[120px] sm:w-64">
+                <SelectTrigger className="h-11 w-full min-w-30 sm:w-64">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -389,22 +398,22 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
       {user.isAdmin && (
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("profile.companyBillingTitle")}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-sm text-muted-foreground">
-                {t("profile.companyBillingDescription")}
-              </div>
-              <Link
-                href="/company"
-                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              >
-                {t("profile.openCompanySettings")}
-              </Link>
-            </CardContent>
-          </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("profile.companyBillingTitle")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-muted-foreground">
+              {t("profile.companyBillingDescription")}
+            </div>
+            <Link
+              href="/company"
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+            >
+              {t("profile.openCompanySettings")}
+            </Link>
+          </CardContent>
+        </Card>
       )}
       {avatarModalOpen ? (
         <div
@@ -416,7 +425,9 @@ export default function ProfilePage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">{t("profile.editAvatar")}</div>
+              <div className="text-sm font-semibold">
+                {t("profile.editAvatar")}
+              </div>
               <Button
                 variant="ghost"
                 size="icon"
@@ -443,9 +454,7 @@ export default function ProfilePage() {
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">
                   <div>
-                    {avatarFile
-                      ? avatarFile.name
-                      : t("profile.chooseImage")}
+                    {avatarFile ? avatarFile.name : t("profile.chooseImage")}
                   </div>
                   <div>{t("profile.imageHint")}</div>
                 </div>

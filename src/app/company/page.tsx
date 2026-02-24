@@ -316,8 +316,26 @@ export default function CompanyPage() {
   };
 
   return (
-    <section className="space-y-6">
-      <div className="flex items-center">
+    <section className="space-y-6 pt-20 md:pt-0">
+      <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+1.25rem)] z-40 md:hidden">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="pointer-events-auto h-12 w-12 rounded-xl border border-border/80 bg-card/95 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80"
+          aria-label={t("companyPage.back")}
+          onClick={() => {
+            if (typeof window !== "undefined" && window.history.length > 1) {
+              router.back();
+              return;
+            }
+            router.replace("/orders");
+          }}
+        >
+          <ArrowLeftIcon className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="hidden items-center md:flex">
         <button
           type="button"
           className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
@@ -450,7 +468,9 @@ export default function CompanyPage() {
                         return;
                       }
                       setCompanyLogoFile(file ?? null);
-                      setCompanyLogoPreview(file ? URL.createObjectURL(file) : null);
+                      setCompanyLogoPreview(
+                        file ? URL.createObjectURL(file) : null,
+                      );
                       setCompanyLogoState("idle");
                       setCompanyLogoMessage("");
                     }}
