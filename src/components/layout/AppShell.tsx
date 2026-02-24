@@ -656,11 +656,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ) : null}
       <div className="flex min-h-screen w-full items-start justify-center overflow-x-clip bg-background font-sans text-foreground">
         <main
-          className={`container mx-auto px-4 py-6 ${
+          className={cn(
+            "container mx-auto px-4 py-6",
+            hideHeader
+              ? null
+              : "pt-[calc(env(safe-area-inset-top)+4.75rem)] md:pt-6",
             hideTabsNav
-              ? ""
-              : "pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-6"
-          }`}
+              ? null
+              : "pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-6",
+          )}
         >
           {children}
         </main>

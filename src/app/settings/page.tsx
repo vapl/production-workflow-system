@@ -370,11 +370,15 @@ export default function SettingsPage() {
     [sortedLevels],
   );
   const [levelName, setLevelName] = useState("");
-  const [levelOrder, setLevelOrder] = useState<number>(sortedLevels.length + 1);
   const [levelRequired, setLevelRequired] = useState(false);
   const [levelActive, setLevelActive] = useState(true);
   const [levelShowInTable, setLevelShowInTable] = useState(true);
-  const [editingLevelId, setEditingLevelId] = useState<string | null>(null);
+  const [inlineEditingLevelId, setInlineEditingLevelId] = useState<
+    string | null
+  >(null);
+  const [inlineLevelName, setInlineLevelName] = useState("");
+  const [draggedLevelId, setDraggedLevelId] = useState<string | null>(null);
+  const [levelDropIndex, setLevelDropIndex] = useState<number | null>(null);
 
   const [selectedLevelId, setSelectedLevelId] = useState<string>(
     selectableLevels[0]?.id ?? "",
@@ -1401,10 +1405,6 @@ export default function SettingsPage() {
   }, [selectedLevelId]);
 
   useEffect(() => {
-    setLevelOrder(sortedLevels.length + 1);
-  }, [sortedLevels.length]);
-
-  useEffect(() => {
     const sb = supabase;
     if (!sb) {
       setUsers([
@@ -2005,7 +2005,6 @@ export default function SettingsPage() {
     setLevelRequired(false);
     setLevelActive(true);
     setLevelShowInTable(true);
-    setEditingLevelId(null);
   }
 
   function handleSaveLevel() {
@@ -2013,27 +2012,12 @@ export default function SettingsPage() {
     if (!trimmedName) {
       return;
     }
-    const existingKey = editingLevelId
-      ? levels.find((level) => level.id === editingLevelId)?.key
-      : undefined;
-    const normalizedKey = existingKey || slugify(trimmedName);
-    if (editingLevelId) {
-      updateLevel(editingLevelId, {
-        name: trimmedName,
-        key: normalizedKey,
-        order: levelOrder,
-        isRequired: levelRequired,
-        isActive: levelActive,
-        showInTable: levelShowInTable,
-      });
-      resetLevelForm();
-      return;
-    }
+    const normalizedKey = slugify(trimmedName);
 
     void addLevel({
       name: trimmedName,
       key: normalizedKey,
-      order: levelOrder,
+      order: sortedLevels.length + 1,
       isRequired: levelRequired,
       isActive: levelActive,
       showInTable: levelShowInTable,
@@ -2041,17 +2025,78 @@ export default function SettingsPage() {
     resetLevelForm();
   }
 
-  function handleEditLevel(levelId: string) {
+  function startInlineLevelEdit(levelId: string) {
     const level = levels.find((item) => item.id === levelId);
     if (!level) {
       return;
     }
-    setEditingLevelId(levelId);
-    setLevelName(level.name);
-    setLevelOrder(level.order);
-    setLevelRequired(level.isRequired);
-    setLevelActive(level.isActive);
-    setLevelShowInTable(level.showInTable);
+    setInlineEditingLevelId(levelId);
+    setInlineLevelName(level.name);
+  }
+
+  function cancelInlineLevelEdit() {
+    setInlineEditingLevelId(null);
+    setInlineLevelName("");
+  }
+
+  async function handleSaveInlineLevel() {
+    if (!inlineEditingLevelId) {
+      return;
+    }
+    const trimmedName = inlineLevelName.trim();
+    if (!trimmedName) {
+      return;
+    }
+    await updateLevel(inlineEditingLevelId, {
+      name: trimmedName,
+    });
+    cancelInlineLevelEdit();
+  }
+
+  async function persistLevelOrder(nextLevels: typeof sortedLevels) {
+    await Promise.all(
+      nextLevels.map((level, index) =>
+        updateLevel(level.id, {
+          order: index + 1,
+        }),
+      ),
+    );
+  }
+
+  async function handleDropLevel() {
+    if (
+      draggedLevelId === null ||
+      levelDropIndex === null ||
+      sortedLevels.length === 0
+    ) {
+      setDraggedLevelId(null);
+      setLevelDropIndex(null);
+      return;
+    }
+
+    const fromIndex = sortedLevels.findIndex((level) => level.id === draggedLevelId);
+    if (fromIndex === -1) {
+      setDraggedLevelId(null);
+      setLevelDropIndex(null);
+      return;
+    }
+
+    let targetIndex = levelDropIndex;
+    if (levelDropIndex > fromIndex) {
+      targetIndex -= 1;
+    }
+    if (targetIndex === fromIndex) {
+      setDraggedLevelId(null);
+      setLevelDropIndex(null);
+      return;
+    }
+
+    const reordered = [...sortedLevels];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    await persistLevelOrder(reordered);
+    setDraggedLevelId(null);
+    setLevelDropIndex(null);
   }
 
   function resetNodeForm() {
@@ -3448,7 +3493,7 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(120px,0.5fr)_minmax(240px,1fr)_auto] lg:items-end">
+                <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.2fr)_minmax(280px,1fr)_auto] lg:items-end">
                   <InputField
                     label={t("settings.structure.levelName")}
                     value={levelName}
@@ -3456,16 +3501,6 @@ export default function SettingsPage() {
                       setLevelName(event.target.value);
                     }}
                     placeholder={t("settings.structure.levelNamePlaceholder")}
-                    className="h-10 text-sm"
-                  />
-                  <InputField
-                    label={t("settings.structure.order")}
-                    type="number"
-                    min={1}
-                    value={levelOrder}
-                    onChange={(event) =>
-                      setLevelOrder(Number(event.target.value) || 1)
-                    }
                     className="h-10 text-sm"
                   />
                   <div className="flex flex-wrap items-center gap-4 pt-2">
@@ -3491,25 +3526,21 @@ export default function SettingsPage() {
                   </div>
                   <div className="flex gap-2">
                     <Button onClick={handleSaveLevel}>
-                      {editingLevelId
-                        ? t("settings.structure.saveLevel")
-                        : t("settings.structure.addLevel")}
+                      {t("settings.structure.addLevel")}
                     </Button>
-                    {editingLevelId && (
-                      <Button variant="outline" onClick={resetLevelForm}>
-                        {t("settings.common.cancel")}
-                      </Button>
-                    )}
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {t("settings.structure.defaultMeaningHint")}
                 </p>
 
-                <div className="overflow-x-hidden rounded-lg border border-border">
-                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="min-w-[760px] w-full table-auto text-sm [&_th]:whitespace-normal [&_th]:wrap-break-word [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
+                        <th className="w-12 px-2 py-2 text-left font-medium">
+                          <span className="sr-only">Drag</span>
+                        </th>
                         <th className="px-4 py-2 text-left font-medium">
                           {t("settings.structure.level")}
                         </th>
@@ -3531,106 +3562,192 @@ export default function SettingsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedLevels.map((level) => (
-                        <tr key={level.id} className="border-t border-border">
-                          <td className="px-4 py-2">
-                            <div className="font-medium">
-                              {level.name}
-                              {lockedLevelKeys.has(level.key) && (
-                                <span className="ml-2 text-xs text-muted-foreground">
-                                  {t("settings.common.default")}
+                      {sortedLevels.map((level, rowIndex) => {
+                        const isInlineEditing = inlineEditingLevelId === level.id;
+                        return (
+                          <Fragment key={level.id}>
+                            <tr
+                              className={`border-t border-border transition-all ${
+                                levelDropIndex === rowIndex && draggedLevelId
+                                  ? "h-4 bg-primary/10"
+                                  : "h-0"
+                              }`}
+                            />
+                            <tr
+                              className={`border-t border-border ${
+                                draggedLevelId === level.id
+                                  ? "bg-primary/5"
+                                  : "bg-background"
+                              }`}
+                              draggable={!isInlineEditing}
+                              onDragStart={() => {
+                                setDraggedLevelId(level.id);
+                                setLevelDropIndex(rowIndex);
+                              }}
+                              onDragOver={(event) => {
+                                if (!draggedLevelId) {
+                                  return;
+                                }
+                                event.preventDefault();
+                                const rect =
+                                  event.currentTarget.getBoundingClientRect();
+                                const before =
+                                  event.clientY < rect.top + rect.height / 2;
+                                setLevelDropIndex(before ? rowIndex : rowIndex + 1);
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                void handleDropLevel();
+                              }}
+                              onDragEnd={() => {
+                                setDraggedLevelId(null);
+                                setLevelDropIndex(null);
+                              }}
+                            >
+                              <td className="px-2 py-2 align-middle text-muted-foreground">
+                                <span className="cursor-grab select-none" aria-hidden>
+                                  ::
                                 </span>
-                              )}
-                            </div>
-                            {lockedLevelKeys.has(level.key) &&
-                              defaultLevelDescriptions[level.key] && (
-                                <div className="text-xs text-muted-foreground">
-                                  {defaultLevelDescriptions[level.key]}
-                                </div>
-                              )}
-                          </td>
-                          <td className="px-4 py-2">{level.order}</td>
-                          <td className="px-4 py-2">
-                            <Checkbox
-                              checked={level.isRequired}
-                              onChange={(event) =>
-                                updateLevel(level.id, {
-                                  isRequired: event.target.checked,
-                                })
-                              }
-                              label={
-                                level.isRequired
-                                  ? t("settings.common.yes")
-                                  : t("settings.common.no")
-                              }
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <Checkbox
-                              checked={level.isActive}
-                              onChange={(event) =>
-                                updateLevel(level.id, {
-                                  isActive: event.target.checked,
-                                })
-                              }
-                              label={
-                                level.isActive
-                                  ? t("settings.common.active")
-                                  : t("settings.common.hidden")
-                              }
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <Checkbox
-                              checked={level.showInTable}
-                              onChange={(event) =>
-                                updateLevel(level.id, {
-                                  showInTable: event.target.checked,
-                                })
-                              }
-                              label={
-                                level.showInTable
-                                  ? t("settings.common.shown")
-                                  : t("settings.common.hidden")
-                              }
-                            />
-                          </td>
-                          <td className="px-4 py-2 text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleEditLevel(level.id)}
-                              >
-                                <PencilIcon className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={async () => {
-                                  if (
-                                    !(await confirmRemove(
-                                      t("settings.structure.removeLevelConfirm", {
-                                        name: level.name,
-                                      }),
-                                    ))
-                                  ) {
-                                    return;
+                              </td>
+                              <td className="px-4 py-2">
+                                {isInlineEditing ? (
+                                  <Input
+                                    value={inlineLevelName}
+                                    onChange={(event) =>
+                                      setInlineLevelName(event.target.value)
+                                    }
+                                    className="h-9 text-sm"
+                                  />
+                                ) : (
+                                  <div className="font-medium">
+                                    {level.name}
+                                    {lockedLevelKeys.has(level.key) && (
+                                      <span className="ml-2 text-xs text-muted-foreground">
+                                        {t("settings.common.default")}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                {lockedLevelKeys.has(level.key) &&
+                                  defaultLevelDescriptions[level.key] && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {defaultLevelDescriptions[level.key]}
+                                    </div>
+                                  )}
+                              </td>
+                              <td className="px-4 py-2">{level.order}</td>
+                              <td className="px-4 py-2">
+                                <Checkbox
+                                  checked={level.isRequired}
+                                  onChange={(event) =>
+                                    updateLevel(level.id, {
+                                      isRequired: event.target.checked,
+                                    })
                                   }
-                                  removeLevel(level.id);
-                                }}
-                                disabled={lockedLevelKeys.has(level.key)}
-                              >
-                                <Trash2Icon className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                                  label={
+                                    level.isRequired
+                                      ? t("settings.common.yes")
+                                      : t("settings.common.no")
+                                  }
+                                />
+                              </td>
+                              <td className="px-4 py-2">
+                                <Checkbox
+                                  checked={level.isActive}
+                                  onChange={(event) =>
+                                    updateLevel(level.id, {
+                                      isActive: event.target.checked,
+                                    })
+                                  }
+                                  label={
+                                    level.isActive
+                                      ? t("settings.common.active")
+                                      : t("settings.common.hidden")
+                                  }
+                                />
+                              </td>
+                              <td className="px-4 py-2">
+                                <Checkbox
+                                  checked={level.showInTable}
+                                  onChange={(event) =>
+                                    updateLevel(level.id, {
+                                      showInTable: event.target.checked,
+                                    })
+                                  }
+                                  label={
+                                    level.showInTable
+                                      ? t("settings.common.shown")
+                                      : t("settings.common.hidden")
+                                  }
+                                />
+                              </td>
+                              <td className="px-4 py-2 text-right">
+                                <div className="flex justify-end gap-2">
+                                  {isInlineEditing ? (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => void handleSaveInlineLevel()}
+                                        disabled={!inlineLevelName.trim()}
+                                      >
+                                        {t("settings.structure.saveLevel")}
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={cancelInlineLevelEdit}
+                                      >
+                                        {t("settings.common.cancel")}
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => startInlineLevelEdit(level.id)}
+                                      >
+                                        <PencilIcon className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={async () => {
+                                          if (
+                                            !(await confirmRemove(
+                                              t("settings.structure.removeLevelConfirm", {
+                                                name: level.name,
+                                              }),
+                                            ))
+                                          ) {
+                                            return;
+                                          }
+                                          removeLevel(level.id);
+                                        }}
+                                        disabled={lockedLevelKeys.has(level.key)}
+                                      >
+                                        <Trash2Icon className="h-4 w-4" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          </Fragment>
+                        );
+                      })}
+                      <tr
+                        className={`border-t border-border transition-all ${
+                          levelDropIndex === sortedLevels.length && draggedLevelId
+                            ? "h-4 bg-primary/10"
+                            : "h-0"
+                        }`}
+                      />
                       {sortedLevels.length === 0 && (
                         <tr>
                           <td
-                            colSpan={6}
+                            colSpan={7}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
                             {t("settings.structure.addFirstLevel")}
@@ -3758,8 +3875,8 @@ export default function SettingsPage() {
                     {t("settings.common.removeSelected")}
                   </Button>
                 </div>
-                <div className="overflow-hidden rounded-lg border border-border">
-                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="min-w-[760px] w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
@@ -4262,8 +4379,8 @@ export default function SettingsPage() {
                     {t("settings.common.removeSelected")}
                   </Button>
                 </div>
-                <div className="overflow-hidden rounded-lg border border-border">
-                  <table className="w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="min-w-[760px] w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
@@ -4411,8 +4528,8 @@ export default function SettingsPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="operations" className="min-w-0 overflow-x-hidden">
-          <div className="min-w-0 space-y-6 overflow-x-hidden">
+        <TabsContent value="operations" className="min-w-0">
+          <div className="min-w-0 space-y-6">
             {isSettingsDataLoading || isTenantSettingsLoading ? (
               <Card>
                 <CardContent className="py-10">
@@ -5061,8 +5178,8 @@ export default function SettingsPage() {
                       {operatorAssignmentsError}
                     </div>
                   )}
-                  <div className="overflow-x-auto rounded-lg border border-border">
-                    <table className="w-full text-sm">
+                <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="min-w-[760px] w-full text-sm">
                       <thead className="bg-muted/40 text-muted-foreground">
                         <tr>
                           <th className="px-4 py-2 text-left">
@@ -6480,7 +6597,7 @@ export default function SettingsPage() {
                   {t("settings.users.invites")}
                 </div>
                 <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-sm">
+                  <table className="min-w-[720px] w-full text-sm">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
@@ -6638,7 +6755,7 @@ export default function SettingsPage() {
                   </div>
                 ) : null}
                 <div className="overflow-x-auto rounded-md border border-border">
-                  <table className="w-full text-sm">
+                  <table className="min-w-max w-full text-sm">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2 text-left font-medium">
