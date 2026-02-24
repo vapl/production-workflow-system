@@ -232,7 +232,7 @@ export default function ProfilePage() {
 
   return (
     <section className="space-y-6 pt-28 md:pt-0">
-      <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+0.6rem)] z-40 md:hidden">
+      <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+0.7rem)] z-40 md:hidden">
         <Button
           type="button"
           variant="ghost"
