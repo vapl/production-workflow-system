@@ -105,7 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     label: "Production",
                     icon: FactoryIcon,
                   }
-              : null,
+                : null,
             canViewSettings
               ? {
                   href: "/settings",
@@ -356,17 +356,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ? "/settings"
           : pathname.startsWith("/qr/")
             ? "/orders"
-          : pathname.startsWith("/production/operator")
-            ? "/production/operator"
-            : pathname.startsWith("/production")
-              ? "/production"
-              : pathname.startsWith("/warehouse")
-                ? "/warehouse"
-              : pathname.startsWith("/company")
-                ? "/company"
-                : pathname.startsWith("/orders")
-                  ? "/orders"
-                  : null;
+            : pathname.startsWith("/production/operator")
+              ? "/production/operator"
+              : pathname.startsWith("/production")
+                ? "/production"
+                : pathname.startsWith("/warehouse")
+                  ? "/warehouse"
+                  : pathname.startsWith("/company")
+                    ? "/company"
+                    : pathname.startsWith("/orders")
+                      ? "/orders"
+                      : null;
     if (!route) {
       return;
     }
@@ -376,11 +376,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         authUser,
         permissions,
       );
-      const fallbackRoute =
-        isWarehouseUser
-          ? "/warehouse/queue"
-          : isProductionWorker(authUser) || canUseOperatorFallback
-            ? "/production/operator"
+      const fallbackRoute = isWarehouseUser
+        ? "/warehouse/queue"
+        : isProductionWorker(authUser) || canUseOperatorFallback
+          ? "/production/operator"
           : "/orders";
       if (pathname !== fallbackRoute) {
         router.replace(fallbackRoute);
@@ -660,7 +659,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             "container mx-auto px-4 py-6",
             hideHeader
               ? null
-              : "pt-[calc(env(safe-area-inset-top)+4.75rem)] md:pt-6",
+              : "pt-[calc(env(safe-area-inset-top)+1.75rem)] md:pt-6",
             hideTabsNav
               ? null
               : "pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-6",
