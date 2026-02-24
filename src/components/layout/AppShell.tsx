@@ -657,9 +657,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main
           className={cn(
             "container mx-auto px-4 py-6",
-            hideHeader
-              ? null
-              : "pt-[calc(env(safe-area-inset-top)+1.75rem)] md:pt-6",
+            hideHeader ? null : "pt-[calc(env(safe-area-inset-top))] md:pt-6",
             hideTabsNav
               ? null
               : "pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-6",
