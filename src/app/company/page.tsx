@@ -316,8 +316,8 @@ export default function CompanyPage() {
   };
 
   return (
-    <section className="space-y-6 pt-20 md:pt-0">
-      <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+1.25rem)] z-40 md:hidden">
+    <section className="space-y-6 pt-28 md:pt-0">
+      <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+0.4rem)] z-40 md:hidden">
         <Button
           type="button"
           variant="ghost"
