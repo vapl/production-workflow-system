@@ -791,10 +791,29 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       user,
       signOut: async () => {
         const sb = supabase;
-        if (!sb) {
-          return;
+        const activeUserId = user.id;
+        setUser((prev) => ({
+          ...fallbackUser,
+          locale: prev.locale,
+          loading: false,
+        }));
+        try {
+          window.localStorage.removeItem("pws_signup");
+          if (activeUserId) {
+            window.localStorage.removeItem(`pws_user_cache_${activeUserId}`);
+          }
+        } catch {
+          // ignore storage cleanup errors
         }
-        await sb.auth.signOut();
+        if (sb) {
+          const { error } = await sb.auth.signOut();
+          if (error) {
+            await sb.auth.signOut({ scope: "local" });
+          }
+        }
+        if (typeof window !== "undefined") {
+          window.location.replace("/auth");
+        }
       },
       setLocale: async (locale) => {
         const nextLocale = normalizeAppLocale(locale);
