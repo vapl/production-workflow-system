@@ -28,8 +28,10 @@ import {
 } from "@/lib/auth/permissions";
 import { useRbac } from "@/contexts/RbacContext";
 import { cn } from "@/components/ui/utils";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
   const user = useCurrentUser();
   const { signOut } = useAuthActions();
   const { permissions, hasPermission, loading: rbacLoading } = useRbac();
@@ -67,12 +69,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ? ([
             {
               href: "/orders",
-              label: "Orders",
+              label: t("appShell.orders"),
               icon: PackageIcon,
             },
             {
               href: "/warehouse/queue",
-              label: "Warehouse",
+              label: t("appShell.queue"),
+              icon: FactoryIcon,
+            },
+            {
+              href: "/warehouse/external",
+              label: t("appShell.external"),
               icon: FactoryIcon,
             },
           ] as Array<{
@@ -124,6 +131,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       canViewProductionOperator,
       canViewSettings,
       isWarehouseUser,
+      t,
     ],
   );
 
@@ -539,10 +547,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 )}
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold">
-                    {user.tenantName ?? "Company workspace"}
+                    {user.tenantName ?? t("header.companyWorkspace")}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Production Workflow System
+                    {t("header.appName")}
                   </p>
                 </div>
               </div>
@@ -609,14 +617,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <div className="space-y-3 border-t border-border p-3">
               <div className="space-y-1">
-                <Link
-                  href="/profile"
-                  onClick={() => setIsMobileDrawerOpen(false)}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
-                >
-                  <UserIcon className="h-4 w-4" />
-                  Profile settings
-                </Link>
+                  <Link
+                    href="/profile"
+                    onClick={() => setIsMobileDrawerOpen(false)}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
+                  >
+                    <UserIcon className="h-4 w-4" />
+                    {t("appShell.profileSettings")}
+                  </Link>
                 {canViewCompany ? (
                   <Link
                     href="/company"
@@ -624,7 +632,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
                   >
                     <Building2Icon className="h-4 w-4" />
-                    Company settings
+                    {t("header.companySettings")}
                   </Link>
                 ) : null}
               </div>
@@ -639,7 +647,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   }}
                 >
                   <LogOutIcon className="h-4 w-4" />
-                  Sign out
+                  {t("header.signOut")}
                 </Button>
               </div>
             </div>

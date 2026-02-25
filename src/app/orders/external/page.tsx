@@ -358,15 +358,6 @@ export default function ExternalJobsPage() {
       job.partnerResponseDueDate || job.dueDate,
     [],
   );
-  const getDisplayExternalOrder = useCallback((job: (typeof jobs)[number]) => {
-    if (job.requestMode === "partner_portal") {
-      return (
-        job.partnerResponseOrderNumber ||
-        t("orders.externalPage.pendingFrom", { partner: job.partnerName })
-      );
-    }
-    return job.externalOrderNumber || "--";
-  }, [t]);
   const getDisplayDueDate = useCallback(
     (job: (typeof jobs)[number]) => {
       if (job.requestMode === "partner_portal" && !job.partnerResponseDueDate) {
@@ -385,9 +376,8 @@ export default function ExternalJobsPage() {
         partner: job.partnerName,
       });
       if (field.semantic === "external_order") {
-        const fallback = isPortal
-          ? job.partnerResponseOrderNumber
-          : job.externalOrderNumber;
+        const fallback =
+          job.externalOrderNumber || job.partnerResponseOrderNumber;
         const value = isEmptyValue(rawValue) ? fallback : rawValue;
         if (isEmptyValue(value)) {
           return isPortal ? pendingLabel : "--";
@@ -543,7 +533,34 @@ export default function ExternalJobsPage() {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const filteredJobs = useMemo(() => jobs, [jobs]);
+  const filteredJobs = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) {
+      return jobs;
+    }
+    const externalOrderField = externalListFields.find(
+      (field) => field.semantic === "external_order",
+    );
+    return jobs.filter((job) => {
+      const fieldValue = externalOrderField
+        ? externalFieldValuesByJobId[job.id]?.[externalOrderField.id]
+        : null;
+      const extOrderValue = isEmptyValue(fieldValue)
+        ? job.externalOrderNumber || job.partnerResponseOrderNumber || ""
+        : String(fieldValue);
+      const haystack = [
+        extOrderValue,
+        job.externalOrderNumber ?? "",
+        job.partnerResponseOrderNumber ?? "",
+        job.partnerName ?? "",
+        job.orderNumber ?? "",
+        job.customerName ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [externalFieldValuesByJobId, externalListFields, jobs, search]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -767,12 +784,6 @@ export default function ExternalJobsPage() {
       }
       if (partnerFilter) {
         query.eq("partner_id", partnerFilter);
-      }
-      if (search.trim().length > 0) {
-        const q = `%${search.trim()}%`;
-        query.or(
-          `external_order_number.ilike.${q},partner_response_order_number.ilike.${q},partner_name.ilike.${q}`,
-        );
       }
       if (overdueOnly) {
         query.or(
@@ -1250,7 +1261,7 @@ export default function ExternalJobsPage() {
                     }
                   >
                     {field.semantic === "external_order"
-                      ? getDisplayExternalOrder(job)
+                      ? getFieldDisplayValue(job, field)
                       : field.semantic === "due_date"
                         ? getDisplayDueDate(job)
                         : getFieldDisplayValue(job, field)}
@@ -1371,12 +1382,6 @@ export default function ExternalJobsPage() {
                     }
                     if (partnerFilter) {
                       query.eq("partner_id", partnerFilter);
-                    }
-                    if (search.trim().length > 0) {
-                      const q = `%${search.trim()}%`;
-                      query.or(
-                        `external_order_number.ilike.${q},partner_response_order_number.ilike.${q},partner_name.ilike.${q}`,
-                      );
                     }
                     if (overdueOnly) {
                       query.or(

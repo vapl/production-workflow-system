@@ -39,6 +39,12 @@
     signOut: "\u0412\u044b\u0439\u0442\u0438",
     signIn: "\u0412\u043e\u0439\u0442\u0438",
   },
+  appShell: {
+    orders: "Заказы",
+    queue: "Очередь",
+    external: "Внешние",
+    profileSettings: "Настройки профиля",
+  },
   profile: {
     back: "\u041d\u0430\u0437\u0430\u0434",
     title: "\u041c\u043e\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c",

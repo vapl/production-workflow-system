@@ -39,6 +39,12 @@
     signOut: "Izrakstīties",
     signIn: "Pierakstīties",
   },
+  appShell: {
+    orders: "Pasūtījumi",
+    queue: "Rinda",
+    external: "Ārējie",
+    profileSettings: "Profila iestatījumi",
+  },
   profile: {
     back: "Atpakaļ",
     title: "Mans profils",

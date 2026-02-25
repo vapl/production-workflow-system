@@ -321,6 +321,7 @@ export default function OperatorProductionPage() {
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const isWarehouseQueueView = pathname.startsWith("/warehouse");
   const cacheKey =
     currentUser.id && selectedDate && !orderFilter
       ? `pws_operator_cache_${currentUser.id}_${selectedDate}`
@@ -1172,6 +1173,23 @@ export default function OperatorProductionPage() {
     quickActionItem
       ? quickActionItem.items.filter((item) => item.id === quickActionItemId)
       : (quickActionItem?.items ?? []);
+  const quickActionHasBlockingDependenciesForBatch = useMemo(() => {
+    if (!quickActionItem) {
+      return false;
+    }
+    return quickActionItem.items.some((prodItem) => {
+      const dependencyStations =
+        dependenciesByStation.get(prodItem.station_id ?? "") ?? [];
+      if (dependencyStations.length === 0) {
+        return false;
+      }
+      const groupKey = getItemGroupKey(prodItem);
+      return dependencyStations.some((depId) => {
+        const depItem = itemsByGroupAndStation.get(groupKey)?.get(depId) ?? null;
+        return depItem && depItem.status !== "done";
+      });
+    });
+  }, [quickActionItem, dependenciesByStation, itemsByGroupAndStation]);
 
   const activitySummary = useMemo(() => {
     const todayEvents = activityEvents.filter(
@@ -1506,6 +1524,12 @@ export default function OperatorProductionPage() {
     if (pendingAction) {
       return;
     }
+    if (status === "paused") {
+      const targetItem = productionItems.find((item) => item.id === itemId);
+      if (!targetItem || targetItem.status !== "in_progress") {
+        return;
+      }
+    }
     setPendingAction({ itemId, action: status });
     try {
       await updateItemStatus(itemId, runId, status, extra);
@@ -1535,6 +1559,30 @@ export default function OperatorProductionPage() {
     if (runItems.length === 0) {
       return;
     }
+    const runTrackingMode =
+      stations.find((station) => station.id === run.station_id)?.trackingMode ??
+      "construction_level";
+    if (status === "done" && runTrackingMode === "receipt_only") {
+      if (isFuturePlannedDate(run.planned_date ?? null)) {
+        return;
+      }
+      const hasBlockingDependencies = runItems.some((prodItem) => {
+        const dependencyStations =
+          dependenciesByStation.get(prodItem.station_id ?? "") ?? [];
+        if (dependencyStations.length === 0) {
+          return false;
+        }
+        const groupKey = getItemGroupKey(prodItem);
+        return dependencyStations.some((depId) => {
+          const depItem =
+            itemsByGroupAndStation.get(groupKey)?.get(depId) ?? null;
+          return depItem && depItem.status !== "done";
+        });
+      });
+      if (hasBlockingDependencies) {
+        return;
+      }
+    }
     const targetItems = runItems.filter((item) => {
       if (status === "in_progress") {
         return item.status !== "done";
@@ -1546,7 +1594,7 @@ export default function OperatorProductionPage() {
         return item.status !== "done";
       }
       if (status === "paused") {
-        return item.status !== "done";
+        return item.status === "in_progress";
       }
       return true;
     });
@@ -2041,6 +2089,7 @@ export default function OperatorProductionPage() {
         showCompact={showCompactMobileTitle}
         className="pt-6 pb-6"
         rightAction={
+          isWarehouseQueueView ? null :
           <button
             type="button"
             onClick={() => setIsProfilePanelOpen(true)}
@@ -2067,6 +2116,7 @@ export default function OperatorProductionPage() {
         title={t("production.operator.header.title")}
         subtitle={headerSubtitle}
         actions={
+          isWarehouseQueueView ? null :
           <button
             type="button"
             onClick={() => setIsProfilePanelOpen(true)}
@@ -2091,6 +2141,39 @@ export default function OperatorProductionPage() {
         }
         className="top-0!"
       />
+
+      {isWarehouseQueueView ? (
+        <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card p-3 text-sm md:grid-cols-4 md:p-4">
+          <div className="rounded-lg border border-border px-3 py-2">
+            <div className="text-[11px] text-muted-foreground">
+              {t("production.operator.profile.todayDone")}
+            </div>
+            <div className="text-lg font-semibold">{activitySummary.done}</div>
+          </div>
+          <div className="rounded-lg border border-border px-3 py-2">
+            <div className="text-[11px] text-muted-foreground">
+              {t("production.operator.profile.todayTime")}
+            </div>
+            <div className="text-lg font-semibold">
+              {formatDuration(activitySummary.minutes)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border px-3 py-2">
+            <div className="text-[11px] text-muted-foreground">
+              {t("production.operator.profile.weekDone")}
+            </div>
+            <div className="text-lg font-semibold">{weeklySummary.done}</div>
+          </div>
+          <div className="rounded-lg border border-border px-3 py-2">
+            <div className="text-[11px] text-muted-foreground">
+              {t("production.operator.profile.weekTime")}
+            </div>
+            <div className="text-lg font-semibold">
+              {formatDuration(weeklySummary.minutes)}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="hidden rounded-xl border border-border bg-card p-3 md:block md:p-4">
         <div>
@@ -2758,7 +2841,12 @@ export default function OperatorProductionPage() {
                                                   <Button
                                                     variant="ghost"
                                                     size="sm"
-                                                    disabled={isDone || isPaused}
+                                                    disabled={
+                                                      isDone ||
+                                                      isPaused ||
+                                                      prodItem.status !==
+                                                        "in_progress"
+                                                    }
                                                     onClick={() =>
                                                       handleOpenPaused(
                                                         item.id,
@@ -2837,7 +2925,10 @@ export default function OperatorProductionPage() {
                                             isBatchDone ||
                                             isBatchBlocked ||
                                             isBatchPaused)) ||
-                                        (isReceiptOnlyTracking && isBatchDone) ||
+                                        (isReceiptOnlyTracking &&
+                                          (isBatchDone ||
+                                            isFuturePlannedDate(item.plannedDate) ||
+                                            hasBlockingDependenciesForBatch)) ||
                                         isBatchCompleting
                                       }
                                       onClick={() =>
@@ -2852,7 +2943,11 @@ export default function OperatorProductionPage() {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        disabled={isBatchDone || isBatchPaused}
+                                        disabled={
+                                          isBatchDone ||
+                                          isBatchPaused ||
+                                          item.status !== "in_progress"
+                                        }
                                         onClick={() => handleOpenPaused(item.id)}
                                       >
                                         {t("production.operator.actions.pause")}
@@ -3200,8 +3295,13 @@ export default function OperatorProductionPage() {
                       variant="outline"
                       size="sm"
                       disabled={
-                        quickActionItem.status === "done" ||
-                        quickActionItem.status === "paused" ||
+                        (quickActionItem.trackingMode !== "receipt_only" &&
+                          (quickActionItem.status === "done" ||
+                            quickActionItem.status === "paused")) ||
+                        (quickActionItem.trackingMode === "receipt_only" &&
+                          (quickActionItem.status === "done" ||
+                            isFuturePlannedDate(quickActionItem.plannedDate) ||
+                            quickActionHasBlockingDependenciesForBatch)) ||
                         isRunActionLoading(quickActionItem.id, "done")
                       }
                       onClick={() =>
@@ -3218,7 +3318,8 @@ export default function OperatorProductionPage() {
                         size="sm"
                         disabled={
                           quickActionItem.status === "done" ||
-                          quickActionItem.status === "paused"
+                          quickActionItem.status === "paused" ||
+                          quickActionItem.status !== "in_progress"
                         }
                         onClick={() => handleOpenPaused(quickActionItem.id)}
                       >
@@ -3328,7 +3429,11 @@ export default function OperatorProductionPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            disabled={isDone || isPaused}
+                            disabled={
+                              isDone ||
+                              isPaused ||
+                              prodItem.status !== "in_progress"
+                            }
                             onClick={() =>
                               handleOpenPaused(quickActionItem.id, prodItem.id)
                             }
@@ -3371,6 +3476,7 @@ export default function OperatorProductionPage() {
         </div>
       </BottomSheet>
 
+      {!isWarehouseQueueView ? (
       <SideDrawer
         open={isProfilePanelOpen}
         onClose={() => setIsProfilePanelOpen(false)}
@@ -3473,7 +3579,9 @@ export default function OperatorProductionPage() {
           </div>
         </div>
       </SideDrawer>
+      ) : null}
 
+      {!isWarehouseQueueView ? (
       <div
         className={`fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex ${isProfilePanelOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
         aria-hidden={!isProfilePanelOpen}
@@ -3582,8 +3690,15 @@ export default function OperatorProductionPage() {
           </div>
         </div>
       </div>
+      ) : null}
 
-      <div className="fixed inset-x-4 bottom-[calc(2.75rem+env(safe-area-inset-bottom))] z-30 md:hidden">
+      <div
+        className={`fixed inset-x-4 z-30 md:hidden ${
+          isWarehouseQueueView
+            ? "bottom-[calc(6.75rem+env(safe-area-inset-bottom))]"
+            : "bottom-[calc(2.75rem+env(safe-area-inset-bottom))]"
+        }`}
+      >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Button

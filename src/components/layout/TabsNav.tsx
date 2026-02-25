@@ -149,6 +149,21 @@ export function TabsNav() {
       icon: FactoryIcon,
     },
   ];
+  const warehouseMobileTabs = [
+    { value: "orders", href: "/orders", label: "Orders", icon: PackageIcon },
+    {
+      value: "queue",
+      href: "/warehouse/queue",
+      label: "Queue",
+      icon: FactoryIcon,
+    },
+    {
+      value: "external",
+      href: "/warehouse/external",
+      label: "External",
+      icon: FactoryIcon,
+    },
+  ];
 
   const visibleMainTabs = isWarehouseUser
     ? warehouseTabs
@@ -178,7 +193,7 @@ export function TabsNav() {
     ? [...visibleMainTabs, settingsTab]
     : visibleMainTabs;
   const mobileTabs = isWarehouseUser
-    ? visibleMainTabs
+    ? warehouseMobileTabs
     : showSettings
       ? canViewNotifications
         ? [...visibleMainTabs, notificationsTab, settingsTab]

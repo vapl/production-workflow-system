@@ -39,6 +39,12 @@
     signOut: "Sign out",
     signIn: "Sign in",
   },
+  appShell: {
+    orders: "Orders",
+    queue: "Queue",
+    external: "External",
+    profileSettings: "Profile settings",
+  },
   profile: {
     back: "Back",
     title: "My Profile",
