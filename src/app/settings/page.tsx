@@ -48,6 +48,7 @@ import { useSettingsData } from "@/hooks/useSettingsData";
 import {
   formatUserRoleLabel,
   normalizeUserRole,
+  useAuthActions,
   useCurrentUser,
   type UserRole,
   userRoleOptions,
@@ -338,6 +339,7 @@ export default function SettingsPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
+  const { signOut } = useAuthActions();
   const { t } = useI18n();
   const {
     permissions: rolePermissions,
@@ -1587,6 +1589,10 @@ export default function SettingsPage() {
       prev.map((user) => (user.id === userId ? { ...user, role } : user)),
     );
     setUpdatingUserId(null);
+    if (userId === currentUser.id) {
+      await signOut();
+      return;
+    }
   }
 
   const hasFreshPrivilegedVerification = () =>

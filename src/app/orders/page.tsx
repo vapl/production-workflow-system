@@ -115,7 +115,7 @@ export default function OrdersPage() {
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const [partnerGroupFilter, setPartnerGroupFilter] = useState("");
   const [assignmentFilter, setAssignmentFilter] = useState<"queue" | "my">(
-    "queue",
+    isEngineeringUser ? "my" : "queue",
   );
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [blockedOnly, setBlockedOnly] = useState(false);
@@ -386,7 +386,7 @@ export default function OrdersPage() {
   }, [defaultStatusFilter, roleStatusOptions, statusFilter]);
   useEffect(() => {
     if (isEngineeringUser) {
-      setAssignmentFilter("queue");
+      setAssignmentFilter("my");
     }
   }, [isEngineeringUser]);
   useEffect(() => {
@@ -420,7 +420,7 @@ export default function OrdersPage() {
         parsed.assignmentFilter === "queue" ||
         parsed.assignmentFilter === "my"
       ) {
-        setAssignmentFilter(parsed.assignmentFilter);
+        setAssignmentFilter(isEngineeringUser ? "my" : parsed.assignmentFilter);
       }
       if (typeof parsed.overdueOnly === "boolean") {
         setOverdueOnly(parsed.overdueOnly);
@@ -434,7 +434,7 @@ export default function OrdersPage() {
     } catch {
       // Ignore invalid filter snapshots.
     }
-  }, []);
+  }, [isEngineeringUser]);
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -581,26 +581,29 @@ export default function OrdersPage() {
     return filtered;
   };
 
-  async function getOrderIdsForPartnerGroup(groupId: string) {
-    if (!supabase || !user.tenantId) {
-      return [];
-    }
-    const partnerIds = partners
-      .filter((partner) => partner.groupId === groupId)
-      .map((partner) => partner.id);
-    if (partnerIds.length === 0) {
-      return [];
-    }
-    const { data, error } = await supabase
-      .from("external_jobs")
-      .select("order_id")
-      .in("partner_id", partnerIds)
-      .eq("tenant_id", user.tenantId);
-    if (error || !data) {
-      return [];
-    }
-    return Array.from(new Set(data.map((row) => row.order_id)));
-  }
+  const getOrderIdsForPartnerGroup = useCallback(
+    async (groupId: string) => {
+      if (!supabase || !user.tenantId) {
+        return [];
+      }
+      const partnerIds = partners
+        .filter((partner) => partner.groupId === groupId)
+        .map((partner) => partner.id);
+      if (partnerIds.length === 0) {
+        return [];
+      }
+      const { data, error } = await supabase
+        .from("external_jobs")
+        .select("order_id")
+        .in("partner_id", partnerIds)
+        .eq("tenant_id", user.tenantId);
+      if (error || !data) {
+        return [];
+      }
+      return Array.from(new Set(data.map((row) => row.order_id)));
+    },
+    [partners, user.tenantId],
+  );
 
   useEffect(() => {
     if (!supabase || user.loading || !user.isAuthenticated) {
@@ -805,11 +808,46 @@ export default function OrdersPage() {
       let query = sb
         .from("orders")
         .select(
-          "id, order_number, customer_name, due_date, priority, status, assigned_engineer_id",
+          "id, order_number, customer_name, product_name, due_date, priority, status, assigned_engineer_id",
         )
         .order("created_at", { ascending: false });
       if (user.tenantId) {
         query = query.eq("tenant_id", user.tenantId);
+      }
+      if (isEngineeringUser) {
+        if (assignmentFilter === "queue") {
+          query.or(
+            "assigned_engineer_id.is.null,status.in.(ready_for_production,in_production),status.eq.done",
+          );
+        } else {
+          query.or(
+            `assigned_engineer_id.eq.${user.id},status.in.(ready_for_production,in_production),status.eq.done`,
+          );
+        }
+        if (blockedOnly) {
+          query.eq("status", "engineering_blocked");
+        }
+      }
+      if (unassignedOnly) {
+        query.is("assigned_engineer_id", null);
+      }
+      if (overdueOnly) {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        query.lt("due_date", todayIso);
+      }
+      if (searchQuery.trim().length > 0) {
+        const q = `%${searchQuery.trim()}%`;
+        query.or(
+          `order_number.ilike.${q},customer_name.ilike.${q},product_name.ilike.${q}`,
+        );
+      }
+      if (partnerGroupFilter) {
+        const orderIds = await getOrderIdsForPartnerGroup(partnerGroupFilter);
+        if (orderIds.length === 0) {
+          setStatusCounts({});
+          return;
+        }
+        query.in("id", orderIds);
       }
       const { data, error } = await query;
       if (!isMounted || error || !data) {
@@ -819,6 +857,7 @@ export default function OrdersPage() {
         id: row.id,
         orderNumber: row.order_number,
         customerName: row.customer_name,
+        productName: row.product_name ?? undefined,
         dueDate: row.due_date,
         priority: row.priority,
         status: row.status,
@@ -838,7 +877,21 @@ export default function OrdersPage() {
           (order) => getEffectiveStatus(order) === option.value,
         ).length;
       });
-      setStatusCounts(counts);
+      setStatusCounts((prev) => {
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(counts);
+        if (prevKeys.length === nextKeys.length) {
+          const same = nextKeys.every(
+            (key) =>
+              prev[key as OrderStatus | "all"] ===
+              counts[key as OrderStatus | "all"],
+          );
+          if (same) {
+            return prev;
+          }
+        }
+        return counts;
+      });
     };
 
     void fetchCounts();
@@ -847,10 +900,19 @@ export default function OrdersPage() {
       isMounted = false;
     };
   }, [
+    assignmentFilter,
+    blockedOnly,
+    overdueOnly,
+    partnerGroupFilter,
+    searchQuery,
     roleStatusOptions,
+    unassignedOnly,
+    user.id,
     user.isAuthenticated,
     user.loading,
     user.tenantId,
+    isEngineeringUser,
+    getOrderIdsForPartnerGroup,
     getEffectiveStatus,
   ]);
 

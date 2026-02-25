@@ -86,6 +86,7 @@ const defaultAttachmentCategories = [
   { id: "photos", label: "Site photos" },
   { id: "other", label: "Other" },
 ];
+const EMPTY_ATTACHMENTS: OrderAttachment[] = [];
 
 function formatDuration(totalMinutes?: number | null) {
   if (!totalMinutes || totalMinutes <= 0) return "0m";
@@ -945,7 +946,7 @@ export default function OrderDetailPage() {
     isAttachmentCategoryManual,
   ]);
 
-  const attachments = orderState?.attachments ?? [];
+  const attachments = orderState?.attachments ?? EMPTY_ATTACHMENTS;
   const defaultAiAttachmentCategoryIds = useMemo(() => {
     const ids = new Set<string>();
     const engineeringDefault = rules.attachmentCategoryDefaults?.Engineering;
@@ -1068,9 +1069,16 @@ export default function OrderDetailPage() {
 
   useEffect(() => {
     const availableIds = new Set(attachments.map((attachment) => attachment.id));
-    setSelectedAttachmentIds((prev) =>
-      prev.filter((attachmentId) => availableIds.has(attachmentId)),
-    );
+    setSelectedAttachmentIds((prev) => {
+      const next = prev.filter((attachmentId) => availableIds.has(attachmentId));
+      if (next.length === prev.length) {
+        const same = next.every((id, index) => id === prev[index]);
+        if (same) {
+          return prev;
+        }
+      }
+      return next;
+    });
   }, [attachments]);
 
   useEffect(() => {
@@ -3575,11 +3583,27 @@ export default function OrderDetailPage() {
       return;
     }
     const now = new Date().toISOString();
+    const shouldAssignCurrentEngineer =
+      nextStatus === "in_engineering" &&
+      role === "Engineering" &&
+      !orderState.assignedEngineerId;
+    if (shouldAssignCurrentEngineer) {
+      setSelectedEngineerId(userId);
+    }
     setOrderState((prev) =>
       prev
         ? {
             ...prev,
             status: nextStatus,
+            assignedEngineerId: shouldAssignCurrentEngineer
+              ? userId
+              : prev.assignedEngineerId,
+            assignedEngineerName: shouldAssignCurrentEngineer
+              ? name
+              : prev.assignedEngineerName,
+            assignedEngineerAt: shouldAssignCurrentEngineer
+              ? now
+              : prev.assignedEngineerAt,
             statusChangedBy: name,
             statusChangedByRole: role,
             statusChangedAt: now,
@@ -3598,6 +3622,13 @@ export default function OrderDetailPage() {
     );
     await updateOrder(orderState.id, {
       status: nextStatus,
+      ...(shouldAssignCurrentEngineer
+        ? {
+            assignedEngineerId: userId,
+            assignedEngineerName: name,
+            assignedEngineerAt: now,
+          }
+        : {}),
       statusChangedBy: name,
       statusChangedByRole: role,
       statusChangedAt: now,

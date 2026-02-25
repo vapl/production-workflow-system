@@ -323,7 +323,7 @@ function writeCachedProfile(
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<CurrentUser>({
     ...fallbackUser,
-    loading: true,
+    loading: Boolean(supabase),
   });
   const profileTimeoutMs = 2500;
 
@@ -556,7 +556,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!supabase) {
-      setUser(fallbackUser);
       return;
     }
     const sb = supabase;
@@ -792,11 +791,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       signOut: async () => {
         const sb = supabase;
         const activeUserId = user.id;
-        setUser((prev) => ({
-          ...fallbackUser,
-          locale: prev.locale,
-          loading: false,
-        }));
         try {
           window.localStorage.removeItem("pws_signup");
           if (activeUserId) {

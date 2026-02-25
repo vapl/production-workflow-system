@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useMemo } from "react";
 import { useCurrentUser } from "@/contexts/UserContext";
 import {
   defaultAppLocale,
@@ -39,20 +40,23 @@ function interpolate(template: string, vars?: Vars): string {
 export function useI18n() {
   const user = useCurrentUser();
   const locale: AppLocale = normalizeAppLocale(user.locale ?? defaultAppLocale);
-  const current = messages[locale];
-  const fallback = messages[defaultAppLocale];
+  const current = useMemo(() => messages[locale], [locale]);
+  const fallback = useMemo(() => messages[defaultAppLocale], []);
 
-  const t = (key: string, vars?: Vars) => {
-    const direct = getByPath(current, key);
-    if (direct !== null) {
-      return interpolate(direct, vars);
-    }
-    const fromFallback = getByPath(fallback, key);
-    if (fromFallback !== null) {
-      return interpolate(fromFallback, vars);
-    }
-    return key;
-  };
+  const t = useCallback(
+    (key: string, vars?: Vars) => {
+      const direct = getByPath(current, key);
+      if (direct !== null) {
+        return interpolate(direct, vars);
+      }
+      const fromFallback = getByPath(fallback, key);
+      if (fromFallback !== null) {
+        return interpolate(fromFallback, vars);
+      }
+      return key;
+    },
+    [current, fallback],
+  );
 
-  return { t, locale };
+  return useMemo(() => ({ t, locale }), [t, locale]);
 }
