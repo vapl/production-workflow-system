@@ -5,7 +5,10 @@ import {
   getActiveOrdersCount,
   getActiveBatchesCount,
   getCompletedBatchesCount,
+  getCycleTimeByStationMedian,
   getLateBatchesCount,
+  getLeadTimeMedianHours,
+  getOnTimeRate,
 } from "@/lib/domain/dashboardKpis";
 import { getRecentActivities } from "@/lib/domain/getRecentActivities";
 
@@ -31,6 +34,9 @@ export function useDashboard(): UseDashboardResult {
   const { rules } = useWorkflowRules();
 
   const bottlenecks = getBottleneckBatches(batches);
+  const onTime = getOnTimeRate(orders);
+  const leadTimeMedianHours = getLeadTimeMedianHours(orders);
+  const slowestStation = getCycleTimeByStationMedian(batches);
 
   const today = new Date().toISOString().slice(0, 10);
   const dueSoonDate = new Date();
@@ -60,6 +66,12 @@ export function useDashboard(): UseDashboardResult {
     totalOrders: orders.length,
     dueSoonOrders,
     overdueOrders,
+    onTimeRate: onTime.rate,
+    completedOrdersForOnTime: onTime.completedCount,
+    leadTimeMedianHours,
+    slowestStationName: slowestStation.stationName,
+    slowestStationMedianHours: slowestStation.medianHours,
+    slowestStationSampleSize: slowestStation.sampleSize,
   };
 
   const activities = getRecentActivities(orders, batches, 5);

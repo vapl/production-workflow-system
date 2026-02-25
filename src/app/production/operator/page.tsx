@@ -70,7 +70,7 @@ type ProductionItemRow = {
   item_name: string;
   qty: number;
   material: string | null;
-  status: "queued" | "pending" | "in_progress" | "blocked" | "done";
+  status: "queued" | "pending" | "in_progress" | "paused" | "blocked" | "done";
   station_id: string | null;
   meta?: Record<string, unknown> | null;
   started_at?: string | null;
@@ -101,7 +101,7 @@ type BatchRunRow = {
   station_id: string | null;
   route_key: string;
   step_index: number;
-  status: "queued" | "pending" | "in_progress" | "blocked" | "done";
+  status: "queued" | "pending" | "in_progress" | "paused" | "blocked" | "done";
   blocked_reason?: string | null;
   blocked_reason_id?: string | null;
   planned_date?: string | null;
@@ -154,11 +154,11 @@ type QueueItem = {
 
 type PendingAction = {
   itemId: string;
-  action: "in_progress" | "done" | "blocked";
+  action: "in_progress" | "done" | "paused" | "blocked";
 };
 type PendingRunAction = {
   runId: string;
-  action: "in_progress" | "done" | "blocked";
+  action: "in_progress" | "done" | "paused" | "blocked";
 };
 
 type QueueStatusFilter = "all" | BatchRunRow["status"];
@@ -183,6 +183,7 @@ function priorityBadge(priority: Priority) {
 
 function statusBadge(status: BatchRunRow["status"]) {
   if (status === "blocked") return "status-blocked";
+  if (status === "paused") return "status-paused";
   if (status === "pending") return "status-pending";
   if (status === "in_progress") return "status-in_engineering";
   if (status === "done") return "status-ready_for_production";
@@ -249,10 +250,7 @@ function getStoragePathFromUrl(url: string, bucket: string) {
   return url.slice(index + marker.length);
 }
 
-function renderAttachmentIcon(
-  attachment: OrderAttachmentRow,
-  signedUrl?: string,
-) {
+function renderAttachmentIcon(attachment: OrderAttachmentRow) {
   const name = attachment.name.toLowerCase();
   const isPdf = name.endsWith(".pdf");
   const isImage =
@@ -262,16 +260,6 @@ function renderAttachmentIcon(
     name.endsWith(".gif") ||
     name.endsWith(".webp");
 
-  if (isImage && signedUrl) {
-    return (
-      <img
-        src={signedUrl}
-        alt={attachment.name}
-        className="h-9 w-9 rounded-md border border-border object-cover"
-      />
-    );
-  }
-
   if (isPdf) {
     return (
       <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted">
@@ -280,11 +268,7 @@ function renderAttachmentIcon(
     );
   }
 
-  if (
-    name.endsWith(".png") ||
-    name.endsWith(".jpg") ||
-    name.endsWith(".jpeg")
-  ) {
+  if (isImage) {
     return (
       <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted">
         <ImageIcon className="h-4 w-4 text-muted-foreground" />
@@ -367,6 +351,11 @@ export default function OperatorProductionPage() {
   const [blockedItemId, setBlockedItemId] = useState<string | null>(null);
   const [blockedReasonId, setBlockedReasonId] = useState<string>("");
   const [blockedReasonText, setBlockedReasonText] = useState<string>("");
+  const [pausedRunId, setPausedRunId] = useState<string | null>(null);
+  const [pausedItemId, setPausedItemId] = useState<string | null>(null);
+  const [pausedReasonId, setPausedReasonId] = useState<string>("");
+  const [pausedReasonText, setPausedReasonText] = useState<string>("");
+  const [pausedReasonError, setPausedReasonError] = useState<string>("");
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(
     null,
   );
@@ -392,6 +381,7 @@ export default function OperatorProductionPage() {
       value: "in_progress",
       label: t("production.operator.status.in_progress"),
     },
+    { value: "paused", label: t("production.operator.status.paused") },
     { value: "blocked", label: t("production.operator.status.blocked") },
     { value: "done", label: t("production.operator.status.done") },
   ];
@@ -1030,17 +1020,20 @@ export default function OperatorProductionPage() {
     if (items.every((item) => item.status === "done")) {
       return "done" as BatchRunRow["status"];
     }
+    if (items.some((item) => item.status === "blocked")) {
+      return "blocked" as BatchRunRow["status"];
+    }
     if (items.some((item) => item.status === "in_progress")) {
       return "in_progress" as BatchRunRow["status"];
+    }
+    if (items.some((item) => item.status === "paused")) {
+      return "paused" as BatchRunRow["status"];
     }
     if (items.some((item) => item.status === "queued")) {
       return "queued" as BatchRunRow["status"];
     }
     if (items.some((item) => item.status === "pending")) {
       return "pending" as BatchRunRow["status"];
-    }
-    if (items.some((item) => item.status === "blocked")) {
-      return "blocked" as BatchRunRow["status"];
     }
     return "queued" as BatchRunRow["status"];
   };
@@ -1221,7 +1214,7 @@ export default function OperatorProductionPage() {
     itemId: string,
     runId: string,
     status: BatchRunRow["status"],
-    extra?: { blockedReason?: string | null; blockedReasonId?: string | null },
+    extra?: { reason?: string | null; reasonId?: string | null },
   ) => {
     const sb = supabase;
     if (!sb) {
@@ -1234,8 +1227,10 @@ export default function OperatorProductionPage() {
     }
     const now = new Date().toISOString();
     const wasBlocked = targetItem.status === "blocked";
+    const wasPaused = targetItem.status === "paused";
     const isBlocked = status === "blocked";
-    const isResumed = wasBlocked && status === "in_progress";
+    const isPaused = status === "paused";
+    const isResumed = (wasBlocked || wasPaused) && status === "in_progress";
     const nextStartedAt =
       status === "in_progress"
         ? (targetItem.started_at ?? now)
@@ -1257,10 +1252,14 @@ export default function OperatorProductionPage() {
     }
     const nextMeta = {
       ...(targetItem.meta ?? {}),
-      blocked_reason: isBlocked ? (extra?.blockedReason ?? null) : null,
-      blocked_reason_id: isBlocked ? (extra?.blockedReasonId ?? null) : null,
+      blocked_reason: isBlocked ? (extra?.reason ?? null) : null,
+      blocked_reason_id: isBlocked ? (extra?.reasonId ?? null) : null,
       blocked_at: isBlocked ? now : null,
       blocked_by: isBlocked ? currentUser.id : null,
+      paused_reason: isPaused ? (extra?.reason ?? null) : null,
+      paused_reason_id: isPaused ? (extra?.reasonId ?? null) : null,
+      paused_at: isPaused ? now : null,
+      paused_by: isPaused ? currentUser.id : null,
     };
     const { error } = await sb
       .from("production_items")
@@ -1285,8 +1284,8 @@ export default function OperatorProductionPage() {
         production_item_id: targetItem.id,
         from_status: targetItem.status,
         to_status: status,
-        reason: extra?.blockedReason ?? null,
-        reason_id: extra?.blockedReasonId ?? null,
+        reason: extra?.reason ?? null,
+        reason_id: extra?.reasonId ?? null,
         actor_user_id: currentUser.id,
       };
       const { data: eventInsertData, error: eventInsertError } = await sb
@@ -1311,7 +1310,7 @@ export default function OperatorProductionPage() {
         : "Station";
       const orderNumber = run.orders?.order_number ?? "Order";
       const reason =
-        extra?.blockedReason ??
+        extra?.reason ??
         (nextMeta.blocked_reason as string) ??
         "Blocked";
       const roles =
@@ -1502,7 +1501,7 @@ export default function OperatorProductionPage() {
     itemId: string,
     runId: string,
     status: PendingAction["action"],
-    extra?: { blockedReason?: string | null; blockedReasonId?: string | null },
+    extra?: { reason?: string | null; reasonId?: string | null },
   ) => {
     if (pendingAction) {
       return;
@@ -1518,7 +1517,7 @@ export default function OperatorProductionPage() {
   const handleRunStatusUpdate = async (
     runId: string,
     status: PendingRunAction["action"],
-    extra?: { blockedReason?: string | null; blockedReasonId?: string | null },
+    extra?: { reason?: string | null; reasonId?: string | null },
   ) => {
     if (pendingRunAction || pendingAction) {
       return;
@@ -1544,6 +1543,9 @@ export default function OperatorProductionPage() {
         return item.status !== "done";
       }
       if (status === "blocked") {
+        return item.status !== "done";
+      }
+      if (status === "paused") {
         return item.status !== "done";
       }
       return true;
@@ -1584,6 +1586,7 @@ export default function OperatorProductionPage() {
       }
       if (
         item.status === "in_progress" ||
+        item.status === "paused" ||
         item.status === "done" ||
         item.status === "blocked"
       ) {
@@ -1640,6 +1643,14 @@ export default function OperatorProductionPage() {
     setBlockedReasonText("");
   };
 
+  const handleOpenPaused = (runId: string, itemId?: string | null) => {
+    setPausedRunId(runId);
+    setPausedItemId(itemId ?? null);
+    setPausedReasonId("");
+    setPausedReasonText("");
+    setPausedReasonError("");
+  };
+
   const handleConfirmBlocked = async () => {
     if (!blockedRunId) {
       return;
@@ -1650,19 +1661,49 @@ export default function OperatorProductionPage() {
     const reason = manual || selectedLabel || "Blocked";
     if (blockedItemId) {
       await handleUserStatusUpdate(blockedItemId, blockedRunId, "blocked", {
-        blockedReason: reason,
-        blockedReasonId: blockedReasonId || null,
+        reason,
+        reasonId: blockedReasonId || null,
       });
     } else {
       await handleRunStatusUpdate(blockedRunId, "blocked", {
-        blockedReason: reason,
-        blockedReasonId: blockedReasonId || null,
+        reason,
+        reasonId: blockedReasonId || null,
       });
     }
     setBlockedRunId(null);
     setBlockedItemId(null);
     setBlockedReasonId("");
     setBlockedReasonText("");
+  };
+
+  const handleConfirmPaused = async () => {
+    if (!pausedRunId) {
+      return;
+    }
+    const manual = pausedReasonText.trim();
+    const selectedLabel =
+      stopReasons.find((reason) => reason.id === pausedReasonId)?.label ?? "";
+    const reason = manual || selectedLabel;
+    if (!reason) {
+      setPausedReasonError(t("production.operator.paused.reasonRequired"));
+      return;
+    }
+    if (pausedItemId) {
+      await handleUserStatusUpdate(pausedItemId, pausedRunId, "paused", {
+        reason,
+        reasonId: pausedReasonId || null,
+      });
+    } else {
+      await handleRunStatusUpdate(pausedRunId, "paused", {
+        reason,
+        reasonId: pausedReasonId || null,
+      });
+    }
+    setPausedRunId(null);
+    setPausedItemId(null);
+    setPausedReasonId("");
+    setPausedReasonText("");
+    setPausedReasonError("");
   };
 
   const closeQuickAction = () => {
@@ -1838,6 +1879,15 @@ export default function OperatorProductionPage() {
   const closeBlockedDialog = () => {
     setBlockedRunId(null);
     setBlockedItemId(null);
+    setBlockedReasonId("");
+    setBlockedReasonText("");
+  };
+  const closePausedDialog = () => {
+    setPausedRunId(null);
+    setPausedItemId(null);
+    setPausedReasonId("");
+    setPausedReasonText("");
+    setPausedReasonError("");
   };
   const blockedDialogContent = (
     <div className="space-y-3 text-sm">
@@ -1898,6 +1948,83 @@ export default function OperatorProductionPage() {
         >
           {(blockedItemId && isActionLoading(blockedItemId, "blocked")) ||
           (blockedRunId && isRunActionLoading(blockedRunId, "blocked")) ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+          ) : null}
+          {t("production.operator.common.save")}
+        </Button>
+      </div>
+    </div>
+  );
+  const pausedDialogContent = (
+    <div className="space-y-3 text-sm">
+      <SelectField
+        label={t("production.operator.paused.reasonTemplate")}
+        labelClassName="text-xs text-muted-foreground"
+        value={pausedReasonId || "__none__"}
+        onValueChange={(value) =>
+          setPausedReasonId(value === "__none__" ? "" : value)
+        }
+      >
+        <Select
+          value={pausedReasonId || "__none__"}
+          onValueChange={(value) => {
+            setPausedReasonId(value === "__none__" ? "" : value);
+            if (pausedReasonError) {
+              setPausedReasonError("");
+            }
+          }}
+        >
+          <SelectTrigger className="h-9 w-full">
+            <SelectValue
+              placeholder={t("production.operator.paused.selectReason")}
+            />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">
+              {t("production.operator.paused.selectReason")}
+            </SelectItem>
+            {stopReasons.map((reason) => (
+              <SelectItem key={reason.id} value={reason.id}>
+                {reason.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SelectField>
+      <TextAreaField
+        label={t("production.operator.paused.manualNote")}
+        labelClassName="text-xs text-muted-foreground"
+        value={pausedReasonText}
+        onChange={(event) => {
+          setPausedReasonText(event.target.value);
+          if (pausedReasonError) {
+            setPausedReasonError("");
+          }
+        }}
+        placeholder={t("production.operator.paused.customReasonPlaceholder")}
+        className="min-h-22.5"
+      />
+      {pausedReasonError ? (
+        <div className="text-xs text-destructive">{pausedReasonError}</div>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" type="button" onClick={closePausedDialog}>
+          {t("production.operator.common.cancel")}
+        </Button>
+        <Button
+          type="button"
+          onClick={handleConfirmPaused}
+          disabled={
+            pausedItemId
+              ? isActionLoading(pausedItemId, "paused")
+              : (pausedRunId
+                  ? isRunActionLoading(pausedRunId, "paused")
+                  : false)
+          }
+          className="gap-2"
+        >
+          {(pausedItemId && isActionLoading(pausedItemId, "paused")) ||
+          (pausedRunId && isRunActionLoading(pausedRunId, "paused")) ? (
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
           ) : null}
           {t("production.operator.common.save")}
@@ -2244,7 +2371,7 @@ export default function OperatorProductionPage() {
                           (row) => row.status === "blocked",
                         );
                         const hasActive = item.items.some((row) =>
-                          ["queued", "pending", "in_progress"].includes(
+                          ["queued", "pending", "in_progress", "paused"].includes(
                             row.status,
                           ),
                         );
@@ -2256,12 +2383,16 @@ export default function OperatorProductionPage() {
                         const isReceiptOnlyTracking =
                           item.trackingMode === "receipt_only";
                         const hasBatchStarted =
-                          Boolean(item.startedAt) || item.status === "in_progress";
+                          Boolean(item.startedAt) ||
+                          item.status === "in_progress" ||
+                          item.status === "paused";
                         const isBatchBlocked = item.status === "blocked";
+                        const isBatchPaused = item.status === "paused";
                         const isBatchDone = item.status === "done";
                         const batchStartLockedByDate =
                           !hasBatchStarted &&
                           !isBatchBlocked &&
+                          !isBatchPaused &&
                           isFuturePlannedDate(item.plannedDate);
                         const hasBlockingDependenciesForBatch = item.items.some(
                           (prodItem) => {
@@ -2397,6 +2528,13 @@ export default function OperatorProductionPage() {
                                             unknown
                                           > | null
                                         )?.blocked_reason ?? null;
+                                      const pausedReason =
+                                        (
+                                          prodItem.meta as Record<
+                                            string,
+                                            unknown
+                                          > | null
+                                        )?.paused_reason ?? null;
                                       const groupKey =
                                         getItemGroupKey(prodItem);
                                       const dependencyStations =
@@ -2512,14 +2650,24 @@ export default function OperatorProductionPage() {
                                               })}
                                             </div>
                                           ) : null}
+                                          {prodItem.status === "paused" &&
+                                          pausedReason ? (
+                                            <div className="mt-1 text-[11px] text-amber-600">
+                                              {t("production.operator.queue.pausedReason", {
+                                                reason: String(pausedReason),
+                                              })}
+                                            </div>
+                                          ) : null}
                                           <div className="mt-2 flex flex-wrap gap-2">
                                             {(() => {
                                               const hasStarted =
                                                 Boolean(prodItem.started_at) ||
-                                                prodItem.status ===
-                                                  "in_progress";
+                                                prodItem.status === "in_progress" ||
+                                                prodItem.status === "paused";
                                               const isBlocked =
                                                 prodItem.status === "blocked";
+                                              const isPaused =
+                                                prodItem.status === "paused";
                                               const startLockedByDate =
                                                 !hasStarted &&
                                                 !isBlocked &&
@@ -2547,9 +2695,11 @@ export default function OperatorProductionPage() {
                                                     disabled={
                                                       isDone ||
                                                       (hasStarted &&
-                                                        !isBlocked) ||
+                                                        !isBlocked &&
+                                                        !isPaused) ||
                                                       startLockedByDate ||
                                                       (!isBlocked &&
+                                                        !isPaused &&
                                                         hasBlockingDependencies) ||
                                                       isStarting
                                                     }
@@ -2564,7 +2714,7 @@ export default function OperatorProductionPage() {
                                                     {isStarting ? (
                                                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                                                     ) : null}
-                                                    {isBlocked
+                                                    {isBlocked || isPaused
                                                       ? t("production.operator.actions.resume")
                                                       : t("production.operator.actions.start")}
                                                   </Button>
@@ -2589,6 +2739,7 @@ export default function OperatorProductionPage() {
                                                       !hasStarted ||
                                                       isDone ||
                                                       isBlocked ||
+                                                      isPaused ||
                                                       isCompleting
                                                     }
                                                     onClick={() =>
@@ -2603,6 +2754,19 @@ export default function OperatorProductionPage() {
                                                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
                                                     ) : null}
                                                     {t("production.operator.actions.done")}
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    disabled={isDone || isPaused}
+                                                    onClick={() =>
+                                                      handleOpenPaused(
+                                                        item.id,
+                                                        prodItem.id,
+                                                      )
+                                                    }
+                                                  >
+                                                    {t("production.operator.actions.pause")}
                                                   </Button>
                                                   <Button
                                                     variant="ghost"
@@ -2644,7 +2808,9 @@ export default function OperatorProductionPage() {
                                         className="gap-2"
                                         disabled={
                                           isBatchDone ||
-                                          (hasBatchStarted && !isBatchBlocked) ||
+                                          (hasBatchStarted &&
+                                            !isBatchBlocked &&
+                                            !isBatchPaused) ||
                                           batchStartLockedByDate ||
                                           hasBlockingDependenciesForBatch ||
                                           isBatchStarting
@@ -2656,7 +2822,7 @@ export default function OperatorProductionPage() {
                                           )
                                         }
                                       >
-                                        {isBatchBlocked
+                                        {isBatchBlocked || isBatchPaused
                                           ? t("production.operator.actions.resume")
                                           : t("production.operator.actions.start")}
                                       </Button>
@@ -2669,7 +2835,8 @@ export default function OperatorProductionPage() {
                                         (!isReceiptOnlyTracking &&
                                           (!hasBatchStarted ||
                                             isBatchDone ||
-                                            isBatchBlocked)) ||
+                                            isBatchBlocked ||
+                                            isBatchPaused)) ||
                                         (isReceiptOnlyTracking && isBatchDone) ||
                                         isBatchCompleting
                                       }
@@ -2681,6 +2848,16 @@ export default function OperatorProductionPage() {
                                         ? t("production.operator.actions.received")
                                         : t("production.operator.actions.done")}
                                     </Button>
+                                    {!isReceiptOnlyTracking ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled={isBatchDone || isBatchPaused}
+                                        onClick={() => handleOpenPaused(item.id)}
+                                      >
+                                        {t("production.operator.actions.pause")}
+                                      </Button>
+                                    ) : null}
                                     {!isReceiptOnlyTracking ? (
                                       <Button
                                         variant="ghost"
@@ -2769,10 +2946,7 @@ export default function OperatorProductionPage() {
                                           rel="noreferrer"
                                           className="flex items-center gap-3 rounded-md border border-border px-2 py-2 text-xs hover:bg-muted/30"
                                         >
-                                          {renderAttachmentIcon(
-                                            attachment,
-                                            signedUrl,
-                                          )}
+                                          {renderAttachmentIcon(attachment)}
                                           <div className="flex-1 min-w-0">
                                             <div className="font-medium truncate">
                                               {attachment.name}
@@ -3016,7 +3190,8 @@ export default function OperatorProductionPage() {
                           handleRunStatusUpdate(quickActionItem.id, "in_progress")
                         }
                       >
-                        {quickActionItem.status === "blocked"
+                        {quickActionItem.status === "blocked" ||
+                        quickActionItem.status === "paused"
                           ? t("production.operator.actions.resume")
                           : t("production.operator.actions.start")}
                       </Button>
@@ -3026,6 +3201,7 @@ export default function OperatorProductionPage() {
                       size="sm"
                       disabled={
                         quickActionItem.status === "done" ||
+                        quickActionItem.status === "paused" ||
                         isRunActionLoading(quickActionItem.id, "done")
                       }
                       onClick={() =>
@@ -3036,6 +3212,19 @@ export default function OperatorProductionPage() {
                         ? t("production.operator.actions.received")
                         : t("production.operator.actions.done")}
                     </Button>
+                    {quickActionItem.trackingMode !== "receipt_only" ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={
+                          quickActionItem.status === "done" ||
+                          quickActionItem.status === "paused"
+                        }
+                        onClick={() => handleOpenPaused(quickActionItem.id)}
+                      >
+                        {t("production.operator.actions.pause")}
+                      </Button>
+                    ) : null}
                     {quickActionItem.trackingMode !== "receipt_only" ? (
                       <Button
                         variant="ghost"
@@ -3061,8 +3250,10 @@ export default function OperatorProductionPage() {
                 ? quickActionVisibleItems.map((prodItem) => {
                     const hasStarted =
                       Boolean(prodItem.started_at) ||
-                      prodItem.status === "in_progress";
+                      prodItem.status === "in_progress" ||
+                      prodItem.status === "paused";
                     const isBlocked = prodItem.status === "blocked";
+                    const isPaused = prodItem.status === "paused";
                     const isDone = prodItem.status === "done";
                     const startLockedByDate =
                       !hasStarted &&
@@ -3098,7 +3289,7 @@ export default function OperatorProductionPage() {
                             className="gap-2"
                             disabled={
                               isDone ||
-                              (hasStarted && !isBlocked) ||
+                              (hasStarted && !isBlocked && !isPaused) ||
                               startLockedByDate ||
                               isStarting
                             }
@@ -3110,7 +3301,7 @@ export default function OperatorProductionPage() {
                               )
                             }
                           >
-                            {isBlocked
+                            {isBlocked || isPaused
                               ? t("production.operator.actions.resume")
                               : t("production.operator.actions.start")}
                           </Button>
@@ -3118,7 +3309,11 @@ export default function OperatorProductionPage() {
                             variant="outline"
                             size="sm"
                             disabled={
-                              !hasStarted || isDone || isBlocked || isCompleting
+                              !hasStarted ||
+                              isDone ||
+                              isBlocked ||
+                              isPaused ||
+                              isCompleting
                             }
                             onClick={() =>
                               handleUserStatusUpdate(
@@ -3129,6 +3324,16 @@ export default function OperatorProductionPage() {
                             }
                           >
                             {t("production.operator.actions.done")}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={isDone || isPaused}
+                            onClick={() =>
+                              handleOpenPaused(quickActionItem.id, prodItem.id)
+                            }
+                          >
+                            {t("production.operator.actions.pause")}
                           </Button>
                           <Button
                             variant="ghost"
@@ -3442,6 +3647,39 @@ export default function OperatorProductionPage() {
               </button>
             </div>
             <div className="mt-4">{blockedDialogContent}</div>
+          </div>
+        </div>
+      ) : null}
+
+      <BottomSheet
+        open={Boolean(pausedRunId)}
+        onClose={closePausedDialog}
+        ariaLabel={t("production.operator.paused.markAsPaused")}
+        closeButtonLabel={t("production.operator.paused.closeDialog")}
+        title={t("production.operator.paused.markAsPaused")}
+        keyboardAware
+      >
+        <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3 md:hidden">
+          {pausedDialogContent}
+        </div>
+      </BottomSheet>
+
+      {pausedRunId ? (
+        <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 px-4 md:flex">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">
+                {t("production.operator.paused.markAsPaused")}
+              </h3>
+              <button
+                type="button"
+                className="text-sm text-muted-foreground"
+                onClick={closePausedDialog}
+              >
+                {t("production.operator.common.close")}
+              </button>
+            </div>
+            <div className="mt-4">{pausedDialogContent}</div>
           </div>
         </div>
       ) : null}

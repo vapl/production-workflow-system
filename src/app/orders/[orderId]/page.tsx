@@ -1024,7 +1024,7 @@ export default function OrderDetailPage() {
     canManageAllComments || comment.authorId === userId;
   useEffect(() => {
     const sb = supabase;
-    if (!sb) {
+    if (!sb || activeTab !== "files") {
       return;
     }
     const pending = attachments.filter(
@@ -1064,7 +1064,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [attachments, signedAttachmentUrls]);
+  }, [activeTab, attachments, signedAttachmentUrls]);
 
   useEffect(() => {
     const availableIds = new Set(attachments.map((attachment) => attachment.id));
@@ -1075,7 +1075,7 @@ export default function OrderDetailPage() {
 
   useEffect(() => {
     const sb = supabase;
-    if (!sb) {
+    if (!sb || activeTab !== "external") {
       return;
     }
     const externalAttachments = (orderState?.externalJobs ?? []).flatMap(
@@ -1119,7 +1119,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [orderState?.externalJobs, signedExternalAttachmentUrls]);
+  }, [activeTab, orderState?.externalJobs, signedExternalAttachmentUrls]);
   const meetsEngineeringChecklist = requiredForEngineering.every(
     (item) => checklistState[item.id],
   );
@@ -3796,11 +3796,9 @@ export default function OrderDetailPage() {
 
     if (isImage && resolvedUrl) {
       return (
-        <img
-          src={resolvedUrl}
-          alt={attachment.name}
-          className="h-12 w-12 rounded-md object-cover"
-        />
+        <div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted">
+          <ImageIcon className="h-5 w-5 text-muted-foreground" />
+        </div>
       );
     }
 

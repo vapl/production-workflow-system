@@ -736,7 +736,7 @@ create table if not exists public.production_items (
   dimensions text,
   priority text check (priority in ('low', 'normal', 'high', 'urgent')),
   status text not null default 'queued'
-    check (status in ('queued', 'in_progress', 'blocked', 'done')),
+    check (status in ('queued', 'pending', 'in_progress', 'paused', 'blocked', 'done')),
   station_id uuid references public.workstations(id) on delete set null,
   source_attachment_id uuid references public.order_attachments(id) on delete set null,
   meta jsonb,
@@ -767,7 +767,7 @@ create table if not exists public.batch_runs (
   route_key text not null default 'default',
   step_index integer not null default 0,
   status text not null default 'queued'
-    check (status in ('queued', 'in_progress', 'blocked', 'done')),
+    check (status in ('queued', 'pending', 'in_progress', 'paused', 'blocked', 'done')),
   blocked_reason text,
   blocked_reason_id uuid references public.stop_reasons(id) on delete set null,
   blocked_at timestamptz,
