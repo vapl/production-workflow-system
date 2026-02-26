@@ -24,7 +24,9 @@ import {
 } from "@/components/ui/Select";
 import { QrScannerModal } from "@/components/qr/QrScannerModal";
 import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
+import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate } from "@/lib/domain/formatters";
+import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
 import {
   computeWorkingMinutes,
@@ -286,6 +288,7 @@ function renderAttachmentIcon(attachment: OrderAttachmentRow) {
 export default function OperatorProductionPage() {
   const { t } = useI18n();
   const currentUser = useCurrentUser();
+  const { rules } = useWorkflowRules();
   const { signOut } = useAuthActions();
   const today = new Date().toISOString().slice(0, 10);
   const router = useRouter();
@@ -1500,8 +1503,13 @@ export default function OperatorProductionPage() {
         )
         .filter((item) => item.order_id === run.order_id);
       if (
-        orderItems.length > 0 &&
-        orderItems.every((item) => item.status === "done")
+        isOrderProductionComplete(
+          orderItems.map((item) => ({
+            status: item.status,
+            stationId: item.station_id,
+          })),
+          rules.productionCompletionConfig,
+        )
       ) {
         const totalDuration = orderItems.reduce(
           (sum, item) => sum + Number(item.duration_minutes ?? 0),

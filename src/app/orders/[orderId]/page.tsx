@@ -77,6 +77,7 @@ import { useNotifications } from "@/components/ui/Notifications";
 import { useTenantSubscription } from "@/hooks/useTenantSubscription";
 import { useRbac } from "@/contexts/RbacContext";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -296,6 +297,10 @@ export default function OrderDetailPage() {
   const [orderState, setOrderState] = useState(order);
   const [productionDisplayStatus, setProductionDisplayStatus] =
     useState<OrderStatus | null>(null);
+  const [productionCompletionProgress, setProductionCompletionProgress] =
+    useState<{ done: number; total: number; mode: "all" | "stations" } | null>(
+      null,
+    );
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
@@ -905,30 +910,61 @@ export default function OrderDetailPage() {
     const sb = supabase;
     if (!sb || !orderState?.id) {
       setProductionDisplayStatus(null);
+      setProductionCompletionProgress(null);
       return;
     }
     let isMounted = true;
     const loadProductionStatus = async () => {
       const { data, error } = await sb
         .from("production_items")
-        .select("status")
+        .select("status, station_id")
         .eq("order_id", orderState.id);
       if (!isMounted) {
         return;
       }
       if (error || !data || data.length === 0) {
         setProductionDisplayStatus(null);
+        setProductionCompletionProgress(null);
         return;
       }
-      const total = data.length;
-      const done = data.filter((item) => item.status === "done").length;
-      setProductionDisplayStatus(done === total ? "done" : "in_production");
+      const completionMode = rules.productionCompletionConfig.mode;
+      if (completionMode === "completion_stations_done") {
+        const selectedStationIds = new Set(
+          rules.productionCompletionConfig.completionStationIds,
+        );
+        const byStation = new Map<string, Array<{ status: string }>>();
+        data.forEach((item) => {
+          if (!item.station_id || !selectedStationIds.has(item.station_id)) {
+            return;
+          }
+          const entry = byStation.get(item.station_id) ?? [];
+          entry.push({ status: item.status });
+          byStation.set(item.station_id, entry);
+        });
+        const total = byStation.size;
+        const done = Array.from(byStation.values()).filter((items) =>
+          items.every((item) => item.status === "done"),
+        ).length;
+        setProductionCompletionProgress({ done, total, mode: "stations" });
+      } else {
+        const total = data.length;
+        const done = data.filter((item) => item.status === "done").length;
+        setProductionCompletionProgress({ done, total, mode: "all" });
+      }
+      const isDone = isOrderProductionComplete(
+        data.map((item) => ({
+          status: item.status,
+          stationId: item.station_id,
+        })),
+        rules.productionCompletionConfig,
+      );
+      setProductionDisplayStatus(isDone ? "done" : "in_production");
     };
     void loadProductionStatus();
     return () => {
       isMounted = false;
     };
-  }, [orderState?.id, supabase]);
+  }, [orderState?.id, rules.productionCompletionConfig, supabase]);
 
   useEffect(() => {
     if (isAttachmentCategoryManual) {
@@ -3985,9 +4021,18 @@ export default function OrderDetailPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Badge variant={priorityVariant}>{orderState.priority}</Badge>
-              <Badge variant={statusVariant}>
+          <Badge variant={statusVariant}>
                 {statusLabel(displayStatus)}
               </Badge>
+              {productionCompletionProgress ? (
+                <span className="text-xs text-muted-foreground">
+                  {productionCompletionProgress.done}/
+                  {productionCompletionProgress.total}{" "}
+                  {productionCompletionProgress.mode === "stations"
+                    ? t("orders.detail.productionCompletion.stations")
+                    : t("orders.detail.productionCompletion.items")}
+                </span>
+              ) : null}
               <Button
                 variant="ghost"
                 size="sm"
@@ -4005,6 +4050,15 @@ export default function OrderDetailPage() {
         <div className="flex flex-wrap items-center gap-2 px-1 md:hidden">
           <Badge variant={priorityVariant}>{orderState.priority}</Badge>
           <Badge variant={statusVariant}>{statusLabel(displayStatus)}</Badge>
+          {productionCompletionProgress ? (
+            <span className="text-xs text-muted-foreground">
+              {productionCompletionProgress.done}/
+              {productionCompletionProgress.total}{" "}
+              {productionCompletionProgress.mode === "stations"
+                ? t("orders.detail.productionCompletion.stations")
+                : t("orders.detail.productionCompletion.items")}
+            </span>
+          ) : null}
         </div>
 
         <TabsContent value="overview">

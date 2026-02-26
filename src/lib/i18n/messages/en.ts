@@ -577,6 +577,10 @@
           missing: "missing",
         },
       },
+      productionCompletion: {
+        items: "items done",
+        stations: "completion stations done",
+      },
       aiImport: {
         defaultCategoryLabel: "Production documentation",
         description:
@@ -998,6 +1002,7 @@
         queued: "Queued",
         pending: "Pending",
         in_progress: "In progress",
+        paused: "Paused",
         blocked: "Blocked",
         done: "Done",
       },
@@ -1491,6 +1496,17 @@
       requireOrderInputsEngineering: "Require order inputs before engineering",
       requireOrderInputsProduction: "Require order inputs before production",
       enableDueDateIndicators: "Enable due date indicators",
+      productionCompletionTitle: "Production completion",
+      productionCompletionDescription:
+        "Define when an order is considered done in production.",
+      productionCompletionMode: "Completion rule",
+      productionCompletionModeAllItems: "All production items are done",
+      productionCompletionModeStations: "Selected station(s) are done",
+      productionCompletionStationsTitle: "Completion station(s)",
+      productionCompletionNoStations:
+        "No stations available. Add stations in Operations first.",
+      productionCompletionSelectAtLeastOne:
+        "Select at least one completion station, otherwise orders cannot become done by this rule.",
       orderStatusConfiguration: "Order status configuration",
       saveOrderStatuses: "Save order statuses",
       externalJobStatusConfiguration: "External job status configuration",

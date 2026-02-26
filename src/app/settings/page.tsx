@@ -70,6 +70,7 @@ import type {
 } from "@/types/orderInputs";
 import {
   useWorkflowRules,
+  type ProductionCompletionMode,
   type WorkflowTargetStatus,
   type WorkflowStatusColor,
 } from "@/contexts/WorkflowContext";
@@ -1366,7 +1367,11 @@ export default function SettingsPage() {
   }
 
   async function handleRemoveAttachmentCategory(id: string) {
-    if (!(await confirmRemove(t("settings.workflow.removeAttachmentCategoryConfirm")))) {
+    if (
+      !(await confirmRemove(
+        t("settings.workflow.removeAttachmentCategoryConfirm"),
+      ))
+    ) {
       return;
     }
     const nextCategories = attachmentCategoryDrafts.filter(
@@ -2080,7 +2085,9 @@ export default function SettingsPage() {
       return;
     }
 
-    const fromIndex = sortedLevels.findIndex((level) => level.id === draggedLevelId);
+    const fromIndex = sortedLevels.findIndex(
+      (level) => level.id === draggedLevelId,
+    );
     if (fromIndex === -1) {
       setDraggedLevelId(null);
       setLevelDropIndex(null);
@@ -2937,7 +2944,11 @@ export default function SettingsPage() {
   async function handleDeleteOrderField(fieldId: string) {
     const target = orderInputFields.find((field) => field.id === fieldId);
     const label = target?.label ?? t("settings.orderInputs.label");
-    if (!(await confirmRemove(t("settings.orderInputs.removeFieldConfirm", { label })))) {
+    if (
+      !(await confirmRemove(
+        t("settings.orderInputs.removeFieldConfirm", { label }),
+      ))
+    ) {
       return;
     }
     await removeOrderInputField(fieldId);
@@ -2968,7 +2979,11 @@ export default function SettingsPage() {
   async function handleDeleteExternalJobField(fieldId: string) {
     const target = externalJobFields.find((field) => field.id === fieldId);
     const label = target?.label ?? t("settings.partners.externalFieldFallback");
-    if (!(await confirmRemove(t("settings.partners.removeFieldConfirm", { label })))) {
+    if (
+      !(await confirmRemove(
+        t("settings.partners.removeFieldConfirm", { label }),
+      ))
+    ) {
       return;
     }
     await removeExternalJobField(fieldId);
@@ -3378,9 +3393,9 @@ export default function SettingsPage() {
   const sectionSubtitle = (value: SettingsSectionValue) =>
     t(`settings.sectionSubtitle.${value}`);
 
-  const activeSectionValue =
-    (settingsSections.find((section) => section.value === activeTab)?.value ??
-      "structure") as SettingsSectionValue;
+  const activeSectionValue = (settingsSections.find(
+    (section) => section.value === activeTab,
+  )?.value ?? "structure") as SettingsSectionValue;
 
   const activeSectionLabel = sectionLabel(activeSectionValue);
   const activeSectionSubtitle = sectionSubtitle(activeSectionValue);
@@ -3471,7 +3486,9 @@ export default function SettingsPage() {
                           {sectionLabel(section.value)}
                         </span>
                         {isActive ? (
-                          <span className="text-xs">{t("settings.active")}</span>
+                          <span className="text-xs">
+                            {t("settings.active")}
+                          </span>
                         ) : null}
                       </button>
                     );
@@ -3569,7 +3586,8 @@ export default function SettingsPage() {
                     </thead>
                     <tbody>
                       {sortedLevels.map((level, rowIndex) => {
-                        const isInlineEditing = inlineEditingLevelId === level.id;
+                        const isInlineEditing =
+                          inlineEditingLevelId === level.id;
                         return (
                           <Fragment key={level.id}>
                             <tr
@@ -3599,7 +3617,9 @@ export default function SettingsPage() {
                                   event.currentTarget.getBoundingClientRect();
                                 const before =
                                   event.clientY < rect.top + rect.height / 2;
-                                setLevelDropIndex(before ? rowIndex : rowIndex + 1);
+                                setLevelDropIndex(
+                                  before ? rowIndex : rowIndex + 1,
+                                );
                               }}
                               onDrop={(event) => {
                                 event.preventDefault();
@@ -3611,7 +3631,10 @@ export default function SettingsPage() {
                               }}
                             >
                               <td className="px-2 py-2 align-middle text-muted-foreground">
-                                <span className="cursor-grab select-none" aria-hidden>
+                                <span
+                                  className="cursor-grab select-none"
+                                  aria-hidden
+                                >
                                   ::
                                 </span>
                               </td>
@@ -3694,7 +3717,9 @@ export default function SettingsPage() {
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => void handleSaveInlineLevel()}
+                                        onClick={() =>
+                                          void handleSaveInlineLevel()
+                                        }
                                         disabled={!inlineLevelName.trim()}
                                       >
                                         {t("settings.structure.saveLevel")}
@@ -3712,7 +3737,9 @@ export default function SettingsPage() {
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => startInlineLevelEdit(level.id)}
+                                        onClick={() =>
+                                          startInlineLevelEdit(level.id)
+                                        }
                                       >
                                         <PencilIcon className="h-4 w-4" />
                                       </Button>
@@ -3722,16 +3749,21 @@ export default function SettingsPage() {
                                         onClick={async () => {
                                           if (
                                             !(await confirmRemove(
-                                              t("settings.structure.removeLevelConfirm", {
-                                                name: level.name,
-                                              }),
+                                              t(
+                                                "settings.structure.removeLevelConfirm",
+                                                {
+                                                  name: level.name,
+                                                },
+                                              ),
                                             ))
                                           ) {
                                             return;
                                           }
                                           removeLevel(level.id);
                                         }}
-                                        disabled={lockedLevelKeys.has(level.key)}
+                                        disabled={lockedLevelKeys.has(
+                                          level.key,
+                                        )}
                                       >
                                         <Trash2Icon className="h-4 w-4" />
                                       </Button>
@@ -3745,7 +3777,8 @@ export default function SettingsPage() {
                       })}
                       <tr
                         className={`border-t border-border transition-all ${
-                          levelDropIndex === sortedLevels.length && draggedLevelId
+                          levelDropIndex === sortedLevels.length &&
+                          draggedLevelId
                             ? "h-4 bg-primary/10"
                             : "h-0"
                         }`}
@@ -3767,7 +3800,9 @@ export default function SettingsPage() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>{t("settings.structure.referenceListsTitle")}</CardTitle>
+                <CardTitle>
+                  {t("settings.structure.referenceListsTitle")}
+                </CardTitle>
                 <CardDescription>
                   {t("settings.structure.referenceListsDescription")}
                 </CardDescription>
@@ -3809,7 +3844,9 @@ export default function SettingsPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">{t("settings.structure.noParent")}</SelectItem>
+                          <SelectItem value="none">
+                            {t("settings.structure.noParent")}
+                          </SelectItem>
                           {parentNodes.map((node) => (
                             <SelectItem key={node.id} value={node.id}>
                               {node.label}
@@ -3860,7 +3897,9 @@ export default function SettingsPage() {
                     description={t("settings.structure.bulkAddDescription")}
                   />
                   <div className="flex gap-2">
-                    <Button onClick={handleBulkAddNodes}>{t("settings.structure.addList")}</Button>
+                    <Button onClick={handleBulkAddNodes}>
+                      {t("settings.structure.addList")}
+                    </Button>
                   </div>
                 </div>
 
@@ -3956,10 +3995,15 @@ export default function SettingsPage() {
                                 onClick={async () => {
                                   if (
                                     !(await confirmRemove(
-                                      t("settings.structure.removeItemFromLevelConfirm", {
-                                        label: node.label,
-                                        level: selectedLevel?.name ?? t("settings.structure.level"),
-                                      }),
+                                      t(
+                                        "settings.structure.removeItemFromLevelConfirm",
+                                        {
+                                          label: node.label,
+                                          level:
+                                            selectedLevel?.name ??
+                                            t("settings.structure.level"),
+                                        },
+                                      ),
                                     ))
                                   ) {
                                     return;
@@ -4127,7 +4171,9 @@ export default function SettingsPage() {
                       setOrderFieldOptions(event.target.value)
                     }
                     disabled={orderFieldType !== "select"}
-                    placeholder={t("settings.orderInputs.selectOptionsPlaceholder")}
+                    placeholder={t(
+                      "settings.orderInputs.selectOptionsPlaceholder",
+                    )}
                     className="min-h-20 disabled:opacity-50"
                   />
                 </div>
@@ -4201,7 +4247,9 @@ export default function SettingsPage() {
                                     label: event.target.value,
                                   })
                                 }
-                                placeholder={t("settings.orderInputs.positionPlaceholder")}
+                                placeholder={t(
+                                  "settings.orderInputs.positionPlaceholder",
+                                )}
                                 className="h-9 text-sm"
                                 labelClassName="text-xs font-medium"
                               />
@@ -4213,7 +4261,9 @@ export default function SettingsPage() {
                                     aiKey: event.target.value,
                                   })
                                 }
-                                placeholder={t("settings.orderInputs.aiKeyPlaceholder")}
+                                placeholder={t(
+                                  "settings.orderInputs.aiKeyPlaceholder",
+                                )}
                                 className="h-9 text-sm"
                                 labelClassName="text-xs font-medium"
                               />
@@ -4291,7 +4341,9 @@ export default function SettingsPage() {
                                   onClick={async () => {
                                     if (
                                       !(await confirmRemove(
-                                        t("settings.orderInputs.removeColumnConfirm"),
+                                        t(
+                                          "settings.orderInputs.removeColumnConfirm",
+                                        ),
                                       ))
                                     ) {
                                       return;
@@ -4315,7 +4367,9 @@ export default function SettingsPage() {
                                       ),
                                     })
                                   }
-                                  placeholder={t("settings.orderInputs.optionsPlaceholder")}
+                                  placeholder={t(
+                                    "settings.orderInputs.optionsPlaceholder",
+                                  )}
                                   className="min-h-17.5 rounded-md px-2 py-2 text-sm"
                                   labelClassName="text-xs font-medium"
                                 />
@@ -4546,7 +4600,9 @@ export default function SettingsPage() {
             <div className="grid min-w-0 gap-6 lg:grid-cols-2 *:min-w-0">
               <Card>
                 <CardHeader>
-                  <CardTitle>{t("settings.operations.workingHoursTitle")}</CardTitle>
+                  <CardTitle>
+                    {t("settings.operations.workingHoursTitle")}
+                  </CardTitle>
                   <CardDescription>
                     {t("settings.operations.workingHoursDescription")}
                   </CardDescription>
@@ -4673,7 +4729,9 @@ export default function SettingsPage() {
               </Card>
               <Card>
                 <CardHeader>
-                  <CardTitle>{t("settings.operations.workStationsTitle")}</CardTitle>
+                  <CardTitle>
+                    {t("settings.operations.workStationsTitle")}
+                  </CardTitle>
                   <CardDescription>
                     {t("settings.operations.workStationsDescription")}
                   </CardDescription>
@@ -4684,7 +4742,9 @@ export default function SettingsPage() {
                       label={t("settings.operations.stationName")}
                       value={stationName}
                       onChange={(event) => setStationName(event.target.value)}
-                      placeholder={t("settings.operations.stationNamePlaceholder")}
+                      placeholder={t(
+                        "settings.operations.stationNamePlaceholder",
+                      )}
                       className="h-10 text-sm"
                     />
                     <InputField
@@ -4693,7 +4753,9 @@ export default function SettingsPage() {
                       onChange={(event) =>
                         setStationDescription(event.target.value)
                       }
-                      placeholder={t("settings.operations.descriptionPlaceholder")}
+                      placeholder={t(
+                        "settings.operations.descriptionPlaceholder",
+                      )}
                       className="h-10 text-sm"
                     />
                     <label className="flex flex-col gap-2 text-sm font-medium">
@@ -4860,9 +4922,12 @@ export default function SettingsPage() {
                               onClick={async () => {
                                 if (
                                   !(await confirmRemove(
-                                    t("settings.operations.removeWorkstationConfirm", {
-                                      name: station.name,
-                                    }),
+                                    t(
+                                      "settings.operations.removeWorkstationConfirm",
+                                      {
+                                        name: station.name,
+                                      },
+                                    ),
                                   ))
                                 ) {
                                   return;
@@ -4928,7 +4993,11 @@ export default function SettingsPage() {
                                   });
                                 }}
                               />
-                              {optionLabel("qrSize", option.value, option.label)}
+                              {optionLabel(
+                                "qrSize",
+                                option.value,
+                                option.label,
+                              )}
                             </label>
                           );
                         })}
@@ -5038,7 +5107,9 @@ export default function SettingsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>{t("settings.operations.notificationsTitle")}</CardTitle>
+                  <CardTitle>
+                    {t("settings.operations.notificationsTitle")}
+                  </CardTitle>
                   <CardDescription>
                     {t("settings.operations.notificationsDescription")}
                   </CardDescription>
@@ -5184,7 +5255,7 @@ export default function SettingsPage() {
                       {operatorAssignmentsError}
                     </div>
                   )}
-                <div className="overflow-x-auto rounded-lg border border-border">
+                  <div className="overflow-x-auto rounded-lg border border-border">
                     <table className="min-w-[760px] w-full text-sm">
                       <thead className="bg-muted/40 text-muted-foreground">
                         <tr>
@@ -5210,7 +5281,9 @@ export default function SettingsPage() {
                             >
                               <LoadingSpinner
                                 className="justify-center"
-                                label={t("settings.operations.loadingAssignments")}
+                                label={t(
+                                  "settings.operations.loadingAssignments",
+                                )}
                               />
                             </td>
                           </tr>
@@ -5270,7 +5343,9 @@ export default function SettingsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>{t("settings.operations.stopReasonsTitle")}</CardTitle>
+                <CardTitle>
+                  {t("settings.operations.stopReasonsTitle")}
+                </CardTitle>
                 <CardDescription>
                   {t("settings.operations.stopReasonsDescription")}
                 </CardDescription>
@@ -5708,7 +5783,7 @@ export default function SettingsPage() {
                                 isActive: event.target.checked,
                               })
                             }
-                            />
+                          />
                           {t("settings.common.active")}
                         </label>
                         <Button
@@ -5769,7 +5844,9 @@ export default function SettingsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>{t("settings.partners.externalSchemaTitle")}</CardTitle>
+                <CardTitle>
+                  {t("settings.partners.externalSchemaTitle")}
+                </CardTitle>
                 <CardDescription>
                   {t("settings.partners.externalSchemaDescription")}
                 </CardDescription>
@@ -6376,7 +6453,9 @@ export default function SettingsPage() {
                 </div>
               ) : null}
               <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="text-sm font-medium">{t("settings.users.inviteUser")}</div>
+                <div className="text-sm font-medium">
+                  {t("settings.users.inviteUser")}
+                </div>
                 <div className="mt-3 grid gap-3 items-center md:grid-cols-[minmax(220px,1.2fr)_minmax(200px,1fr)_minmax(140px,0.5fr)_auto] md:items-end">
                   <InputField
                     label={t("settings.users.email")}
@@ -6552,7 +6631,9 @@ export default function SettingsPage() {
                     return (
                       <div className="flex items-center justify-end gap-2">
                         <span className="text-xs text-muted-foreground">
-                          {updatingUserId === user.id ? t("settings.users.saving") : ""}
+                          {updatingUserId === user.id
+                            ? t("settings.users.saving")
+                            : ""}
                         </span>
                         <Tooltip content={t("settings.users.deactivateHint")}>
                           <InfoIcon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -6995,6 +7076,115 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                  <div className="text-sm font-semibold">
+                    {t("settings.workflow.productionCompletionTitle")}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("settings.workflow.productionCompletionDescription")}
+                  </p>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(260px,0.8fr)_1fr] lg:items-start">
+                    <label className="space-y-2 text-sm font-medium">
+                      {t("settings.workflow.productionCompletionMode")}
+                      <Select
+                        value={rules.productionCompletionConfig.mode}
+                        onValueChange={(value) => {
+                          const mode = value as ProductionCompletionMode;
+                          setRules({
+                            productionCompletionConfig: {
+                              ...rules.productionCompletionConfig,
+                              mode,
+                              completionStationIds:
+                                mode === "all_items_done"
+                                  ? []
+                                  : rules.productionCompletionConfig
+                                      .completionStationIds,
+                            },
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all_items_done">
+                            {t(
+                              "settings.workflow.productionCompletionModeAllItems",
+                            )}
+                          </SelectItem>
+                          <SelectItem value="completion_stations_done">
+                            {t(
+                              "settings.workflow.productionCompletionModeStations",
+                            )}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    {rules.productionCompletionConfig.mode ===
+                    "completion_stations_done" ? (
+                      <div className="rounded-lg border border-border bg-background/60 p-3">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          {t(
+                            "settings.workflow.productionCompletionStationsTitle",
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-3 text-sm">
+                          {displayStations.length === 0 ? (
+                            <span className="text-xs text-muted-foreground">
+                              {t(
+                                "settings.workflow.productionCompletionNoStations",
+                              )}
+                            </span>
+                          ) : (
+                            displayStations.map((station) => {
+                              const isChecked =
+                                rules.productionCompletionConfig.completionStationIds.includes(
+                                  station.id,
+                                );
+                              return (
+                                <label
+                                  key={station.id}
+                                  className="flex items-center gap-2"
+                                >
+                                  <Checkbox
+                                    checked={isChecked}
+                                    onChange={(event) => {
+                                      const nextIds = event.target.checked
+                                        ? [
+                                            ...rules.productionCompletionConfig
+                                              .completionStationIds,
+                                            station.id,
+                                          ]
+                                        : rules.productionCompletionConfig.completionStationIds.filter(
+                                            (id) => id !== station.id,
+                                          );
+                                      setRules({
+                                        productionCompletionConfig: {
+                                          ...rules.productionCompletionConfig,
+                                          completionStationIds: nextIds,
+                                        },
+                                      });
+                                    }}
+                                  />
+                                  {station.name}
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                        {rules.productionCompletionConfig
+                          .completionStationIds.length === 0 ? (
+                          <div className="mt-3 rounded-md border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            {t(
+                              "settings.workflow.productionCompletionSelectAtLeastOne",
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
                 <div className="grid gap-6 lg:grid-cols-2">
                   <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                     <div className="text-sm font-semibold">
@@ -7005,7 +7195,11 @@ export default function SettingsPage() {
                         const config = orderStatusConfigDrafts[option.value];
                         const previewLabel =
                           config?.label?.trim() ||
-                          optionLabel("workflowStatus", option.value, option.label);
+                          optionLabel(
+                            "workflowStatus",
+                            option.value,
+                            option.label,
+                          );
                         return (
                           <div
                             key={option.value}
@@ -7044,7 +7238,7 @@ export default function SettingsPage() {
                                     },
                                   }))
                                 }
-                                className="h-9 min-w-45 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                                className="h-9 min-w-45 flex-1 rounded-lg bg-input-background px-3 text-sm"
                               />
                               <Select
                                 value={config?.color ?? "slate"}
@@ -7202,7 +7396,7 @@ export default function SettingsPage() {
                                     },
                                   }))
                                 }
-                                className="h-9 min-w-45 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
+                                className="h-9 min-w-45 flex-1 rounded-lg bg-input-background px-3 text-sm"
                               />
                               <Select
                                 value={config?.color ?? "slate"}
@@ -7455,7 +7649,9 @@ export default function SettingsPage() {
                           onChange={(event) =>
                             setNewAttachmentCategoryLabel(event.target.value)
                           }
-                          placeholder={t("settings.workflow.addCategoryPlaceholder")}
+                          placeholder={t(
+                            "settings.workflow.addCategoryPlaceholder",
+                          )}
                           className="h-10 min-w-50 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
                         />
                         <Button onClick={handleAddAttachmentCategory}>
@@ -7578,7 +7774,9 @@ export default function SettingsPage() {
                         onChange={(event) =>
                           setNewChecklistLabel(event.target.value)
                         }
-                        placeholder={t("settings.workflow.checklistItemPlaceholder")}
+                        placeholder={t(
+                          "settings.workflow.checklistItemPlaceholder",
+                        )}
                         className="h-10 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       />
                       <Button
@@ -7704,9 +7902,12 @@ export default function SettingsPage() {
                             onClick={async () => {
                               if (
                                 !(await confirmRemove(
-                                  t("settings.workflow.removeChecklistConfirm", {
-                                    label: item.label,
-                                  }),
+                                  t(
+                                    "settings.workflow.removeChecklistConfirm",
+                                    {
+                                      label: item.label,
+                                    },
+                                  ),
                                 ))
                               ) {
                                 return;
@@ -7738,7 +7939,9 @@ export default function SettingsPage() {
                         onChange={(event) =>
                           setNewReturnReason(event.target.value)
                         }
-                        placeholder={t("settings.workflow.addReasonPlaceholder")}
+                        placeholder={t(
+                          "settings.workflow.addReasonPlaceholder",
+                        )}
                         className="h-10 flex-1 rounded-lg border border-border bg-input-background px-3 text-sm"
                       />
                       <Button
@@ -7795,15 +7998,15 @@ export default function SettingsPage() {
             {isTenantProfileLoading ? (
               <Card>
                 <CardContent className="py-10">
-                  <LoadingSpinner
-                    label={t("settings.integrations.loading")}
-                  />
+                  <LoadingSpinner label={t("settings.integrations.loading")} />
                 </CardContent>
               </Card>
             ) : null}
             <Card>
               <CardHeader>
-                <CardTitle>{t("settings.integrations.outboundTitle")}</CardTitle>
+                <CardTitle>
+                  {t("settings.integrations.outboundTitle")}
+                </CardTitle>
                 <CardDescription>
                   {t("settings.integrations.outboundDescription")}
                 </CardDescription>
@@ -7819,7 +8022,8 @@ export default function SettingsPage() {
                       }
                       className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
                       placeholder={
-                        companyName || t("settings.integrations.companyPlaceholder")
+                        companyName ||
+                        t("settings.integrations.companyPlaceholder")
                       }
                       disabled={!currentUser.isAdmin}
                     />
@@ -7833,7 +8037,9 @@ export default function SettingsPage() {
                         setOutboundFromEmail(event.target.value)
                       }
                       className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      placeholder={t("settings.integrations.fromEmailPlaceholder")}
+                      placeholder={t(
+                        "settings.integrations.fromEmailPlaceholder",
+                      )}
                       disabled={!currentUser.isAdmin}
                     />
                   </label>
@@ -7846,7 +8052,9 @@ export default function SettingsPage() {
                         setOutboundReplyToEmail(event.target.value)
                       }
                       className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm"
-                      placeholder={t("settings.integrations.replyToPlaceholder")}
+                      placeholder={t(
+                        "settings.integrations.replyToPlaceholder",
+                      )}
                       disabled={!currentUser.isAdmin}
                     />
                   </label>
@@ -8044,7 +8252,9 @@ export default function SettingsPage() {
       {isSecurityPromptOpen ? (
         <div className="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
-            <h2 className="text-lg font-semibold">{t("settings.security.title")}</h2>
+            <h2 className="text-lg font-semibold">
+              {t("settings.security.title")}
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {t("settings.security.description")}
             </p>

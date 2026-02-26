@@ -44,12 +44,22 @@ export interface WorkflowRules {
   checklistItems: ChecklistItem[];
   returnReasons: string[];
   externalJobRules: ExternalJobRule[];
+  productionCompletionConfig: ProductionCompletionConfig;
 }
 
 export interface ExternalJobRule {
   id: string;
   status: ExternalJobStatus;
   minAttachments: number;
+}
+
+export type ProductionCompletionMode =
+  | "all_items_done"
+  | "completion_stations_done";
+
+export interface ProductionCompletionConfig {
+  mode: ProductionCompletionMode;
+  completionStationIds: string[];
 }
 
 export type WorkflowStatusColor =
@@ -215,6 +225,36 @@ const defaultRules: WorkflowRules = {
     { id: "ext-approved", status: "approved", minAttachments: 1 },
     { id: "ext-cancelled", status: "cancelled", minAttachments: 0 },
   ],
+  productionCompletionConfig: {
+    mode: "all_items_done",
+    completionStationIds: [],
+  },
+};
+
+const sanitizeProductionCompletionConfig = (
+  raw: unknown,
+): ProductionCompletionConfig => {
+  if (!raw || typeof raw !== "object") {
+    return defaultRules.productionCompletionConfig;
+  }
+  const row = raw as {
+    mode?: unknown;
+    completionStationIds?: unknown;
+  };
+  const mode: ProductionCompletionMode =
+    row.mode === "completion_stations_done"
+      ? "completion_stations_done"
+      : "all_items_done";
+  const completionStationIds = Array.isArray(row.completionStationIds)
+    ? row.completionStationIds.filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      )
+    : [];
+  return {
+    mode,
+    completionStationIds,
+  };
 };
 
 const normalizeAttachmentCategories = (
@@ -463,6 +503,9 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           returnReasons: cached.returnReasons ?? defaultRules.returnReasons,
           externalJobRules:
             cached.externalJobRules ?? defaultRules.externalJobRules,
+          productionCompletionConfig: sanitizeProductionCompletionConfig(
+            cached.productionCompletionConfig,
+          ),
         });
       }
       setHasHydrated(true);
@@ -475,7 +518,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           sb
             .from("workflow_rules")
             .select(
-              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, require_order_inputs_engineering, require_order_inputs_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, external_job_status_labels, order_status_config, external_job_status_config, assignment_labels, attachment_categories, attachment_category_defaults",
+              "min_attachments_engineering, min_attachments_production, require_comment_engineering, require_comment_production, require_order_inputs_engineering, require_order_inputs_production, due_soon_days, due_indicator_enabled, due_indicator_statuses, status_labels, external_job_status_labels, order_status_config, external_job_status_config, assignment_labels, attachment_categories, attachment_category_defaults, production_completion_config",
             )
             .eq("tenant_id", user.tenantId)
             .maybeSingle(),
@@ -585,6 +628,10 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
                 minAttachments: row.min_attachments ?? 0,
               }))
             : prev.externalJobRules,
+        productionCompletionConfig: sanitizeProductionCompletionConfig(
+          rulesData?.production_completion_config ??
+            prev.productionCompletionConfig,
+        ),
         };
         writeCachedRules(next);
         return next;
@@ -611,6 +658,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           assignment_labels: defaultRules.assignmentLabels,
           attachment_categories: defaultRules.attachmentCategories,
           attachment_category_defaults: defaultRules.attachmentCategoryDefaults,
+          production_completion_config: defaultRules.productionCompletionConfig,
         });
       }
 
@@ -675,6 +723,9 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
           ),
         attachmentCategoryDefaults:
           patch.attachmentCategoryDefaults ?? prev.attachmentCategoryDefaults,
+        productionCompletionConfig: sanitizeProductionCompletionConfig(
+          patch.productionCompletionConfig ?? prev.productionCompletionConfig,
+        ),
       };
       if (supabase && user.tenantId) {
         void supabase
@@ -700,6 +751,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
               assignment_labels: next.assignmentLabels,
               attachment_categories: next.attachmentCategories,
               attachment_category_defaults: next.attachmentCategoryDefaults,
+              production_completion_config: next.productionCompletionConfig,
             },
             { onConflict: "tenant_id" },
           )

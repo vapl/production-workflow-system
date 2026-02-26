@@ -583,6 +583,10 @@
           missing: "trūkst",
         },
       },
+      productionCompletion: {
+        items: "ieraksti pabeigti",
+        stations: "pabeigšanas stacijas pabeigtas",
+      },
       aiImport: {
         defaultCategoryLabel: "Ražošanas dokumentācija",
         description:
@@ -1019,6 +1023,7 @@
         queued: "Rindā",
         pending: "Gaida",
         in_progress: "Procesā",
+        paused: "Pauzēts",
         blocked: "Bloķēts",
         done: "Pabeigts",
       },
@@ -1515,6 +1520,19 @@
       requireOrderInputsEngineering: "Pirms inženierijas pieprasīt ievades laukus",
       requireOrderInputsProduction: "Pirms ražošanas pieprasīt ievades laukus",
       enableDueDateIndicators: "Ieslēgt termiņa indikatorus",
+      productionCompletionTitle: "Ražošanas pabeigšana",
+      productionCompletionDescription:
+        "Nosakiet, kad pasūtījums ražošanā skaitās pabeigts.",
+      productionCompletionMode: "Pabeigšanas noteikums",
+      productionCompletionModeAllItems:
+        "Pabeigti visi ražošanas ieraksti",
+      productionCompletionModeStations:
+        "Pabeigtas izvēlētās stacijas",
+      productionCompletionStationsTitle: "Pabeigšanas stacijas",
+      productionCompletionNoStations:
+        "Nav pievienotu staciju. Vispirms pievienojiet stacijas sadaļā Operācijas.",
+      productionCompletionSelectAtLeastOne:
+        "Izvēlieties vismaz vienu pabeigšanas staciju, citādi pasūtījumu pēc šī noteikuma nevarēs pabeigt.",
       orderStatusConfiguration: "Pasūtījuma statusu konfigurācija",
       saveOrderStatuses: "Saglabāt pasūtījuma statusus",
       externalJobStatusConfiguration: "Ārējo darbu statusu konfigurācija",

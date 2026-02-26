@@ -35,6 +35,7 @@ import { ViewModeToggle } from "./components/ViewModeToggle";
 import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 import { Input } from "@/components/ui/Input";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 
 export default function OrdersPage() {
   const { t } = useI18n();
@@ -221,27 +222,31 @@ export default function OrdersPage() {
     }
     const { data, error: prodError } = await supabase
       .from("production_items")
-      .select("order_id, status")
+      .select("order_id, station_id, status")
       .in("order_id", orderIds);
     if (prodError || !data) {
       return rows;
     }
-    const counts = new Map<string, { total: number; done: number }>();
+    const counts = new Map<string, Array<{ status: string; stationId: string | null }>>();
     data.forEach((item) => {
-      const entry = counts.get(item.order_id) ?? { total: 0, done: 0 };
-      entry.total += 1;
-      if (item.status === "done") {
-        entry.done += 1;
-      }
+      const entry = counts.get(item.order_id) ?? [];
+      entry.push({
+        status: item.status,
+        stationId: item.station_id,
+      });
       counts.set(item.order_id, entry);
     });
     return rows.map((row) => {
       const stat = counts.get(row.id);
-      if (!stat || stat.total === 0) {
+      if (!stat || stat.length === 0) {
         return row;
       }
-      const displayStatus: OrderStatus =
-        stat.done > 0 && stat.done === stat.total ? "done" : "in_production";
+      const displayStatus: OrderStatus = isOrderProductionComplete(
+        stat,
+        rules.productionCompletionConfig,
+      )
+        ? "done"
+        : "in_production";
       return {
         ...row,
         statusDisplay: displayStatus,
