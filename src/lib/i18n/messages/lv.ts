@@ -691,6 +691,8 @@
         noLongerReadyForEngineering:
           "Pasūtījumam vairs nav statuss “Gatavs inženierijai”.",
         noPermission: "Nav tiesību",
+        orderAssignedToAnotherEngineer:
+          "Pasūtījums piešķirts citam inženierim. To var apskatīt, bet nevar mainīt plūsmas darbības.",
         roleCannotTakeOrder:
           "Jūsu lomai nav atļauts paņemt šo pasūtījumu. Sazinieties ar administratoru.",
         couldNotTakeOrder:

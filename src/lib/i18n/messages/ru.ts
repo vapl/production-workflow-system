@@ -670,6 +670,8 @@
         noLongerReadyForEngineering:
           "Заказ больше не находится в статусе «Готов к инженерии».",
         noPermission: "Нет доступа",
+        orderAssignedToAnotherEngineer:
+          "Заказ назначен другому инженеру. Его можно просматривать, но нельзя менять этапы процесса.",
         roleCannotTakeOrder:
           "Вашей роли не разрешено брать этот заказ. Обратитесь к администратору.",
         couldNotTakeOrder:

@@ -383,8 +383,9 @@ export default function OrderDetailPage() {
   >({});
   const [signedExternalAttachmentUrls, setSignedExternalAttachmentUrls] =
     useState<Record<string, string>>({});
-  const [downloadingAttachmentGroup, setDownloadingAttachmentGroup] =
-    useState<string | null>(null);
+  const [downloadingAttachmentGroup, setDownloadingAttachmentGroup] = useState<
+    string | null
+  >(null);
   const [deletingAttachmentGroup, setDeletingAttachmentGroup] = useState<
     string | null
   >(null);
@@ -417,18 +418,27 @@ export default function OrderDetailPage() {
     role === "Engineering" &&
     !orderState?.assignedEngineerId &&
     orderState?.status === "ready_for_engineering";
-  const canReturnToQueue =
+  const isAssignedToCurrentEngineer =
+    role === "Engineering" && orderState?.assignedEngineerId === userId;
+  const isAssignedToAnotherEngineer =
     role === "Engineering" &&
-    orderState?.assignedEngineerId === userId &&
+    Boolean(orderState?.assignedEngineerId) &&
+    orderState?.assignedEngineerId !== userId;
+  const canReturnToQueue =
+    isAssignedToCurrentEngineer &&
     (orderState?.status === "in_engineering" ||
       orderState?.status === "engineering_blocked" ||
       orderState?.status === "ready_for_engineering");
   const canSendToEngineering =
     role === "Sales" && orderState?.status === "draft";
   const canStartEngineering =
-    role === "Engineering" && orderState?.status === "ready_for_engineering";
+    role === "Engineering" &&
+    orderState?.status === "ready_for_engineering" &&
+    !isAssignedToAnotherEngineer;
   const canSendToProduction =
-    role === "Engineering" && orderState?.status === "in_engineering";
+    role === "Engineering" &&
+    orderState?.status === "in_engineering" &&
+    !isAssignedToAnotherEngineer;
   const canAssignEngineer = role === "Sales" || isAdmin;
   const canSendBack =
     (role === "Sales" &&
@@ -436,6 +446,7 @@ export default function OrderDetailPage() {
         orderState?.status === "in_engineering" ||
         orderState?.status === "engineering_blocked")) ||
     (role === "Engineering" &&
+      !isAssignedToAnotherEngineer &&
       (orderState?.status === "in_engineering" ||
         orderState?.status === "engineering_blocked" ||
         orderState?.status === "ready_for_production"));
@@ -1104,9 +1115,13 @@ export default function OrderDetailPage() {
   }, [activeTab, attachments, signedAttachmentUrls]);
 
   useEffect(() => {
-    const availableIds = new Set(attachments.map((attachment) => attachment.id));
+    const availableIds = new Set(
+      attachments.map((attachment) => attachment.id),
+    );
     setSelectedAttachmentIds((prev) => {
-      const next = prev.filter((attachmentId) => availableIds.has(attachmentId));
+      const next = prev.filter((attachmentId) =>
+        availableIds.has(attachmentId),
+      );
       if (next.length === prev.length) {
         const same = next.every((id, index) => id === prev[index]);
         if (same) {
@@ -1228,14 +1243,13 @@ export default function OrderDetailPage() {
         normalizeOrderInputValue(field, orderInputValues[field.id]),
       ),
     ).length;
-  const persistedProductionOrderInputCount = productionScopedOrderInputFields
-    .filter((field) =>
+  const persistedProductionOrderInputCount =
+    productionScopedOrderInputFields.filter((field) =>
       shouldPersistOrderInputValue(
         field,
         normalizeOrderInputValue(field, orderInputValues[field.id]),
       ),
-    )
-    .length;
+    ).length;
   const hasRequiredOrderInputs =
     completedRequiredOrderInputCount === requiredOrderInputFields.length;
   const hasRequiredProductionOrderInputs =
@@ -1260,9 +1274,10 @@ export default function OrderDetailPage() {
     (!rules.requireOrderInputsForEngineering || hasRequiredOrderInputs);
   const canAdvanceToProduction =
     meetsProductionChecklist &&
-    (engineeringScopedAttachments.length >= rules.minAttachmentsForProduction) &&
+    engineeringScopedAttachments.length >= rules.minAttachmentsForProduction &&
     meetsProductionComment &&
-    (!rules.requireOrderInputsForProduction || hasRequiredProductionOrderInputs) &&
+    (!rules.requireOrderInputsForProduction ||
+      hasRequiredProductionOrderInputs) &&
     hasAssignedEngineer;
   const engineeringGateItems = [
     ...(requiredForEngineering.length > 0
@@ -1608,8 +1623,12 @@ export default function OrderDetailPage() {
   if (!orderState && (isLoadingOrder || isOrdersLoading || !showNotFound)) {
     return (
       <section className="space-y-3">
-        <h1 className="text-xl font-semibold">{t("orders.detail.loadingTitle")}</h1>
-        <p className="text-sm text-muted-foreground">{t("orders.detail.loadingDescription")}</p>
+        <h1 className="text-xl font-semibold">
+          {t("orders.detail.loadingTitle")}
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          {t("orders.detail.loadingDescription")}
+        </p>
         <LoadingSpinner label={t("orders.detail.loadingSpinner")} />
       </section>
     );
@@ -1618,7 +1637,9 @@ export default function OrderDetailPage() {
   if (!orderState) {
     return (
       <section className="space-y-3">
-        <h1 className="text-xl font-semibold">{t("orders.detail.notFoundTitle")}</h1>
+        <h1 className="text-xl font-semibold">
+          {t("orders.detail.notFoundTitle")}
+        </h1>
         <p className="text-sm text-muted-foreground">
           {t("orders.detail.notFoundDescription")}
         </p>
@@ -1681,22 +1702,37 @@ export default function OrderDetailPage() {
   };
   const buildExternalTimeline = (job: ExternalJob) => {
     const events: Array<{ label: string; at: string }> = [
-      { label: t("orders.detail.external.timeline.created"), at: job.createdAt },
+      {
+        label: t("orders.detail.external.timeline.created"),
+        at: job.createdAt,
+      },
     ];
     if (job.partnerRequestSentAt) {
-      events.push({ label: t("orders.detail.external.timeline.sent"), at: job.partnerRequestSentAt });
+      events.push({
+        label: t("orders.detail.external.timeline.sent"),
+        at: job.partnerRequestSentAt,
+      });
     }
     if (job.partnerRequestViewedAt) {
-      events.push({ label: t("orders.detail.external.timeline.viewed"), at: job.partnerRequestViewedAt });
+      events.push({
+        label: t("orders.detail.external.timeline.viewed"),
+        at: job.partnerRequestViewedAt,
+      });
     }
     if (job.partnerResponseSubmittedAt) {
-      events.push({ label: t("orders.detail.external.timeline.responded"), at: job.partnerResponseSubmittedAt });
+      events.push({
+        label: t("orders.detail.external.timeline.responded"),
+        at: job.partnerResponseSubmittedAt,
+      });
     }
     const confirmed = (job.statusHistory ?? []).find(
       (entry) => entry.status === "approved" || entry.status === "delivered",
     );
     if (confirmed) {
-      events.push({ label: t("orders.detail.external.timeline.confirmedManually"), at: confirmed.changedAt });
+      events.push({
+        label: t("orders.detail.external.timeline.confirmedManually"),
+        at: confirmed.changedAt,
+      });
     }
     return events
       .slice()
@@ -1755,7 +1791,8 @@ export default function OrderDetailPage() {
         }
         const result = await uploadOrderAttachment(file, orderState.id);
         if (result.error || !result.attachment) {
-          const rawError = result.error ?? t("orders.detail.errors.uploadFailed");
+          const rawError =
+            result.error ?? t("orders.detail.errors.uploadFailed");
           if (rawError.toLowerCase().includes("mime type")) {
             setAttachmentError(
               t("orders.detail.errors.uploadBlockedByMimeRules"),
@@ -2172,11 +2209,6 @@ export default function OrderDetailPage() {
     if (field.fieldType === "table") {
       const columns = field.columns ?? [];
       const rows = Array.isArray(normalized) ? normalized : [];
-      const parseMultiValue = (raw: string) =>
-        raw
-          .split(/[\/;]+/)
-          .map((item) => item.trim())
-          .filter(Boolean);
       const selectedAttachmentId = tableImportAttachmentIds[field.id] ?? "";
       const availableParseAttachments = productionDocumentationParseAttachments;
       const selectedAttachment = availableParseAttachments.find(
@@ -2263,28 +2295,41 @@ export default function OrderDetailPage() {
       const resolveColumnWidth = (column: OrderInputTableColumn) => {
         const token = `${column.key} ${column.label}`.toLowerCase();
         if (
-          token.includes("krāsa") ||
-          token.includes("krasa") ||
-          token.includes("color")
+          token.includes("skaits") ||
+          token.includes("gab") ||
+          token.includes("qty") ||
+          token.includes("quantity")
         ) {
-          return "480px";
+          return "88px";
         }
         if (
           token.includes("izmērs") ||
           token.includes("izmers") ||
           token.includes("size")
         ) {
-          return "480px";
+          return "170px";
         }
         if (
-          token.includes("skaits") ||
-          token.includes("gab") ||
-          token.includes("qty") ||
-          token.includes("quantity")
+          token.includes("krāsa") ||
+          token.includes("krasa") ||
+          token.includes("color")
         ) {
-          return "96px";
+          return "220px";
         }
-        return "150px";
+        if (
+          token.includes("nosaukums") ||
+          token.includes("name") ||
+          token.includes("description")
+        ) {
+          return "260px";
+        }
+        if (token.includes("konstrukcija") || token.includes("construction")) {
+          return "190px";
+        }
+        if (token.includes("position") || token.includes("poz")) {
+          return "170px";
+        }
+        return "180px";
       };
       return (
         <div
@@ -2424,24 +2469,19 @@ export default function OrderDetailPage() {
               {t("orders.detail.aiImport.proOnly")}
             </div>
           )}
-          {canUseAiOrderInputImport && showAiReviewNotice && (
-            <div className="text-xs text-amber-700">
-              {t("orders.detail.aiImport.reviewWarning")}
-            </div>
-          )}
           {columns.length === 0 ? (
             <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
               {t("orders.detail.aiImport.noColumnsConfigured")}
             </div>
           ) : (
-            <div className="w-full max-w-full overflow-x-auto md:overflow-x-hidden rounded-lg border border-border">
+            <div className="w-full max-w-full overflow-x-auto rounded-lg border border-border">
               {isParsingThisField && (
                 <LoadingSpinner
                   className="justify-start border-b border-border px-3 py-2"
                   label={t("orders.detail.aiImport.addingRows")}
                 />
               )}
-              <table className="w-full text-sm">
+              <table className="w-full table-fixed text-sm">
                 <colgroup>
                   {columns.map((column) => (
                     <col
@@ -2449,7 +2489,7 @@ export default function OrderDetailPage() {
                       style={{ width: resolveColumnWidth(column) }}
                     />
                   ))}
-                  <col style={{ width: "130px" }} />
+                  <col style={{ width: "116px" }} />
                 </colgroup>
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
@@ -2545,7 +2585,7 @@ export default function OrderDetailPage() {
                             return (
                               <td
                                 key={column.key}
-                                className="px-3 py-2 align-top"
+                                className="whitespace-nowrap px-3 py-2 align-top"
                               >
                                 <Select
                                   value={
@@ -2577,7 +2617,9 @@ export default function OrderDetailPage() {
                                         isMultiSelect
                                           ? canAddMore
                                             ? t("orders.detail.aiImport.select")
-                                            : t("orders.detail.aiImport.maxSelected")
+                                            : t(
+                                                "orders.detail.aiImport.maxSelected",
+                                              )
                                           : t("orders.detail.aiImport.select")
                                       }
                                     />
@@ -2587,7 +2629,9 @@ export default function OrderDetailPage() {
                                       {isMultiSelect
                                         ? canAddMore
                                           ? t("orders.detail.aiImport.select")
-                                          : t("orders.detail.aiImport.maxSelected")
+                                          : t(
+                                              "orders.detail.aiImport.maxSelected",
+                                            )
                                         : t("orders.detail.aiImport.select")}
                                     </SelectItem>
                                     {(column.options ?? []).map((option) => (
@@ -2648,7 +2692,7 @@ export default function OrderDetailPage() {
                           return (
                             <td
                               key={column.key}
-                              className="px-3 py-2 align-top"
+                              className="whitespace-nowrap px-3 py-2 align-top"
                             >
                               <Input
                                 type={
@@ -2667,30 +2711,10 @@ export default function OrderDetailPage() {
                                 }
                                 className="h-9 w-full px-2 text-sm"
                               />
-                              {column.fieldType !== "number" &&
-                                typeof cellValue === "string" &&
-                                (() => {
-                                  const chips = parseMultiValue(cellValue);
-                                  if (chips.length <= 1) {
-                                    return null;
-                                  }
-                                  return (
-                                    <div className="mt-2 flex flex-wrap gap-1">
-                                      {chips.map((chip, chipIndex) => (
-                                        <span
-                                          key={`${chip}-${chipIndex}`}
-                                          className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
-                                        >
-                                          {chip}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  );
-                                })()}
                             </td>
                           );
                         })}
-                        <td className="px-3 py-2 align-top text-right">
+                        <td className="whitespace-nowrap px-3 py-2 align-top text-right">
                           <div className="flex items-start justify-end gap-2">
                             <Button
                               size="sm"
@@ -2851,7 +2875,9 @@ export default function OrderDetailPage() {
     if (targetItems.length === 0) {
       notify({
         title: t("orders.detail.notifications.noFilesSelectedTitle"),
-        description: t("orders.detail.notifications.noFilesSelectedDescription"),
+        description: t(
+          "orders.detail.notifications.noFilesSelectedDescription",
+        ),
         variant: "error",
       });
       return;
@@ -2877,7 +2903,10 @@ export default function OrderDetailPage() {
         if (attachment.url?.startsWith("blob:")) {
           URL.revokeObjectURL(attachment.url);
         }
-        const removed = await removeOrderAttachment(orderState.id, attachment.id);
+        const removed = await removeOrderAttachment(
+          orderState.id,
+          attachment.id,
+        );
         if (removed) {
           removedIds.push(attachment.id);
         }
@@ -2985,7 +3014,9 @@ export default function OrderDetailPage() {
       });
       if (missingRequired) {
         setExternalError(
-          t("orders.detail.errors.fieldRequired", { field: missingRequired.label }),
+          t("orders.detail.errors.fieldRequired", {
+            field: missingRequired.label,
+          }),
         );
         return;
       }
@@ -3093,7 +3124,8 @@ export default function OrderDetailPage() {
           const upload = await uploadExternalJobAttachment(file, created.id);
           if (upload.error || !upload.attachment) {
             setExternalError(
-              upload.error ?? t("orders.detail.errors.uploadPartnerRequestFiles"),
+              upload.error ??
+                t("orders.detail.errors.uploadPartnerRequestFiles"),
             );
             continue;
           }
@@ -3213,7 +3245,9 @@ export default function OrderDetailPage() {
       if (payload.error === "feature_not_available") {
         setExternalError(t("orders.detail.errors.featureProOnly"));
       } else {
-        setExternalError(payload.error ?? t("orders.detail.errors.sendToPartnerFailed"));
+        setExternalError(
+          payload.error ?? t("orders.detail.errors.sendToPartnerFailed"),
+        );
       }
       setSendingToPartnerJobId(null);
       return false;
@@ -3520,10 +3554,15 @@ export default function OrderDetailPage() {
             : t("orders.detail.notifications.anotherEngineerTook"),
           variant: "error",
         });
-      } else if (latestOrder && latestOrder.status !== "ready_for_engineering") {
+      } else if (
+        latestOrder &&
+        latestOrder.status !== "ready_for_engineering"
+      ) {
         notify({
           title: t("orders.detail.notifications.orderStateChanged"),
-          description: t("orders.detail.notifications.noLongerReadyForEngineering"),
+          description: t(
+            "orders.detail.notifications.noLongerReadyForEngineering",
+          ),
           variant: "error",
         });
       } else if (
@@ -3562,6 +3601,20 @@ export default function OrderDetailPage() {
 
   async function handleReturnToQueue() {
     if (!orderState) {
+      return;
+    }
+    if (
+      role === "Engineering" &&
+      orderState.assignedEngineerId &&
+      orderState.assignedEngineerId !== userId
+    ) {
+      notify({
+        title: t("orders.detail.notifications.noPermission"),
+        description: t(
+          "orders.detail.notifications.orderAssignedToAnotherEngineer",
+        ),
+        variant: "error",
+      });
       return;
     }
     const shouldResetStatus =
@@ -3616,6 +3669,20 @@ export default function OrderDetailPage() {
       | "in_production",
   ) {
     if (!orderState) {
+      return;
+    }
+    if (
+      role === "Engineering" &&
+      orderState.assignedEngineerId &&
+      orderState.assignedEngineerId !== userId
+    ) {
+      notify({
+        title: t("orders.detail.notifications.noPermission"),
+        description: t(
+          "orders.detail.notifications.orderAssignedToAnotherEngineer",
+        ),
+        variant: "error",
+      });
       return;
     }
     const now = new Date().toISOString();
@@ -3773,7 +3840,9 @@ export default function OrderDetailPage() {
       if (includedCount === 0) {
         notify({
           title: t("orders.detail.notifications.downloadFailed"),
-          description: t("orders.detail.notifications.noFilesDownloadableInCategory"),
+          description: t(
+            "orders.detail.notifications.noFilesDownloadableInCategory",
+          ),
           variant: "error",
         });
         return;
@@ -3978,7 +4047,9 @@ export default function OrderDetailPage() {
                   }`}
                 >
                   <span>{section.label}</span>
-                  {isActive ? <span className="text-xs">{t("orders.detail.active")}</span> : null}
+                  {isActive ? (
+                    <span className="text-xs">{t("orders.detail.active")}</span>
+                  ) : null}
                 </button>
               );
             })}
@@ -4012,16 +4083,26 @@ export default function OrderDetailPage() {
                 {t("orders.detail.back")}
               </Link>
               <TabsList className="min-w-max h-9 shadow-sm **:data-[slot=tabs-trigger]:h-7 **:data-[slot=tabs-trigger]:py-1">
-                <TabsTrigger value="overview">{t("orders.detail.tabs.overview")}</TabsTrigger>
-                <TabsTrigger value="files">{t("orders.detail.tabs.files")}</TabsTrigger>
-                <TabsTrigger value="details">{t("orders.detail.tabs.details")}</TabsTrigger>
-                <TabsTrigger value="workflow">{t("orders.detail.tabs.workflow")}</TabsTrigger>
-                <TabsTrigger value="external">{t("orders.detail.tabs.external")}</TabsTrigger>
+                <TabsTrigger value="overview">
+                  {t("orders.detail.tabs.overview")}
+                </TabsTrigger>
+                <TabsTrigger value="files">
+                  {t("orders.detail.tabs.files")}
+                </TabsTrigger>
+                <TabsTrigger value="details">
+                  {t("orders.detail.tabs.details")}
+                </TabsTrigger>
+                <TabsTrigger value="workflow">
+                  {t("orders.detail.tabs.workflow")}
+                </TabsTrigger>
+                <TabsTrigger value="external">
+                  {t("orders.detail.tabs.external")}
+                </TabsTrigger>
               </TabsList>
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Badge variant={priorityVariant}>{orderState.priority}</Badge>
-          <Badge variant={statusVariant}>
+              <Badge variant={statusVariant}>
                 {statusLabel(displayStatus)}
               </Badge>
               {productionCompletionProgress ? (
@@ -4074,13 +4155,17 @@ export default function OrderDetailPage() {
                       {t("orders.detail.schedule")}
                     </div>
                     <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">{t("orders.page.dueDate")}</span>
+                      <span className="text-muted-foreground">
+                        {t("orders.page.dueDate")}
+                      </span>
                       <span className="font-medium">
                         {formatDate(orderState.dueDate)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">{t("orders.page.quantity")}</span>
+                      <span className="text-muted-foreground">
+                        {t("orders.page.quantity")}
+                      </span>
                       <span className="font-medium">
                         {orderState.quantity ?? "--"}
                       </span>
@@ -4153,10 +4238,14 @@ export default function OrderDetailPage() {
                       {t("orders.detail.orderInputs.noneConfiguredTitle")}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {t("orders.detail.orderInputs.noneConfiguredDescription1")}
+                      {t(
+                        "orders.detail.orderInputs.noneConfiguredDescription1",
+                      )}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {t("orders.detail.orderInputs.noneConfiguredDescription2")}
+                      {t(
+                        "orders.detail.orderInputs.noneConfiguredDescription2",
+                      )}
                     </p>
                     <div className="mt-3">
                       <Button variant="outline" size="sm" asChild>
@@ -4257,9 +4346,12 @@ export default function OrderDetailPage() {
                         >
                           <SelectTrigger className="h-8 w-55 rounded-md text-xs">
                             <SelectValue
-                              placeholder={t("orders.detail.workflow.assignPlaceholder", {
-                                role: engineerLabel.toLowerCase(),
-                              })}
+                              placeholder={t(
+                                "orders.detail.workflow.assignPlaceholder",
+                                {
+                                  role: engineerLabel.toLowerCase(),
+                                },
+                              )}
                             />
                           </SelectTrigger>
                           <SelectContent>
@@ -4413,7 +4505,9 @@ export default function OrderDetailPage() {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between">
-                      <CardTitle>{t("orders.detail.workflow.preparationChecklist")}</CardTitle>
+                      <CardTitle>
+                        {t("orders.detail.workflow.preparationChecklist")}
+                      </CardTitle>
                       <div className="text-xs text-muted-foreground">
                         {checklistDoneCount}/{activeChecklistItems.length}
                       </div>
@@ -4468,15 +4562,19 @@ export default function OrderDetailPage() {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>{t("orders.detail.workflow.statusHistory")}</CardTitle>
+                  <CardTitle>
+                    {t("orders.detail.workflow.statusHistory")}
+                  </CardTitle>
                   {statusHistory.length > 5 ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowAllHistory((prev) => !prev)}
-                      >
-                      {showAllHistory ? t("orders.detail.showRecent") : t("orders.detail.showAll")}
-                      </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAllHistory((prev) => !prev)}
+                    >
+                      {showAllHistory
+                        ? t("orders.detail.showRecent")
+                        : t("orders.detail.showAll")}
+                    </Button>
                   ) : null}
                 </div>
               </CardHeader>
@@ -4547,7 +4645,9 @@ export default function OrderDetailPage() {
                     setAttachmentCategory(value);
                     setIsAttachmentCategoryManual(true);
                   }}
-                  description={t("orders.detail.attachments.categoryDescription")}
+                  description={t(
+                    "orders.detail.attachments.categoryDescription",
+                  )}
                 >
                   <Select
                     value={attachmentCategory}
@@ -4664,7 +4764,9 @@ export default function OrderDetailPage() {
                               size="sm"
                               variant="outline"
                               className="h-7 text-xs"
-                              disabled={downloadingAttachmentGroup === group.key}
+                              disabled={
+                                downloadingAttachmentGroup === group.key
+                              }
                               onClick={() => {
                                 void handleDownloadAttachmentGroup(group);
                               }}
@@ -4802,11 +4904,15 @@ export default function OrderDetailPage() {
                     placeholder={t("orders.detail.comments.placeholder")}
                   />
                   <div className="flex justify-end">
-                    <Button onClick={handleAddComment}>{t("orders.detail.comments.add")}</Button>
+                    <Button onClick={handleAddComment}>
+                      {t("orders.detail.comments.add")}
+                    </Button>
                   </div>
                 </div>
                 {comments.length === 0 ? (
-                  <p className="text-muted-foreground">{t("orders.detail.comments.empty")}</p>
+                  <p className="text-muted-foreground">
+                    {t("orders.detail.comments.empty")}
+                  </p>
                 ) : (
                   <div className="space-y-2">
                     {comments.map((comment) => (
@@ -4850,7 +4956,9 @@ export default function OrderDetailPage() {
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 <div className="space-y-2">
-                  <div className="text-sm font-medium">{t("orders.detail.external.requestMode")}</div>
+                  <div className="text-sm font-medium">
+                    {t("orders.detail.external.requestMode")}
+                  </div>
                   <div className="grid gap-2 md:grid-cols-2">
                     <button
                       type="button"
@@ -4861,7 +4969,9 @@ export default function OrderDetailPage() {
                           : "border-border bg-background"
                       }`}
                     >
-                      <div className="font-medium">{t("orders.detail.external.manualEntry")}</div>
+                      <div className="font-medium">
+                        {t("orders.detail.external.manualEntry")}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {t("orders.detail.external.manualEntryDescription")}
                       </div>
@@ -4879,7 +4989,9 @@ export default function OrderDetailPage() {
                           : "border-border bg-background"
                       } ${!canSendExternalJobToPartner ? "opacity-60" : ""}`}
                     >
-                      <div className="font-medium">{t("orders.detail.external.partnerPortal")}</div>
+                      <div className="font-medium">
+                        {t("orders.detail.external.partnerPortal")}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {t("orders.detail.external.partnerPortalDescription")}
                       </div>
@@ -4914,7 +5026,9 @@ export default function OrderDetailPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__all__">{t("orders.detail.external.allGroups")}</SelectItem>
+                        <SelectItem value="__all__">
+                          {t("orders.detail.external.allGroups")}
+                        </SelectItem>
                         {activeGroups.map((group) => (
                           <SelectItem key={group.id} value={group.id}>
                             {group.name}
@@ -4940,7 +5054,9 @@ export default function OrderDetailPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">{t("orders.detail.external.selectPartner")}</SelectItem>
+                        <SelectItem value="__none__">
+                          {t("orders.detail.external.selectPartner")}
+                        </SelectItem>
                         {activePartners
                           .filter((partner) =>
                             externalPartnerGroupId
@@ -5148,7 +5264,9 @@ export default function OrderDetailPage() {
                       onChange={(event) =>
                         setExternalPortalComment(event.target.value)
                       }
-                      placeholder={t("orders.detail.external.partnerCommentPlaceholder")}
+                      placeholder={t(
+                        "orders.detail.external.partnerCommentPlaceholder",
+                      )}
                       className="min-h-22.5"
                     />
                     <div className="space-y-2">
@@ -5284,12 +5402,14 @@ export default function OrderDetailPage() {
                               </div>
                               {job.partnerRequestComment ? (
                                 <div className="text-xs text-muted-foreground">
-                                  {t("orders.detail.external.requestNote")}: {job.partnerRequestComment}
+                                  {t("orders.detail.external.requestNote")}:{" "}
+                                  {job.partnerRequestComment}
                                 </div>
                               ) : null}
                               {job.partnerResponseNote ? (
                                 <div className="text-xs text-muted-foreground">
-                                  {t("orders.detail.external.note")}: {job.partnerResponseNote}
+                                  {t("orders.detail.external.note")}:{" "}
+                                  {job.partnerResponseNote}
                                 </div>
                               ) : null}
                               {(job.requestMode === "partner_portal"
@@ -5373,10 +5493,16 @@ export default function OrderDetailPage() {
                                   {sendingToPartnerJobId === job.id
                                     ? t("orders.detail.sending")
                                     : job.requestMode === "partner_portal"
-                                      ? t("orders.detail.external.resendRequest")
+                                      ? t(
+                                          "orders.detail.external.resendRequest",
+                                        )
                                       : job.partnerRequestSentAt
-                                        ? t("orders.detail.external.resendRequest")
-                                        : t("orders.detail.external.sendToPartner")}
+                                        ? t(
+                                            "orders.detail.external.resendRequest",
+                                          )
+                                        : t(
+                                            "orders.detail.external.sendToPartner",
+                                          )}
                                 </Button>
                               ) : (
                                 <span className="text-xs text-muted-foreground">
@@ -5668,7 +5794,9 @@ export default function OrderDetailPage() {
       {isReturnOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
-            <h2 className="text-lg font-semibold">{t("orders.detail.sendBackTitle")}</h2>
+            <h2 className="text-lg font-semibold">
+              {t("orders.detail.sendBackTitle")}
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {t("orders.detail.sendBackDescription")}{" "}
               {statusLabel(returnTargetStatus)}.
@@ -5688,10 +5816,14 @@ export default function OrderDetailPage() {
                   }
                 >
                   <SelectTrigger className="h-10 w-full">
-                    <SelectValue placeholder={t("orders.detail.selectReason")} />
+                    <SelectValue
+                      placeholder={t("orders.detail.selectReason")}
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">{t("orders.detail.selectReason")}</SelectItem>
+                    <SelectItem value="__none__">
+                      {t("orders.detail.selectReason")}
+                    </SelectItem>
                     {rules.returnReasons
                       .filter((reason) => reason.trim() !== "")
                       .map((reason) => (
@@ -5720,7 +5852,8 @@ export default function OrderDetailPage() {
                   if (!returnReason && !trimmedNote) {
                     return;
                   }
-                  const reasonLabel = returnReason || t("orders.detail.noReasonSelected");
+                  const reasonLabel =
+                    returnReason || t("orders.detail.noReasonSelected");
                   const created = await addOrderComment(orderState.id, {
                     message: `Returned: ${reasonLabel}${
                       trimmedNote ? ` - ${trimmedNote}` : ""

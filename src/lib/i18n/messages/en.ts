@@ -679,6 +679,8 @@
         noLongerReadyForEngineering:
           "Order is no longer in Ready for engineering status.",
         noPermission: "No permission",
+        orderAssignedToAnotherEngineer:
+          "Order is assigned to another engineer. You can view it, but cannot change workflow.",
         roleCannotTakeOrder:
           "Your role is not allowed to take this order. Contact Admin.",
         couldNotTakeOrder: "Could not take order. Please refresh and try again.",

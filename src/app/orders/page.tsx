@@ -115,8 +115,10 @@ export default function OrdersPage() {
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const [partnerGroupFilter, setPartnerGroupFilter] = useState("");
-  const [assignmentFilter, setAssignmentFilter] = useState<"queue" | "my">(
-    isEngineeringUser ? "my" : "queue",
+  const [assignmentFilter, setAssignmentFilter] = useState<
+    "all" | "queue" | "my"
+  >(
+    isEngineeringUser ? "all" : "queue",
   );
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [blockedOnly, setBlockedOnly] = useState(false);
@@ -390,10 +392,10 @@ export default function OrdersPage() {
     }
   }, [defaultStatusFilter, roleStatusOptions, statusFilter]);
   useEffect(() => {
-    if (isEngineeringUser) {
-      setAssignmentFilter("my");
+    if (!isEngineeringUser && assignmentFilter === "all") {
+      setAssignmentFilter("queue");
     }
-  }, [isEngineeringUser]);
+  }, [assignmentFilter, isEngineeringUser]);
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -407,7 +409,7 @@ export default function OrdersPage() {
         statusFilter: OrderStatus | "all";
         groupByContract: boolean;
         partnerGroupFilter: string;
-        assignmentFilter: "queue" | "my";
+        assignmentFilter: "all" | "queue" | "my";
         overdueOnly: boolean;
         blockedOnly: boolean;
         unassignedOnly: boolean;
@@ -422,10 +424,11 @@ export default function OrdersPage() {
         setPartnerGroupFilter(parsed.partnerGroupFilter);
       }
       if (
+        parsed.assignmentFilter === "all" ||
         parsed.assignmentFilter === "queue" ||
         parsed.assignmentFilter === "my"
       ) {
-        setAssignmentFilter(isEngineeringUser ? "my" : parsed.assignmentFilter);
+        setAssignmentFilter(parsed.assignmentFilter);
       }
       if (typeof parsed.overdueOnly === "boolean") {
         setOverdueOnly(parsed.overdueOnly);
@@ -539,11 +542,13 @@ export default function OrdersPage() {
     let filtered = source;
     if (isEngineeringUser) {
       filtered = filtered.filter((order) =>
-        isEngineeringAlwaysVisibleStatus(getEffectiveStatus(order))
+        assignmentFilter === "all"
           ? true
-          : assignmentFilter === "queue"
-            ? !order.assignedEngineerId
-            : order.assignedEngineerId === user.id,
+          : isEngineeringAlwaysVisibleStatus(getEffectiveStatus(order))
+            ? true
+            : assignmentFilter === "queue"
+              ? !order.assignedEngineerId
+              : order.assignedEngineerId === user.id,
       );
     }
     if (statusFilter !== "all") {
@@ -679,7 +684,7 @@ export default function OrdersPage() {
             query.or(
               "assigned_engineer_id.is.null,status.in.(ready_for_production,in_production),status.eq.done",
             );
-          } else {
+          } else if (assignmentFilter === "my") {
             query.or(
               `assigned_engineer_id.eq.${user.id},status.in.(ready_for_production,in_production),status.eq.done`,
             );
@@ -824,7 +829,7 @@ export default function OrdersPage() {
           query.or(
             "assigned_engineer_id.is.null,status.in.(ready_for_production,in_production),status.eq.done",
           );
-        } else {
+        } else if (assignmentFilter === "my") {
           query.or(
             `assigned_engineer_id.eq.${user.id},status.in.(ready_for_production,in_production),status.eq.done`,
           );
@@ -1104,9 +1109,10 @@ export default function OrdersPage() {
                 title={t("orders.page.engineering")}
                 value={assignmentFilter}
                 onChange={(value) =>
-                  setAssignmentFilter(value as "queue" | "my")
+                  setAssignmentFilter(value as "all" | "queue" | "my")
                 }
                 options={[
+                  { value: "all", label: t("orders.page.all") },
                   { value: "queue", label: t("orders.page.queue") },
                   { value: "my", label: t("orders.page.myWork") },
                 ]}
@@ -1313,7 +1319,7 @@ export default function OrdersPage() {
                         query.or(
                           "assigned_engineer_id.is.null,status.in.(ready_for_production,in_production),status.eq.done",
                         );
-                      } else {
+                      } else if (assignmentFilter === "my") {
                         query.or(
                           `assigned_engineer_id.eq.${user.id},status.in.(ready_for_production,in_production),status.eq.done`,
                         );

@@ -4386,7 +4386,7 @@ export default function SettingsPage() {
                                           Number(event.target.value) || 1,
                                       })
                                     }
-                                    className="h-9 rounded-md border border-border bg-input-background px-2 text-sm"
+                                    className="h-9 rounded-md bg-input-background px-2 text-sm"
                                   />
                                 </label>
                               </div>
@@ -7172,8 +7172,8 @@ export default function SettingsPage() {
                             })
                           )}
                         </div>
-                        {rules.productionCompletionConfig
-                          .completionStationIds.length === 0 ? (
+                        {rules.productionCompletionConfig.completionStationIds
+                          .length === 0 ? (
                           <div className="mt-3 rounded-md border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                             {t(
                               "settings.workflow.productionCompletionSelectAtLeastOne",

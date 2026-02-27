@@ -12,7 +12,7 @@ import { useI18n } from "@/lib/i18n/useI18n";
 
 export type StatusOption = { value: OrderStatus | "all"; label: string };
 type StatusFilter = StatusOption["value"];
-type AssignmentFilter = "queue" | "my";
+type AssignmentFilter = "all" | "queue" | "my";
 
 interface OrdersToolbarProps {
   searchQuery: string;
@@ -91,6 +91,7 @@ export function OrdersToolbar({
                 <div className="flex flex-wrap gap-2">
                   {(
                     [
+                      { value: "all", label: t("orders.page.all") },
                       { value: "queue", label: t("orders.page.queue") },
                       { value: "my", label: t("orders.page.myWork") },
                     ] as const
