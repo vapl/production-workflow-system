@@ -91,32 +91,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             canViewDashboard
               ? {
                   href: "/",
-                  label: "Dashboard",
+                  label: t("appShell.dashboard"),
                   icon: LayoutDashboardIcon,
                 }
               : null,
             {
               href: "/orders",
-              label: "Orders",
+              label: t("appShell.orders"),
               icon: PackageIcon,
             },
             canViewProduction
               ? {
                   href: "/production",
-                  label: "Production",
+                  label: t("appShell.production"),
                   icon: FactoryIcon,
                 }
               : canViewProductionOperator
                 ? {
                     href: "/production/operator",
-                    label: "Production",
+                    label: t("appShell.production"),
                     icon: FactoryIcon,
                   }
                 : null,
             canViewSettings
               ? {
                   href: "/settings",
-                  label: "Settings",
+                  label: t("appShell.settings"),
                   icon: SettingsIcon,
                 }
               : null,

@@ -27,6 +27,7 @@ import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate } from "@/lib/domain/formatters";
 import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
+import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus";
 import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
 import {
   computeWorkingMinutes,
@@ -1017,31 +1018,6 @@ export default function OperatorProductionPage() {
     return map;
   }, [productionItems]);
 
-  const computeRunStatus = (items: ProductionItemRow[]) => {
-    if (items.length === 0) {
-      return "queued" as BatchRunRow["status"];
-    }
-    if (items.every((item) => item.status === "done")) {
-      return "done" as BatchRunRow["status"];
-    }
-    if (items.some((item) => item.status === "blocked")) {
-      return "blocked" as BatchRunRow["status"];
-    }
-    if (items.some((item) => item.status === "in_progress")) {
-      return "in_progress" as BatchRunRow["status"];
-    }
-    if (items.some((item) => item.status === "paused")) {
-      return "paused" as BatchRunRow["status"];
-    }
-    if (items.some((item) => item.status === "queued")) {
-      return "queued" as BatchRunRow["status"];
-    }
-    if (items.some((item) => item.status === "pending")) {
-      return "pending" as BatchRunRow["status"];
-    }
-    return "queued" as BatchRunRow["status"];
-  };
-
   const visibleStations = useMemo(() => {
     if (!stationFilter) {
       return stations;
@@ -1055,10 +1031,6 @@ export default function OperatorProductionPage() {
       visibleStations.map((station) => [station.id, station.trackingMode]),
     );
     visibleStations.forEach((station) => map.set(station.id, []));
-    const runMap = new Map<string, BatchRunRow>();
-    batchRuns.forEach((run) => {
-      runMap.set(`${run.order_id}-${run.batch_code}-${run.step_index}`, run);
-    });
     batchRuns.forEach((run) => {
       if (!run.station_id) {
         return;
@@ -1095,7 +1067,7 @@ export default function OperatorProductionPage() {
         customerName,
         dueDate,
         priority,
-        status: computeRunStatus(items),
+        status: run.status,
         plannedDate: run.planned_date ?? null,
         batchCode: run.batch_code,
         totalQty,
@@ -1247,93 +1219,61 @@ export default function OperatorProductionPage() {
       return;
     }
     const now = new Date().toISOString();
-    const wasBlocked = targetItem.status === "blocked";
-    const wasPaused = targetItem.status === "paused";
-    const isBlocked = status === "blocked";
-    const isPaused = status === "paused";
+    const wasBlocked = run.status === "blocked" || targetItem.status === "blocked";
+    const wasPaused = run.status === "paused" || targetItem.status === "paused";
     const isResumed = (wasBlocked || wasPaused) && status === "in_progress";
-    const nextStartedAt =
-      status === "in_progress"
-        ? (targetItem.started_at ?? now)
-        : targetItem.started_at;
-    const nextDoneAt = status === "done" ? now : targetItem.done_at;
-    let nextDurationMinutes =
-      status === "done"
-        ? computeWorkingMinutes(nextStartedAt ?? now, now, workingCalendar)
-        : (targetItem.duration_minutes ?? null);
-    if (status === "done" && (nextDurationMinutes ?? 0) <= 0 && nextStartedAt) {
-      const startMs = Date.parse(nextStartedAt);
-      const endMs = Date.parse(now);
-      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
-        nextDurationMinutes = Math.max(
-          1,
-          Math.round((endMs - startMs) / 60000),
-        );
-      }
-    }
-    const nextMeta = {
-      ...(targetItem.meta ?? {}),
-      blocked_reason: isBlocked ? (extra?.reason ?? null) : null,
-      blocked_reason_id: isBlocked ? (extra?.reasonId ?? null) : null,
-      blocked_at: isBlocked ? now : null,
-      blocked_by: isBlocked ? currentUser.id : null,
-      paused_reason: isPaused ? (extra?.reason ?? null) : null,
-      paused_reason_id: isPaused ? (extra?.reasonId ?? null) : null,
-      paused_at: isPaused ? now : null,
-      paused_by: isPaused ? currentUser.id : null,
-    };
-    const { error } = await sb
-      .from("production_items")
-      .update({
-        status,
-        meta: nextMeta,
-        started_at: nextStartedAt ?? null,
-        done_at: nextDoneAt ?? null,
-        duration_minutes: nextDurationMinutes,
-      })
-      .eq("id", itemId);
-    if (error) {
-      setDataError(error.message ?? "Failed to update item status.");
+    const { data: transitionedRun, error: transitionError } =
+      await transitionBatchRunStatus(sb, {
+        batchRunId: runId,
+        toStatus: status,
+        reason: extra?.reason ?? null,
+        reasonId: extra?.reasonId ?? null,
+        productionItemId: itemId,
+        actorUserId: currentUser.id,
+      });
+    if (transitionError) {
+      setDataError(transitionError.message ?? "Failed to transition batch run status.");
       return;
     }
+    if (!transitionedRun) {
+      setDataError("No batch run returned from transition.");
+      return;
+    }
+    const appliedStatus = (transitionedRun.status ??
+      status) as BatchRunRow["status"];
+    const nextRunStartedAt = transitionedRun.started_at ?? run.started_at ?? null;
+    const nextRunDoneAt = transitionedRun.done_at ?? run.done_at ?? null;
+    const nextRunDuration =
+      typeof transitionedRun.duration_minutes === "number"
+        ? transitionedRun.duration_minutes
+        : (run.duration_minutes ?? null);
 
     if (currentUser.tenantId) {
-      const eventPayload = {
-        tenant_id: currentUser.tenantId,
-        order_id: run.order_id,
-        batch_run_id: run.id,
-        production_item_id: targetItem.id,
-        from_status: targetItem.status,
-        to_status: status,
-        reason: extra?.reason ?? null,
-        reason_id: extra?.reasonId ?? null,
-        actor_user_id: currentUser.id,
-      };
-      const { data: eventInsertData, error: eventInsertError } = await sb
-        .from("production_status_events")
-        .insert(eventPayload)
-        .select(
-          "id, production_item_id, order_id, batch_run_id, from_status, to_status, reason, created_at",
-        )
-        .maybeSingle();
-      if (!eventInsertError && eventInsertData) {
+      if (run.status !== appliedStatus) {
+        const eventInsertData: StatusEventRow = {
+          id: crypto.randomUUID(),
+          production_item_id: targetItem.id,
+          order_id: run.order_id,
+          batch_run_id: run.id,
+          from_status: run.status,
+          to_status: appliedStatus,
+          reason: extra?.reason ?? null,
+          created_at: now,
+        };
         setActivityEvents((prev) => [
-          eventInsertData as StatusEventRow,
+          eventInsertData,
           ...prev,
         ]);
       }
     }
 
-    if (status === "blocked" && currentUser.tenantId) {
+    if (appliedStatus === "blocked" && currentUser.tenantId) {
       const actorName = currentUser.name?.trim() || "Operator";
       const stationName = targetItem.station_id
         ? (stationsById.get(targetItem.station_id) ?? "Station")
         : "Station";
       const orderNumber = run.orders?.order_number ?? "Order";
-      const reason =
-        extra?.reason ??
-        (nextMeta.blocked_reason as string) ??
-        "Blocked";
+      const reason = extra?.reason ?? "Blocked";
       const roles =
         notificationRoles.length > 0
           ? notificationRoles
@@ -1381,7 +1321,7 @@ export default function OperatorProductionPage() {
         },
       });
     }
-    if (status === "done" && currentUser.tenantId) {
+    if (appliedStatus === "done" && currentUser.tenantId) {
       const actorName = currentUser.name?.trim() || "Operator";
       const stationName = targetItem.station_id
         ? (stationsById.get(targetItem.station_id) ?? "Station")
@@ -1407,112 +1347,65 @@ export default function OperatorProductionPage() {
         },
       });
     }
-    setProductionItems((prev) =>
+    setBatchRuns((prev) =>
       prev.map((item) =>
-        item.id === itemId
+        item.id === runId
           ? {
               ...item,
-              status,
-              meta: nextMeta,
-              started_at: nextStartedAt ?? item.started_at ?? null,
-              done_at: nextDoneAt ?? item.done_at ?? null,
-              duration_minutes: nextDurationMinutes,
+              status: appliedStatus,
+              blocked_reason: transitionedRun.blocked_reason ?? null,
+              blocked_reason_id: transitionedRun.blocked_reason_id ?? null,
+              started_at: nextRunStartedAt,
+              done_at: nextRunDoneAt,
+              duration_minutes: nextRunDuration,
             }
           : item,
       ),
     );
-    const stationItems = productionItems
-      .map((item) =>
-        item.id === itemId
+    const nextItems = productionItems.map((item) =>
+      item.order_id === run.order_id &&
+      item.batch_code === run.batch_code &&
+      item.station_id === run.station_id
+        ? {
+            ...item,
+            status: appliedStatus,
+            started_at:
+              appliedStatus === "in_progress"
+                ? (item.started_at ?? nextRunStartedAt ?? now)
+                : item.started_at,
+            done_at: appliedStatus === "done" ? (nextRunDoneAt ?? now) : null,
+          }
+        : item,
+    );
+    setProductionItems(nextItems);
+
+    if (appliedStatus === "done") {
+      const nextRuns = batchRuns.map((item) =>
+        item.id === runId
           ? {
               ...item,
-              status,
-              meta: nextMeta,
-              started_at: nextStartedAt ?? item.started_at ?? null,
-              done_at: nextDoneAt ?? item.done_at ?? null,
-              duration_minutes: nextDurationMinutes,
+              status: appliedStatus,
+              started_at: nextRunStartedAt,
+              done_at: nextRunDoneAt,
+              duration_minutes: nextRunDuration,
             }
           : item,
-      )
-      .filter(
-        (item) =>
-          item.order_id === run.order_id &&
-          item.batch_code === run.batch_code &&
-          item.station_id === run.station_id,
       );
-    const nextRunStatus = computeRunStatus(stationItems);
-    if (nextRunStatus !== run.status) {
-      const nextRunDuration =
-        nextRunStatus === "done"
-          ? stationItems.reduce(
-              (sum, item) => sum + Number(item.duration_minutes ?? 0),
-              0,
-            )
-          : (run.duration_minutes ?? null);
-      const { error: runError } = await sb
-        .from("batch_runs")
-        .update({
-          status: nextRunStatus,
-          started_at:
-            nextRunStatus === "in_progress"
-              ? (run.started_at ?? now)
-              : run.started_at,
-          done_at:
-            nextRunStatus === "done" ? (run.done_at ?? now) : run.done_at,
-          duration_minutes: nextRunDuration,
-        })
-        .eq("id", runId);
-      if (runError) {
-        setDataError(runError.message ?? "Failed to update batch status.");
-        return;
-      }
-      setBatchRuns((prev) =>
-        prev.map((item) =>
-          item.id === runId
-            ? {
-                ...item,
-                status: nextRunStatus,
-                started_at:
-                  nextRunStatus === "in_progress"
-                    ? (item.started_at ?? now)
-                    : item.started_at,
-                done_at:
-                  nextRunStatus === "done"
-                    ? (item.done_at ?? now)
-                    : item.done_at,
-                duration_minutes: nextRunDuration,
-              }
-            : item,
-        ),
-      );
-    }
-
-    if (nextRunStatus === "done") {
-      const orderItems = productionItems
-        .map((item) =>
-          item.id === itemId
-            ? {
-                ...item,
-                status,
-                meta: nextMeta,
-                started_at: nextStartedAt ?? item.started_at ?? null,
-                done_at: nextDoneAt ?? item.done_at ?? null,
-                duration_minutes: nextDurationMinutes,
-              }
-            : item,
-        )
-        .filter((item) => item.order_id === run.order_id);
       if (
         isOrderProductionComplete(
-          orderItems.map((item) => ({
+          nextRuns
+            .filter((item) => item.order_id === run.order_id)
+            .map((item) => ({
             status: item.status,
             stationId: item.station_id,
           })),
           rules.productionCompletionConfig,
         )
       ) {
-        const totalDuration = orderItems.reduce(
-          (sum, item) => sum + Number(item.duration_minutes ?? 0),
+        const totalDuration = nextRuns
+          .filter((item) => item.order_id === run.order_id)
+          .reduce(
+            (sum, item) => sum + Number(item.duration_minutes ?? 0),
           0,
         );
         await sb
@@ -1611,9 +1504,7 @@ export default function OperatorProductionPage() {
     }
     setPendingRunAction({ runId, action: status });
     try {
-      for (const item of targetItems) {
-        await updateItemStatus(item.id, runId, status, extra);
-      }
+      await updateItemStatus(targetItems[0].id, runId, status, extra);
     } finally {
       setPendingRunAction(null);
     }
@@ -1630,11 +1521,10 @@ export default function OperatorProductionPage() {
     if (!supabase || productionItems.length === 0) {
       return;
     }
-    const updates: Array<{
-      itemId: string;
-      runId: string;
-      status: BatchRunRow["status"];
-    }> = [];
+    const updatesByRun = new Map<
+      string,
+      { itemId: string; runId: string; status: BatchRunRow["status"] }
+    >();
 
     productionItems.forEach((item) => {
       if (!item.station_id) {
@@ -1672,10 +1562,18 @@ export default function OperatorProductionPage() {
       });
       const desiredStatus = hasBlocking ? "pending" : "queued";
       if (item.status !== desiredStatus) {
-        updates.push({ itemId: item.id, runId: run.id, status: desiredStatus });
+        const existing = updatesByRun.get(run.id);
+        if (!existing) {
+          updatesByRun.set(run.id, {
+            itemId: item.id,
+            runId: run.id,
+            status: desiredStatus,
+          });
+        }
       }
     });
 
+    const updates = Array.from(updatesByRun.values());
     if (updates.length === 0) {
       return;
     }
@@ -2458,17 +2356,6 @@ export default function OperatorProductionPage() {
                         );
                         const orderDurationMinutes =
                           orderDurationMap.get(item.orderId) ?? 0;
-                        const hasBlocked = item.items.some(
-                          (row) => row.status === "blocked",
-                        );
-                        const hasActive = item.items.some((row) =>
-                          ["queued", "pending", "in_progress", "paused"].includes(
-                            row.status,
-                          ),
-                        );
-                        const isPartiallyBlocked = hasBlocked && hasActive;
-                        const showBlockedStyle =
-                          isPartiallyBlocked && item.status === "in_progress";
                         const isConstructionTracking =
                           item.trackingMode === "construction_level";
                         const isReceiptOnlyTracking =
@@ -2544,11 +2431,7 @@ export default function OperatorProductionPage() {
                                   {priorityLabel(item.priority)}
                                 </Badge>
                                 <Badge
-                                  variant={
-                                    showBlockedStyle
-                                      ? "status-blocked"
-                                      : statusBadge(item.status)
-                                  }
+                                  variant={statusBadge(item.status)}
                                 >
                                   {runStatusLabel(item.status ?? "queued")}
                                 </Badge>

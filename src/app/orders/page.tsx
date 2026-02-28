@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { OrderModal } from "./components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
-import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { ImportWizard } from "./components/ImportWizard";
@@ -34,14 +34,35 @@ import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { ViewModeToggle } from "./components/ViewModeToggle";
 import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 import { Input } from "@/components/ui/Input";
+import { getOrderStatusLabel } from "@/lib/domain/orderFieldPresentation";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
+
+function getStoragePathFromUrl(url: string, bucket: string) {
+  if (!url) {
+    return null;
+  }
+  if (!url.startsWith("http")) {
+    return url;
+  }
+  try {
+    const parsed = new URL(url);
+    const marker = `/storage/v1/object/public/${bucket}/`;
+    const idx = parsed.pathname.indexOf(marker);
+    if (idx === -1) {
+      return null;
+    }
+    return parsed.pathname.slice(idx + marker.length);
+  } catch {
+    return null;
+  }
+}
 
 export default function OrdersPage() {
   const { t } = useI18n();
   const filtersStorageKey = "pws-orders-filters-v1";
   const { orders, addOrder, updateOrder, removeOrder, error } = useOrders();
-  const { nodes, levels } = useHierarchy();
+  const { orderFields } = useOrderFieldSettings();
   const user = useCurrentUser();
   const { hasPermission } = useRbac();
   const { rules } = useWorkflowRules();
@@ -80,7 +101,11 @@ export default function OrdersPage() {
         .filter((status) => rules.orderStatusConfig?.[status]?.isActive ?? true)
         .map((status) => ({
           value: status,
-          label: rules.statusLabels?.[status] ?? formatOrderStatus(status),
+          label: getOrderStatusLabel(
+            status,
+            t,
+            rules.statusLabels?.[status] ?? formatOrderStatus(status),
+          ),
         }));
 
     if (isEngineeringUser) {
@@ -134,32 +159,17 @@ export default function OrdersPage() {
     [],
   );
 
-  const isProductionStatus = (status: OrderStatus) =>
-    status === "ready_for_production" || status === "in_production";
-  const isEngineeringAlwaysVisibleStatus = (status: OrderStatus) =>
-    isProductionStatus(status) || status === "done";
+  const isProductionStatus = useCallback(
+    (status: OrderStatus) =>
+      status === "ready_for_production" || status === "in_production",
+    [],
+  );
+  const isEngineeringAlwaysVisibleStatus = useCallback(
+    (status: OrderStatus) => isProductionStatus(status) || status === "done",
+    [isProductionStatus],
+  );
 
-  const getStoragePathFromUrl = (url: string, bucket: string) => {
-    if (!url) {
-      return null;
-    }
-    if (!url.startsWith("http")) {
-      return url;
-    }
-    try {
-      const parsed = new URL(url);
-      const marker = `/storage/v1/object/public/${bucket}/`;
-      const idx = parsed.pathname.indexOf(marker);
-      if (idx === -1) {
-        return null;
-      }
-      return parsed.pathname.slice(idx + marker.length);
-    } catch {
-      return null;
-    }
-  };
-
-  const resolveSignedAvatarUrl = async (url?: string | null) => {
+  const resolveSignedAvatarUrl = useCallback(async (url?: string | null) => {
     if (!supabase || !url) {
       return url ?? null;
     }
@@ -171,9 +181,9 @@ export default function OrdersPage() {
       .from(supabaseAvatarBucket)
       .createSignedUrl(storagePath, 60 * 60);
     return data?.signedUrl ?? url;
-  };
+  }, []);
 
-  const resolveOrderAvatars = async (rows: Order[]) => {
+  const resolveOrderAvatars = useCallback(async (rows: Order[]) => {
     if (!supabase) {
       return rows;
     }
@@ -212,9 +222,9 @@ export default function OrdersPage() {
         ? (avatarMap.get(order.assignedManagerId) ?? undefined)
         : undefined,
     }));
-  };
+  }, [resolveSignedAvatarUrl]);
 
-  const applyProductionStatus = async (rows: Order[]) => {
+  const applyProductionStatus = useCallback(async (rows: Order[]) => {
     if (!supabase) {
       return rows;
     }
@@ -254,7 +264,7 @@ export default function OrdersPage() {
         statusDisplay: displayStatus,
       };
     });
-  };
+  }, [rules.productionCompletionConfig]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -474,30 +484,23 @@ export default function OrdersPage() {
   >({});
 
   const contractLevel = useMemo(
-    () => levels.find((level) => level.key === "contract"),
-    [levels],
+    () => orderFields.find((field) => field.key === "contract"),
+    [orderFields],
   );
   const canGroupByContract = Boolean(
     contractLevel?.isActive && contractLevel?.showInTable,
   );
-  const contractLabelMap = useMemo(() => {
-    const map = new Map<string, string>();
-    nodes.forEach((node) => {
-      map.set(node.id, node.label);
-    });
-    return map;
-  }, [nodes]);
   const groupedOrders = useMemo(() => {
     if (!groupByContract || !canGroupByContract || !contractLevel) {
       return [];
     }
     const groups = new Map<string, Order[]>();
     visibleOrders.forEach((order) => {
-      const contractId = order.hierarchy?.[contractLevel.id] ?? "none";
+      const contractId = order.orderFieldValues?.[contractLevel.id] ?? "none";
       const label =
         contractId === "none"
           ? t("orders.page.noContract")
-          : (contractLabelMap.get(contractId) ?? contractId);
+          : contractId;
       if (!groups.has(label)) {
         groups.set(label, []);
       }
@@ -509,7 +512,6 @@ export default function OrdersPage() {
     }));
   }, [
     canGroupByContract,
-    contractLabelMap,
     contractLevel,
     visibleOrders,
     groupByContract,
@@ -537,7 +539,7 @@ export default function OrdersPage() {
     });
   }
 
-  const getLocalFilteredOrders = (source: Order[]) => {
+  const getLocalFilteredOrders = useCallback((source: Order[]) => {
     const todayIso = new Date().toISOString().slice(0, 10);
     let filtered = source;
     if (isEngineeringUser) {
@@ -589,7 +591,20 @@ export default function OrdersPage() {
       );
     }
     return filtered;
-  };
+  }, [
+    assignmentFilter,
+    blockedOnly,
+    getEffectiveStatus,
+    isEngineeringAlwaysVisibleStatus,
+    isEngineeringUser,
+    overdueOnly,
+    partnerGroupFilter,
+    partners,
+    searchQuery,
+    statusFilter,
+    unassignedOnly,
+    user.id,
+  ]);
 
   const getOrderIdsForPartnerGroup = useCallback(
     async (groupId: string) => {
@@ -652,7 +667,7 @@ export default function OrdersPage() {
             customer_name,
             product_name,
             quantity,
-            hierarchy,
+            order_field_values,
             due_date,
             priority,
             status,
@@ -731,7 +746,7 @@ export default function OrdersPage() {
           customerName: row.customer_name,
           productName: row.product_name ?? undefined,
           quantity: row.quantity ?? undefined,
-          hierarchy: row.hierarchy ?? undefined,
+          orderFieldValues: row.order_field_values ?? undefined,
           dueDate: row.due_date,
           priority: row.priority,
           status: row.status,
@@ -791,9 +806,14 @@ export default function OrdersPage() {
       isMounted = false;
     };
   }, [
+    applyProductionStatus,
     orders,
     assignmentFilter,
     blockedOnly,
+    getLocalFilteredOrders,
+    getOrderIdsForPartnerGroup,
+    resolveOrderAvatars,
+    roleStatusOptions,
     partnerGroupFilter,
     overdueOnly,
     searchQuery,
@@ -805,6 +825,7 @@ export default function OrdersPage() {
     isEngineeringUser,
     user.id,
     getEffectiveStatus,
+    t,
   ]);
 
   useEffect(() => {
@@ -910,6 +931,7 @@ export default function OrdersPage() {
       isMounted = false;
     };
   }, [
+    applyProductionStatus,
     assignmentFilter,
     blockedOnly,
     overdueOnly,
@@ -931,22 +953,27 @@ export default function OrdersPage() {
     customerName: string;
     customerEmail?: string;
     productName: string;
-    quantity: number;
+    quantity?: number;
     dueDate: string;
     priority: "low" | "normal" | "high" | "urgent";
+    status: OrderStatus;
     notes?: string;
-    hierarchy?: Record<string, string>;
+    assignedEngineerName?: string;
+    assignedManagerName?: string;
+    orderFieldValues?: Record<string, string>;
   }) {
     const newOrder = {
       orderNumber: values.orderNumber,
       customerName: values.customerName,
       productName: values.productName,
       quantity: values.quantity,
-      hierarchy: values.hierarchy,
+      orderFieldValues: values.orderFieldValues,
       dueDate: values.dueDate,
       priority: values.priority,
-      status: "draft" as const,
+      status: values.status,
       notes: values.notes,
+      assignedEngineerName: values.assignedEngineerName,
+      assignedManagerName: values.assignedManagerName,
       authorName: user.name,
       authorRole: user.role,
     };
@@ -960,11 +987,14 @@ export default function OrdersPage() {
     customerName: string;
     customerEmail?: string;
     productName: string;
-    quantity: number;
+    quantity?: number;
     dueDate: string;
     priority: "low" | "normal" | "high" | "urgent";
+    status: OrderStatus;
     notes?: string;
-    hierarchy?: Record<string, string>;
+    assignedEngineerName?: string;
+    assignedManagerName?: string;
+    orderFieldValues?: Record<string, string>;
   }) {
     if (!editingOrder || !canEditOrDeleteOrders) {
       return false;
@@ -973,9 +1003,12 @@ export default function OrdersPage() {
       customerName: values.customerName,
       productName: values.productName,
       quantity: values.quantity,
-      hierarchy: values.hierarchy,
+      orderFieldValues: values.orderFieldValues,
       dueDate: values.dueDate,
       priority: values.priority,
+      status: values.status,
+      assignedEngineerName: values.assignedEngineerName,
+      assignedManagerName: values.assignedManagerName,
     });
     setEditingOrder(null);
     return Boolean(updated);
@@ -1287,7 +1320,7 @@ export default function OrdersPage() {
                           customer_name,
                           product_name,
                           quantity,
-                          hierarchy,
+                          order_field_values,
                           due_date,
                           priority,
                           status,
@@ -1355,7 +1388,7 @@ export default function OrdersPage() {
                       customerName: row.customer_name,
                       productName: row.product_name ?? undefined,
                       quantity: row.quantity ?? undefined,
-                      hierarchy: row.hierarchy ?? undefined,
+                      orderFieldValues: row.order_field_values ?? undefined,
                       dueDate: row.due_date,
                       priority: row.priority,
                       status: row.status,
@@ -1426,7 +1459,10 @@ export default function OrdersPage() {
                 quantity: editingOrder.quantity ?? 1,
                 dueDate: editingOrder.dueDate,
                 priority: editingOrder.priority,
-                hierarchy: editingOrder.hierarchy,
+                status: editingOrder.status,
+                assignedEngineerName: editingOrder.assignedEngineerName ?? "",
+                assignedManagerName: editingOrder.assignedManagerName ?? "",
+                orderFieldValues: editingOrder.orderFieldValues,
               }
             : undefined
         }
@@ -1522,3 +1558,5 @@ export default function OrdersPage() {
     </section>
   );
 }
+
+

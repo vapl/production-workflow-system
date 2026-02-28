@@ -128,10 +128,14 @@ export interface Order {
   id: string;
   orderNumber: string;
   customerName: string;
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
+  createdByName?: string;
   productName?: string;
   quantity?: number;
-  hierarchy?: Record<string, string>;
-  hierarchyLabels?: Record<string, string>;
+  orderFieldValues?: Record<string, string>;
+  orderFieldLabels?: Record<string, string>;
   dueDate: string; // ISO date string
   priority: "low" | "normal" | "high" | "urgent";
   status: OrderStatus;

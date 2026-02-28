@@ -12,83 +12,6 @@ profile_update as (
   where id = '<user-uuid>'
   returning tenant_id
 ),
-levels as (
-  insert into public.hierarchy_levels (
-    tenant_id,
-    name,
-    key,
-    sort_order,
-    is_required,
-    is_active,
-    show_in_table
-  )
-  values
-    ((select id from tenant_row), 'Contract', 'contract', 1, false, true, true),
-    ((select id from tenant_row), 'Category', 'category', 2, false, true, true),
-    ((select id from tenant_row), 'Product', 'product', 3, true, true, true)
-  returning id, key
-),
-contract_node as (
-  insert into public.hierarchy_nodes (
-    tenant_id,
-    level_id,
-    label,
-    code,
-    parent_id
-  )
-  values (
-    (select id from tenant_row),
-    (select id from levels where key = 'contract'),
-    'VV-1234-26',
-    'VV-1234-26',
-    null
-  )
-  returning id
-),
-category_nodes as (
-  insert into public.hierarchy_nodes (
-    tenant_id,
-    level_id,
-    label,
-    parent_id
-  )
-  values
-    (
-      (select id from tenant_row),
-      (select id from levels where key = 'category'),
-      'Kitchen furniture',
-      (select id from contract_node)
-    ),
-    (
-      (select id from tenant_row),
-      (select id from levels where key = 'category'),
-      'Skapis',
-      (select id from contract_node)
-    )
-  returning id, label
-),
-product_nodes as (
-  insert into public.hierarchy_nodes (
-    tenant_id,
-    level_id,
-    label,
-    parent_id
-  )
-  values
-    (
-      (select id from tenant_row),
-      (select id from levels where key = 'product'),
-      'Sliding doors',
-      (select id from category_nodes where label = 'Kitchen furniture')
-    ),
-    (
-      (select id from tenant_row),
-      (select id from levels where key = 'product'),
-      'Kitchen furniture',
-      (select id from category_nodes where label = 'Skapis')
-    )
-  returning id
-),
 workstations as (
   insert into public.workstations (tenant_id, name, description, is_active)
   values
@@ -207,7 +130,7 @@ orders as (
     due_date,
     priority,
     status,
-    hierarchy
+    order_field_values
   )
   values
     (
@@ -219,10 +142,7 @@ orders as (
       '2026-02-05'::date,
       'normal',
       'pending',
-      jsonb_build_object(
-        (select id from levels where key = 'contract'),
-        (select id from contract_node)
-      )
+      '{}'::jsonb
     ),
     (
       (select id from tenant_row),
@@ -289,3 +209,4 @@ values
     6,
     'blocked'
   );
+

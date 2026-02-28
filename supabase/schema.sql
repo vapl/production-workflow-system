@@ -49,8 +49,8 @@ create table if not exists public.orders (
   customer_name text not null,
   product_name text,
   quantity integer check (quantity > 0),
-  hierarchy jsonb,
-  hierarchy_labels jsonb,
+  order_field_values jsonb,
+  order_field_labels jsonb,
   due_date date not null,
   priority text not null check (priority in ('low', 'normal', 'high', 'urgent')),
   status text not null check (status in ('pending', 'in_progress', 'completed', 'cancelled')),
@@ -59,6 +59,7 @@ create table if not exists public.orders (
   source_payload jsonb,
   synced_at timestamptz,
   production_duration_minutes integer,
+  created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -140,6 +141,29 @@ create index if not exists order_input_fields_sort_order_idx
   on public.order_input_fields(sort_order);
 create index if not exists order_input_fields_show_in_production_idx
   on public.order_input_fields(show_in_production);
+
+create table if not exists public.order_field_settings (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  field_key text not null,
+  label text not null,
+  is_active boolean not null default true,
+  is_required boolean not null default false,
+  show_in_table boolean not null default true,
+  sort_order integer not null default 0,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists order_field_settings_tenant_field_key_uidx
+  on public.order_field_settings(tenant_id, field_key);
+create index if not exists order_field_settings_tenant_id_idx
+  on public.order_field_settings(tenant_id);
+create index if not exists order_field_settings_sort_order_idx
+  on public.order_field_settings(sort_order);
+create index if not exists order_field_settings_show_in_table_idx
+  on public.order_field_settings(show_in_table);
 
 create table if not exists public.order_input_values (
   id uuid primary key default gen_random_uuid(),
@@ -234,6 +258,66 @@ begin
 end;
 $$ language plpgsql;
 
+create or replace function public.seed_default_order_field_settings(
+  p_tenant_id uuid,
+  p_created_by uuid default null
+)
+returns void
+language plpgsql
+set search_path = public
+as $$
+begin
+  if p_tenant_id is null then
+    return;
+  end if;
+
+  insert into public.order_field_settings (
+    tenant_id,
+    field_key,
+    label,
+    is_active,
+    is_required,
+    show_in_table,
+    sort_order,
+    created_by
+  )
+  values
+    (p_tenant_id, 'manager', 'Manager', true, false, true, 10, p_created_by),
+    (p_tenant_id, 'engineer', 'Engineer', true, false, true, 20, p_created_by),
+    (p_tenant_id, 'delivery_address', 'Delivery address', true, false, false, 30, p_created_by),
+    (p_tenant_id, 'customer_phone', 'Customer phone', true, false, false, 40, p_created_by)
+  on conflict (tenant_id, field_key) do nothing;
+end;
+$$;
+
+create or replace function public.seed_default_order_field_settings_for_tenant()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  perform public.seed_default_order_field_settings(new.id, null);
+  return new;
+end;
+$$;
+
+create or replace function public.set_order_field_settings_tenant_id()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.tenant_id is null and new.created_by is not null then
+    select p.tenant_id
+      into new.tenant_id
+    from public.profiles p
+    where p.id = new.created_by
+    limit 1;
+  end if;
+  return new;
+end;
+$$;
+
 drop trigger if exists set_order_attachments_tenant_id on public.order_attachments;
 create trigger set_order_attachments_tenant_id
 before insert on public.order_attachments
@@ -249,20 +333,45 @@ create trigger set_order_input_fields_updated_at
 before update on public.order_input_fields
 for each row execute procedure public.set_updated_at();
 
+drop trigger if exists set_order_field_settings_updated_at on public.order_field_settings;
+create trigger set_order_field_settings_updated_at
+before update on public.order_field_settings
+for each row execute procedure public.set_updated_at();
+
 drop trigger if exists set_order_input_values_updated_at on public.order_input_values;
 create trigger set_order_input_values_updated_at
 before update on public.order_input_values
 for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_order_field_settings_tenant_id on public.order_field_settings;
+create trigger set_order_field_settings_tenant_id
+before insert on public.order_field_settings
+for each row execute function public.set_order_field_settings_tenant_id();
 
 drop trigger if exists set_order_input_values_tenant_id on public.order_input_values;
 create trigger set_order_input_values_tenant_id
 before insert on public.order_input_values
 for each row execute procedure public.set_order_child_tenant_id();
 
+drop trigger if exists seed_default_order_field_settings_on_tenant_insert on public.tenants;
+create trigger seed_default_order_field_settings_on_tenant_insert
+after insert on public.tenants
+for each row execute function public.seed_default_order_field_settings_for_tenant();
+
+do $$
+declare
+  r record;
+begin
+  for r in select id from public.tenants loop
+    perform public.seed_default_order_field_settings(r.id, null);
+  end loop;
+end $$;
+
 alter table public.orders enable row level security;
 alter table public.order_attachments enable row level security;
 alter table public.order_comments enable row level security;
 alter table public.order_input_fields enable row level security;
+alter table public.order_field_settings enable row level security;
 alter table public.order_input_values enable row level security;
 alter table public.tenants enable row level security;
 alter table public.profiles enable row level security;
@@ -497,6 +606,48 @@ create policy "order_input_fields_delete_by_tenant" on public.order_input_fields
     )
   );
 
+create policy "order_field_settings_select_by_tenant" on public.order_field_settings
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_field_settings.tenant_id
+    )
+  );
+
+create policy "order_field_settings_insert_by_tenant" on public.order_field_settings
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_field_settings.tenant_id
+    )
+  );
+
+create policy "order_field_settings_update_by_tenant" on public.order_field_settings
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_field_settings.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_field_settings.tenant_id
+    )
+  );
+
+create policy "order_field_settings_delete_by_tenant" on public.order_field_settings
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_field_settings.tenant_id
+    )
+  );
+
 create policy "order_input_values_select_by_tenant" on public.order_input_values
   for select
   using (
@@ -549,37 +700,6 @@ create policy "tenants_select_own" on public.tenants
   );
 
 -- Additional domain tables
-create table if not exists public.hierarchy_levels (
-  id uuid primary key default gen_random_uuid(),
-  tenant_id uuid not null references public.tenants(id) on delete cascade,
-  name text not null,
-  key text not null,
-  sort_order integer not null default 1,
-  is_required boolean not null default false,
-  is_active boolean not null default true,
-  show_in_table boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists hierarchy_levels_tenant_id_idx on public.hierarchy_levels(tenant_id);
-create index if not exists hierarchy_levels_key_idx on public.hierarchy_levels(key);
-
-create table if not exists public.hierarchy_nodes (
-  id uuid primary key default gen_random_uuid(),
-  tenant_id uuid not null references public.tenants(id) on delete cascade,
-  level_id uuid not null references public.hierarchy_levels(id) on delete cascade,
-  label text not null,
-  code text,
-  parent_id uuid references public.hierarchy_nodes(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists hierarchy_nodes_tenant_id_idx on public.hierarchy_nodes(tenant_id);
-create index if not exists hierarchy_nodes_level_id_idx on public.hierarchy_nodes(level_id);
-create index if not exists hierarchy_nodes_parent_id_idx on public.hierarchy_nodes(parent_id);
-
 create table if not exists public.workstations (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
@@ -838,15 +958,98 @@ create index if not exists qr_scan_events_user_id_idx
 create index if not exists qr_scan_events_created_at_idx
   on public.qr_scan_events(created_at desc);
 
-drop trigger if exists set_hierarchy_levels_updated_at on public.hierarchy_levels;
-create trigger set_hierarchy_levels_updated_at
-before update on public.hierarchy_levels
-for each row execute procedure public.set_updated_at();
+create or replace view public.production_execution_drift as
+with run_item_pairs as (
+  select
+    br.tenant_id,
+    br.id as batch_run_id,
+    br.order_id,
+    br.batch_code,
+    br.station_id,
+    br.status as batch_run_status,
+    br.updated_at as batch_run_updated_at,
+    pi.id as production_item_id,
+    pi.status as production_item_status,
+    pi.updated_at as production_item_updated_at
+  from public.batch_runs br
+  left join public.production_items pi
+    on pi.tenant_id = br.tenant_id
+   and pi.order_id = br.order_id
+   and pi.batch_code = br.batch_code
+   and (
+     (pi.station_id is null and br.station_id is null)
+     or pi.station_id = br.station_id
+   )
+)
+select
+  'run_item_status_mismatch'::text as drift_type,
+  rip.tenant_id,
+  rip.batch_run_id,
+  rip.production_item_id,
+  rip.order_id,
+  rip.batch_code,
+  rip.station_id,
+  rip.batch_run_status,
+  rip.production_item_status,
+  rip.batch_run_updated_at,
+  rip.production_item_updated_at
+from run_item_pairs rip
+where rip.production_item_id is not null
+  and rip.batch_run_status is distinct from rip.production_item_status
 
-drop trigger if exists set_hierarchy_nodes_updated_at on public.hierarchy_nodes;
-create trigger set_hierarchy_nodes_updated_at
-before update on public.hierarchy_nodes
-for each row execute procedure public.set_updated_at();
+union all
+
+select
+  'run_without_items'::text as drift_type,
+  br.tenant_id,
+  br.id as batch_run_id,
+  null::uuid as production_item_id,
+  br.order_id,
+  br.batch_code,
+  br.station_id,
+  br.status as batch_run_status,
+  null::text as production_item_status,
+  br.updated_at as batch_run_updated_at,
+  null::timestamptz as production_item_updated_at
+from public.batch_runs br
+where not exists (
+  select 1
+  from public.production_items pi
+  where pi.tenant_id = br.tenant_id
+    and pi.order_id = br.order_id
+    and pi.batch_code = br.batch_code
+    and (
+      (pi.station_id is null and br.station_id is null)
+      or pi.station_id = br.station_id
+    )
+)
+
+union all
+
+select
+  'item_without_run'::text as drift_type,
+  pi.tenant_id,
+  null::uuid as batch_run_id,
+  pi.id as production_item_id,
+  pi.order_id,
+  pi.batch_code,
+  pi.station_id,
+  null::text as batch_run_status,
+  pi.status as production_item_status,
+  null::timestamptz as batch_run_updated_at,
+  pi.updated_at as production_item_updated_at
+from public.production_items pi
+where not exists (
+  select 1
+  from public.batch_runs br
+  where br.tenant_id = pi.tenant_id
+    and br.order_id = pi.order_id
+    and br.batch_code = pi.batch_code
+    and (
+      (pi.station_id is null and br.station_id is null)
+      or pi.station_id = br.station_id
+    )
+);
 
 drop trigger if exists set_workstations_updated_at on public.workstations;
 create trigger set_workstations_updated_at
@@ -920,8 +1123,302 @@ create trigger set_batch_runs_tenant_id
 before insert on public.batch_runs
 for each row execute procedure public.set_order_child_tenant_id();
 
-alter table public.hierarchy_levels enable row level security;
-alter table public.hierarchy_nodes enable row level security;
+create or replace function public.transition_batch_run_status(
+  p_batch_run_id uuid,
+  p_to_status text,
+  p_reason text default null,
+  p_reason_id uuid default null,
+  p_production_item_id uuid default null,
+  p_actor_user_id uuid default auth.uid()
+)
+returns table (
+  id uuid,
+  order_id uuid,
+  batch_code text,
+  station_id uuid,
+  route_key text,
+  step_index integer,
+  status text,
+  blocked_reason text,
+  blocked_reason_id uuid,
+  blocked_at timestamptz,
+  blocked_by uuid,
+  planned_date date,
+  started_at timestamptz,
+  done_at timestamptz,
+  duration_minutes integer,
+  updated_at timestamptz
+)
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_run public.batch_runs%rowtype;
+  v_now timestamptz := now();
+  v_started_at timestamptz;
+  v_done_at timestamptz;
+  v_duration integer;
+  v_transition_allowed boolean := false;
+begin
+  select *
+    into v_run
+  from public.batch_runs br
+  where br.id = p_batch_run_id
+  for update;
+
+  if not found then
+    raise exception 'Batch run % not found', p_batch_run_id
+      using errcode = 'P0002';
+  end if;
+
+  if p_to_status not in ('queued', 'pending', 'in_progress', 'paused', 'blocked', 'done') then
+    raise exception 'Unsupported batch run status: %', p_to_status
+      using errcode = '22023';
+  end if;
+
+  if v_run.status = p_to_status then
+    return query
+      select
+        br.id,
+        br.order_id,
+        br.batch_code,
+        br.station_id,
+        br.route_key,
+        br.step_index,
+        br.status,
+        br.blocked_reason,
+        br.blocked_reason_id,
+        br.blocked_at,
+        br.blocked_by,
+        br.planned_date,
+        br.started_at,
+        br.done_at,
+        br.duration_minutes,
+        br.updated_at
+      from public.batch_runs br
+      where br.id = v_run.id;
+    return;
+  end if;
+
+  case v_run.status
+    when 'queued' then
+      v_transition_allowed := p_to_status in ('pending', 'in_progress', 'blocked');
+    when 'pending' then
+      v_transition_allowed := p_to_status in ('queued', 'in_progress', 'blocked');
+    when 'in_progress' then
+      v_transition_allowed := p_to_status in ('paused', 'blocked', 'done');
+    when 'paused' then
+      v_transition_allowed := p_to_status in ('in_progress', 'blocked');
+    when 'blocked' then
+      v_transition_allowed := p_to_status in ('queued', 'pending', 'in_progress');
+    when 'done' then
+      v_transition_allowed := false;
+  end case;
+
+  if not v_transition_allowed then
+    raise exception 'Invalid batch run transition: % -> %', v_run.status, p_to_status
+      using errcode = '22023';
+  end if;
+
+  v_started_at := v_run.started_at;
+  v_done_at := v_run.done_at;
+  v_duration := v_run.duration_minutes;
+
+  if p_to_status = 'in_progress' then
+    v_started_at := coalesce(v_run.started_at, v_now);
+    v_done_at := null;
+  elsif p_to_status = 'done' then
+    v_started_at := coalesce(v_run.started_at, v_now);
+    v_done_at := coalesce(v_run.done_at, v_now);
+    v_duration := greatest(
+      1,
+      round(extract(epoch from (v_done_at - v_started_at)) / 60.0)::integer
+    );
+  elsif p_to_status in ('queued', 'pending') then
+    v_started_at := null;
+    v_done_at := null;
+    v_duration := null;
+  elsif p_to_status in ('paused', 'blocked') then
+    v_done_at := null;
+  end if;
+
+  perform set_config('app.allow_status_transition', 'on', true);
+  perform set_config('app.allow_production_item_execution_write', 'on', true);
+
+  update public.batch_runs br
+     set status = p_to_status,
+         blocked_reason = case when p_to_status = 'blocked' then p_reason else null end,
+         blocked_reason_id = case when p_to_status = 'blocked' then p_reason_id else null end,
+         blocked_at = case when p_to_status = 'blocked' then v_now else null end,
+         blocked_by = case when p_to_status = 'blocked' then coalesce(p_actor_user_id, auth.uid()) else null end,
+         started_at = v_started_at,
+         done_at = v_done_at,
+         duration_minutes = v_duration
+   where br.id = v_run.id;
+
+  update public.production_items pi
+     set status = p_to_status,
+         started_at = case
+           when p_to_status = 'in_progress' then coalesce(pi.started_at, v_started_at, v_now)
+           when p_to_status in ('queued', 'pending') then null
+           else pi.started_at
+         end,
+         done_at = case
+           when p_to_status = 'done' then coalesce(pi.done_at, v_done_at, v_now)
+           when p_to_status in ('queued', 'pending', 'in_progress', 'paused', 'blocked') then null
+           else pi.done_at
+         end
+   where pi.tenant_id = v_run.tenant_id
+     and pi.order_id = v_run.order_id
+     and pi.batch_code = v_run.batch_code
+     and (
+       (pi.station_id is null and v_run.station_id is null)
+       or pi.station_id = v_run.station_id
+     );
+
+  if v_run.tenant_id is not null then
+    insert into public.production_status_events (
+      tenant_id,
+      order_id,
+      batch_run_id,
+      production_item_id,
+      from_status,
+      to_status,
+      reason,
+      reason_id,
+      actor_user_id
+    )
+    values (
+      v_run.tenant_id,
+      v_run.order_id,
+      v_run.id,
+      p_production_item_id,
+      v_run.status,
+      p_to_status,
+      p_reason,
+      p_reason_id,
+      coalesce(p_actor_user_id, auth.uid())
+    );
+  end if;
+
+  return query
+    select
+      br.id,
+      br.order_id,
+      br.batch_code,
+      br.station_id,
+      br.route_key,
+      br.step_index,
+      br.status,
+      br.blocked_reason,
+      br.blocked_reason_id,
+      br.blocked_at,
+      br.blocked_by,
+      br.planned_date,
+      br.started_at,
+      br.done_at,
+      br.duration_minutes,
+      br.updated_at
+    from public.batch_runs br
+    where br.id = v_run.id;
+end;
+$$;
+
+create or replace function public.guard_batch_run_execution_writes()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if coalesce(current_setting('app.allow_status_transition', true), 'off') = 'on' then
+    return new;
+  end if;
+
+  if row(
+      new.status,
+      new.blocked_reason,
+      new.blocked_reason_id,
+      new.blocked_at,
+      new.blocked_by,
+      new.started_at,
+      new.done_at,
+      new.duration_minutes
+    ) is distinct from row(
+      old.status,
+      old.blocked_reason,
+      old.blocked_reason_id,
+      old.blocked_at,
+      old.blocked_by,
+      old.started_at,
+      old.done_at,
+      old.duration_minutes
+    ) then
+    raise exception 'Direct batch run execution updates are forbidden. Use public.transition_batch_run_status(...)'
+      using errcode = '42501';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists batch_runs_execution_write_guard on public.batch_runs;
+create trigger batch_runs_execution_write_guard
+before update of
+  status,
+  blocked_reason,
+  blocked_reason_id,
+  blocked_at,
+  blocked_by,
+  started_at,
+  done_at,
+  duration_minutes
+on public.batch_runs
+for each row
+execute function public.guard_batch_run_execution_writes();
+
+create or replace function public.guard_production_item_execution_writes()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if coalesce(current_setting('app.allow_production_item_execution_write', true), 'off') = 'on' then
+    return new;
+  end if;
+
+  if row(
+      new.status,
+      new.station_id,
+      new.started_at,
+      new.done_at,
+      new.duration_minutes
+    ) is distinct from row(
+      old.status,
+      old.station_id,
+      old.started_at,
+      old.done_at,
+      old.duration_minutes
+    ) then
+    raise exception 'Production item execution fields are read-only. Transition batch_runs instead.'
+      using errcode = '42501';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists production_items_execution_write_guard on public.production_items;
+create trigger production_items_execution_write_guard
+before update of
+  status,
+  station_id,
+  started_at,
+  done_at,
+  duration_minutes
+on public.production_items
+for each row
+execute function public.guard_production_item_execution_writes();
+
 alter table public.workstations enable row level security;
 alter table public.station_dependencies enable row level security;
 alter table public.tenant_settings enable row level security;
@@ -935,90 +1432,6 @@ alter table public.production_items enable row level security;
 alter table public.batch_runs enable row level security;
 alter table public.production_status_events enable row level security;
 alter table public.qr_scan_events enable row level security;
-
-create policy "hierarchy_levels_select_by_tenant" on public.hierarchy_levels
-  for select
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_levels.tenant_id
-    )
-  );
-
-create policy "hierarchy_levels_insert_by_tenant" on public.hierarchy_levels
-  for insert
-  with check (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_levels.tenant_id
-    )
-  );
-
-create policy "hierarchy_levels_update_by_tenant" on public.hierarchy_levels
-  for update
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_levels.tenant_id
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_levels.tenant_id
-    )
-  );
-
-create policy "hierarchy_levels_delete_by_tenant" on public.hierarchy_levels
-  for delete
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_levels.tenant_id
-    )
-  );
-
-create policy "hierarchy_nodes_select_by_tenant" on public.hierarchy_nodes
-  for select
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_nodes.tenant_id
-    )
-  );
-
-create policy "hierarchy_nodes_insert_by_tenant" on public.hierarchy_nodes
-  for insert
-  with check (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_nodes.tenant_id
-    )
-  );
-
-create policy "hierarchy_nodes_update_by_tenant" on public.hierarchy_nodes
-  for update
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_nodes.tenant_id
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_nodes.tenant_id
-    )
-  );
-
-create policy "hierarchy_nodes_delete_by_tenant" on public.hierarchy_nodes
-  for delete
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.tenant_id = hierarchy_nodes.tenant_id
-    )
-  );
 
 create policy "workstations_select_by_tenant" on public.workstations
   for select
@@ -1528,3 +1941,5 @@ create policy "qr_scan_events_insert_by_tenant"
       where p.id = auth.uid() and p.tenant_id = qr_scan_events.tenant_id
     )
   );
+
+

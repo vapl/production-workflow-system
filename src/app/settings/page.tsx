@@ -43,7 +43,7 @@ import { DataTable } from "@/components/ui/DataTable";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
-import { useHierarchy } from "./HierarchyContext";
+import { useOrderFieldSettings } from "./OrderFieldSettingsContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
 import {
   formatUserRoleLabel,
@@ -92,6 +92,7 @@ import type {
   OrderStatus,
 } from "@/types/orders";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { ORDER_CORE_FIELD_KEYS } from "@/lib/domain/orderCoreFields";
 
 function slugify(value: string) {
   return value
@@ -146,20 +147,20 @@ const workflowStatusOptions: { value: OrderStatus; label: string }[] = [
 
 type AttachmentRole = UserRole;
 
-const lockedLevelKeys = new Set([
-  "contract",
-  "category",
-  "product",
-  "manager",
-  "engineer",
-]);
+const lockedFieldKeys = new Set(ORDER_CORE_FIELD_KEYS);
 
-const defaultLevelDescriptions: Record<string, string> = {
-  contract: "Customer or project contract identifier.",
-  category: "High-level product category or group.",
-  product: "Specific product or item type.",
+const defaultFieldDescriptions: Record<string, string> = {
+  order_number: "Unique order identifier shown in the main order list.",
+  customer_name: "Customer or company for the order.",
+  quantity: "Planned order quantity.",
+  due_date: "Promised delivery date.",
   manager: "Sales/lead owner responsible for the order.",
   engineer: "Assigned engineer or designer handling the order.",
+  priority: "Order urgency level used in planning and sorting.",
+  status: "Current order workflow state.",
+  actions: "Attachment and comment indicators shown in the list row.",
+  delivery_address: "Delivery destination metadata field.",
+  customer_phone: "Customer contact phone metadata field.",
 };
 
 const weekdayOptions: Array<{ value: number; label: string }> = [
@@ -319,7 +320,7 @@ const defaultQrContentFields = [
 ];
 
 const settingsSections = [
-  { value: "structure", icon: NetworkIcon },
+  { value: "orderFields", icon: NetworkIcon },
   { value: "operations", icon: FactoryIcon },
   { value: "partners", icon: GitBranchIcon },
   { value: "users", icon: UsersIcon },
@@ -351,45 +352,27 @@ export default function SettingsPage() {
   } = useRbac();
   const { confirm, dialog } = useConfirmDialog();
   const {
-    levels,
-    nodes,
-    addLevel,
-    updateLevel,
-    removeLevel,
-    addNode,
-    updateNode,
-    removeNode,
-  } = useHierarchy();
+    orderFields,
+    addOrderField,
+    updateOrderField,
+    removeOrderField,
+  } = useOrderFieldSettings();
 
-  const sortedLevels = useMemo(
-    () => [...levels].sort((a, b) => a.order - b.order),
-    [levels],
+  const sortedFields = useMemo(
+    () => [...orderFields].sort((a, b) => a.order - b.order),
+    [orderFields],
   );
-  const selectableLevels = useMemo(
-    () =>
-      sortedLevels.filter(
-        (level) => level.key !== "engineer" && level.key !== "manager",
-      ),
-    [sortedLevels],
-  );
-  const [levelName, setLevelName] = useState("");
-  const [levelRequired, setLevelRequired] = useState(false);
-  const [levelActive, setLevelActive] = useState(true);
-  const [levelShowInTable, setLevelShowInTable] = useState(true);
-  const [inlineEditingLevelId, setInlineEditingLevelId] = useState<
+  const [fieldName, setFieldName] = useState("");
+  const [fieldRequired, setFieldRequired] = useState(false);
+  const [fieldActive, setFieldActive] = useState(true);
+  const [fieldShowInTable, setFieldShowInTable] = useState(true);
+  const [inlineEditingFieldId, setInlineEditingFieldId] = useState<
     string | null
   >(null);
-  const [inlineLevelName, setInlineLevelName] = useState("");
-  const [draggedLevelId, setDraggedLevelId] = useState<string | null>(null);
-  const [levelDropIndex, setLevelDropIndex] = useState<number | null>(null);
+  const [inlineFieldName, setInlineFieldName] = useState("");
+  const [draggedFieldId, setDraggedFieldId] = useState<string | null>(null);
+  const [fieldDropIndex, setFieldDropIndex] = useState<number | null>(null);
 
-  const [selectedLevelId, setSelectedLevelId] = useState<string>(
-    selectableLevels[0]?.id ?? "",
-  );
-  const [nodeLabel, setNodeLabel] = useState("");
-  const [nodeCode, setNodeCode] = useState("");
-  const [nodeParentId, setNodeParentId] = useState<string>("none");
-  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const {
     workStations,
     stationDependencies,
@@ -541,8 +524,6 @@ export default function SettingsPage() {
   >(null);
   const [selectedExternalJobFieldIds, setSelectedExternalJobFieldIds] =
     useState<string[]>([]);
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [bulkNodeInput, setBulkNodeInput] = useState("");
   const [selectedWorkStationIds, setSelectedWorkStationIds] = useState<
     string[]
   >([]);
@@ -1395,23 +1376,6 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    if (!selectedLevelId && selectableLevels[0]?.id) {
-      setSelectedLevelId(selectableLevels[0].id);
-      return;
-    }
-    if (
-      selectedLevelId &&
-      !levels.some((level) => level.id === selectedLevelId)
-    ) {
-      setSelectedLevelId(selectableLevels[0]?.id ?? "");
-    }
-  }, [levels, selectableLevels, selectedLevelId]);
-
-  useEffect(() => {
-    setNodeParentId("none");
-  }, [selectedLevelId]);
-
-  useEffect(() => {
     const sb = supabase;
     if (!sb) {
       setUsers([
@@ -1994,229 +1958,105 @@ export default function SettingsPage() {
     setPermissionMessage(t("settings.users.rolePermissionsSaved"));
   }
 
-  const selectedLevel = levels.find((level) => level.id === selectedLevelId);
-  const selectedLevelOrder = selectedLevel?.order ?? 0;
-  const parentLevel = useMemo(
-    () =>
-      selectableLevels
-        .filter((level) => level.order < selectedLevelOrder && level.isActive)
-        .at(-1),
-    [selectableLevels, selectedLevelOrder],
-  );
-
-  const parentNodes = parentLevel
-    ? nodes.filter((node) => node.levelId === parentLevel.id)
-    : [];
-  const currentLevelNodes = nodes.filter(
-    (node) => node.levelId === selectedLevelId,
-  );
-
-  function resetLevelForm() {
-    setLevelName("");
-    setLevelRequired(false);
-    setLevelActive(true);
-    setLevelShowInTable(true);
+  function resetFieldForm() {
+    setFieldName("");
+    setFieldRequired(false);
+    setFieldActive(true);
+    setFieldShowInTable(true);
   }
 
-  function handleSaveLevel() {
-    const trimmedName = levelName.trim();
+  function handleSaveField() {
+    const trimmedName = fieldName.trim();
     if (!trimmedName) {
       return;
     }
     const normalizedKey = slugify(trimmedName);
 
-    void addLevel({
+    void addOrderField({
       name: trimmedName,
       key: normalizedKey,
-      order: sortedLevels.length + 1,
-      isRequired: levelRequired,
-      isActive: levelActive,
-      showInTable: levelShowInTable,
+      order: sortedFields.length + 1,
+      isRequired: fieldRequired,
+      isActive: fieldActive,
+      showInTable: fieldShowInTable,
     });
-    resetLevelForm();
+    resetFieldForm();
   }
 
-  function startInlineLevelEdit(levelId: string) {
-    const level = levels.find((item) => item.id === levelId);
-    if (!level) {
+  function startInlineFieldEdit(fieldId: string) {
+    const field = orderFields.find((item) => item.id === fieldId);
+    if (!field) {
       return;
     }
-    setInlineEditingLevelId(levelId);
-    setInlineLevelName(level.name);
+    setInlineEditingFieldId(fieldId);
+    setInlineFieldName(field.name);
   }
 
-  function cancelInlineLevelEdit() {
-    setInlineEditingLevelId(null);
-    setInlineLevelName("");
+  function cancelInlineFieldEdit() {
+    setInlineEditingFieldId(null);
+    setInlineFieldName("");
   }
 
-  async function handleSaveInlineLevel() {
-    if (!inlineEditingLevelId) {
+  async function handleSaveInlineField() {
+    if (!inlineEditingFieldId) {
       return;
     }
-    const trimmedName = inlineLevelName.trim();
+    const trimmedName = inlineFieldName.trim();
     if (!trimmedName) {
       return;
     }
-    await updateLevel(inlineEditingLevelId, {
+    await updateOrderField(inlineEditingFieldId, {
       name: trimmedName,
     });
-    cancelInlineLevelEdit();
+    cancelInlineFieldEdit();
   }
 
-  async function persistLevelOrder(nextLevels: typeof sortedLevels) {
+  async function persistFieldOrder(nextFields: typeof sortedFields) {
     await Promise.all(
-      nextLevels.map((level, index) =>
-        updateLevel(level.id, {
+      nextFields.map((field, index) =>
+        updateOrderField(field.id, {
           order: index + 1,
         }),
       ),
     );
   }
 
-  async function handleDropLevel() {
+  async function handleDropField() {
     if (
-      draggedLevelId === null ||
-      levelDropIndex === null ||
-      sortedLevels.length === 0
+      draggedFieldId === null ||
+      fieldDropIndex === null ||
+      sortedFields.length === 0
     ) {
-      setDraggedLevelId(null);
-      setLevelDropIndex(null);
+      setDraggedFieldId(null);
+      setFieldDropIndex(null);
       return;
     }
 
-    const fromIndex = sortedLevels.findIndex(
-      (level) => level.id === draggedLevelId,
+    const fromIndex = sortedFields.findIndex(
+      (field) => field.id === draggedFieldId,
     );
     if (fromIndex === -1) {
-      setDraggedLevelId(null);
-      setLevelDropIndex(null);
+      setDraggedFieldId(null);
+      setFieldDropIndex(null);
       return;
     }
 
-    let targetIndex = levelDropIndex;
-    if (levelDropIndex > fromIndex) {
+    let targetIndex = fieldDropIndex;
+    if (fieldDropIndex > fromIndex) {
       targetIndex -= 1;
     }
     if (targetIndex === fromIndex) {
-      setDraggedLevelId(null);
-      setLevelDropIndex(null);
+      setDraggedFieldId(null);
+      setFieldDropIndex(null);
       return;
     }
 
-    const reordered = [...sortedLevels];
+    const reordered = [...sortedFields];
     const [moved] = reordered.splice(fromIndex, 1);
     reordered.splice(targetIndex, 0, moved);
-    await persistLevelOrder(reordered);
-    setDraggedLevelId(null);
-    setLevelDropIndex(null);
-  }
-
-  function resetNodeForm() {
-    setNodeLabel("");
-    setNodeCode("");
-    setNodeParentId("none");
-    setEditingNodeId(null);
-  }
-
-  function handleSaveNode() {
-    if (!selectedLevel) {
-      return;
-    }
-    const trimmedLabel = nodeLabel.trim();
-    if (!trimmedLabel) {
-      return;
-    }
-    const parentIdValue = nodeParentId === "none" ? null : nodeParentId;
-    if (editingNodeId) {
-      updateNode(editingNodeId, {
-        label: trimmedLabel,
-        code: nodeCode.trim() || undefined,
-        parentId: parentIdValue,
-      });
-      resetNodeForm();
-      return;
-    }
-    void addNode({
-      levelId: selectedLevel.id,
-      label: trimmedLabel,
-      code: nodeCode.trim() || undefined,
-      parentId: parentIdValue,
-    });
-    resetNodeForm();
-  }
-
-  function handleEditNode(nodeId: string) {
-    const node = nodes.find((item) => item.id === nodeId);
-    if (!node) {
-      return;
-    }
-    setEditingNodeId(nodeId);
-    setNodeLabel(node.label);
-    setNodeCode(node.code ?? "");
-    setNodeParentId(node.parentId ?? "none");
-  }
-
-  async function handleBulkAddNodes() {
-    if (!selectedLevel) {
-      return;
-    }
-    const parentIdValue = nodeParentId === "none" ? null : nodeParentId;
-    const lines = bulkNodeInput.split(/\r?\n/).map((line) => line.trim());
-    const entries = lines.filter(Boolean);
-    if (entries.length === 0) {
-      return;
-    }
-    for (const entry of entries) {
-      const parts = entry.split(/[|\t;]+/).map((part) => part.trim());
-      const label = parts[0];
-      if (!label) {
-        continue;
-      }
-      const code = parts[1] || undefined;
-      await addNode({
-        levelId: selectedLevel.id,
-        label,
-        code,
-        parentId: parentIdValue,
-      });
-    }
-    setBulkNodeInput("");
-  }
-
-  async function handleCopyNode(nodeId: string) {
-    const node = nodes.find((item) => item.id === nodeId);
-    if (!node) {
-      return;
-    }
-    const label = `${node.label} copy`;
-    await addNode({
-      levelId: node.levelId,
-      label,
-      code: undefined,
-      parentId: node.parentId ?? null,
-    });
-  }
-
-  async function handleDeleteSelectedNodes() {
-    if (selectedNodeIds.length === 0) {
-      return;
-    }
-    if (
-      !(await confirmRemove(
-        t("settings.structure.removeSelectedItemsConfirm", {
-          count: selectedNodeIds.length,
-          level: selectedLevel?.name ?? t("settings.structure.level"),
-        }),
-      ))
-    ) {
-      return;
-    }
-    const ids = [...selectedNodeIds];
-    for (const id of ids) {
-      await removeNode(id);
-    }
-    setSelectedNodeIds([]);
+    await persistFieldOrder(reordered);
+    setDraggedFieldId(null);
+    setFieldDropIndex(null);
   }
 
   async function handleCopyOrderField(fieldId: string) {
@@ -2735,14 +2575,6 @@ export default function SettingsPage() {
   }, [externalTableColumnCatalog]);
 
   useEffect(() => {
-    const valid = new Set(currentLevelNodes.map((node) => node.id));
-    const next = selectedNodeIds.filter((id) => valid.has(id));
-    if (next.length !== selectedNodeIds.length) {
-      setSelectedNodeIds(next);
-    }
-  }, [currentLevelNodes, selectedNodeIds]);
-
-  useEffect(() => {
     const valid = new Set(workStations.map((station) => station.id));
     const next = selectedWorkStationIds.filter((id) => valid.has(id));
     if (next.length !== selectedWorkStationIds.length) {
@@ -3082,7 +2914,7 @@ export default function SettingsPage() {
       },
       {
         id: "in_table",
-        label: t("settings.structure.inTable"),
+        label: t("settings.orderFields.inTable"),
         widthClassName: "min-w-[84px] md:min-w-0",
       },
       {
@@ -3499,62 +3331,62 @@ export default function SettingsPage() {
           </>
         }
 
-        <TabsContent value="structure">
+        <TabsContent value="orderFields">
           <div className="space-y-6">
             {isSettingsDataLoading ? (
               <Card className="min-w-0">
                 <CardContent className="py-10">
-                  <LoadingSpinner label={t("settings.loadingStructure")} />
+                  <LoadingSpinner label={t("settings.loadingOrderFields")} />
                 </CardContent>
               </Card>
             ) : null}
             <Card>
               <CardHeader>
-                <CardTitle>{t("settings.structure.hierarchyTitle")}</CardTitle>
+                <CardTitle>{t("settings.orderFields.title")}</CardTitle>
                 <CardDescription>
-                  {t("settings.structure.hierarchyDescription")}
+                  {t("settings.orderFields.description")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.2fr)_minmax(280px,1fr)_auto] lg:items-end">
                   <InputField
-                    label={t("settings.structure.levelName")}
-                    value={levelName}
+                    label={t("settings.orderFields.fieldLabel")}
+                    value={fieldName}
                     onChange={(event) => {
-                      setLevelName(event.target.value);
+                      setFieldName(event.target.value);
                     }}
-                    placeholder={t("settings.structure.levelNamePlaceholder")}
+                    placeholder={t("settings.orderFields.fieldLabelPlaceholder")}
                     className="h-10 text-sm"
                   />
                   <div className="flex flex-wrap items-center gap-4 pt-2">
                     <Checkbox
-                      checked={levelRequired}
+                      checked={fieldRequired}
                       onChange={(event) =>
-                        setLevelRequired(event.target.checked)
+                        setFieldRequired(event.target.checked)
                       }
                       label={t("settings.common.required")}
                     />
                     <Checkbox
-                      checked={levelActive}
-                      onChange={(event) => setLevelActive(event.target.checked)}
+                      checked={fieldActive}
+                      onChange={(event) => setFieldActive(event.target.checked)}
                       label={t("settings.common.active")}
                     />
                     <Checkbox
-                      checked={levelShowInTable}
+                      checked={fieldShowInTable}
                       onChange={(event) =>
-                        setLevelShowInTable(event.target.checked)
+                        setFieldShowInTable(event.target.checked)
                       }
-                      label={t("settings.structure.showInTable")}
+                      label={t("settings.orderFields.showInTable")}
                     />
                   </div>
                   <div className="flex gap-2">
-                    <Button onClick={handleSaveLevel}>
-                      {t("settings.structure.addLevel")}
+                    <Button onClick={handleSaveField}>
+                      {t("settings.orderFields.addField")}
                     </Button>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {t("settings.structure.defaultMeaningHint")}
+                  {t("settings.orderFields.defaultMeaningHint")}
                 </p>
 
                 <div className="overflow-x-auto rounded-lg border border-border">
@@ -3565,10 +3397,10 @@ export default function SettingsPage() {
                           <span className="sr-only">Drag</span>
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.structure.level")}
+                          {t("settings.orderFields.field")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.structure.order")}
+                          {t("settings.orderFields.displayOrder")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
                           {t("settings.common.required")}
@@ -3577,7 +3409,7 @@ export default function SettingsPage() {
                           {t("settings.common.active")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.structure.inTable")}
+                          {t("settings.orderFields.inTable")}
                         </th>
                         <th className="px-4 py-2 text-right font-medium">
                           {t("settings.common.actions")}
@@ -3585,31 +3417,31 @@ export default function SettingsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedLevels.map((level, rowIndex) => {
+                      {sortedFields.map((field, rowIndex) => {
                         const isInlineEditing =
-                          inlineEditingLevelId === level.id;
+                          inlineEditingFieldId === field.id;
                         return (
-                          <Fragment key={level.id}>
+                          <Fragment key={field.id}>
                             <tr
                               className={`border-t border-border transition-all ${
-                                levelDropIndex === rowIndex && draggedLevelId
+                                fieldDropIndex === rowIndex && draggedFieldId
                                   ? "h-4 bg-primary/10"
                                   : "h-0"
                               }`}
                             />
                             <tr
                               className={`border-t border-border ${
-                                draggedLevelId === level.id
+                                draggedFieldId === field.id
                                   ? "bg-primary/5"
                                   : "bg-background"
                               }`}
                               draggable={!isInlineEditing}
                               onDragStart={() => {
-                                setDraggedLevelId(level.id);
-                                setLevelDropIndex(rowIndex);
+                                setDraggedFieldId(field.id);
+                                setFieldDropIndex(rowIndex);
                               }}
                               onDragOver={(event) => {
-                                if (!draggedLevelId) {
+                                if (!draggedFieldId) {
                                   return;
                                 }
                                 event.preventDefault();
@@ -3617,17 +3449,17 @@ export default function SettingsPage() {
                                   event.currentTarget.getBoundingClientRect();
                                 const before =
                                   event.clientY < rect.top + rect.height / 2;
-                                setLevelDropIndex(
+                                setFieldDropIndex(
                                   before ? rowIndex : rowIndex + 1,
                                 );
                               }}
                               onDrop={(event) => {
                                 event.preventDefault();
-                                void handleDropLevel();
+                                void handleDropField();
                               }}
                               onDragEnd={() => {
-                                setDraggedLevelId(null);
-                                setLevelDropIndex(null);
+                                setDraggedFieldId(null);
+                                setFieldDropIndex(null);
                               }}
                             >
                               <td className="px-2 py-2 align-middle text-muted-foreground">
@@ -3641,40 +3473,40 @@ export default function SettingsPage() {
                               <td className="px-4 py-2">
                                 {isInlineEditing ? (
                                   <Input
-                                    value={inlineLevelName}
+                                    value={inlineFieldName}
                                     onChange={(event) =>
-                                      setInlineLevelName(event.target.value)
+                                      setInlineFieldName(event.target.value)
                                     }
                                     className="h-9 text-sm"
                                   />
                                 ) : (
                                   <div className="font-medium">
-                                    {level.name}
-                                    {lockedLevelKeys.has(level.key) && (
+                                    {field.name}
+                                    {lockedFieldKeys.has(field.key) && (
                                       <span className="ml-2 text-xs text-muted-foreground">
                                         {t("settings.common.default")}
                                       </span>
                                     )}
                                   </div>
                                 )}
-                                {lockedLevelKeys.has(level.key) &&
-                                  defaultLevelDescriptions[level.key] && (
+                                {lockedFieldKeys.has(field.key) &&
+                                  defaultFieldDescriptions[field.key] && (
                                     <div className="text-xs text-muted-foreground">
-                                      {defaultLevelDescriptions[level.key]}
+                                      {defaultFieldDescriptions[field.key]}
                                     </div>
                                   )}
                               </td>
-                              <td className="px-4 py-2">{level.order}</td>
+                              <td className="px-4 py-2">{field.order}</td>
                               <td className="px-4 py-2">
                                 <Checkbox
-                                  checked={level.isRequired}
+                                  checked={field.isRequired}
                                   onChange={(event) =>
-                                    updateLevel(level.id, {
+                                    updateOrderField(field.id, {
                                       isRequired: event.target.checked,
                                     })
                                   }
                                   label={
-                                    level.isRequired
+                                    field.isRequired
                                       ? t("settings.common.yes")
                                       : t("settings.common.no")
                                   }
@@ -3682,14 +3514,14 @@ export default function SettingsPage() {
                               </td>
                               <td className="px-4 py-2">
                                 <Checkbox
-                                  checked={level.isActive}
+                                  checked={field.isActive}
                                   onChange={(event) =>
-                                    updateLevel(level.id, {
+                                    updateOrderField(field.id, {
                                       isActive: event.target.checked,
                                     })
                                   }
                                   label={
-                                    level.isActive
+                                    field.isActive
                                       ? t("settings.common.active")
                                       : t("settings.common.hidden")
                                   }
@@ -3697,14 +3529,14 @@ export default function SettingsPage() {
                               </td>
                               <td className="px-4 py-2">
                                 <Checkbox
-                                  checked={level.showInTable}
+                                  checked={field.showInTable}
                                   onChange={(event) =>
-                                    updateLevel(level.id, {
+                                    updateOrderField(field.id, {
                                       showInTable: event.target.checked,
                                     })
                                   }
                                   label={
-                                    level.showInTable
+                                    field.showInTable
                                       ? t("settings.common.shown")
                                       : t("settings.common.hidden")
                                   }
@@ -3718,16 +3550,16 @@ export default function SettingsPage() {
                                         variant="outline"
                                         size="sm"
                                         onClick={() =>
-                                          void handleSaveInlineLevel()
+                                          void handleSaveInlineField()
                                         }
-                                        disabled={!inlineLevelName.trim()}
+                                        disabled={!inlineFieldName.trim()}
                                       >
-                                        {t("settings.structure.saveLevel")}
+                                        {t("settings.orderFields.saveField")}
                                       </Button>
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={cancelInlineLevelEdit}
+                                        onClick={cancelInlineFieldEdit}
                                       >
                                         {t("settings.common.cancel")}
                                       </Button>
@@ -3738,7 +3570,7 @@ export default function SettingsPage() {
                                         variant="outline"
                                         size="sm"
                                         onClick={() =>
-                                          startInlineLevelEdit(level.id)
+                                          startInlineFieldEdit(field.id)
                                         }
                                       >
                                         <PencilIcon className="h-4 w-4" />
@@ -3750,19 +3582,19 @@ export default function SettingsPage() {
                                           if (
                                             !(await confirmRemove(
                                               t(
-                                                "settings.structure.removeLevelConfirm",
+                                                "settings.orderFields.removeFieldConfirm",
                                                 {
-                                                  name: level.name,
+                                                  name: field.name,
                                                 },
                                               ),
                                             ))
                                           ) {
                                             return;
                                           }
-                                          removeLevel(level.id);
+                                          removeOrderField(field.id);
                                         }}
-                                        disabled={lockedLevelKeys.has(
-                                          level.key,
+                                        disabled={lockedFieldKeys.has(
+                                          field.key,
                                         )}
                                       >
                                         <Trash2Icon className="h-4 w-4" />
@@ -3777,265 +3609,19 @@ export default function SettingsPage() {
                       })}
                       <tr
                         className={`border-t border-border transition-all ${
-                          levelDropIndex === sortedLevels.length &&
-                          draggedLevelId
+                          fieldDropIndex === sortedFields.length &&
+                          draggedFieldId
                             ? "h-4 bg-primary/10"
                             : "h-0"
                         }`}
                       />
-                      {sortedLevels.length === 0 && (
+                      {sortedFields.length === 0 && (
                         <tr>
                           <td
                             colSpan={7}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
-                            {t("settings.structure.addFirstLevel")}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  {t("settings.structure.referenceListsTitle")}
-                </CardTitle>
-                <CardDescription>
-                  {t("settings.structure.referenceListsDescription")}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap gap-3">
-                  <SelectField
-                    label={t("settings.structure.level")}
-                    value={selectedLevelId}
-                    onValueChange={setSelectedLevelId}
-                  >
-                    <Select
-                      value={selectedLevelId}
-                      onValueChange={setSelectedLevelId}
-                    >
-                      <SelectTrigger className="h-10 min-w-50">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {selectableLevels.map((level) => (
-                          <SelectItem key={level.id} value={level.id}>
-                            {level.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </SelectField>
-                  {parentLevel && (
-                    <SelectField
-                      label={`${t("settings.structure.parent")} (${parentLevel.name})`}
-                      value={nodeParentId}
-                      onValueChange={setNodeParentId}
-                    >
-                      <Select
-                        value={nodeParentId}
-                        onValueChange={setNodeParentId}
-                      >
-                        <SelectTrigger className="h-10 min-w-50">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">
-                            {t("settings.structure.noParent")}
-                          </SelectItem>
-                          {parentNodes.map((node) => (
-                            <SelectItem key={node.id} value={node.id}>
-                              {node.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </SelectField>
-                  )}
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,0.6fr)_auto] lg:items-end">
-                  <InputField
-                    label={t("settings.structure.label")}
-                    value={nodeLabel}
-                    onChange={(event) => setNodeLabel(event.target.value)}
-                    placeholder={t("settings.structure.enterLabel")}
-                    className="h-10 text-sm"
-                  />
-                  <InputField
-                    label={t("settings.structure.codeOptional")}
-                    value={nodeCode}
-                    onChange={(event) => setNodeCode(event.target.value)}
-                    placeholder={t("settings.structure.optionalCode")}
-                    className="h-10 text-sm"
-                  />
-                  <div className="flex gap-2">
-                    <Button onClick={handleSaveNode}>
-                      {editingNodeId
-                        ? t("settings.structure.saveItem")
-                        : t("settings.structure.addItem")}
-                    </Button>
-                    {editingNodeId && (
-                      <Button variant="outline" onClick={resetNodeForm}>
-                        {t("settings.common.cancel")}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
-                  <TextAreaField
-                    label={t("settings.structure.bulkAdd")}
-                    value={bulkNodeInput}
-                    onChange={(event) => setBulkNodeInput(event.target.value)}
-                    placeholder="PE 40 Durvis\nPE 40 Vitrina\nPE 40 Logs"
-                    className="min-h-30"
-                    description={t("settings.structure.bulkAddDescription")}
-                  />
-                  <div className="flex gap-2">
-                    <Button onClick={handleBulkAddNodes}>
-                      {t("settings.structure.addList")}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm text-muted-foreground">
-                    {selectedNodeIds.length > 0
-                      ? t("settings.common.selectedCount", {
-                          count: selectedNodeIds.length,
-                        })
-                      : " "}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleDeleteSelectedNodes}
-                    disabled={selectedNodeIds.length === 0}
-                  >
-                    {t("settings.common.removeSelected")}
-                  </Button>
-                </div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="min-w-[760px] w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
-                    <thead className="bg-muted/40 text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.structure.label")}
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.structure.code")}
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.structure.parent")}
-                        </th>
-                        <th className="px-4 py-2 text-right font-medium">
-                          <div className="flex items-center justify-end gap-2">
-                            <span>{t("settings.common.actions")}</span>
-                            <Checkbox
-                              variant="box"
-                              checked={
-                                currentLevelNodes.length > 0 &&
-                                selectedNodeIds.length ===
-                                  currentLevelNodes.length
-                              }
-                              onChange={(event) => {
-                                if (event.target.checked) {
-                                  setSelectedNodeIds(
-                                    currentLevelNodes.map((node) => node.id),
-                                  );
-                                } else {
-                                  setSelectedNodeIds([]);
-                                }
-                              }}
-                              disabled={currentLevelNodes.length === 0}
-                            />
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentLevelNodes.map((node) => (
-                        <tr key={node.id} className="border-t border-border">
-                          <td className="px-4 py-2 font-medium">
-                            {node.label}
-                          </td>
-                          <td className="px-4 py-2 text-muted-foreground">
-                            {node.code ?? "--"}
-                          </td>
-                          <td className="px-4 py-2 text-muted-foreground">
-                            {node.parentId
-                              ? (nodes.find((item) => item.id === node.parentId)
-                                  ?.label ?? "--")
-                              : "--"}
-                          </td>
-                          <td className="px-4 py-2 text-right">
-                            <div className="flex justify-end items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleEditNode(node.id)}
-                              >
-                                <PencilIcon className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleCopyNode(node.id)}
-                              >
-                                <CopyIcon className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={async () => {
-                                  if (
-                                    !(await confirmRemove(
-                                      t(
-                                        "settings.structure.removeItemFromLevelConfirm",
-                                        {
-                                          label: node.label,
-                                          level:
-                                            selectedLevel?.name ??
-                                            t("settings.structure.level"),
-                                        },
-                                      ),
-                                    ))
-                                  ) {
-                                    return;
-                                  }
-                                  removeNode(node.id);
-                                }}
-                              >
-                                <Trash2Icon className="h-4 w-4" />
-                              </Button>
-                              <Checkbox
-                                variant="box"
-                                checked={selectedNodeIds.includes(node.id)}
-                                onChange={(event) => {
-                                  setSelectedNodeIds((prev) => {
-                                    if (event.target.checked) {
-                                      return [...prev, node.id];
-                                    }
-                                    return prev.filter((id) => id !== node.id);
-                                  });
-                                }}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {currentLevelNodes.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-4 py-6 text-center text-muted-foreground"
-                          >
-                            {t("settings.structure.addItemsForLevel")}
+                            {t("settings.orderFields.addFirstField")}
                           </td>
                         </tr>
                       )}
@@ -8297,3 +7883,4 @@ export default function SettingsPage() {
     </section>
   );
 }
+

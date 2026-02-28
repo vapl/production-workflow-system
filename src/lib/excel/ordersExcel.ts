@@ -15,7 +15,7 @@ export const BASE_ORDER_COLUMNS = [
 export function buildOrdersTemplate(levelNames: string[]): Blob {
   const headers = [
     ...BASE_ORDER_COLUMNS,
-    ...levelNames.map((name) => `Hierarchy:${name}`),
+    ...levelNames.map((name) => `Order field:${name}`),
   ];
   const worksheet = XLSX.utils.aoa_to_sheet([headers]);
   const workbook = XLSX.utils.book_new();

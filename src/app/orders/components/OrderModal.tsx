@@ -17,22 +17,32 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import { XIcon } from "lucide-react";
-import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import type { ReactNode } from "react";
 import { getAccountingAdapter } from "@/lib/integrations/accounting/getAdapter";
 import type { AccountingOrder } from "@/lib/integrations/accounting/types";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { ORDER_CORE_FIELD_KEYS } from "@/lib/domain/orderCoreFields";
+import { useWorkflowRules } from "@/contexts/WorkflowContext";
+import type { OrderStatus } from "@/types/orders";
+import {
+  getOrderFieldLabel,
+  getOrderStatusLabel,
+} from "@/lib/domain/orderFieldPresentation";
 
 export interface OrderFormValues {
   orderNumber: string;
   customerName: string;
   customerEmail?: string;
   productName: string;
-  quantity: number;
+  quantity?: number;
   dueDate: string;
   priority: "low" | "normal" | "high" | "urgent";
+  status: OrderStatus;
   notes?: string;
-  hierarchy?: Record<string, string>;
+  assignedEngineerName?: string;
+  assignedManagerName?: string;
+  orderFieldValues?: Record<string, string>;
 }
 
 interface OrderModalProps {
@@ -59,7 +69,10 @@ const defaultValues: OrderFormValues = {
   quantity: 1,
   dueDate: "",
   priority: "normal",
+  status: "draft",
   notes: "",
+  assignedEngineerName: "",
+  assignedManagerName: "",
 };
 
 export function OrderModal({
@@ -75,6 +88,7 @@ export function OrderModal({
   onOpenImportExcel,
 }: OrderModalProps) {
   const { t } = useI18n();
+  const { rules } = useWorkflowRules();
   const resolvedTitle = title ?? t("orders.page.createOrderTitle");
   const resolvedSubmitLabel = submitLabel ?? t("orders.page.createOrder");
   const minDueDate = initialValues?.dueDate
@@ -88,53 +102,86 @@ export function OrderModal({
     quantity: String(defaultValues.quantity),
     dueDate: defaultValues.dueDate,
     priority: defaultValues.priority,
+    status: defaultValues.status,
     notes: defaultValues.notes ?? "",
-    hierarchy: {} as Record<string, string>,
+    assignedEngineerName: defaultValues.assignedEngineerName ?? "",
+    assignedManagerName: defaultValues.assignedManagerName ?? "",
+    orderFieldValues: {} as Record<string, string>,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [hierarchyInput, setHierarchyInput] = useState<Record<string, string>>(
-    {},
+  const [orderFieldInput, setOrderFieldInput] = useState<
+    Record<string, string>
+  >({});
+  const { orderFields } = useOrderFieldSettings();
+  const coreFieldsByKey = useMemo(
+    () => new Map(orderFields.map((field) => [field.key, field])),
+    [orderFields],
   );
-  const { levels, nodes } = useHierarchy();
-  const activeLevels = useMemo(
+  const orderNumberField = coreFieldsByKey.get("order_number");
+  const customerField = coreFieldsByKey.get("customer_name");
+  const quantityField = coreFieldsByKey.get("quantity");
+  const dueDateField = coreFieldsByKey.get("due_date");
+  const engineerField = coreFieldsByKey.get("engineer");
+  const managerField = coreFieldsByKey.get("manager");
+  const metadataCoreFields = useMemo(
     () =>
-      levels
+      orderFields
+        .filter(
+          (field) =>
+            field.isActive &&
+            (field.key === "delivery_address" || field.key === "customer_phone"),
+        )
+        .sort((a, b) => a.order - b.order),
+    [orderFields],
+  );
+  const statusOptions = useMemo(
+    () =>
+      (
+        [
+          "draft",
+          "ready_for_engineering",
+          "in_engineering",
+          "engineering_blocked",
+          "ready_for_production",
+          "in_production",
+          "done",
+        ] as OrderStatus[]
+      )
+        .filter((status) => rules.orderStatusConfig?.[status]?.isActive ?? true)
+        .map((status) => ({
+          value: status,
+          label: getOrderStatusLabel(status, t, rules.statusLabels?.[status]),
+        })),
+    [rules.orderStatusConfig, rules.statusLabels, t],
+  );
+  const activeOrderFields = useMemo(
+    () =>
+      orderFields
         .filter(
           (level) =>
             level.isActive &&
-            level.key !== "engineer" &&
-            level.key !== "manager",
+            !ORDER_CORE_FIELD_KEYS.has(level.key),
         )
         .sort((a, b) => a.order - b.order),
-    [levels],
+    [orderFields],
   );
   const isCategoryProductOnly = editMode === "category-product-only";
   const editableLevelIds = useMemo(() => {
     if (!isCategoryProductOnly) {
-      return new Set(activeLevels.map((level) => level.id));
+      return new Set(activeOrderFields.map((level) => level.id));
     }
     const allowedKeys = new Set(["category", "product"]);
     return new Set(
-      activeLevels
+      activeOrderFields
         .filter((level) => allowedKeys.has(level.key))
         .map((level) => level.id),
     );
-  }, [activeLevels, isCategoryProductOnly]);
+  }, [activeOrderFields, isCategoryProductOnly]);
   const productLevel = useMemo(
-    () => activeLevels.find((level) => level.key === "product"),
-    [activeLevels],
+    () => activeOrderFields.find((level) => level.key === "product"),
+    [activeOrderFields],
   );
-  const levelNodeMap = useMemo(() => {
-    const map = new Map<string, typeof nodes>();
-    activeLevels.forEach((level) => {
-      map.set(
-        level.id,
-        nodes.filter((node) => node.levelId === level.id),
-      );
-    });
-    return map;
-  }, [activeLevels, nodes]);
   const isEditingOrderNumber = Boolean(initialValues?.orderNumber);
   const supportsCreateEntryModes =
     enableCreateEntryModeSelection &&
@@ -167,24 +214,6 @@ export function OrderModal({
     normalizedCurrentNumber.length > 0 &&
     !isEditingOrderNumber &&
     normalizedExistingNumbers.includes(normalizedCurrentNumber);
-
-  function resolveNodeId(
-    levelId: string,
-    label: string,
-    parentId?: string | null,
-  ) {
-    const trimmed = label.trim();
-    if (!trimmed) {
-      return "";
-    }
-    const existing = nodes.find(
-      (node) =>
-        node.levelId === levelId &&
-        node.label.toLowerCase() === trimmed.toLowerCase() &&
-        (parentId ? node.parentId === parentId : !node.parentId),
-    );
-    return existing?.id ?? "";
-  }
 
   const normalizedExistingNumbersSet = useMemo(
     () => new Set(normalizedExistingNumbers),
@@ -230,27 +259,18 @@ export function OrderModal({
       ...defaultValues,
       ...initialValues,
     };
-    let nextProductName = nextValues.productName;
-    if (productLevel && nextValues.hierarchy?.[productLevel.id]) {
-      const rawValue = nextValues.hierarchy?.[productLevel.id] ?? "";
-      const selectedNode = nodes.find((node) => node.id === rawValue);
-      nextProductName = selectedNode?.label ?? (rawValue || nextProductName);
-    }
-    const nextHierarchy: Record<string, string> = {};
-    const nextHierarchyInput: Record<string, string> = {};
-    activeLevels.forEach((level) => {
-      const nodeId = nextValues.hierarchy?.[level.id];
-      if (!nodeId) {
+    const nextProductName =
+      (productLevel && nextValues.orderFieldValues?.[productLevel.id]) ||
+      nextValues.productName;
+    const nextOrderFieldValues: Record<string, string> = {};
+    const nextOrderFieldInput: Record<string, string> = {};
+    activeOrderFields.forEach((level) => {
+      const rawValue = nextValues.orderFieldValues?.[level.id];
+      if (!rawValue) {
         return;
       }
-      const node = nodes.find((item) => item.id === nodeId);
-      if (node) {
-        nextHierarchy[level.id] = nodeId;
-        nextHierarchyInput[level.id] = node.label;
-        return;
-      }
-      // Keep raw value in input for visibility, but drop invalid IDs from state.
-      nextHierarchyInput[level.id] = nodeId;
+      nextOrderFieldValues[level.id] = rawValue;
+      nextOrderFieldInput[level.id] = rawValue;
     });
     setFormState({
       orderNumber: nextValues.orderNumber ?? "",
@@ -260,13 +280,16 @@ export function OrderModal({
       quantity: String(nextValues.quantity ?? 1),
       dueDate: nextValues.dueDate,
       priority: nextValues.priority,
+      status: nextValues.status ?? "draft",
       notes: nextValues.notes ?? "",
-      hierarchy: nextHierarchy,
+      assignedEngineerName: nextValues.assignedEngineerName ?? "",
+      assignedManagerName: nextValues.assignedManagerName ?? "",
+      orderFieldValues: nextOrderFieldValues,
     });
     setErrors({});
     setTouched({});
-    setHierarchyInput(nextHierarchyInput);
-  }, [activeLevels, initialValues, nodes, open, productLevel]);
+    setOrderFieldInput(nextOrderFieldInput);
+  }, [activeOrderFields, initialValues, open, productLevel]);
 
   function resetForm() {
     setFormState({
@@ -277,12 +300,15 @@ export function OrderModal({
       quantity: String(defaultValues.quantity),
       dueDate: defaultValues.dueDate,
       priority: defaultValues.priority,
+      status: defaultValues.status,
       notes: defaultValues.notes ?? "",
-      hierarchy: {},
+      assignedEngineerName: defaultValues.assignedEngineerName ?? "",
+      assignedManagerName: defaultValues.assignedManagerName ?? "",
+      orderFieldValues: {},
     });
     setErrors({});
     setTouched({});
-    setHierarchyInput({});
+    setOrderFieldInput({});
   }
 
   function validateField(field: string, value: string) {
@@ -304,12 +330,18 @@ export function OrderModal({
       case "productName":
         return "";
       case "quantity": {
+        if (!quantityField?.isRequired && !value.trim()) {
+          return "";
+        }
         const parsed = Number(value);
         return Number.isFinite(parsed) && parsed > 0
           ? ""
           : t("orders.modal.validation.quantityPositive");
       }
       case "dueDate": {
+        if (!dueDateField?.isRequired && !value) {
+          return "";
+        }
         if (!value) {
           return t("orders.modal.validation.dueDateRequired");
         }
@@ -321,27 +353,41 @@ export function OrderModal({
         today.setHours(0, 0, 0, 0);
         return dueDate < today ? t("orders.modal.validation.dueDatePast") : "";
       }
+      case "assignedEngineerName":
+        return engineerField?.isRequired && !value.trim()
+          ? t("orders.modal.levelRequired", {
+              level: getOrderFieldLabel(engineerField.key, t, engineerField.name),
+            })
+          : "";
+      case "assignedManagerName":
+        return managerField?.isRequired && !value.trim()
+          ? t("orders.modal.levelRequired", {
+              level: getOrderFieldLabel(managerField.key, t, managerField.name),
+            })
+          : "";
       default:
         return "";
     }
   }
 
-  function handleHierarchyChange(levelId: string, value: string) {
+  function handleOrderFieldChange(levelId: string, value: string) {
     setFormState((prev) => {
-      const nextHierarchy = { ...prev.hierarchy, [levelId]: value };
-      // Do not clear lower levels on manual input; many levels are independent.
-      const productLevel = activeLevels.find(
+      const nextOrderFieldValues = {
+        ...prev.orderFieldValues,
+        [levelId]: value,
+      };
+      // Do not clear lower orderFields on manual input; many orderFields are independent.
+      const productLevel = activeOrderFields.find(
         (level) => level.key === "product",
       );
       if (productLevel && levelId === productLevel.id) {
-        const selectedNode = nodes.find((node) => node.id === value);
         return {
           ...prev,
-          hierarchy: nextHierarchy,
-          productName: selectedNode?.label ?? value,
+          orderFieldValues: nextOrderFieldValues,
+          productName: value,
         };
       }
-      return { ...prev, hierarchy: nextHierarchy };
+      return { ...prev, orderFieldValues: nextOrderFieldValues };
     });
   }
 
@@ -498,56 +544,45 @@ export function OrderModal({
       });
     }
 
-    function resolveHierarchyValue(levelKey: string, rawValue?: string) {
-      if (!rawValue?.trim()) {
-        return "";
-      }
-      const level = activeLevels.find((item) => item.key === levelKey);
-      if (!level) {
-        return "";
-      }
-      const matchedNode = nodes.find(
-        (node) =>
-          node.levelId === level.id &&
-          node.label.toLowerCase() === rawValue.trim().toLowerCase(),
-      );
-      return matchedNode?.id ?? rawValue.trim();
+    function resolveOrderFieldValue(levelKey: string, rawValue?: string) {
+      void levelKey;
+      return rawValue?.trim() ?? "";
     }
 
     function mapAccountingOrderToFormValues(oneSelectedOrder: AccountingOrder) {
-      const nextHierarchy: Record<string, string> = {};
-      const nextHierarchyInput: Record<string, string> = {};
-      const contractValue = resolveHierarchyValue(
+      const nextOrderFieldValues: Record<string, string> = {};
+      const nextOrderFieldInput: Record<string, string> = {};
+      const contractValue = resolveOrderFieldValue(
         "contract",
         oneSelectedOrder.contract,
       );
       if (contractValue) {
-        const level = activeLevels.find((item) => item.key === "contract");
+        const level = activeOrderFields.find((item) => item.key === "contract");
         if (level) {
-          nextHierarchy[level.id] = contractValue;
-          nextHierarchyInput[level.id] = oneSelectedOrder.contract ?? "";
+          nextOrderFieldValues[level.id] = contractValue;
+          nextOrderFieldInput[level.id] = oneSelectedOrder.contract ?? "";
         }
       }
-      const categoryValue = resolveHierarchyValue(
+      const categoryValue = resolveOrderFieldValue(
         "category",
         oneSelectedOrder.category,
       );
       if (categoryValue) {
-        const level = activeLevels.find((item) => item.key === "category");
+        const level = activeOrderFields.find((item) => item.key === "category");
         if (level) {
-          nextHierarchy[level.id] = categoryValue;
-          nextHierarchyInput[level.id] = oneSelectedOrder.category ?? "";
+          nextOrderFieldValues[level.id] = categoryValue;
+          nextOrderFieldInput[level.id] = oneSelectedOrder.category ?? "";
         }
       }
-      const productValue = resolveHierarchyValue(
+      const productValue = resolveOrderFieldValue(
         "product",
         oneSelectedOrder.product ?? oneSelectedOrder.productName,
       );
       if (productValue) {
-        const level = activeLevels.find((item) => item.key === "product");
+        const level = activeOrderFields.find((item) => item.key === "product");
         if (level) {
-          nextHierarchy[level.id] = productValue;
-          nextHierarchyInput[level.id] =
+          nextOrderFieldValues[level.id] = productValue;
+          nextOrderFieldInput[level.id] =
             oneSelectedOrder.product ?? oneSelectedOrder.productName ?? "";
         }
       }
@@ -562,10 +597,10 @@ export function OrderModal({
         dueDate: oneSelectedOrder.dueDate ?? "",
         priority: oneSelectedOrder.priority ?? "normal",
         notes: "",
-        hierarchy: nextHierarchy,
+        orderFieldValues: nextOrderFieldValues,
       };
 
-      return { values, hierarchyInput: nextHierarchyInput };
+      return { values, orderFieldInput: nextOrderFieldInput };
     }
 
     function useSelectedInForm() {
@@ -582,9 +617,9 @@ export function OrderModal({
         dueDate: mapped.values.dueDate,
         priority: mapped.values.priority,
         notes: mapped.values.notes ?? "",
-        hierarchy: mapped.values.hierarchy ?? {},
+        orderFieldValues: mapped.values.orderFieldValues ?? {},
       });
-      setHierarchyInput(mapped.hierarchyInput);
+      setOrderFieldInput(mapped.orderFieldInput);
       setErrors({});
       setTouched({});
       setEntryMode("manual");
@@ -851,79 +886,477 @@ export function OrderModal({
       return true;
     }
     const baseValid =
-      formState.orderNumber.trim() &&
-      formState.customerName.trim() &&
-      formState.quantity.trim() &&
-      formState.dueDate.trim() &&
+      (!orderNumberField?.isRequired || formState.orderNumber.trim()) &&
+      (!customerField?.isRequired || formState.customerName.trim()) &&
+      (!quantityField?.isRequired || formState.quantity.trim()) &&
+      (!dueDateField?.isRequired || formState.dueDate.trim()) &&
+      (!engineerField?.isRequired || formState.assignedEngineerName.trim()) &&
+      (!managerField?.isRequired || formState.assignedManagerName.trim()) &&
       !isDuplicateOrderNumber &&
       !validateField("quantity", formState.quantity) &&
-      !validateField("dueDate", formState.dueDate);
+      !validateField("dueDate", formState.dueDate) &&
+      !validateField("assignedEngineerName", formState.assignedEngineerName) &&
+      !validateField("assignedManagerName", formState.assignedManagerName);
     if (!baseValid) {
       return false;
     }
-    const requiredHierarchyOk = activeLevels.every((level) => {
+    const requiredMetadataOk = metadataCoreFields.every((field) => {
+      if (!field.isRequired) {
+        return true;
+      }
+      return Boolean(formState.orderFieldValues[field.id]?.trim());
+    });
+    if (!requiredMetadataOk) {
+      return false;
+    }
+    const requiredOrderFieldValuesOk = activeOrderFields.every((level) => {
       if (!level.isRequired || !editableLevelIds.has(level.id)) {
         return true;
       }
       return Boolean(
-        formState.hierarchy[level.id] || hierarchyInput[level.id]?.trim(),
+        formState.orderFieldValues[level.id] || orderFieldInput[level.id]?.trim(),
       );
     });
-    return requiredHierarchyOk;
+    return requiredOrderFieldValuesOk;
   })();
   const hasErrors = Object.values(errors).some(Boolean);
   const isSubmitDisabled =
     (!requiredFieldsValid && !isCategoryProductOnly) ||
     hasErrors ||
     isDuplicateOrderNumber;
-  const contractLevel = activeLevels.find((level) => level.key === "contract");
-  const categoryLevel = activeLevels.find((level) => level.key === "category");
-  const productHierarchyLevel = activeLevels.find(
-    (level) => level.key === "product",
-  );
-  const remainingLevels = activeLevels.filter(
-    (level) =>
-      level.key !== "contract" &&
-      level.key !== "category" &&
-      level.key !== "product",
-  );
+  const configuredModalFields = orderFields
+    .filter((field) => field.isActive && field.key !== "actions")
+    .sort((a, b) => a.order - b.order);
+  const orderedModalFields = isCategoryProductOnly
+    ? configuredModalFields.filter(
+        (field) =>
+          !ORDER_CORE_FIELD_KEYS.has(field.key) && editableLevelIds.has(field.id),
+      )
+    : [
+        ...configuredModalFields,
+        {
+          id: "customer-email",
+          name: t("orders.modal.customerEmail"),
+          key: "customer_email",
+          order: (customerField?.order ?? 20) + 0.5,
+          isRequired: false,
+          isActive: true,
+          showInTable: false,
+        },
+      ].sort((a, b) => a.order - b.order);
 
-  function renderHierarchyField(level: (typeof activeLevels)[number]) {
-    const levelIndex = activeLevels.findIndex((item) => item.id === level.id);
-    const parentLevel = levelIndex > 0 ? activeLevels[levelIndex - 1] : null;
-    const parentIdRaw = parentLevel
-      ? formState.hierarchy[parentLevel.id]
-      : null;
-    const parentId =
-      parentIdRaw && nodes.some((node) => node.id === parentIdRaw)
-        ? parentIdRaw
-        : null;
-    const options = (levelNodeMap.get(level.id) || []).filter((node) =>
-      parentId ? node.parentId === parentId : true,
+  function renderMetadataCoreField(
+    field: (typeof metadataCoreFields)[number],
+  ) {
+    const errorKey = `orderFieldValues.${field.id}`;
+    const label = getOrderFieldLabel(field.key, t, field.name);
+    return (
+      <InputField
+        key={field.id}
+        label={label}
+        required={field.isRequired}
+        value={formState.orderFieldValues[field.id] ?? ""}
+        onChange={(event) =>
+          setFormState((prev) => ({
+            ...prev,
+            orderFieldValues: {
+              ...prev.orderFieldValues,
+              [field.id]: event.target.value,
+            },
+          }))
+        }
+        onBlur={(event) => {
+          const value = event.target.value.trim();
+          setTouched((prev) => ({ ...prev, [errorKey]: true }));
+          setFormState((prev) => ({
+            ...prev,
+            orderFieldValues: {
+              ...prev.orderFieldValues,
+              [field.id]: value,
+            },
+          }));
+          setErrors((prev) => ({
+            ...prev,
+            [errorKey]:
+              field.isRequired && !value
+                ? t("orders.modal.levelRequired", { level: label })
+                : "",
+          }));
+        }}
+        type={field.key === "customer_phone" ? "tel" : "text"}
+        className="h-10 text-sm text-foreground"
+        wrapperClassName={`h-10 ${
+          touched[errorKey] && errors[errorKey]
+            ? "border-destructive"
+            : "border-border"
+        }`}
+        error={
+          touched[errorKey] && errors[errorKey] ? errors[errorKey] : undefined
+        }
+      />
     );
-    const errorKey = `hierarchy.${level.id}`;
+  }
+
+  function renderCustomerEmailField() {
+    return (
+      <div key="customer-email">
+        <InputField
+          label={t("orders.modal.customerEmail")}
+          icon="email"
+          value={formState.customerEmail}
+          onChange={(event) =>
+            setFormState((prev) => ({
+              ...prev,
+              customerEmail: event.target.value,
+            }))
+          }
+          onBlur={(event) => {
+            if (isCategoryProductOnly) {
+              return;
+            }
+            const message = validateField(
+              "customerEmail",
+              event.target.value,
+            );
+            setErrors((prev) => ({
+              ...prev,
+              customerEmail: message,
+            }));
+            setTouched((prev) => ({ ...prev, customerEmail: true }));
+          }}
+          className="h-10 text-sm text-foreground"
+          wrapperClassName={`h-10 ${
+            touched.customerEmail && errors.customerEmail
+              ? "border-destructive"
+              : "border-border"
+          }`}
+          placeholder={t("orders.modal.customerEmailPlaceholder")}
+          type="email"
+          disabled={isCategoryProductOnly}
+          error={
+            touched.customerEmail && errors.customerEmail
+              ? errors.customerEmail
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
+
+  function renderConfiguredField(
+    field: (typeof orderedModalFields)[number],
+  ): ReactNode {
+    if (field.key === "customer_email") {
+      return isCategoryProductOnly ? null : renderCustomerEmailField();
+    }
+
+    if (!ORDER_CORE_FIELD_KEYS.has(field.key)) {
+      return renderOrderField(field);
+    }
+
+    const localizedLabel = getOrderFieldLabel(field.key, t, field.name);
+
+    switch (field.key) {
+      case "order_number":
+        return !isCategoryProductOnly ? (
+          <div key="order-number">
+            <InputField
+              label={localizedLabel}
+              value={formState.orderNumber}
+              onChange={(event) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  orderNumber: event.target.value,
+                }))
+              }
+              onBlur={(event) => {
+                if (isCategoryProductOnly || isEditingOrderNumber) {
+                  return;
+                }
+                const message = validateField("orderNumber", event.target.value);
+                setErrors((prev) => ({
+                  ...prev,
+                  orderNumber: message,
+                }));
+                setTouched((prev) => ({ ...prev, orderNumber: true }));
+              }}
+              className="h-10 text-sm text-foreground"
+              wrapperClassName={`h-10 ${
+                touched.orderNumber && errors.orderNumber
+                  ? "border-destructive"
+                  : "border-border"
+              }`}
+              placeholder={t("orders.modal.orderNumberPlaceholder")}
+              required={field.isRequired}
+              disabled={isCategoryProductOnly || isEditingOrderNumber}
+              error={
+                touched.orderNumber && errors.orderNumber
+                  ? errors.orderNumber
+                  : !touched.orderNumber && isDuplicateOrderNumber
+                    ? t("orders.modal.validation.orderNumberExists")
+                    : undefined
+              }
+            />
+          </div>
+        ) : null;
+      case "customer_name":
+        return !isCategoryProductOnly ? (
+          <div key="customer-name">
+            <InputField
+              label={localizedLabel}
+              icon="user"
+              value={formState.customerName}
+              onChange={(event) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  customerName: event.target.value,
+                }))
+              }
+              onBlur={(event) => {
+                const message = validateField("customerName", event.target.value);
+                setErrors((prev) => ({
+                  ...prev,
+                  customerName: message,
+                }));
+                setTouched((prev) => ({ ...prev, customerName: true }));
+              }}
+              className="h-10 text-sm text-foreground"
+              wrapperClassName={`h-10 ${
+                touched.customerName && errors.customerName
+                  ? "border-destructive"
+                  : "border-border"
+              }`}
+              placeholder={t("orders.modal.customerNamePlaceholder")}
+              required={field.isRequired}
+              disabled={isCategoryProductOnly}
+              error={
+                touched.customerName && errors.customerName
+                  ? errors.customerName
+                  : undefined
+              }
+            />
+          </div>
+        ) : null;
+      case "quantity":
+        return (
+          <InputField
+            key={field.id}
+            label={localizedLabel}
+            value={formState.quantity}
+            onChange={(event) =>
+              setFormState((prev) => ({
+                ...prev,
+                quantity: event.target.value,
+              }))
+            }
+            onBlur={(event) => {
+              if (isCategoryProductOnly) {
+                return;
+              }
+              const message = validateField("quantity", event.target.value);
+              setErrors((prev) => ({
+                ...prev,
+                quantity: message,
+              }));
+              setTouched((prev) => ({ ...prev, quantity: true }));
+            }}
+            className="h-10 text-sm text-foreground"
+            wrapperClassName={`h-10 ${
+              touched.quantity && errors.quantity
+                ? "border-destructive"
+                : "border-border"
+            }`}
+            type="number"
+            min={1}
+            required={field.isRequired}
+            disabled={isCategoryProductOnly}
+            error={
+              touched.quantity && errors.quantity ? errors.quantity : undefined
+            }
+          />
+        );
+      case "due_date":
+        return (
+          <div key={field.id} className="space-y-2 text-sm font-medium">
+            <DatePicker
+              label={`${localizedLabel}${field.isRequired ? " *" : ""}`}
+              value={formState.dueDate}
+              onChange={(next) => {
+                setFormState((prev) => ({
+                  ...prev,
+                  dueDate: next,
+                }));
+                if (isCategoryProductOnly) {
+                  return;
+                }
+                const message = validateField("dueDate", next);
+                setErrors((prev) => ({
+                  ...prev,
+                  dueDate: message,
+                }));
+                setTouched((prev) => ({ ...prev, dueDate: true }));
+              }}
+              min={minDueDate}
+              disabled={isCategoryProductOnly}
+              className="text-sm font-medium"
+              triggerClassName={`h-10 ${
+                touched.dueDate && errors.dueDate
+                  ? "border-destructive"
+                  : "border-border"
+              }`}
+            />
+            {touched.dueDate && errors.dueDate && (
+              <span className="text-xs text-destructive">{errors.dueDate}</span>
+            )}
+          </div>
+        );
+      case "engineer":
+        return (
+          <InputField
+            key={field.id}
+            label={localizedLabel}
+            value={formState.assignedEngineerName}
+            onChange={(event) =>
+              setFormState((prev) => ({
+                ...prev,
+                assignedEngineerName: event.target.value,
+              }))
+            }
+            onBlur={(event) => {
+              const message = validateField(
+                "assignedEngineerName",
+                event.target.value,
+              );
+              setErrors((prev) => ({
+                ...prev,
+                assignedEngineerName: message,
+              }));
+              setTouched((prev) => ({
+                ...prev,
+                assignedEngineerName: true,
+              }));
+            }}
+            required={field.isRequired}
+            disabled={isCategoryProductOnly}
+            className="h-10 text-sm text-foreground"
+            wrapperClassName={`h-10 ${
+              touched.assignedEngineerName && errors.assignedEngineerName
+                ? "border-destructive"
+                : "border-border"
+            }`}
+            error={
+              touched.assignedEngineerName && errors.assignedEngineerName
+                ? errors.assignedEngineerName
+                : undefined
+            }
+          />
+        );
+      case "manager":
+        return (
+          <InputField
+            key={field.id}
+            label={localizedLabel}
+            value={formState.assignedManagerName}
+            onChange={(event) =>
+              setFormState((prev) => ({
+                ...prev,
+                assignedManagerName: event.target.value,
+              }))
+            }
+            onBlur={(event) => {
+              const message = validateField(
+                "assignedManagerName",
+                event.target.value,
+              );
+              setErrors((prev) => ({
+                ...prev,
+                assignedManagerName: message,
+              }));
+              setTouched((prev) => ({
+                ...prev,
+                assignedManagerName: true,
+              }));
+            }}
+            required={field.isRequired}
+            disabled={isCategoryProductOnly}
+            className="h-10 text-sm text-foreground"
+            wrapperClassName={`h-10 ${
+              touched.assignedManagerName && errors.assignedManagerName
+                ? "border-destructive"
+                : "border-border"
+            }`}
+            error={
+              touched.assignedManagerName && errors.assignedManagerName
+                ? errors.assignedManagerName
+                : undefined
+            }
+          />
+        );
+      case "priority":
+        return (
+          <SelectField
+            key={field.id}
+            label={localizedLabel}
+            value={formState.priority}
+            onValueChange={(value) =>
+              setFormState((prev) => ({
+                ...prev,
+                priority: value as "low" | "normal" | "high" | "urgent",
+              }))
+            }
+            required={field.isRequired}
+            disabled={isCategoryProductOnly}
+            options={[
+              { value: "low", label: t("orders.modal.priority.low") },
+              { value: "normal", label: t("orders.modal.priority.normal") },
+              { value: "high", label: t("orders.modal.priority.high") },
+              { value: "urgent", label: t("orders.modal.priority.urgent") },
+            ]}
+          />
+        );
+      case "status":
+        return (
+          <SelectField
+            key={field.id}
+            label={localizedLabel}
+            value={formState.status}
+            onValueChange={(value) =>
+              setFormState((prev) => ({
+                ...prev,
+                status: value as OrderStatus,
+              }))
+            }
+            required={field.isRequired}
+            disabled={isCategoryProductOnly}
+            options={statusOptions}
+          />
+        );
+      case "delivery_address":
+      case "customer_phone":
+        return renderMetadataCoreField(field);
+      default:
+        return null;
+    }
+  }
+
+  function renderOrderField(level: (typeof activeOrderFields)[number]) {
+    const errorKey = `orderFieldValues.${level.id}`;
     return (
       <div key={level.id} className="space-y-2">
         <InputField
           label={level.name}
           required={level.isRequired}
-          list={`level-options-${level.id}`}
-          value={hierarchyInput[level.id] ?? ""}
+          value={orderFieldInput[level.id] ?? ""}
           onChange={(event) => {
             if (!editableLevelIds.has(level.id)) {
               return;
             }
             const value = event.target.value;
-            setHierarchyInput((prev) => ({
+            setOrderFieldInput((prev) => ({
               ...prev,
               [level.id]: value,
             }));
-            const matched = options.find(
-              (node) => node.label.toLowerCase() === value.toLowerCase(),
-            );
-            if (matched) {
-              handleHierarchyChange(level.id, matched.id);
-            }
+            handleOrderFieldChange(level.id, value);
           }}
           onBlur={(event) => {
             if (!editableLevelIds.has(level.id)) {
@@ -935,8 +1368,8 @@ export function OrderModal({
             }));
             const rawValue = event.target.value.trim();
             if (!rawValue) {
-              handleHierarchyChange(level.id, "");
-              setHierarchyInput((prev) => ({
+              handleOrderFieldChange(level.id, "");
+              setOrderFieldInput((prev) => ({
                 ...prev,
                 [level.id]: "",
               }));
@@ -948,14 +1381,10 @@ export function OrderModal({
               }
               return;
             }
-            const matched = options.find(
-              (node) => node.label.toLowerCase() === rawValue.toLowerCase(),
-            );
-            const nextValue = matched ? matched.id : rawValue;
-            handleHierarchyChange(level.id, nextValue);
-            setHierarchyInput((prev) => ({
+            handleOrderFieldChange(level.id, rawValue);
+            setOrderFieldInput((prev) => ({
               ...prev,
-              [level.id]: matched?.label ?? rawValue,
+              [level.id]: rawValue,
             }));
             setErrors((prev) => ({
               ...prev,
@@ -974,11 +1403,6 @@ export function OrderModal({
             touched[errorKey] && errors[errorKey] ? errors[errorKey] : undefined
           }
         />
-        <datalist id={`level-options-${level.id}`}>
-          {options.map((node) => (
-            <option key={node.id} value={node.label} />
-          ))}
-        </datalist>
       </div>
     );
   }
@@ -988,32 +1412,13 @@ export function OrderModal({
       className="space-y-4 pb-4"
       onSubmit={async (event) => {
         event.preventDefault();
-        const resolvedHierarchy = { ...formState.hierarchy };
-        activeLevels.forEach((level, index) => {
-          const inputValue = hierarchyInput[level.id]?.trim();
+        const resolvedOrderFieldValues = { ...formState.orderFieldValues };
+        activeOrderFields.forEach((level) => {
+          const inputValue = orderFieldInput[level.id]?.trim();
           if (!inputValue) {
             return;
           }
-          const existingId = resolvedHierarchy[level.id];
-          const existingNode = existingId
-            ? nodes.find((node) => node.id === existingId)
-            : undefined;
-          const matchesExisting =
-            existingNode &&
-            existingNode.label.toLowerCase() === inputValue.toLowerCase();
-          if (matchesExisting) {
-            return;
-          }
-          const parentLevel = activeLevels[index - 1];
-          const parentId = parentLevel
-            ? (resolvedHierarchy[parentLevel.id] ?? null)
-            : null;
-          const matchedId = resolveNodeId(
-            level.id,
-            inputValue,
-            parentId ?? null,
-          );
-          resolvedHierarchy[level.id] = matchedId || inputValue;
+          resolvedOrderFieldValues[level.id] = inputValue;
         });
         const nextErrors: Record<string, string> = {};
         (
@@ -1023,6 +1428,8 @@ export function OrderModal({
             "customerEmail",
             "quantity",
             "dueDate",
+            "assignedEngineerName",
+            "assignedManagerName",
           ] as const
         ).forEach((field) => {
           if (isCategoryProductOnly) {
@@ -1033,15 +1440,23 @@ export function OrderModal({
             nextErrors[field] = message;
           }
         });
-        activeLevels.forEach((level) => {
+        activeOrderFields.forEach((level) => {
           if (
             level.isRequired &&
-            !resolvedHierarchy[level.id] &&
+            !resolvedOrderFieldValues[level.id] &&
             editableLevelIds.has(level.id)
           ) {
-            nextErrors[`hierarchy.${level.id}`] = t("orders.modal.levelRequired", {
+            nextErrors[`orderFieldValues.${level.id}`] = t("orders.modal.levelRequired", {
               level: level.name,
             });
+          }
+        });
+        metadataCoreFields.forEach((field) => {
+          if (field.isRequired && !resolvedOrderFieldValues[field.id]?.trim()) {
+            nextErrors[`orderFieldValues.${field.id}`] = t(
+              "orders.modal.levelRequired",
+              { level: getOrderFieldLabel(field.key, t, field.name) },
+            );
           }
         });
         setErrors(nextErrors);
@@ -1054,11 +1469,17 @@ export function OrderModal({
                 customerEmail: true,
                 quantity: true,
                 dueDate: true,
+                assignedEngineerName: true,
+                assignedManagerName: true,
               }),
-          ...activeLevels.reduce<Record<string, boolean>>((acc, level) => {
+          ...activeOrderFields.reduce<Record<string, boolean>>((acc, level) => {
             if (editableLevelIds.has(level.id)) {
-              acc[`hierarchy.${level.id}`] = true;
+              acc[`orderFieldValues.${level.id}`] = true;
             }
+            return acc;
+          }, {}),
+          ...metadataCoreFields.reduce<Record<string, boolean>>((acc, field) => {
+            acc[`orderFieldValues.${field.id}`] = true;
             return acc;
           }, {}),
         });
@@ -1069,15 +1490,24 @@ export function OrderModal({
         const parsedQuantity = Number(formState.quantity);
         const success = await Promise.resolve(
           onSubmit({
-          orderNumber: formState.orderNumber.trim(),
-          customerName: formState.customerName.trim(),
-          customerEmail: formState.customerEmail.trim() || undefined,
-          productName: formState.productName.trim(),
-          quantity: parsedQuantity,
-          dueDate: formState.dueDate,
-          priority: formState.priority as "low" | "normal" | "high" | "urgent",
-          notes: formState.notes.trim() || undefined,
-          hierarchy: resolvedHierarchy,
+            orderNumber: formState.orderNumber.trim(),
+            customerName: formState.customerName.trim(),
+            customerEmail: formState.customerEmail.trim() || undefined,
+            productName: formState.productName.trim(),
+            quantity: formState.quantity.trim() ? parsedQuantity : undefined,
+            dueDate: formState.dueDate,
+            priority: formState.priority as
+              | "low"
+              | "normal"
+              | "high"
+              | "urgent",
+            status: formState.status,
+            notes: formState.notes.trim() || undefined,
+            assignedEngineerName:
+              formState.assignedEngineerName.trim() || undefined,
+            assignedManagerName:
+              formState.assignedManagerName.trim() || undefined,
+            orderFieldValues: resolvedOrderFieldValues,
           }),
         );
         if (!success) {
@@ -1093,279 +1523,8 @@ export function OrderModal({
       }}
     >
       <div className="grid gap-4 md:grid-cols-2">
-        {!isCategoryProductOnly && (
-          <div key="order-number">
-            <InputField
-              label={t("orders.page.orderNumberShort")}
-              value={formState.orderNumber}
-              onChange={(event) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  orderNumber: event.target.value,
-                }))
-              }
-              onBlur={(event) => {
-                if (isCategoryProductOnly || isEditingOrderNumber) {
-                  return;
-                }
-                const message = validateField(
-                  "orderNumber",
-                  event.target.value,
-                );
-                setErrors((prev) => ({
-                  ...prev,
-                  orderNumber: message,
-                }));
-                setTouched((prev) => ({ ...prev, orderNumber: true }));
-              }}
-              className="h-10 text-sm text-foreground"
-              wrapperClassName={`h-10 ${
-                touched.orderNumber && errors.orderNumber
-                  ? "border-destructive"
-                  : "border-border"
-              }`}
-              placeholder={t("orders.modal.orderNumberPlaceholder")}
-              required
-              disabled={isCategoryProductOnly || isEditingOrderNumber}
-              error={
-                touched.orderNumber && errors.orderNumber
-                  ? errors.orderNumber
-                  : !touched.orderNumber && isDuplicateOrderNumber
-                    ? t("orders.modal.validation.orderNumberExists")
-                    : undefined
-              }
-            />
-          </div>
-        )}
-
-        {contractLevel
-          ? renderHierarchyField(contractLevel)
-          : !isCategoryProductOnly && (
-              <div key="customer-name-fallback">
-                <InputField
-                  label={t("orders.page.customer")}
-                  icon="user"
-                  value={formState.customerName}
-                  onChange={(event) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      customerName: event.target.value,
-                    }))
-                  }
-                  onBlur={(event) => {
-                    if (isCategoryProductOnly) {
-                      return;
-                    }
-                    const message = validateField(
-                      "customerName",
-                      event.target.value,
-                    );
-                    setErrors((prev) => ({
-                      ...prev,
-                      customerName: message,
-                    }));
-                    setTouched((prev) => ({ ...prev, customerName: true }));
-                  }}
-                  className="h-10 text-sm text-foreground"
-                  wrapperClassName={`h-10 ${
-                    touched.customerName && errors.customerName
-                      ? "border-destructive"
-                      : "border-border"
-                  }`}
-                  placeholder={t("orders.modal.customerNamePlaceholder")}
-                  required
-                  disabled={isCategoryProductOnly}
-                  error={
-                    touched.customerName && errors.customerName
-                      ? errors.customerName
-                      : undefined
-                  }
-                />
-              </div>
-            )}
-
-        {!isCategoryProductOnly && contractLevel && (
-          <div key="customer-name">
-            <InputField
-              label={t("orders.page.customer")}
-              icon="user"
-              value={formState.customerName}
-              onChange={(event) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  customerName: event.target.value,
-                }))
-              }
-              onBlur={(event) => {
-                if (isCategoryProductOnly) {
-                  return;
-                }
-                const message = validateField(
-                  "customerName",
-                  event.target.value,
-                );
-                setErrors((prev) => ({
-                  ...prev,
-                  customerName: message,
-                }));
-                setTouched((prev) => ({ ...prev, customerName: true }));
-              }}
-              className="h-10 text-sm text-foreground"
-              wrapperClassName={`h-10 ${
-                touched.customerName && errors.customerName
-                  ? "border-destructive"
-                  : "border-border"
-              }`}
-              placeholder={t("orders.modal.customerNamePlaceholder")}
-              required
-              disabled={isCategoryProductOnly}
-              error={
-                touched.customerName && errors.customerName
-                  ? errors.customerName
-                  : undefined
-              }
-            />
-          </div>
-        )}
-
-        {!isCategoryProductOnly && (
-          <div key="customer-email">
-            <InputField
-              label={t("orders.modal.customerEmail")}
-              icon="email"
-              value={formState.customerEmail}
-              onChange={(event) =>
-                setFormState((prev) => ({
-                  ...prev,
-                  customerEmail: event.target.value,
-                }))
-              }
-              onBlur={(event) => {
-                if (isCategoryProductOnly) {
-                  return;
-                }
-                const message = validateField(
-                  "customerEmail",
-                  event.target.value,
-                );
-                setErrors((prev) => ({
-                  ...prev,
-                  customerEmail: message,
-                }));
-                setTouched((prev) => ({ ...prev, customerEmail: true }));
-              }}
-              className="h-10 text-sm text-foreground"
-              wrapperClassName={`h-10 ${
-                touched.customerEmail && errors.customerEmail
-                  ? "border-destructive"
-                  : "border-border"
-              }`}
-              placeholder={t("orders.modal.customerEmailPlaceholder")}
-              type="email"
-              disabled={isCategoryProductOnly}
-              error={
-                touched.customerEmail && errors.customerEmail
-                  ? errors.customerEmail
-                  : undefined
-              }
-            />
-          </div>
-        )}
-
-        {remainingLevels.map((level) => renderHierarchyField(level))}
-
-        {categoryLevel ? renderHierarchyField(categoryLevel) : null}
-        {productHierarchyLevel
-          ? renderHierarchyField(productHierarchyLevel)
-          : null}
+        {orderedModalFields.map((field) => renderConfiguredField(field))}
       </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <InputField
-          label={t("orders.page.quantity")}
-          value={formState.quantity}
-          onChange={(event) =>
-            setFormState((prev) => ({
-              ...prev,
-              quantity: event.target.value,
-            }))
-          }
-          onBlur={(event) => {
-            if (isCategoryProductOnly) {
-              return;
-            }
-            const message = validateField("quantity", event.target.value);
-            setErrors((prev) => ({
-              ...prev,
-              quantity: message,
-            }));
-            setTouched((prev) => ({ ...prev, quantity: true }));
-          }}
-          className="h-10 text-sm text-foreground"
-          wrapperClassName={`h-10 ${
-            touched.quantity && errors.quantity
-              ? "border-destructive"
-              : "border-border"
-          }`}
-          type="number"
-          min={1}
-          required
-          disabled={isCategoryProductOnly}
-          error={
-            touched.quantity && errors.quantity ? errors.quantity : undefined
-          }
-        />
-        <div className="space-y-2 text-sm font-medium">
-          <DatePicker
-            label={`${t("orders.page.dueDate")} *`}
-            value={formState.dueDate}
-            onChange={(next) => {
-              setFormState((prev) => ({
-                ...prev,
-                dueDate: next,
-              }));
-              if (isCategoryProductOnly) {
-                return;
-              }
-              const message = validateField("dueDate", next);
-              setErrors((prev) => ({
-                ...prev,
-                dueDate: message,
-              }));
-              setTouched((prev) => ({ ...prev, dueDate: true }));
-            }}
-            min={minDueDate}
-            disabled={isCategoryProductOnly}
-            className=" text-sm font-medium"
-            triggerClassName={`h-10 ${
-              touched.dueDate && errors.dueDate
-                ? "border-destructive"
-                : "border-border"
-            }`}
-          />
-          {touched.dueDate && errors.dueDate && (
-            <span className="text-xs text-destructive">{errors.dueDate}</span>
-          )}
-        </div>
-      </div>
-
-      <SelectField
-        label={t("orders.page.priority")}
-        value={formState.priority}
-        onValueChange={(value) =>
-          setFormState((prev) => ({
-            ...prev,
-            priority: value as "low" | "normal" | "high" | "urgent",
-          }))
-        }
-        disabled={isCategoryProductOnly}
-        options={[
-          { value: "low", label: t("orders.modal.priority.low") },
-          { value: "normal", label: t("orders.modal.priority.normal") },
-          { value: "high", label: t("orders.modal.priority.high") },
-          { value: "urgent", label: t("orders.modal.priority.urgent") },
-        ]}
-      />
 
       <TextAreaField
         label={t("orders.modal.notes")}
@@ -1402,5 +1561,8 @@ export function OrderModal({
     </form>,
   );
 }
+
+
+
 
 

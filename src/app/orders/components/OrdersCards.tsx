@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ChevronDownIcon,
@@ -14,13 +14,17 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { useHierarchy } from "@/app/settings/HierarchyContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 import type { Order } from "@/types/orders";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/lib/i18n/useI18n";
+import {
+  getOrderFieldLabel,
+  getOrderPriorityLabel,
+  getOrderStatusLabel,
+} from "@/lib/domain/orderFieldPresentation";
 
 interface OrdersCardsProps {
   orders: Order[];
@@ -42,7 +46,7 @@ interface OrdersCardsProps {
 
 function OrderCard({
   order,
-  activeLevels,
+  activeOrderFields,
   onEdit,
   onDelete,
   onTakeOrder,
@@ -53,7 +57,7 @@ function OrderCard({
   managerLabel,
 }: {
   order: Order;
-  activeLevels: { id: string; name: string }[];
+  activeOrderFields: { id: string; name: string }[];
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
   onTakeOrder?: (order: Order) => void;
@@ -65,7 +69,6 @@ function OrderCard({
 }) {
   const { t } = useI18n();
   const router = useRouter();
-  const { nodes } = useHierarchy();
   const { rules } = useWorkflowRules();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{
@@ -75,13 +78,6 @@ function OrderCard({
   } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
-  const nodeLabelMap = useMemo(() => {
-    const map = new Map<string, string>();
-    nodes.forEach((node) => {
-      map.set(node.id, node.label);
-    });
-    return map;
-  }, [nodes]);
   const engineerInitials = order.assignedEngineerName
     ? order.assignedEngineerName
         .split(" ")
@@ -152,16 +148,16 @@ function OrderCard({
     order.status === "ready_for_engineering" &&
     !order.assignedEngineerId;
   const hasAnyCardAction = Boolean(onEdit || onDelete || canTakeOrderQuick);
-  const hierarchyItems = activeLevels
+  const orderFieldItems = activeOrderFields
     .map((level) => {
-      const value = order.hierarchy?.[level.id];
-      const fallbackLabel = order.hierarchyLabels?.[level.id];
+      const value = order.orderFieldValues?.[level.id];
+      const fallbackLabel = order.orderFieldLabels?.[level.id];
       const displayValue = value
-        ? (nodeLabelMap.get(value) ?? fallbackLabel ?? value)
+        ? (fallbackLabel ?? value)
         : "--";
       return {
         id: level.id,
-        label: level.name,
+        label: getOrderFieldLabel(level.key, t, level.name),
         value: displayValue,
       };
     })
@@ -220,10 +216,16 @@ function OrderCard({
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end pr-10 md:pr-0 gap-1.5">
-          <Badge variant={priorityVariant}>{order.priority}</Badge>
+          <Badge variant={priorityVariant}>
+            {getOrderPriorityLabel(order.priority, t)}
+          </Badge>
           <Badge variant={statusVariant} className={statusColorClass}>
-            {rules.statusLabels[displayStatus] ??
-              formatOrderStatus(displayStatus)}
+            {getOrderStatusLabel(
+              displayStatus,
+              t,
+              rules.statusLabels[displayStatus] ??
+                formatOrderStatus(displayStatus),
+            )}
           </Badge>
           {hasOverdueExternal && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
@@ -234,7 +236,7 @@ function OrderCard({
       </div>
 
       <div className="mt-2 grid gap-2 grid-cols-2">
-        {hierarchyItems.map((item) => (
+        {orderFieldItems.map((item) => (
           <div key={item.id} className="text-xs">
             <div className="text-muted-foreground">{item.label}</div>
             <div className="text-foreground wrap-break-word">{item.value}</div>
@@ -454,8 +456,8 @@ export function OrdersCards({
   managerLabel,
 }: OrdersCardsProps) {
   const { t } = useI18n();
-  const { levels } = useHierarchy();
-  const activeLevels = levels
+  const { orderFields } = useOrderFieldSettings();
+  const activeOrderFields = orderFields
     .filter(
       (level) =>
         level.isActive &&
@@ -463,7 +465,11 @@ export function OrdersCards({
         level.key !== "engineer" &&
         level.key !== "manager",
     )
-    .sort((a, b) => a.order - b.order);
+    .sort((a, b) => a.order - b.order)
+    .map((level) => ({
+      ...level,
+      name: getOrderFieldLabel(level.key, t, level.name),
+    }));
   const [collapsedGroups, setCollapsedGroups] = useState<
     Record<string, boolean>
   >({});
@@ -503,7 +509,7 @@ export function OrdersCards({
                     <OrderCard
                       key={order.id}
                       order={order}
-                      activeLevels={activeLevels}
+                      activeOrderFields={activeOrderFields}
                       onEdit={onEdit}
                       onDelete={onDelete}
                       onTakeOrder={onTakeOrder}
@@ -529,7 +535,7 @@ export function OrdersCards({
             <OrderCard
               key={order.id}
               order={order}
-              activeLevels={activeLevels}
+              activeOrderFields={activeOrderFields}
               onEdit={onEdit}
               onDelete={onDelete}
               onTakeOrder={onTakeOrder}
@@ -550,3 +556,5 @@ export function OrdersCards({
     </div>
   );
 }
+
+

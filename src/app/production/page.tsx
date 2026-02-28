@@ -33,6 +33,20 @@ import {
   parseWorkingCalendar,
   type WorkingCalendar,
 } from "@/lib/domain/workingCalendar";
+import {
+  buildProductionSplitRows,
+  type ProductionBatchGroup as BatchGroup,
+  type ProductionSplitRow as SplitRow,
+} from "@/lib/domain/buildProductionSplitRows";
+import {
+  buildQueueByStation,
+  filterReadyBatchGroups,
+  type ProductionQueueItem as QueueItem,
+} from "@/lib/domain/productionQueue";
+import {
+  getProductionQrFieldValue,
+  prepareProductionQrRows,
+} from "@/lib/domain/prepareProductionQrRows";
 import type { OrderInputField } from "@/types/orderInputs";
 import {
   CalendarIcon,
@@ -48,7 +62,6 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import QRCode from "qrcode";
 
 type Priority = "low" | "normal" | "high" | "urgent";
 
@@ -148,53 +161,6 @@ function normalizeJoinedOrder(value: unknown): {
       typeof row.customer_name === "string" ? row.customer_name : null,
   };
 }
-
-type BatchGroup = {
-  key: string;
-  orderId: string;
-  orderNumber: string;
-  customerName: string;
-  dueDate: string;
-  priority: Priority;
-  batchCode: string;
-  totalQty: number;
-  material: string;
-};
-
-type QueueItem = {
-  id: string;
-  orderId: string;
-  orderNumber: string;
-  customerName: string;
-  dueDate: string;
-  priority: Priority;
-  status: BatchRunRow["status"];
-  batchCode: string;
-  totalQty: number;
-  material: string;
-  plannedDate?: string | null;
-  startedAt?: string | null;
-  doneAt?: string | null;
-  durationMinutes?: number | null;
-  items: ProductionItemRow[];
-};
-
-type SplitRow = {
-  id: string;
-  orderId: string;
-  orderNumber: string;
-  customerName: string;
-  dueDate: string;
-  batchCode: string;
-  priority: Priority;
-  fieldId: string;
-  fieldLabel: string;
-  itemName: string;
-  qty: number;
-  material: string;
-  rowIndex: number;
-  rawRow: Record<string, unknown>;
-};
 
 const productionAttachmentFallbackCategory = "production_report";
 
@@ -508,7 +474,7 @@ export default function ProductionPage() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!supabase) {
@@ -631,7 +597,7 @@ export default function ProductionPage() {
     return () => {
       isMounted = false;
     };
-  }, [productionItems, readyOrders]);
+  }, [productionItems, readyOrders, productionAttachmentCategory]);
 
   useEffect(() => {
     const sb = supabase;
@@ -992,27 +958,41 @@ export default function ProductionPage() {
     return rows;
   }, [productionItems]);
 
-  const orderConstructionRows = useMemo(() => {
-    if (productionConstructionRows.length > 0) {
-      return productionConstructionRows;
-    }
-    return buildSplitRows(readyBatchGroups);
-  }, [
-    productionConstructionRows,
-    readyBatchGroups,
-    productionFields,
-    productionValues,
-  ]);
+  const orderConstructionRows =
+    productionConstructionRows.length > 0
+      ? productionConstructionRows
+      : buildProductionSplitRows(
+          readyBatchGroups,
+          productionFields,
+          productionValues,
+        );
 
   const rowKeyForRow = (row: SplitRow) =>
     `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
+
+  const executionKey = (
+    orderId: string,
+    batchCode: string,
+    stationId: string | null,
+  ) => `${orderId}:${batchCode}:${stationId ?? "unassigned"}`;
+
+  const runByExecutionKey = useMemo(() => {
+    const map = new Map<string, BatchRunRow>();
+    batchRuns.forEach((run) => {
+      const key = executionKey(run.order_id, run.batch_code, run.station_id);
+      if (!map.has(key)) {
+        map.set(key, run);
+      }
+    });
+    return map;
+  }, [batchRuns]);
 
   const stationStatusMap = useMemo(() => {
     const map = new Map<
       string,
       Map<
         string,
-        { status: ProductionItemRow["status"]; blockedReason?: string }
+        { status: BatchRunRow["status"]; blockedReason?: string }
       >
     >();
     productionItems.forEach((item) => {
@@ -1026,18 +1006,22 @@ export default function ProductionPage() {
       if (!map.has(rowKey)) {
         map.set(rowKey, new Map());
       }
+      const run = runByExecutionKey.get(
+        executionKey(item.order_id, item.batch_code, item.station_id),
+      );
       const blockedReason =
-        typeof (item.meta as Record<string, unknown> | null)?.blocked_reason ===
+        run?.blocked_reason ??
+        (typeof (item.meta as Record<string, unknown> | null)?.blocked_reason ===
         "string"
           ? ((item.meta as Record<string, unknown>).blocked_reason as string)
-          : undefined;
+          : undefined);
       map.get(rowKey)?.set(stationId, {
-        status: item.status,
+        status: run?.status ?? item.status,
         blockedReason,
       });
     });
     return map;
-  }, [productionItems]);
+  }, [productionItems, runByExecutionKey]);
 
   const rowPlannedDateMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -1057,11 +1041,14 @@ export default function ProductionPage() {
     productionItems.forEach((item) => {
       const rowKey = rowKeyForProductionItem(item);
       const key = `${item.order_id}:${item.batch_code}:${rowKey}`;
+      const run = runByExecutionKey.get(
+        executionKey(item.order_id, item.batch_code, item.station_id),
+      );
       const isLocked =
-        Boolean(item.started_at) ||
-        Boolean(item.done_at) ||
-        item.status === "in_progress" ||
-        item.status === "done";
+        Boolean(run?.started_at ?? item.started_at) ||
+        Boolean(run?.done_at ?? item.done_at) ||
+        (run?.status ?? item.status) === "in_progress" ||
+        (run?.status ?? item.status) === "done";
       if (isLocked) {
         map.set(key, true);
       } else if (!map.has(key)) {
@@ -1069,7 +1056,7 @@ export default function ProductionPage() {
       }
     });
     return map;
-  }, [productionItems]);
+  }, [productionItems, runByExecutionKey]);
 
   const rowTimeStats = useMemo(() => {
     const map = new Map<
@@ -1362,16 +1349,6 @@ export default function ProductionPage() {
     return map;
   }, [batchRuns, productionItems, calendarDates]);
 
-  const readyOrderDurationMap = useMemo(() => {
-    const map = new Map<string, number>();
-    readyOrders.forEach((order) => {
-      if (order.production_duration_minutes != null) {
-        map.set(order.id, order.production_duration_minutes);
-      }
-    });
-    return map;
-  }, [readyOrders]);
-
   const routes = [
     {
       key: "default",
@@ -1385,144 +1362,6 @@ export default function ProductionPage() {
 
   const canRelease = selectedBatchKeys.length > 0 && routeStations.length > 0;
 
-  const formatTableRow = (
-    field: OrderInputField,
-    row: Record<string, unknown>,
-  ) => {
-    if (!field.columns || field.columns.length === 0) {
-      return "";
-    }
-    const parts = field.columns
-      .map((column) => {
-        const value = row[column.key];
-        if (Array.isArray(value)) {
-          const joined = value.map((item) => String(item)).join(" / ");
-          return column.unit ? `${joined} ${column.unit}` : joined;
-        }
-        if (value === null || value === undefined || value === "") {
-          return "";
-        }
-        const text = String(value);
-        return column.unit ? `${text} ${column.unit}` : text;
-      })
-      .filter((part) => part.trim().length > 0);
-    return parts.join(" | ");
-  };
-
-  const resolveRowQty = (
-    field: OrderInputField,
-    row: Record<string, unknown>,
-  ) => {
-    const numericValue = (value: unknown) => {
-      if (value === null || value === undefined || value === "") {
-        return null;
-      }
-      const parsed = Number(value);
-      return Number.isNaN(parsed) ? null : parsed;
-    };
-    const columns = field.columns ?? [];
-    for (const column of columns) {
-      const label = column.label.toLowerCase();
-      const unit = (column.unit ?? "").toLowerCase();
-      if (
-        label.includes("skaits") ||
-        label.includes("qty") ||
-        label.includes("quantity") ||
-        unit === "pcs" ||
-        unit === "gab"
-      ) {
-        const value = numericValue(row[column.key]);
-        if (value !== null) {
-          return value;
-        }
-      }
-    }
-    return 1;
-  };
-
-  function buildSplitRows(groups: BatchGroup[]): SplitRow[] {
-    const rows: SplitRow[] = [];
-    groups.forEach((group) => {
-      const values = productionValues[group.orderId] ?? {};
-      let added = false;
-      productionFields
-        .filter((field) => field.fieldType === "table")
-        .forEach((field) => {
-          const raw = values[field.id];
-          const tableRows = Array.isArray(raw) ? raw : [];
-          tableRows.forEach((row, rowIndex) => {
-            const normalized =
-              typeof row === "object" && row !== null
-                ? (row as Record<string, unknown>)
-                : {};
-            const itemName = formatTableRow(field, normalized);
-            if (!itemName) {
-              return;
-            }
-            rows.push({
-              id: `${group.orderId}:${field.id}:${rowIndex}`,
-              orderId: group.orderId,
-              orderNumber: group.orderNumber,
-              customerName: group.customerName,
-              dueDate: group.dueDate,
-              batchCode: group.batchCode,
-              priority: group.priority,
-              fieldId: field.id,
-              fieldLabel: field.label,
-              itemName,
-              qty: resolveRowQty(field, normalized),
-              material: group.material ?? "",
-              rowIndex,
-              rawRow: normalized,
-            });
-            added = true;
-          });
-        });
-      if (!added) {
-        rows.push({
-          id: `${group.orderId}:fallback:0`,
-          orderId: group.orderId,
-          orderNumber: group.orderNumber,
-          customerName: group.customerName,
-          dueDate: group.dueDate,
-          batchCode: group.batchCode,
-          priority: group.priority,
-          fieldId: "fallback",
-          fieldLabel: "Order",
-          itemName: group.material || group.orderNumber,
-          qty: group.totalQty || 1,
-          material: group.material ?? "",
-          rowIndex: 0,
-          rawRow: {},
-        });
-      }
-    });
-    return rows;
-  }
-
-  const getQrFieldValue = (row: SplitRow, fieldKey: string) => {
-    switch (fieldKey) {
-      case "order_number":
-        return row.orderNumber;
-      case "customer_name":
-        return row.customerName;
-      case "batch_code":
-        return row.batchCode;
-      case "item_name":
-        return row.itemName;
-      case "qty":
-        return String(row.qty ?? "");
-      case "material":
-        return row.material;
-      case "field_label":
-        return row.fieldLabel;
-      case "due_date":
-        return row.dueDate ? formatDateInput(row.dueDate) : "";
-      default:
-        return "";
-    }
-  };
-
   const buildQrRows = async (rows: SplitRow[]) => {
     if (!supabase || !user?.isAuthenticated) {
       return;
@@ -1530,84 +1369,16 @@ export default function ProductionPage() {
     setQrState("loading");
     setQrError(null);
     try {
-      const orderIds = Array.from(new Set(rows.map((row) => row.orderId)));
-      const fieldIds = Array.from(new Set(rows.map((row) => row.fieldId)));
-      const { data: existingRows, error: existingError } = await supabase
-        .from("production_qr_codes")
-        .select("order_id, field_id, row_index, token")
-        .in("order_id", orderIds)
-        .in("field_id", fieldIds);
-      if (existingError) {
-        throw new Error(existingError.message);
-      }
-      const existingMap = new Map<string, string>();
-      const existingList =
-        (existingRows as Array<{
-          order_id: string;
-          field_id: string;
-          row_index: number;
-          token: string;
-        }>) ?? [];
-      existingList.forEach((entry) => {
-        const key = `${entry.order_id}:${entry.field_id}:${entry.row_index}`;
-        existingMap.set(key, entry.token);
-      });
-      const missing = rows.filter((row) => {
-        const key = `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
-        return !existingMap.has(key);
-      });
-      if (missing.length > 0) {
-        const { data: inserted, error: insertError } = await supabase
-          .from("production_qr_codes")
-          .insert(
-            missing.map((row) => ({
-              order_id: row.orderId,
-              field_id: row.fieldId,
-              row_index: row.rowIndex,
-              created_by: user?.id ?? null,
-            })),
-          )
-          .select("order_id, field_id, row_index, token");
-        if (insertError) {
-          throw new Error(insertError.message);
-        }
-        const insertedList =
-          (inserted as Array<{
-            order_id: string;
-            field_id: string;
-            row_index: number;
-            token: string;
-          }>) ?? [];
-        insertedList.forEach((entry) => {
-          const key = `${entry.order_id}:${entry.field_id}:${entry.row_index}`;
-          existingMap.set(key, entry.token);
-        });
-      }
-      const withTokens = rows
-        .map((row) => {
-          const key = `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
-          const token = existingMap.get(key);
-          return token ? { row, token } : null;
-        })
-        .filter(Boolean) as Array<{ row: SplitRow; token: string }>;
-      setQrRows(withTokens);
-
       const baseUrl =
         typeof window !== "undefined" ? window.location.origin : "";
-      const images = await Promise.all(
-        withTokens.map(async (entry) => {
-          const url = `${baseUrl}/qr/${entry.token}`;
-          const dataUrl = await QRCode.toDataURL(url, {
-            margin: 1,
-            width: 256,
-          });
-          return { token: entry.token, dataUrl };
-        }),
-      );
-      const imageMap: Record<string, string> = {};
-      images.forEach((img) => {
-        imageMap[img.token] = img.dataUrl;
+      const { withTokens, imageMap } = await prepareProductionQrRows({
+        client: supabase,
+        rows,
+        userId: user?.id ?? null,
+        isAuthenticated: Boolean(user?.isAuthenticated),
+        baseUrl,
       });
+      setQrRows(withTokens);
       setQrImages(imageMap);
       setQrState("ready");
     } catch (err) {
@@ -1662,7 +1433,11 @@ export default function ProductionPage() {
     if (nextGroups.length === 0) {
       return;
     }
-    const rows = buildSplitRows(nextGroups);
+    const rows = buildProductionSplitRows(
+      nextGroups,
+      productionFields,
+      productionValues,
+    );
     const defaults: Record<string, string[]> = {};
     const dateDefaults: Record<string, string> = {};
     rows.forEach((row) => {
@@ -2043,64 +1818,13 @@ export default function ProductionPage() {
   };
 
   const queueByStation = useMemo(() => {
-    const map = new Map<string, QueueItem[]>();
-    stations.forEach((station) => map.set(station.id, []));
-    const seenRuns = new Set<string>();
-    const startDate = new Date(viewDate);
-    const endDate = new Date(viewDate);
-    endDate.setDate(endDate.getDate() + Math.max(plannedRangeDays - 1, 0));
-    batchRuns.forEach((run) => {
-      if (seenRuns.has(run.id)) {
-        return;
-      }
-      seenRuns.add(run.id);
-      if (!run.station_id) {
-        return;
-      }
-      if (run.status === "done") {
-        return;
-      }
-      if (run.planned_date) {
-        const runDate = new Date(run.planned_date);
-        if (runDate < startDate || runDate > endDate) {
-          return;
-        }
-      }
-      const items = productionItems.filter(
-        (item) =>
-          item.order_id === run.order_id &&
-          item.batch_code === run.batch_code &&
-          item.station_id === run.station_id,
-      );
-      const totalQty = items.reduce(
-        (sum, item) => sum + Number(item.qty ?? 0),
-        0,
-      );
-      const material = items.find((item) => item.material)?.material ?? "";
-      const orderNumber = run.orders?.order_number ?? "Order";
-      const customerName = run.orders?.customer_name ?? "Customer";
-      const dueDate = run.orders?.due_date ?? "";
-      const priority = run.orders?.priority ?? "normal";
-      const queueItem = {
-        id: run.id,
-        orderId: run.order_id,
-        orderNumber,
-        customerName,
-        dueDate,
-        priority,
-        status: run.status,
-        batchCode: run.batch_code,
-        totalQty,
-        material,
-        plannedDate: run.planned_date ?? null,
-        startedAt: run.started_at,
-        doneAt: run.done_at,
-        durationMinutes: run.duration_minutes ?? null,
-        items,
-      } satisfies QueueItem;
-      map.get(run.station_id)?.push(queueItem);
+    return buildQueueByStation({
+      batchRuns,
+      productionItems,
+      stations,
+      viewDate,
+      plannedRangeDays,
     });
-    return map;
   }, [batchRuns, productionItems, stations, viewDate, plannedRangeDays]);
   const queueItemsCount = useMemo(
     () =>
@@ -2452,21 +2176,7 @@ export default function ProductionPage() {
   };
 
   const filteredReadyGroups = useMemo(() => {
-    const query = readySearch.trim().toLowerCase();
-    return readyBatchGroups.filter((group) => {
-      if (readyPriority !== "all" && group.priority !== readyPriority) {
-        return false;
-      }
-      if (!query) {
-        return true;
-      }
-      return (
-        group.orderNumber.toLowerCase().includes(query) ||
-        group.customerName.toLowerCase().includes(query) ||
-        group.batchCode.toLowerCase().includes(query) ||
-        group.material.toLowerCase().includes(query)
-      );
-    });
+    return filterReadyBatchGroups(readyBatchGroups, readyPriority, readySearch);
   }, [readyBatchGroups, readyPriority, readySearch]);
 
   const isReadyLoading = isLoading;
@@ -3800,21 +3510,6 @@ export default function ProductionPage() {
                                     })()}
                                   </div>
                                   {(() => {
-                                    const hasBlocked = item.items.some(
-                                      (row) => row.status === "blocked",
-                                    );
-                                    const hasActive = item.items.some((row) =>
-                                      [
-                                        "queued",
-                                        "pending",
-                                        "in_progress",
-                                      ].includes(row.status),
-                                    );
-                                    const isPartiallyBlocked =
-                                      hasBlocked && hasActive;
-                                    const showBlockedStyle =
-                                      isPartiallyBlocked &&
-                                      item.status === "in_progress";
                                     return (
                                       <div className="flex flex-col items-end gap-2">
                                         <Badge
@@ -3823,11 +3518,7 @@ export default function ProductionPage() {
                                           {priorityLabel(item.priority)}
                                         </Badge>
                                         <Badge
-                                          variant={
-                                            showBlockedStyle
-                                              ? "status-blocked"
-                                              : statusBadge(item.status)
-                                          }
+                                          variant={statusBadge(item.status)}
                                         >
                                           {statusLabel(item.status ?? "queued")}
                                         </Badge>
@@ -5220,7 +4911,11 @@ export default function ProductionPage() {
                         </div>
                         <div className="space-y-1 text-xs">
                           {orderedQrFields.map((fieldKey) => {
-                            const value = getQrFieldValue(entry.row, fieldKey);
+                            const value = getProductionQrFieldValue(
+                              entry.row,
+                              fieldKey,
+                              formatDateInput,
+                            );
                             if (!value) {
                               return null;
                             }

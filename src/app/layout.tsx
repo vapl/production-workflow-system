@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { OrdersProvider } from "@/app/orders/OrdersContext";
-import { HierarchyProvider } from "@/app/settings/HierarchyContext";
+import { OrderFieldSettingsProvider } from "@/app/settings/OrderFieldSettingsContext";
 import { UserProvider } from "@/contexts/UserContext";
 import { BatchesProvider } from "@/contexts/BatchesContext";
 import {
@@ -80,14 +80,14 @@ export default function RootLayout({
             <RbacProvider>
               <WorkflowProvider>
                 <WorkingCalendarProvider>
-                  <HierarchyProvider>
+                  <OrderFieldSettingsProvider>
                     <OrdersProvider>
                       <BatchesProvider>
                         <AppShell>{children}</AppShell>
                         <NotificationsViewport />
                       </BatchesProvider>
                     </OrdersProvider>
-                  </HierarchyProvider>
+                  </OrderFieldSettingsProvider>
                 </WorkingCalendarProvider>
               </WorkflowProvider>
             </RbacProvider>
@@ -97,3 +97,4 @@ export default function RootLayout({
     </html>
   );
 }
+

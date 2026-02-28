@@ -8,10 +8,11 @@ import {
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { OrderRow } from "./OrderRow";
 import { Order } from "@/types/orders";
-import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import { Fragment, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { getOrderFieldLabel } from "@/lib/domain/orderFieldPresentation";
 
 interface OrdersTableProps {
   orders: Order[];
@@ -46,48 +47,35 @@ export function OrdersTable({
   managerLabel,
 }: OrdersTableProps) {
   const { t } = useI18n();
-  const { levels } = useHierarchy();
-  const activeLevels = levels
-    .filter(
-      (level) =>
-        level.isActive &&
-        level.showInTable &&
-        level.key !== "engineer" &&
-        level.key !== "manager",
-    )
+  const { orderFields } = useOrderFieldSettings();
+  const visibleOrderFields = orderFields
+    .filter((level) => level.isActive && level.showInTable)
     .sort((a, b) => a.order - b.order);
   const [collapsedGroups, setCollapsedGroups] = useState<
     Record<string, boolean>
   >({});
 
-  const totalColumns = 9 + activeLevels.length;
+  const totalColumns = visibleOrderFields.length;
 
   return (
     <div className="rounded-md border overflow-x-auto">
       <Table className="w-full min-w-225">
         <TableHeader>
           <TableRow>
-            <TableHead className="whitespace-nowrap">{t("orders.page.orderNumberShort")}</TableHead>
-            <TableHead className="whitespace-normal">{t("orders.page.customer")}</TableHead>
-            {activeLevels.map((level) => (
+            {visibleOrderFields.map((level) => (
               <TableHead
                 key={level.id}
                 className={`whitespace-normal ${
                   level.isRequired ? "table-cell" : "hidden md:table-cell"
                 }`}
               >
-                {level.name}
+                {level.key === "engineer"
+                  ? engineerLabel ?? getOrderFieldLabel(level.key, t, level.name)
+                  : level.key === "manager"
+                    ? managerLabel ?? getOrderFieldLabel(level.key, t, level.name)
+                    : getOrderFieldLabel(level.key, t, level.name)}
               </TableHead>
             ))}
-            <TableHead className="whitespace-normal">{t("orders.page.quantity")}</TableHead>
-            <TableHead className="whitespace-normal">{t("orders.page.dueDate")}</TableHead>
-            <TableHead className="whitespace-normal">{engineerLabel ?? t("orders.page.engineerFallback")}</TableHead>
-            <TableHead className="whitespace-normal">{managerLabel ?? t("orders.page.managerFallback")}</TableHead>
-            <TableHead className="whitespace-normal">{t("orders.page.priority")}</TableHead>
-            <TableHead className="whitespace-normal">{t("orders.page.status")}</TableHead>
-            <TableHead className="text-right whitespace-normal">
-              {t("orders.page.actions")}
-            </TableHead>
           </TableRow>
         </TableHeader>
 
@@ -132,7 +120,7 @@ export function OrdersTable({
                         onEdit={onEdit}
                         onDelete={onDelete}
                         onTakeOrder={onTakeOrder}
-                        levels={activeLevels}
+                        orderFields={visibleOrderFields}
                         dueSoonDays={dueSoonDays}
                         dueIndicatorEnabled={dueIndicatorEnabled}
                         dueIndicatorStatuses={dueIndicatorStatuses}
@@ -158,7 +146,7 @@ export function OrdersTable({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onTakeOrder={onTakeOrder}
-                levels={activeLevels}
+                orderFields={visibleOrderFields}
                 dueSoonDays={dueSoonDays}
                 dueIndicatorEnabled={dueIndicatorEnabled}
                 dueIndicatorStatuses={dueIndicatorStatuses}
@@ -184,3 +172,4 @@ export function OrdersTable({
     </div>
   );
 }
+

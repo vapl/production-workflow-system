@@ -13,14 +13,13 @@ import { SelectField } from "@/components/ui/SelectField";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { FileField } from "@/components/ui/FileField";
 import { DownloadIcon, FileSpreadsheetIcon, XIcon } from "lucide-react";
-import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useNotifications } from "@/components/ui/Notifications";
 import {
   buildOrdersTemplate,
   parseOrdersWorkbook,
 } from "@/lib/excel/ordersExcel";
-import { createId } from "@/lib/utils/createId";
 import type { OrderStatus } from "@/types/orders";
 import { useI18n } from "@/lib/i18n/useI18n";
 
@@ -83,7 +82,7 @@ function normalizeEnum(value: unknown) {
 
 export function ImportWizard({ open, onClose }: ImportWizardProps) {
   const { t } = useI18n();
-  const { levels, nodes, addNode } = useHierarchy();
+  const { orderFields } = useOrderFieldSettings();
   const { importOrdersFromExcel } = useOrders();
   const { notify } = useNotifications();
   const [step, setStep] = useState<"upload" | "map" | "preview">("upload");
@@ -97,23 +96,22 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
   const [priorityMapping, setPriorityMapping] = useState<
     Record<string, "low" | "normal" | "high" | "urgent">
   >({});
-  const [createHierarchyItems, setCreateHierarchyItems] = useState(false);
   const [ackLargeImport, setAckLargeImport] = useState(false);
   const [previewErrors, setPreviewErrors] = useState<
     Array<{ row: number; message: string }>
   >([]);
   const [isImporting, setIsImporting] = useState(false);
 
-  const hierarchyFields = useMemo(
+  const orderFieldColumns = useMemo(
     () =>
-      levels
+      orderFields
         .filter((level) => level.key !== "engineer" && level.key !== "manager")
         .map((level) => ({
-          key: `hierarchy:${level.id}`,
-          label: `Hierarchy:${level.name}`,
+          key: `order_field:${level.id}`,
+          label: `Order field:${level.name}`,
           levelId: level.id,
         })),
-    [levels],
+    [orderFields],
   );
 
   function resetWizard() {
@@ -124,14 +122,13 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     setMapping({});
     setStatusMapping({});
     setPriorityMapping({});
-    setCreateHierarchyItems(false);
     setAckLargeImport(false);
     setPreviewErrors([]);
     setIsImporting(false);
   }
 
   function handleDownloadTemplate() {
-    const levelNames = levels
+    const levelNames = orderFields
       .filter((level) => level.key !== "engineer" && level.key !== "manager")
       .map((level) => level.name);
     const blob = buildOrdersTemplate(levelNames);
@@ -298,7 +295,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
       priority: "low" | "normal" | "high" | "urgent";
       status: OrderStatus;
       notes?: string;
-      hierarchy?: Record<string, string>;
+      orderFieldValues?: Record<string, string>;
       sourcePayload?: Record<string, unknown>;
     }> = [];
 
@@ -372,15 +369,15 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
         return;
       }
 
-      const hierarchy: Record<string, string> = {};
-      hierarchyFields.forEach((field) => {
+      const orderFieldValues: Record<string, string> = {};
+      orderFieldColumns.forEach((field) => {
         const header = mapping[field.key];
         if (!header) {
           return;
         }
         const value = String(row[header] ?? "").trim();
         if (value) {
-          hierarchy[field.levelId] = value;
+          orderFieldValues[field.levelId] = value;
         }
       });
 
@@ -396,7 +393,10 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
         priority,
         status,
         notes: String(getMappedValue(row, "notes")).trim() || undefined,
-        hierarchy: Object.keys(hierarchy).length > 0 ? hierarchy : undefined,
+        orderFieldValues:
+          Object.keys(orderFieldValues).length > 0
+            ? orderFieldValues
+            : undefined,
         sourcePayload: row,
       });
     });
@@ -404,7 +404,7 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     return { rows: importRows, errors: rowErrors };
   }, [
     getMappedValue,
-    hierarchyFields,
+    orderFieldColumns,
     mapping,
     priorityMapping,
     rows,
@@ -433,58 +433,6 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
         variant: "error",
       });
       return;
-    }
-
-    if (createHierarchyItems) {
-      const sortedLevels = [...levels].sort((a, b) => a.order - b.order);
-      const mappedLevelIds = new Set(
-        hierarchyFields
-          .filter((field) => mapping[field.key])
-          .map((field) => field.levelId),
-      );
-      const nodeKeyMap = new Map<string, string>();
-      nodes.forEach((node) => {
-        const key = `${node.levelId}|${node.parentId ?? ""}|${node.label
-          .toLowerCase()
-          .trim()}`;
-        nodeKeyMap.set(key, node.id);
-      });
-
-      for (const row of importRows) {
-        let parentId: string | null = null;
-        const updatedHierarchy: Record<string, string> = { ...row.hierarchy };
-        sortedLevels.forEach((level) => {
-          if (!mappedLevelIds.has(level.id)) {
-            return;
-          }
-          const label = updatedHierarchy[level.id];
-          if (!label) {
-            parentId = null;
-            return;
-          }
-          const key = `${level.id}|${parentId ?? ""}|${label
-            .toLowerCase()
-            .trim()}`;
-          const existingId = nodeKeyMap.get(key);
-          if (existingId) {
-            updatedHierarchy[level.id] = existingId;
-            parentId = existingId;
-            return;
-          }
-          const currentParentId = parentId;
-          const newId = createId("node");
-          nodeKeyMap.set(key, newId);
-          updatedHierarchy[level.id] = newId;
-          parentId = newId;
-          void addNode({
-            id: newId,
-            levelId: level.id,
-            label,
-            parentId: currentParentId,
-          });
-        });
-        row.hierarchy = updatedHierarchy;
-      }
     }
 
     setIsImporting(true);
@@ -659,11 +607,11 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               ))}
             </div>
 
-            {hierarchyFields.length > 0 && (
+            {orderFieldColumns.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold">{t("orders.import.hierarchyColumns")}</h3>
+                <h3 className="text-sm font-semibold">{t("orders.import.orderFieldColumns")}</h3>
                 <div className="mt-3 grid gap-4 md:grid-cols-2">
-                  {hierarchyFields.map((field) => (
+                  {orderFieldColumns.map((field) => (
                     <SelectField
                       key={field.key}
                       label={field.label}
@@ -825,14 +773,6 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
               </div>
             )}
 
-            <Checkbox
-              checked={createHierarchyItems}
-              onChange={(event) =>
-                setCreateHierarchyItems(event.target.checked)
-              }
-              label={t("orders.import.createHierarchyItems")}
-            />
-
             <div className="flex justify-between">
               <Button
                 variant="outline"
@@ -934,3 +874,6 @@ export function ImportWizard({ open, onClose }: ImportWizardProps) {
     </div>
   );
 }
+
+
+

@@ -1,4 +1,4 @@
-﻿import { Badge } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { TableCell, TableRow } from "@/components/ui/Table";
 import {
@@ -11,21 +11,24 @@ import {
 } from "lucide-react";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Order } from "@/types/orders";
-import type { HierarchyLevel } from "@/app/settings/HierarchyContext";
-import { useHierarchy } from "@/app/settings/HierarchyContext";
+import type { OrderFieldSetting } from "@/app/settings/OrderFieldSettingsContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 import { useI18n } from "@/lib/i18n/useI18n";
+import {
+  getOrderPriorityLabel,
+  getOrderStatusLabel,
+} from "@/lib/domain/orderFieldPresentation";
 
 interface OrderRowProps {
   order: Order;
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
   onTakeOrder?: (order: Order) => void;
-  levels: HierarchyLevel[];
+  orderFields: OrderFieldSetting[];
   dueSoonDays?: number;
   dueIndicatorEnabled?: boolean;
   dueIndicatorStatuses?: Order["status"][];
@@ -36,7 +39,7 @@ export function OrderRow({
   onEdit,
   onDelete,
   onTakeOrder,
-  levels,
+  orderFields,
   dueSoonDays = 5,
   dueIndicatorEnabled = true,
   dueIndicatorStatuses,
@@ -50,15 +53,7 @@ export function OrderRow({
     width: number;
   } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const { nodes } = useHierarchy();
   const { rules } = useWorkflowRules();
-  const nodeLabelMap = useMemo(() => {
-    const map = new Map<string, string>();
-    nodes.forEach((node) => {
-      map.set(node.id, node.label);
-    });
-    return map;
-  }, [nodes]);
 
   const priorityVariant =
     order.priority === "low"
@@ -177,107 +172,145 @@ export function OrderRow({
         }
       }}
     >
-      <TableCell className="font-medium whitespace-nowrap">
-        {order.orderNumber}
-      </TableCell>
-      <TableCell className="whitespace-normal wrap-break-word">
-        {order.customerName}
-      </TableCell>
-      {levels.map((level) => {
-        const value = order.hierarchy?.[level.id];
-        const fallbackLabel = order.hierarchyLabels?.[level.id];
-        const displayValue = value
-          ? nodeLabelMap.get(value) ?? fallbackLabel ?? value
-          : "--";
-        return (
-          <TableCell
-            key={level.id}
-            className={`whitespace-normal wrap-break-word ${
-              level.isRequired ? "table-cell" : "hidden md:table-cell"
-            }`}
-          >
-            {displayValue}
-          </TableCell>
-        );
-      })}
-      <TableCell>{order.quantity ?? "--"}</TableCell>
-      <TableCell>
-        <span
-          className={`inline-flex items-center rounded-md px-2 py-0.5 text-sm ${
-            dueState === "overdue"
-              ? "border border-rose-500 text-rose-600"
-              : dueState === "due-soon"
-                ? "border border-amber-400 text-amber-700"
-                : "text-foreground"
-          }`}
-          title={
-            dueState === "overdue"
-              ? t("orders.page.overdue")
-              : dueState === "due-soon"
-                ? t("orders.page.dueSoon")
-                : undefined
-          }
-        >
-          {formatDate(order.dueDate)}
-        </span>
-      </TableCell>
-      <TableCell className="whitespace-normal wrap-break-word">
-        {order.assignedEngineerName ? (
-          <div className="flex items-center gap-2">
-            {engineerAvatarUrl ? (
-              <img
-                src={engineerAvatarUrl}
-                alt={order.assignedEngineerName}
-                className="h-8 w-8 shrink-0 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
-                {engineerInitials}
+      {orderFields.map((level) => {
+        const cellClass = `whitespace-normal wrap-break-word ${
+          level.isRequired ? "table-cell" : "hidden md:table-cell"
+        }`;
+
+        if (level.key === "order_number") {
+          return (
+            <TableCell key={level.id} className={`font-medium whitespace-nowrap ${cellClass}`}>
+              {order.orderNumber}
+            </TableCell>
+          );
+        }
+
+        if (level.key === "customer_name") {
+          return (
+            <TableCell key={level.id} className={cellClass}>
+              {order.customerName}
+            </TableCell>
+          );
+        }
+
+        if (level.key === "quantity") {
+          return (
+            <TableCell key={level.id} className={cellClass}>
+              {order.quantity ?? "--"}
+            </TableCell>
+          );
+        }
+
+        if (level.key === "due_date") {
+          return (
+            <TableCell key={level.id} className={cellClass}>
+              <span
+                className={`inline-flex items-center rounded-md px-2 py-0.5 text-sm ${
+                  dueState === "overdue"
+                    ? "border border-rose-500 text-rose-600"
+                    : dueState === "due-soon"
+                      ? "border border-amber-400 text-amber-700"
+                      : "text-foreground"
+                }`}
+                title={
+                  dueState === "overdue"
+                    ? t("orders.page.overdue")
+                    : dueState === "due-soon"
+                      ? t("orders.page.dueSoon")
+                      : undefined
+                }
+              >
+                {formatDate(order.dueDate)}
+              </span>
+            </TableCell>
+          );
+        }
+
+        if (level.key === "engineer") {
+          return (
+            <TableCell key={level.id} className={cellClass}>
+              {order.assignedEngineerName ? (
+                <div className="flex items-center gap-2">
+                  {engineerAvatarUrl ? (
+                    <img
+                      src={engineerAvatarUrl}
+                      alt={order.assignedEngineerName}
+                      className="h-8 w-8 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+                      {engineerInitials}
+                    </div>
+                  )}
+                  <span>{order.assignedEngineerName}</span>
+                </div>
+              ) : (
+                "--"
+              )}
+            </TableCell>
+          );
+        }
+
+        if (level.key === "manager") {
+          return (
+            <TableCell key={level.id} className={cellClass}>
+              {order.assignedManagerName ? (
+                <div className="flex items-center gap-2">
+                  {managerAvatarUrl ? (
+                    <img
+                      src={managerAvatarUrl}
+                      alt={order.assignedManagerName}
+                      className="h-8 w-8 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+                      {managerInitials}
+                    </div>
+                  )}
+                  <span>{order.assignedManagerName}</span>
+                </div>
+              ) : (
+                "--"
+              )}
+            </TableCell>
+          );
+        }
+
+        if (level.key === "priority") {
+          return (
+            <TableCell key={level.id} className={cellClass}>
+              <Badge variant={priorityVariant}>
+                {getOrderPriorityLabel(order.priority, t)}
+              </Badge>
+            </TableCell>
+          );
+        }
+
+        if (level.key === "status") {
+          return (
+            <TableCell key={level.id} className={cellClass}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={statusVariant} className={statusColorClass}>
+                  {getOrderStatusLabel(
+                    displayStatus,
+                    t,
+                    rules.statusLabels[displayStatus] ??
+                      formatOrderStatus(displayStatus),
+                  )}
+                </Badge>
+                {hasOverdueExternal && (
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
+                    {t("orders.page.overdue")}
+                  </span>
+                )}
               </div>
-            )}
-            <span>{order.assignedEngineerName}</span>
-          </div>
-        ) : (
-          "--"
-        )}
-      </TableCell>
-      <TableCell className="whitespace-normal wrap-break-word">
-        {order.assignedManagerName ? (
-          <div className="flex items-center gap-2">
-            {managerAvatarUrl ? (
-              <img
-                src={managerAvatarUrl}
-                alt={order.assignedManagerName}
-                className="h-8 w-8 shrink-0 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
-                {managerInitials}
-              </div>
-            )}
-            <span>{order.assignedManagerName}</span>
-          </div>
-        ) : (
-          "--"
-        )}
-      </TableCell>
-      <TableCell>
-        <Badge variant={priorityVariant}>{order.priority}</Badge>
-      </TableCell>
-      <TableCell>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={statusVariant} className={statusColorClass}>
-            {rules.statusLabels[displayStatus] ??
-              formatOrderStatus(displayStatus)}
-          </Badge>
-          {hasOverdueExternal && (
-            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
-              {t("orders.page.overdue")}
-            </span>
-          )}
-        </div>
-      </TableCell>
-      <TableCell className="text-right align-middle">
+            </TableCell>
+          );
+        }
+
+        if (level.key === "actions") {
+          return (
+            <TableCell key={level.id} className="text-right align-middle">
         <div className="relative flex items-center justify-between gap-2 pr-12 md:pr-16">
           <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <PaperclipIcon className="h-3.5 w-3.5" />
@@ -408,7 +441,22 @@ export function OrderRow({
               document.body,
             )
           : null}
-      </TableCell>
+            </TableCell>
+          );
+        }
+
+        const value = order.orderFieldValues?.[level.id];
+        const fallbackLabel = order.orderFieldLabels?.[level.id];
+        const displayValue = value
+          ? fallbackLabel ?? value
+          : "--";
+        return (
+          <TableCell key={level.id} className={cellClass}>
+            {displayValue}
+          </TableCell>
+        );
+      })}
     </TableRow>
   );
 }
+

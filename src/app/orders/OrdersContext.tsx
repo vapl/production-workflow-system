@@ -17,7 +17,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useNotifications } from "@/components/ui/Notifications";
 import { getAccountingAdapter } from "@/lib/integrations/accounting/getAdapter";
-import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import { useI18n } from "@/lib/i18n/useI18n";
 
 interface OrdersContextValue {
@@ -34,13 +34,16 @@ interface OrdersContextValue {
     customerName: string;
     productName?: string;
     quantity?: number;
-    hierarchy?: Record<string, string>;
+    orderFieldValues?: Record<string, string>;
     dueDate: string;
     priority: "low" | "normal" | "high" | "urgent";
     status: OrderStatus;
     notes?: string;
     authorName?: string;
     authorRole?: string;
+    assignedEngineerId?: string;
+    assignedEngineerName?: string;
+    assignedEngineerAt?: string;
     assignedManagerId?: string;
     assignedManagerName?: string;
     assignedManagerAt?: string;
@@ -51,7 +54,7 @@ interface OrdersContextValue {
       customerName: string;
       productName?: string;
       quantity?: number;
-      hierarchy?: Record<string, string>;
+      orderFieldValues?: Record<string, string>;
       dueDate: string;
       priority: "low" | "normal" | "high" | "urgent";
       status: OrderStatus;
@@ -134,7 +137,7 @@ interface OrderImportPayload {
   priority: "low" | "normal" | "high" | "urgent";
   status: OrderStatus;
   notes?: string;
-  hierarchy?: Record<string, string>;
+  orderFieldValues?: Record<string, string>;
   sourcePayload?: Record<string, unknown>;
 }
 
@@ -143,7 +146,7 @@ const OrdersContext = createContext<OrdersContextValue | null>(null);
 export function OrdersProvider({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
   const { notify } = useNotifications();
-  const { levels } = useHierarchy();
+  const { orderFields } = useOrderFieldSettings();
   const { t } = useI18n();
   const [orders, setOrders] = useState<Order[]>(mockOrders);
   const [isLoading, setIsLoading] = useState(false);
@@ -340,9 +343,13 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     id: string;
     order_number: string;
     customer_name: string;
+    created_at?: string;
+    updated_at?: string | null;
+    created_by?: string | null;
+    created_by_name?: string | null;
     product_name?: string | null;
     quantity?: number | null;
-    hierarchy?: Record<string, string> | null;
+    order_field_values?: Record<string, string> | null;
     due_date: string;
     priority: "low" | "normal" | "high" | "urgent";
     status: string;
@@ -420,9 +427,13 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     id: row.id,
     orderNumber: row.order_number,
     customerName: row.customer_name,
+    createdAt: row.created_at ?? undefined,
+    updatedAt: row.updated_at ?? undefined,
+    createdBy: row.created_by ?? undefined,
+    createdByName: row.created_by_name ?? undefined,
     productName: row.product_name ?? undefined,
     quantity: row.quantity ?? undefined,
-    hierarchy: row.hierarchy ?? undefined,
+    orderFieldValues: row.order_field_values ?? undefined,
     dueDate: row.due_date,
     priority: row.priority,
     status: normalizeOrderStatus(row.status),
@@ -461,9 +472,12 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         id,
         order_number,
         customer_name,
+        created_at,
+        updated_at,
+        created_by,
         product_name,
         quantity,
-        hierarchy,
+        order_field_values,
         due_date,
         priority,
         status,
@@ -559,7 +573,39 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
       return;
     }
-    setOrders((data ?? []).map(mapOrder));
+    const createdByIds = Array.from(
+      new Set(
+        (data ?? [])
+          .map((row) => row.created_by)
+          .filter(
+            (value): value is string =>
+              typeof value === "string" && value.length > 0,
+          ),
+      ),
+    );
+    let createdByNameMap = new Map<string, string>();
+    if (createdByIds.length > 0) {
+      const { data: creatorProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", createdByIds);
+      createdByNameMap = new Map(
+        (creatorProfiles ?? []).map((profile) => [
+          profile.id,
+          profile.full_name ?? unknownLabel,
+        ]),
+      );
+    }
+    setOrders(
+      (data ?? []).map((row) =>
+        mapOrder({
+          ...row,
+          created_by_name: row.created_by
+            ? (createdByNameMap.get(row.created_by) ?? null)
+            : null,
+        }),
+      ),
+    );
     setIsLoading(false);
   };
   useEffect(() => {
@@ -594,21 +640,21 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       return 0;
     }
 
-    const contractLevel = levels.find((level) => level.key === "contract");
-    const categoryLevel = levels.find((level) => level.key === "category");
-    const productLevel = levels.find((level) => level.key === "product");
+    const contractLevel = orderFields.find((field) => field.key === "contract");
+    const categoryLevel = orderFields.find((field) => field.key === "category");
+    const productLevel = orderFields.find((field) => field.key === "product");
 
     if (!supabase) {
       const mapped: Order[] = accountingOrders.map((order) => {
-        const hierarchy: Record<string, string> = {};
+        const orderFieldValues: Record<string, string> = {};
         if (order.contract && contractLevel?.id) {
-          hierarchy[contractLevel.id] = order.contract;
+          orderFieldValues[contractLevel.id] = order.contract;
         }
         if (order.category && categoryLevel?.id) {
-          hierarchy[categoryLevel.id] = order.category;
+          orderFieldValues[categoryLevel.id] = order.category;
         }
         if (order.product && productLevel?.id) {
-          hierarchy[productLevel.id] = order.product;
+          orderFieldValues[productLevel.id] = order.product;
         }
         return {
           id: `acc-${order.externalId}`,
@@ -616,7 +662,10 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
           customerName: order.customerName,
           productName: order.productName ?? order.product ?? undefined,
           quantity: order.quantity ?? undefined,
-          hierarchy: Object.keys(hierarchy).length > 0 ? hierarchy : undefined,
+          orderFieldValues:
+            Object.keys(orderFieldValues).length > 0
+              ? orderFieldValues
+              : undefined,
           dueDate: order.dueDate,
           priority: order.priority ?? "normal",
           status: "draft",
@@ -669,15 +718,15 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     const rows = accountingOrders
       .filter((order) => !blockedOrders.has(order.orderNumber))
       .map((order) => {
-      const hierarchy: Record<string, string> = {};
+      const orderFieldValues: Record<string, string> = {};
       if (order.contract && contractLevel?.id) {
-        hierarchy[contractLevel.id] = order.contract;
+        orderFieldValues[contractLevel.id] = order.contract;
       }
       if (order.category && categoryLevel?.id) {
-        hierarchy[categoryLevel.id] = order.category;
+        orderFieldValues[categoryLevel.id] = order.category;
       }
       if (order.product && productLevel?.id) {
-        hierarchy[productLevel.id] = order.product;
+        orderFieldValues[productLevel.id] = order.product;
       }
       return {
         tenant_id: user.tenantId,
@@ -685,7 +734,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         customer_name: order.customerName,
         product_name: order.productName ?? order.product ?? null,
         quantity: order.quantity ?? null,
-        hierarchy: Object.keys(hierarchy).length > 0 ? hierarchy : null,
+        orderFieldValues:
+          Object.keys(orderFieldValues).length > 0 ? orderFieldValues : null,
         due_date: order.dueDate,
         priority: order.priority ?? "normal",
         status: "draft",
@@ -751,7 +801,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         customerName: row.customerName,
         productName: row.productName,
         quantity: row.quantity,
-        hierarchy: row.hierarchy,
+        orderFieldValues: row.orderFieldValues,
         dueDate: row.dueDate,
         priority: row.priority,
         status: row.status,
@@ -800,7 +850,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       customer_name: row.customerName,
       product_name: row.productName ?? null,
       quantity: row.quantity ?? null,
-      hierarchy: row.hierarchy ?? null,
+      order_field_values: row.orderFieldValues ?? null,
       due_date: row.dueDate,
       priority: row.priority,
       status: row.status,
@@ -878,10 +928,13 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             customerName: order.customerName,
             productName: order.productName,
             quantity: order.quantity,
-            hierarchy: order.hierarchy,
+            orderFieldValues: order.orderFieldValues,
             dueDate: order.dueDate,
             priority: order.priority,
             status: order.status,
+            assignedEngineerId: order.assignedEngineerId ?? undefined,
+            assignedEngineerName: order.assignedEngineerName ?? undefined,
+            assignedEngineerAt: order.assignedEngineerAt ?? undefined,
             assignedManagerId:
               order.assignedManagerId ??
               (user.role === "Sales" || user.isAdmin ? user.id : undefined),
@@ -928,10 +981,14 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             customer_name: order.customerName,
             product_name: order.productName ?? null,
             quantity: order.quantity ?? null,
-            hierarchy: order.hierarchy ?? null,
+            order_field_values: order.orderFieldValues ?? null,
             due_date: order.dueDate,
             priority: order.priority,
             status: order.status,
+            created_by: user.id ?? null,
+            assigned_engineer_id: order.assignedEngineerId ?? null,
+            assigned_engineer_name: order.assignedEngineerName ?? null,
+            assigned_engineer_at: order.assignedEngineerAt ?? null,
             assigned_manager_id: order.assignedManagerId ?? (user.role === "Sales" || user.isAdmin ? user.id : null),
             assigned_manager_name: order.assignedManagerName ?? (user.role === "Sales" || user.isAdmin ? user.name : null),
             assigned_manager_at: order.assignedManagerAt ?? (user.role === "Sales" || user.isAdmin ? new Date().toISOString() : null),
@@ -942,9 +999,12 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             id,
             order_number,
             customer_name,
+            created_at,
+            updated_at,
+            created_by,
             product_name,
             quantity,
-            hierarchy,
+            order_field_values,
             due_date,
             priority,
             status,
@@ -1126,8 +1186,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (patch.quantity !== undefined) {
           updatePayload.quantity = patch.quantity;
         }
-        if (patch.hierarchy !== undefined) {
-          updatePayload.hierarchy = patch.hierarchy;
+        if (patch.orderFieldValues !== undefined) {
+          updatePayload.order_field_values = patch.orderFieldValues;
         }
         if (patch.dueDate !== undefined) {
           updatePayload.due_date = patch.dueDate;
@@ -1189,9 +1249,12 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             id,
             order_number,
             customer_name,
+            created_at,
+            updated_at,
+            created_by,
             product_name,
             quantity,
-            hierarchy,
+            order_field_values,
             due_date,
             priority,
             status,
@@ -1967,4 +2030,5 @@ export function useOrders() {
   }
   return context;
 }
+
 

@@ -12,13 +12,16 @@ export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 function Calendar({
   className,
   classNames,
+  formatters,
   showOutsideDays = true,
+  showWeekNumber = true,
   weekStartsOn = 1,
   ...props
 }: CalendarProps) {
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      showWeekNumber={showWeekNumber}
       weekStartsOn={weekStartsOn}
       className={cn("p-3", className)}
       classNames={{
@@ -35,11 +38,15 @@ function Calendar({
           "pointer-events-auto flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
         chevron: "pointer-events-none",
         month_grid: "w-full border-collapse space-y-1",
-        weekdays: "grid grid-cols-7",
+        weekdays: showWeekNumber ? "grid grid-cols-8" : "grid grid-cols-7",
         weekday:
           "w-9 rounded-md text-center text-[0.75rem] font-medium text-muted-foreground",
+        week_number_header:
+          "w-9 text-center text-[0.75rem] font-medium text-muted-foreground",
         weeks: "grid",
-        week: "grid grid-cols-7 mt-2",
+        week: showWeekNumber ? "grid grid-cols-8 mt-2" : "grid grid-cols-7 mt-2",
+        week_number:
+          "flex h-9 w-9 items-center justify-center text-[0.75rem] font-medium text-muted-foreground",
         day: "relative h-9 w-9 p-0 text-center text-sm",
         day_button: cn(
           buttonVariants({ variant: "ghost", size: "icon" }),
@@ -58,6 +65,10 @@ function Calendar({
         disabled: "text-muted-foreground opacity-50",
         hidden: "invisible",
         ...classNames,
+      }}
+      formatters={{
+        formatWeekNumberHeader: () => "W",
+        ...formatters,
       }}
       components={{
         Chevron: ({ className: iconClassName, orientation, ...iconProps }) => {

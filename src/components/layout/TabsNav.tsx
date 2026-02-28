@@ -16,38 +16,10 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import { isAdminLike } from "@/lib/auth/permissions";
 import { supabase } from "@/lib/supabaseClient";
 import { cn } from "@/components/ui/utils";
-
-const mainTabs = [
-  {
-    value: "dashboard",
-    href: "/",
-    label: "Dashboard",
-    icon: LayoutDashboardIcon,
-  },
-  { value: "orders", href: "/orders", label: "Orders", icon: PackageIcon },
-  {
-    value: "production",
-    href: "/production",
-    label: "Production",
-    icon: FactoryIcon,
-  },
-];
-
-const settingsTab = {
-  value: "settings",
-  href: "/settings",
-  label: "Settings",
-  icon: SettingsIcon,
-};
-
-const notificationsTab = {
-  value: "notifications",
-  href: "/notifications",
-  label: "Notifications",
-  icon: BellIcon,
-};
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export function TabsNav() {
+  const { t } = useI18n();
   const pathname = usePathname();
   const router = useRouter();
   const { hasPermission } = useRbac();
@@ -59,6 +31,38 @@ export function TabsNav() {
   const canViewProductionOperator = hasPermission("production.operator.view");
   const hasAdminAccess = isAdminLike(user);
   const isWarehouseUser = user.role === "Warehouse" && !hasAdminAccess;
+  const mainTabs = [
+    {
+      value: "dashboard",
+      href: "/",
+      label: t("appShell.dashboard"),
+      icon: LayoutDashboardIcon,
+    },
+    {
+      value: "orders",
+      href: "/orders",
+      label: t("appShell.orders"),
+      icon: PackageIcon,
+    },
+    {
+      value: "production",
+      href: "/production",
+      label: t("appShell.production"),
+      icon: FactoryIcon,
+    },
+  ];
+  const settingsTab = {
+    value: "settings",
+    href: "/settings",
+    label: t("appShell.settings"),
+    icon: SettingsIcon,
+  };
+  const notificationsTab = {
+    value: "notifications",
+    href: "/notifications",
+    label: t("header.notifications"),
+    icon: BellIcon,
+  };
 
   useEffect(() => {
     const sb = supabase;
@@ -100,7 +104,9 @@ export function TabsNav() {
       !user.tenantId ||
       !canViewNotifications
     ) {
-      setUnreadCount(0);
+      queueMicrotask(() => {
+        setUnreadCount(0);
+      });
       return;
     }
     let isMounted = true;
@@ -141,26 +147,36 @@ export function TabsNav() {
   }, [canViewNotifications, user.id, user.isAuthenticated, user.tenantId]);
 
   const warehouseTabs = [
-    { value: "orders", href: "/orders", label: "Orders", icon: PackageIcon },
+    {
+      value: "orders",
+      href: "/orders",
+      label: t("appShell.orders"),
+      icon: PackageIcon,
+    },
     {
       value: "warehouse",
       href: "/warehouse/queue",
-      label: "Warehouse",
+      label: t("appShell.warehouse"),
       icon: FactoryIcon,
     },
   ];
   const warehouseMobileTabs = [
-    { value: "orders", href: "/orders", label: "Orders", icon: PackageIcon },
+    {
+      value: "orders",
+      href: "/orders",
+      label: t("appShell.orders"),
+      icon: PackageIcon,
+    },
     {
       value: "queue",
       href: "/warehouse/queue",
-      label: "Queue",
+      label: t("appShell.queue"),
       icon: FactoryIcon,
     },
     {
       value: "external",
       href: "/warehouse/external",
-      label: "External",
+      label: t("appShell.external"),
       icon: FactoryIcon,
     },
   ];

@@ -51,7 +51,6 @@ import type {
 import Link from "next/link";
 import {
   ArrowLeftIcon,
-  Copy,
   CopyIcon,
   DownloadIcon,
   FileIcon,
@@ -61,12 +60,11 @@ import {
   PencilIcon,
   SparklesIcon,
   Trash2Icon,
-  XIcon,
 } from "lucide-react";
 import JSZip from "jszip";
 import { OrderModal } from "@/app/orders/components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
-import { useHierarchy } from "@/app/settings/HierarchyContext";
+import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { uploadOrderAttachment } from "@/lib/uploadOrderAttachment";
 import { uploadExternalJobAttachment } from "@/lib/uploadExternalJobAttachment";
@@ -78,6 +76,12 @@ import { useTenantSubscription } from "@/hooks/useTenantSubscription";
 import { useRbac } from "@/contexts/RbacContext";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
+import { ORDER_CORE_FIELD_KEYS } from "@/lib/domain/orderCoreFields";
+import {
+  getOrderFieldLabel,
+  getOrderPriorityLabel,
+  getOrderStatusLabel,
+} from "@/lib/domain/orderFieldPresentation";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -201,7 +205,7 @@ export default function OrderDetailPage() {
     addExternalJobAttachment,
     removeExternalJobAttachment,
   } = useOrders();
-  const { levels, nodes } = useHierarchy();
+  const { orderFields } = useOrderFieldSettings();
   const {
     role,
     isAdmin,
@@ -265,25 +269,43 @@ export default function OrderDetailPage() {
           .toUpperCase()
       : "";
   const statusLabel = (status: OrderStatus) =>
-    rules.statusLabels?.[status] ?? formatOrderStatus(status);
+    getOrderStatusLabel(
+      status,
+      t,
+      rules.statusLabels?.[status] ?? formatOrderStatus(status),
+    );
   const activeLevels = useMemo(
     () =>
-      levels
+      orderFields
         .filter(
           (level) =>
             level.isActive &&
+            !ORDER_CORE_FIELD_KEYS.has(level.key) &&
             level.key !== "engineer" &&
             level.key !== "manager",
         )
-        .sort((a, b) => a.order - b.order),
-    [levels],
+        .sort((a, b) => a.order - b.order)
+        .map((level) => ({
+          ...level,
+          name: getOrderFieldLabel(level.key, t, level.name),
+        })),
+    [orderFields, t],
   );
-  const nodeLabelMap = useMemo(() => {
-    const map = new Map<string, string>();
-    nodes.forEach((node) => map.set(node.id, node.label));
-    return map;
-  }, [nodes]);
-
+  const summaryMetadataFields = useMemo(
+    () =>
+      orderFields
+        .filter(
+          (field) =>
+            field.isActive &&
+            (field.key === "delivery_address" || field.key === "customer_phone"),
+        )
+        .sort((a, b) => a.order - b.order)
+        .map((field) => ({
+          ...field,
+          name: getOrderFieldLabel(field.key, t, field.name),
+        })),
+    [orderFields, t],
+  );
   const order = useMemo(
     () =>
       orders.find(
@@ -781,7 +803,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [supabase, t, tenantId]);
+  }, [t, tenantId]);
 
   useEffect(() => {
     const sb = supabase;
@@ -845,7 +867,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [supabase, tenantId]);
+  }, [tenantId]);
 
   useEffect(() => {
     const sb = supabase;
@@ -881,7 +903,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [orderState?.externalJobs, supabase, tenantId]);
+  }, [orderState?.externalJobs, tenantId]);
 
   useEffect(() => {
     const sb = supabase;
@@ -915,7 +937,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [orderState?.id, supabase, t]);
+  }, [orderState?.id, t]);
 
   useEffect(() => {
     const sb = supabase;
@@ -975,7 +997,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [orderState?.id, rules.productionCompletionConfig, supabase]);
+  }, [orderState?.id, rules.productionCompletionConfig]);
 
   useEffect(() => {
     if (isAttachmentCategoryManual) {
@@ -1063,7 +1085,7 @@ export default function OrderDetailPage() {
           mimeLower.includes("spreadsheet");
         return isProductionDocumentation && isSupported;
       }),
-    [attachments, attachmentCategoryLabels, effectiveAiAttachmentCategoryIds],
+    [attachments, attachmentCategoryLabels, effectiveAiAttachmentCategoryIds, t],
   );
   const comments = orderState?.comments ?? [];
   const canManageAllComments =
@@ -1112,7 +1134,7 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [activeTab, attachments, signedAttachmentUrls]);
+  }, [activeTab, attachments, signedAttachmentUrls, storagePublicPrefix]);
 
   useEffect(() => {
     const availableIds = new Set(
@@ -1178,7 +1200,12 @@ export default function OrderDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [activeTab, orderState?.externalJobs, signedExternalAttachmentUrls]);
+  }, [
+    activeTab,
+    orderState?.externalJobs,
+    signedExternalAttachmentUrls,
+    storagePublicPrefix,
+  ]);
   const meetsEngineeringChecklist = requiredForEngineering.every(
     (item) => checklistState[item.id],
   );
@@ -2217,9 +2244,6 @@ export default function OrderDetailPage() {
       const aiButtonTooltipBasic = t("orders.detail.aiImport.description");
       const importNotice = tableImportNotices[field.id] ?? "";
       const isParsingThisField = isParsingTableFieldId === field.id;
-      const showAiReviewNotice =
-        isParsingThisField ||
-        importNotice.startsWith(t("orders.detail.aiImport.rowsAddedPrefix"));
       const selectedRows = tableRowSelections[field.id] ?? [];
       const allSelected =
         rows.length > 0 && selectedRows.length === rows.length;
@@ -4101,7 +4125,9 @@ export default function OrderDetailPage() {
               </TabsList>
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-              <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+              <Badge variant={priorityVariant}>
+                {getOrderPriorityLabel(orderState.priority, t)}
+              </Badge>
               <Badge variant={statusVariant}>
                 {statusLabel(displayStatus)}
               </Badge>
@@ -4129,7 +4155,9 @@ export default function OrderDetailPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 px-1 md:hidden">
-          <Badge variant={priorityVariant}>{orderState.priority}</Badge>
+          <Badge variant={priorityVariant}>
+            {getOrderPriorityLabel(orderState.priority, t)}
+          </Badge>
           <Badge variant={statusVariant}>{statusLabel(displayStatus)}</Badge>
           {productionCompletionProgress ? (
             <span className="text-xs text-muted-foreground">
@@ -4152,64 +4180,153 @@ export default function OrderDetailPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-3">
                     <div className="text-xs font-semibold text-muted-foreground">
-                      {t("orders.detail.schedule")}
+                      {t("orders.detail.orderInfo")}
                     </div>
-                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">
-                        {t("orders.page.dueDate")}
-                      </span>
-                      <span className="font-medium">
-                        {formatDate(orderState.dueDate)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">
-                        {t("orders.page.quantity")}
-                      </span>
-                      <span className="font-medium">
-                        {orderState.quantity ?? "--"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">
-                        {t("orders.detail.productionTime")}
-                      </span>
-                      <span className="font-medium">
-                        {orderState.productionDurationMinutes != null
-                          ? formatDuration(orderState.productionDurationMinutes)
-                          : "--"}
-                      </span>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t("orders.page.orderNumberShort")}
+                        </span>
+                        <span className="font-medium">
+                          {orderState.orderNumber}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t("orders.page.customer")}
+                        </span>
+                        <span className="font-medium">
+                          {orderState.customerName}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t("orders.page.dueDate")}
+                        </span>
+                        <span className="font-medium">
+                          {formatDate(orderState.dueDate)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t("orders.page.quantity")}
+                        </span>
+                        <span className="font-medium">
+                          {orderState.quantity ?? "--"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t("orders.detail.productionTime")}
+                        </span>
+                        <span className="font-medium">
+                          {orderState.productionDurationMinutes != null
+                            ? formatDuration(orderState.productionDurationMinutes)
+                            : "--"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {engineerLabel}
+                        </span>
+                        <span className="font-medium">
+                          {orderState.assignedEngineerName ?? "--"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {managerLabel}
+                        </span>
+                        <span className="font-medium">
+                          {orderState.assignedManagerName ?? "--"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t("orders.page.priority")}
+                        </span>
+                        <span className="font-medium">
+                          {getOrderPriorityLabel(orderState.priority, t)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t("orders.page.status")}
+                        </span>
+                        <span className="font-medium">
+                          {getOrderStatusLabel(displayStatus, t, statusLabel(displayStatus))}
+                        </span>
+                      </div>
+                      {summaryMetadataFields.map((field) => {
+                        const rawValue = orderState.orderFieldValues?.[field.id];
+                        const valueLabel = rawValue
+                          ? (orderState.orderFieldLabels?.[field.id] ?? rawValue)
+                          : "--";
+                        return (
+                          <div
+                            key={field.id}
+                            className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                          >
+                            <span className="text-muted-foreground">
+                              {field.name}
+                            </span>
+                            <span className="font-medium">{valueLabel}</span>
+                          </div>
+                        );
+                      })}
+                      {activeLevels.map((level) => {
+                        const valueId = orderState.orderFieldValues?.[level.id];
+                        const valueLabel = valueId
+                          ? (orderState.orderFieldLabels?.[level.id] ?? valueId)
+                          : "--";
+                        return (
+                          <div
+                            key={level.id}
+                            className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                          >
+                            <span className="text-muted-foreground">
+                              {level.name}
+                            </span>
+                            <span className="font-medium">{valueLabel}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                   <div className="space-y-3">
                     <div className="text-xs font-semibold text-muted-foreground">
-                      {t("orders.detail.hierarchy")}
+                      {t("orders.detail.audit")}
                     </div>
-                    {activeLevels.length === 0 ? (
-                      <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                        {t("orders.detail.noHierarchyConfigured")}
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {activeLevels.map((level) => {
-                          const valueId = orderState.hierarchy?.[level.id];
-                          const valueLabel = valueId
-                            ? (nodeLabelMap.get(valueId) ?? valueId)
-                            : "--";
-                          return (
-                            <div
-                              key={level.id}
-                              className="flex items-center justify-between rounded-md border border-border px-3 py-2"
-                            >
-                              <span className="text-muted-foreground">
-                                {level.name}
-                              </span>
-                              <span className="font-medium">{valueLabel}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                      <span className="text-muted-foreground">
+                        {t("orders.detail.createdAt")}
+                      </span>
+                      <span className="font-medium">
+                        {orderState.createdAt
+                          ? formatDateTime(orderState.createdAt)
+                          : "--"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                      <span className="text-muted-foreground">
+                        {t("orders.detail.updatedAt")}
+                      </span>
+                      <span className="font-medium">
+                        {orderState.updatedAt
+                          ? formatDateTime(orderState.updatedAt)
+                          : "--"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                      <span className="text-muted-foreground">
+                        {t("orders.detail.createdBy")}
+                      </span>
+                      <span className="font-medium">
+                        {orderState.createdByName ??
+                          orderState.createdBy ??
+                          t("orders.detail.system")}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -5761,9 +5878,12 @@ export default function OrderDetailPage() {
                   customerName: values.customerName,
                   productName: values.productName,
                   quantity: values.quantity,
-                  hierarchy: values.hierarchy,
+                  orderFieldValues: values.orderFieldValues,
                   dueDate: values.dueDate,
                   priority: values.priority,
+                  status: values.status,
+                  assignedEngineerName: values.assignedEngineerName,
+                  assignedManagerName: values.assignedManagerName,
                 }
               : prev,
           );
@@ -5771,9 +5891,12 @@ export default function OrderDetailPage() {
             customerName: values.customerName,
             productName: values.productName,
             quantity: values.quantity,
-            hierarchy: values.hierarchy,
+            orderFieldValues: values.orderFieldValues,
             dueDate: values.dueDate,
             priority: values.priority,
+            status: values.status,
+            assignedEngineerName: values.assignedEngineerName,
+            assignedManagerName: values.assignedManagerName,
           });
           return true;
         }}
@@ -5787,7 +5910,10 @@ export default function OrderDetailPage() {
           quantity: orderState.quantity ?? 1,
           dueDate: orderState.dueDate,
           priority: orderState.priority,
-          hierarchy: orderState.hierarchy,
+          status: orderState.status,
+          assignedEngineerName: orderState.assignedEngineerName ?? "",
+          assignedManagerName: orderState.assignedManagerName ?? "",
+          orderFieldValues: orderState.orderFieldValues,
         }}
       />
 
@@ -5887,3 +6013,4 @@ export default function OrderDetailPage() {
     </section>
   );
 }
+
