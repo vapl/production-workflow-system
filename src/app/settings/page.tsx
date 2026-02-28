@@ -3155,14 +3155,19 @@ export default function SettingsPage() {
     setPartnerGroupName(group.name);
   }
 
-  const [activeTab, setActiveTab] = useState("structure");
+  const [activeTab, setActiveTab] = useState<SettingsSectionValue>("orderFields");
   const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
-    if (tab && settingsSections.some((section) => section.value === tab)) {
-      setActiveTab(tab);
+    const normalizedTab =
+      tab === "structure" ? "orderFields" : tab;
+    if (
+      normalizedTab &&
+      settingsSections.some((section) => section.value === normalizedTab)
+    ) {
+      setActiveTab(normalizedTab as SettingsSectionValue);
     }
   }, [searchParams]);
 
@@ -3227,7 +3232,7 @@ export default function SettingsPage() {
 
   const activeSectionValue = (settingsSections.find(
     (section) => section.value === activeTab,
-  )?.value ?? "structure") as SettingsSectionValue;
+  )?.value ?? "orderFields") as SettingsSectionValue;
 
   const activeSectionLabel = sectionLabel(activeSectionValue);
   const activeSectionSubtitle = sectionSubtitle(activeSectionValue);
