@@ -17,7 +17,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useNotifications } from "@/components/ui/Notifications";
 import { getAccountingAdapter } from "@/lib/integrations/accounting/getAdapter";
-import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
+import { useOrderFieldSettings } from "@/app/(app)/settings/OrderFieldSettingsContext";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { useAssignmentLabels } from "@/hooks/useAssignmentLabels";
 

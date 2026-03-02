@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import { MapPinIcon, XIcon } from "lucide-react";
-import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
+import { useOrderFieldSettings } from "@/app/(app)/settings/OrderFieldSettingsContext";
 import type { ReactNode } from "react";
 import { getAccountingAdapter } from "@/lib/integrations/accounting/getAdapter";
 import type { AccountingOrder } from "@/lib/integrations/accounting/types";
