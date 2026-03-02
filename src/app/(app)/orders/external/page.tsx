@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeftIcon, SearchIcon, SlidersHorizontalIcon } from "lucide-react";
-import { useOrders } from "@/app/orders/OrdersContext";
+import { useOrders } from "@/app/(app)/orders/OrdersContext";
 import { usePartners } from "@/hooks/usePartners";
 import type {
   ExternalJobFieldRole,

@@ -8,7 +8,7 @@ import {
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { OrderRow } from "./OrderRow";
 import { Order } from "@/types/orders";
-import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
+import { useOrderFieldSettings } from "@/app/(app)/settings/OrderFieldSettingsContext";
 import { Fragment, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { useI18n } from "@/lib/i18n/useI18n";

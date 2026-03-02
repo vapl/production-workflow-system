@@ -14,7 +14,7 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
+import { useOrderFieldSettings } from "@/app/(app)/settings/OrderFieldSettingsContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";

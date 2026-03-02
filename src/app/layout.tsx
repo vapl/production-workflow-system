@@ -1,19 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { OrdersProvider } from "@/app/orders/OrdersContext";
-import { OrderFieldSettingsProvider } from "@/app/settings/OrderFieldSettingsContext";
-import { UserProvider } from "@/contexts/UserContext";
-import { BatchesProvider } from "@/contexts/BatchesContext";
-import {
-  NotificationsProvider,
-  NotificationsViewport,
-} from "@/components/ui/Notifications";
-import { WorkflowProvider } from "@/contexts/WorkflowContext";
-import { AppShell } from "@/components/layout/AppShell";
-import { ServiceWorker } from "@/components/pwa/ServiceWorker";
-import { RbacProvider } from "@/contexts/RbacContext";
-import { WorkingCalendarProvider } from "@/contexts/WorkingCalendarContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -74,27 +61,8 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ServiceWorker />
-        <UserProvider>
-          <NotificationsProvider>
-            <RbacProvider>
-              <WorkflowProvider>
-                <WorkingCalendarProvider>
-                  <OrderFieldSettingsProvider>
-                    <OrdersProvider>
-                      <BatchesProvider>
-                        <AppShell>{children}</AppShell>
-                        <NotificationsViewport />
-                      </BatchesProvider>
-                    </OrdersProvider>
-                  </OrderFieldSettingsProvider>
-                </WorkingCalendarProvider>
-              </WorkflowProvider>
-            </RbacProvider>
-          </NotificationsProvider>
-        </UserProvider>
+        {children}
       </body>
     </html>
   );
 }
-

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeftIcon, SearchIcon, SparklesIcon } from "lucide-react";
-import { useOrders } from "@/app/orders/OrdersContext";
+import { useOrders } from "@/app/(app)/orders/OrdersContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";

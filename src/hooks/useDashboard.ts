@@ -16,7 +16,7 @@ import type { Order } from "@/types/orders";
 import type { Batch } from "@/types/batch";
 import type { DashboardKpis } from "@/types/dashboard";
 import type { Activity } from "@/types/activity";
-import { useOrders } from "@/app/orders/OrdersContext";
+import { useOrders } from "@/app/(app)/orders/OrdersContext";
 import { useBatches } from "@/contexts/BatchesContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 

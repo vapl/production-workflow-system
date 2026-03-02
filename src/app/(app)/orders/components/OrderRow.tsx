@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import type { Order } from "@/types/orders";
-import type { OrderFieldSetting } from "@/app/settings/OrderFieldSettingsContext";
+import type { OrderFieldSetting } from "@/app/(app)/settings/OrderFieldSettingsContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";

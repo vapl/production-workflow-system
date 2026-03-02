@@ -17,8 +17,8 @@ import {
   XIcon,
 } from "lucide-react";
 import { OrderModal } from "./components/OrderModal";
-import { useOrders } from "@/app/orders/OrdersContext";
-import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
+import { useOrders } from "@/app/(app)/orders/OrdersContext";
+import { useOrderFieldSettings } from "@/app/(app)/settings/OrderFieldSettingsContext";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { ImportWizard } from "./components/ImportWizard";
