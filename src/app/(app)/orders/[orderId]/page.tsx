@@ -119,6 +119,8 @@ const defaultAttachmentCategories = [
 ];
 const EMPTY_ATTACHMENTS: OrderAttachment[] = [];
 
+type HistoryFilter = "all" | "status" | "comment" | "file";
+
 function formatDuration(totalMinutes?: number | null) {
   if (!totalMinutes || totalMinutes <= 0) return "0m";
   const hours = Math.floor(totalMinutes / 60);
@@ -410,6 +412,7 @@ export default function OrderDetailPage() {
     {},
   );
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [isReturnOpen, setIsReturnOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnNote, setReturnNote] = useState("");
@@ -601,9 +604,46 @@ export default function OrderDetailPage() {
     (item) => checklistState[item.id],
   ).length;
   const statusHistory = orderState?.statusHistory ?? [];
-  const visibleStatusHistory = showAllHistory
-    ? statusHistory
-    : statusHistory.slice(0, 5);
+  const historyEvents = useMemo(() => {
+    const statusEvents = (orderState?.statusHistory ?? []).map((entry) => ({
+      id: `status-${entry.id}`,
+      type: "status" as const,
+      createdAt: entry.changedAt,
+      actor: entry.changedBy,
+      actorRole: entry.changedByRole,
+      label: entry.status,
+      meta: entry.status,
+    }));
+    const commentEvents = (orderState?.comments ?? []).map((comment) => ({
+      id: `comment-${comment.id}`,
+      type: "comment" as const,
+      createdAt: comment.createdAt,
+      actor: comment.author,
+      actorRole: comment.authorRole,
+      label: comment.message,
+      meta: null,
+    }));
+    const fileEvents = (orderState?.attachments ?? []).map((attachment) => ({
+      id: `file-${attachment.id}`,
+      type: "file" as const,
+      createdAt: attachment.createdAt,
+      actor: attachment.addedBy,
+      actorRole: attachment.addedByRole,
+      label: attachment.name,
+      meta: formatFileSize(attachment.size),
+    }));
+    return [...statusEvents, ...commentEvents, ...fileEvents].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }, [orderState?.statusHistory, orderState?.comments, orderState?.attachments]);
+  const visibleHistoryEvents = useMemo(() => {
+    const filtered =
+      historyFilter === "all"
+        ? historyEvents
+        : historyEvents.filter((event) => event.type === historyFilter);
+    return showAllHistory ? filtered : filtered.slice(0, 8);
+  }, [historyEvents, historyFilter, showAllHistory]);
   const engineeringTiming = useMemo(() => {
     if (!orderState) {
       return null;
@@ -5627,51 +5667,75 @@ export default function OrderDetailPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                {statusHistory.length > 0 ? (
-                  <div className="space-y-4">
-                    {visibleStatusHistory.map((entry, index) => (
-                      <div key={entry.id} className="flex gap-3">
+                <div className="flex flex-wrap gap-2">
+                  {(["all", "status", "comment", "file"] as const).map((filter) => (
+                    <Button
+                      key={filter}
+                      type="button"
+                      variant={historyFilter === filter ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setHistoryFilter(filter)}
+                    >
+                      {t(`orders.detail.workflow.historyFilter.${filter}`)}
+                    </Button>
+                  ))}
+                </div>
+                {visibleHistoryEvents.length > 0 ? (
+                  <div className="space-y-3">
+                    {visibleHistoryEvents.map((event, index) => (
+                      <div key={event.id} className="flex gap-3">
                         <div className="flex flex-col items-center">
-                          <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                          {index < visibleStatusHistory.length - 1 && (
+                          <div
+                            className={`h-2.5 w-2.5 rounded-full ${
+                              event.type === "status"
+                                ? "bg-primary"
+                                : event.type === "comment"
+                                  ? "bg-blue-500"
+                                  : "bg-emerald-500"
+                            }`}
+                          />
+                          {index < visibleHistoryEvents.length - 1 ? (
                             <div className="mt-1 h-full w-px bg-border" />
-                          )}
+                          ) : null}
                         </div>
                         <div className="flex-1 rounded-md border border-border px-3 py-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <Badge variant={`status-${entry.status}`}>
-                              {statusLabel(entry.status)}
-                            </Badge>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              {event.type === "status" ? (
+                                <Badge variant={`status-${event.meta}`}>
+                                  {statusLabel(event.label as OrderStatus)}
+                                </Badge>
+                              ) : (
+                                <div className="text-sm font-medium text-foreground">
+                                  {event.type === "comment"
+                                    ? t("orders.detail.workflow.historyEvent.commentAdded")
+                                    : t("orders.detail.workflow.historyEvent.fileAdded")}
+                                </div>
+                              )}
+                            </div>
                             <div className="text-xs text-muted-foreground">
-                              {formatDate(entry.changedAt.slice(0, 10))}
+                              {formatDateTime(event.createdAt)}
                             </div>
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {entry.changedBy}
-                            {entry.changedByRole
-                              ? ` (${entry.changedByRole})`
-                              : ""}
+                            {event.actor || t("orders.detail.unknown")}
+                            {event.actorRole ? ` (${event.actorRole})` : ""}
                           </div>
+                          {event.type !== "status" ? (
+                            <div className="mt-1 text-sm text-foreground">
+                              {event.label}
+                              {event.type === "file" && event.meta
+                                ? ` · ${event.meta}`
+                                : ""}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     ))}
                   </div>
-                ) : orderState.statusChangedAt ? (
-                  <div className="rounded-md border border-border px-3 py-2">
-                    <div className="font-medium">
-                      {statusLabel(orderState.status)}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {orderState.statusChangedBy ?? t("orders.detail.unknown")}
-                      {orderState.statusChangedByRole
-                        ? ` (${orderState.statusChangedByRole})`
-                        : ""}
-                      {` ${t("orders.detail.on")} ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
-                    </div>
-                  </div>
                 ) : (
                   <p className="text-muted-foreground">
-                    {t("orders.detail.noStatusChanges")}
+                    {t("orders.detail.workflow.historyEmpty")}
                   </p>
                 )}
               </CardContent>
@@ -6098,7 +6162,7 @@ export default function OrderDetailPage() {
                   </p>
                 ) : (
                   <div className="space-y-3">
-                    {comments.map((comment) => (
+                    {comments.map((comment, index) => (
                       <div
                         key={comment.id}
                         className="relative rounded-xl border border-border/80 bg-background px-3 py-3"

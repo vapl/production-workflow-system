@@ -624,6 +624,17 @@
         beforeSendingToEngineering: "before sending to engineering.",
         beforeSendingToProduction: "before sending to production.",
         statusHistory: "Status History",
+        historyEmpty: "No events in the selected filter.",
+        historyFilter: {
+          all: "All",
+          status: "Statuses",
+          comment: "Comments",
+          file: "Files",
+        },
+        historyEvent: {
+          commentAdded: "Comment added",
+          fileAdded: "File added",
+        },
         sendToEngineeringChecks: "Send to engineering checks",
         sendToProductionChecks: "Send to production checks",
         gates: {
