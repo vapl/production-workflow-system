@@ -548,6 +548,8 @@
         empty: "No comments yet.",
         totalComments: "{count} comments",
         latestComment: "Latest comment: {date}",
+        composerHint: "Conversation and handoff context between roles.",
+        roleUnknown: "Role not specified",
       },
       external: {
         title: "External Jobs",

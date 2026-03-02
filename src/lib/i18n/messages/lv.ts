@@ -561,6 +561,8 @@
         empty: "Komentāru vēl nav.",
         totalComments: "{count} komentāri",
         latestComment: "Pēdējais komentārs: {date}",
+        composerHint: "Sarunas un darba nodošanas konteksts starp lomām.",
+        roleUnknown: "Loma nav norādīta",
       },
       external: {
         title: "Ārējie darbi",
