@@ -83,6 +83,7 @@ export function OrderFieldSettingsProvider({
     if (!supabase) {
       return;
     }
+    const client = supabase;
     if (user.loading) {
       return;
     }
@@ -91,7 +92,7 @@ export function OrderFieldSettingsProvider({
     }
     let isMounted = true;
     const loadOrderFieldSettings = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from("order_field_settings")
         .select(
           "id, label, field_key, sort_order, is_required, is_active, show_in_table",

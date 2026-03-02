@@ -47,6 +47,12 @@ interface OrdersCardsProps {
   managerLabel?: string;
 }
 
+type ActiveOrderField = {
+  id: string;
+  key: string;
+  name: string;
+};
+
 function OrderCard({
   order,
   activeOrderFields,
@@ -60,7 +66,7 @@ function OrderCard({
   managerLabel,
 }: {
   order: Order;
-  activeOrderFields: { id: string; name: string }[];
+  activeOrderFields: ActiveOrderField[];
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
   onTakeOrder?: (order: Order) => void;
@@ -471,7 +477,7 @@ export function OrdersCards({
         level.key !== "manager",
     )
     .sort((a, b) => a.order - b.order)
-    .map((level) => ({
+    .map((level): ActiveOrderField => ({
       ...level,
       name: getOrderFieldLabel(level.key, t, level.name),
     }));
