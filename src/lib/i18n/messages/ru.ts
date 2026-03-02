@@ -533,6 +533,8 @@
         empty: "Комментариев пока нет.",
         totalComments: "{count} комментариев",
         latestComment: "Последний комментарий: {date}",
+        composerHint: "Контекст обсуждения и передачи работы между ролями.",
+        roleUnknown: "Роль не указана",
       },
       external: {
         title: "Внешние работы",
