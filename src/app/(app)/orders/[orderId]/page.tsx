@@ -6167,14 +6167,10 @@ export default function OrderDetailPage() {
                         key={comment.id}
                         className="relative rounded-xl border border-border/80 bg-background px-3 py-3"
                       >
+                        <div className="absolute bottom-0 left-5 top-0 w-px bg-border/70" />
                         <div className="relative flex items-start gap-3">
-                          <div className="flex w-8 shrink-0 flex-col items-center">
-                            <div className="z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-muted/40 text-xs font-semibold text-foreground">
-                              {getInitials(comment.author)}
-                            </div>
-                            {index < comments.length - 1 ? (
-                              <div className="mt-1 h-full w-px bg-border/70" />
-                            ) : null}
+                          <div className="z-10 mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-muted/40 text-xs font-semibold text-foreground">
+                            {getInitials(comment.author)}
                           </div>
                           <div className="min-w-0 flex-1 space-y-2">
                             <div className="flex flex-wrap items-start justify-between gap-2">
