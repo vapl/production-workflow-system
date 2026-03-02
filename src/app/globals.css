@@ -5,6 +5,7 @@
 :root {
   --font-size: 16px;
   --background: #ffffff;
+  --app-surface: #f5f6f8;
   --foreground: oklch(0.145 0 0);
   --card: #ffffff;
   --card-foreground: oklch(0.145 0 0);
@@ -63,6 +64,7 @@
 .dark,
 :root[data-theme="dark"] {
   --background: oklch(0.145 0 0);
+  --app-surface: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.145 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -110,6 +112,7 @@
 
 @theme inline {
   --color-background: var(--background);
+  --color-app-surface: var(--app-surface);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -301,7 +304,7 @@
   }
 
   .desktop-sticky-bleed {
-    @apply md:before:pointer-events-none md:before:absolute md:before:inset-y-0 md:before:left-[calc((100dvw-100%)/-2)] md:before:-z-10 md:before:w-[100dvw] md:before:bg-background;
+    @apply md:before:pointer-events-none md:before:absolute md:before:inset-y-0 md:before:left-[calc((100dvw-100%)/-2)] md:before:-z-10 md:before:w-dvw md:before:bg-app-surface;
   }
 
   .desktop-sticky-bleed-shadow {

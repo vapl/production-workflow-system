@@ -37,6 +37,7 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatDate } from "@/lib/domain/formatters";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 import {
   canReceiveExternalOrders,
   canViewExternalOrders,
@@ -293,6 +294,7 @@ export default function ExternalJobsPage() {
     ExternalListField[]
   >([]);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [externalFieldValuesByJobId, setExternalFieldValuesByJobId] = useState<
@@ -1063,7 +1065,13 @@ export default function ExternalJobsPage() {
         </div>
       </div>
 
-      <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 md:hidden">
+      <div
+        className={`fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 transition-all duration-200 md:hidden ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Button

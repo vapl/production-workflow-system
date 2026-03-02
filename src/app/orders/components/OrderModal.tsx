@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/Table";
-import { XIcon } from "lucide-react";
+import { MapPinIcon, XIcon } from "lucide-react";
 import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import type { ReactNode } from "react";
 import { getAccountingAdapter } from "@/lib/integrations/accounting/getAdapter";
@@ -24,11 +24,14 @@ import type { AccountingOrder } from "@/lib/integrations/accounting/types";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { ORDER_CORE_FIELD_KEYS } from "@/lib/domain/orderCoreFields";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { useAssignmentLabels } from "@/hooks/useAssignmentLabels";
 import type { OrderStatus } from "@/types/orders";
 import {
   getOrderFieldLabel,
   getOrderStatusLabel,
 } from "@/lib/domain/orderFieldPresentation";
+import { supabase } from "@/lib/supabaseClient";
 
 export interface OrderFormValues {
   orderNumber: string;
@@ -40,7 +43,9 @@ export interface OrderFormValues {
   priority: "low" | "normal" | "high" | "urgent";
   status: OrderStatus;
   notes?: string;
+  assignedEngineerId?: string;
   assignedEngineerName?: string;
+  assignedManagerId?: string;
   assignedManagerName?: string;
   orderFieldValues?: Record<string, string>;
 }
@@ -71,7 +76,9 @@ const defaultValues: OrderFormValues = {
   priority: "normal",
   status: "draft",
   notes: "",
+  assignedEngineerId: "",
   assignedEngineerName: "",
+  assignedManagerId: "",
   assignedManagerName: "",
 };
 
@@ -88,7 +95,10 @@ export function OrderModal({
   onOpenImportExcel,
 }: OrderModalProps) {
   const { t } = useI18n();
+  const user = useCurrentUser();
   const { rules } = useWorkflowRules();
+  const { engineer: engineerLabel, manager: managerLabel } =
+    useAssignmentLabels();
   const resolvedTitle = title ?? t("orders.page.createOrderTitle");
   const resolvedSubmitLabel = submitLabel ?? t("orders.page.createOrder");
   const minDueDate = initialValues?.dueDate
@@ -104,7 +114,9 @@ export function OrderModal({
     priority: defaultValues.priority,
     status: defaultValues.status,
     notes: defaultValues.notes ?? "",
+    assignedEngineerId: defaultValues.assignedEngineerId ?? "",
     assignedEngineerName: defaultValues.assignedEngineerName ?? "",
+    assignedManagerId: defaultValues.assignedManagerId ?? "",
     assignedManagerName: defaultValues.assignedManagerName ?? "",
     orderFieldValues: {} as Record<string, string>,
   });
@@ -124,13 +136,18 @@ export function OrderModal({
   const dueDateField = coreFieldsByKey.get("due_date");
   const engineerField = coreFieldsByKey.get("engineer");
   const managerField = coreFieldsByKey.get("manager");
+  const [engineers, setEngineers] = useState<{ id: string; name: string }[]>(
+    [],
+  );
+  const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
   const metadataCoreFields = useMemo(
     () =>
       orderFields
         .filter(
           (field) =>
             field.isActive &&
-            (field.key === "delivery_address" || field.key === "customer_phone"),
+            (field.key === "delivery_address" ||
+              field.key === "customer_phone"),
         )
         .sort((a, b) => a.order - b.order),
     [orderFields],
@@ -159,9 +176,7 @@ export function OrderModal({
     () =>
       orderFields
         .filter(
-          (level) =>
-            level.isActive &&
-            !ORDER_CORE_FIELD_KEYS.has(level.key),
+          (level) => level.isActive && !ORDER_CORE_FIELD_KEYS.has(level.key),
         )
         .sort((a, b) => a.order - b.order),
     [orderFields],
@@ -200,8 +215,10 @@ export function OrderModal({
     useState<string[]>([]);
   const [isAccountingImporting, setIsAccountingImporting] = useState(false);
   const [accountingImportSummary, setAccountingImportSummary] = useState("");
-  const [accountingImportStatusByExternalId, setAccountingImportStatusByExternalId] =
-    useState<Record<string, AccountingImportStatus>>({});
+  const [
+    accountingImportStatusByExternalId,
+    setAccountingImportStatusByExternalId,
+  ] = useState<Record<string, AccountingImportStatus>>({});
   const normalizedExistingNumbers = useMemo(
     () =>
       existingOrderNumbers
@@ -252,6 +269,65 @@ export function OrderModal({
   }
 
   useEffect(() => {
+    const tenantId = user.tenantId;
+    const sb = supabase;
+    if (!tenantId || !sb || !open) {
+      setEngineers([]);
+      setManagers([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchAssignees = async () => {
+      const [engineersResult, managersResult] = await Promise.all([
+        sb
+          .from("profiles")
+          .select("id, full_name")
+          .eq("tenant_id", tenantId)
+          .eq("role", "Engineering"),
+        sb
+          .from("profiles")
+          .select("id, full_name")
+          .eq("tenant_id", tenantId)
+          .in("role", ["Sales", "Admin"]),
+      ]);
+
+      if (!isMounted) {
+        return;
+      }
+
+      setEngineers(
+        engineersResult.error
+          ? []
+          : (engineersResult.data ?? []).map((row) => ({
+              id: row.id,
+              name:
+                row.full_name ??
+                engineerLabel,
+            })),
+      );
+
+      setManagers(
+        managersResult.error
+          ? []
+          : (managersResult.data ?? []).map((row) => ({
+              id: row.id,
+              name:
+                row.full_name ??
+                managerLabel,
+            })),
+      );
+    };
+
+    void fetchAssignees();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [engineerLabel, managerLabel, open, user.tenantId]);
+
+  useEffect(() => {
     if (!open) {
       return;
     }
@@ -282,14 +358,56 @@ export function OrderModal({
       priority: nextValues.priority,
       status: nextValues.status ?? "draft",
       notes: nextValues.notes ?? "",
+      assignedEngineerId: nextValues.assignedEngineerId ?? "",
       assignedEngineerName: nextValues.assignedEngineerName ?? "",
+      assignedManagerId:
+        nextValues.assignedManagerId ??
+        (!initialValues?.orderNumber &&
+        (user.role === "Sales" || user.isAdmin) &&
+        user.id
+          ? user.id
+          : ""),
       assignedManagerName: nextValues.assignedManagerName ?? "",
       orderFieldValues: nextOrderFieldValues,
     });
     setErrors({});
     setTouched({});
     setOrderFieldInput(nextOrderFieldInput);
-  }, [activeOrderFields, initialValues, open, productLevel]);
+  }, [
+    activeOrderFields,
+    initialValues,
+    open,
+    productLevel,
+    user.id,
+    user.isAdmin,
+    user.role,
+  ]);
+
+  useEffect(() => {
+    if (!open || initialValues?.orderNumber) {
+      return;
+    }
+    if (!(user.role === "Sales" || user.isAdmin) || !user.id) {
+      return;
+    }
+    setFormState((prev) => {
+      if (prev.assignedManagerId) {
+        return prev;
+      }
+      return {
+        ...prev,
+        assignedManagerId: user.id,
+        assignedManagerName: user.name ?? prev.assignedManagerName,
+      };
+    });
+  }, [
+    initialValues?.orderNumber,
+    open,
+    user.id,
+    user.isAdmin,
+    user.name,
+    user.role,
+  ]);
 
   function resetForm() {
     setFormState({
@@ -302,7 +420,9 @@ export function OrderModal({
       priority: defaultValues.priority,
       status: defaultValues.status,
       notes: defaultValues.notes ?? "",
+      assignedEngineerId: defaultValues.assignedEngineerId ?? "",
       assignedEngineerName: defaultValues.assignedEngineerName ?? "",
+      assignedManagerId: defaultValues.assignedManagerId ?? "",
       assignedManagerName: defaultValues.assignedManagerName ?? "",
       orderFieldValues: {},
     });
@@ -314,7 +434,9 @@ export function OrderModal({
   function validateField(field: string, value: string) {
     switch (field) {
       case "customerName":
-        return value.trim() ? "" : t("orders.modal.validation.customerNameRequired");
+        return value.trim()
+          ? ""
+          : t("orders.modal.validation.customerNameRequired");
       case "orderNumber":
         if (!value.trim()) {
           return t("orders.modal.validation.orderNumberRequired");
@@ -354,13 +476,17 @@ export function OrderModal({
         return dueDate < today ? t("orders.modal.validation.dueDatePast") : "";
       }
       case "assignedEngineerName":
-        return engineerField?.isRequired && !value.trim()
+        return engineerField?.isRequired && !formState.assignedEngineerId.trim()
           ? t("orders.modal.levelRequired", {
-              level: getOrderFieldLabel(engineerField.key, t, engineerField.name),
+              level: getOrderFieldLabel(
+                engineerField.key,
+                t,
+                engineerField.name,
+              ),
             })
           : "";
       case "assignedManagerName":
-        return managerField?.isRequired && !value.trim()
+        return managerField?.isRequired && !formState.assignedManagerId.trim()
           ? t("orders.modal.levelRequired", {
               level: getOrderFieldLabel(managerField.key, t, managerField.name),
             })
@@ -434,7 +560,9 @@ export function OrderModal({
           className="w-full rounded-lg border border-border p-4 text-left transition hover:bg-muted/40"
           onClick={() => setEntryMode("manual")}
         >
-          <div className="text-sm font-semibold">{t("orders.modal.choose.manualTitle")}</div>
+          <div className="text-sm font-semibold">
+            {t("orders.modal.choose.manualTitle")}
+          </div>
           <div className="mt-1 text-xs text-muted-foreground">
             {t("orders.modal.choose.manualDescription")}
           </div>
@@ -446,7 +574,9 @@ export function OrderModal({
             void handleEnterAccountingMode();
           }}
         >
-          <div className="text-sm font-semibold">{t("orders.modal.choose.accountingTitle")}</div>
+          <div className="text-sm font-semibold">
+            {t("orders.modal.choose.accountingTitle")}
+          </div>
           <div className="mt-1 text-xs text-muted-foreground">
             {t("orders.modal.choose.accountingDescription")}
           </div>
@@ -460,7 +590,9 @@ export function OrderModal({
             onClose();
           }}
         >
-          <div className="text-sm font-semibold">{t("orders.modal.choose.csvTitle")}</div>
+          <div className="text-sm font-semibold">
+            {t("orders.modal.choose.csvTitle")}
+          </div>
           <div className="mt-1 text-xs text-muted-foreground">
             {t("orders.modal.choose.csvDescription")}
           </div>
@@ -531,7 +663,9 @@ export function OrderModal({
 
     function toggleAllVisible(checked: boolean) {
       if (!checked) {
-        const visibleIds = new Set(filteredAccountingOrders.map((row) => row.externalId));
+        const visibleIds = new Set(
+          filteredAccountingOrders.map((row) => row.externalId),
+        );
         setSelectedAccountingExternalIds((prev) =>
           prev.filter((value) => !visibleIds.has(value)),
         );
@@ -598,6 +732,7 @@ export function OrderModal({
         priority: oneSelectedOrder.priority ?? "normal",
         notes: "",
         orderFieldValues: nextOrderFieldValues,
+        status: "draft",
       };
 
       return { values, orderFieldInput: nextOrderFieldInput };
@@ -616,7 +751,12 @@ export function OrderModal({
         quantity: String(mapped.values.quantity ?? 1),
         dueDate: mapped.values.dueDate,
         priority: mapped.values.priority,
+        status: "draft",
         notes: mapped.values.notes ?? "",
+        assignedEngineerId: "",
+        assignedEngineerName: "",
+        assignedManagerId: "",
+        assignedManagerName: "",
         orderFieldValues: mapped.values.orderFieldValues ?? {},
       });
       setOrderFieldInput(mapped.orderFieldInput);
@@ -639,7 +779,10 @@ export function OrderModal({
 
       for (const row of selectedRows) {
         const normalizedOrderNumber = row.orderNumber.trim().toLowerCase();
-        if (!row.orderNumber.trim() || knownOrderNumbers.has(normalizedOrderNumber)) {
+        if (
+          !row.orderNumber.trim() ||
+          knownOrderNumbers.has(normalizedOrderNumber)
+        ) {
           nextStatuses[row.externalId] = "skipped";
           skipped += 1;
           continue;
@@ -663,7 +806,11 @@ export function OrderModal({
 
       setAccountingImportStatusByExternalId(nextStatuses);
       setAccountingImportSummary(
-        t("orders.modal.accounting.importSummary", { imported, skipped, error }),
+        t("orders.modal.accounting.importSummary", {
+          imported,
+          skipped,
+          error,
+        }),
       );
       setIsAccountingImporting(false);
     }
@@ -671,7 +818,9 @@ export function OrderModal({
     return renderModalFrame(
       <div className="space-y-4">
         <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
-          <div className="text-sm font-semibold">{t("orders.modal.accounting.title")}</div>
+          <div className="text-sm font-semibold">
+            {t("orders.modal.accounting.title")}
+          </div>
           <Input
             type="search"
             icon="search"
@@ -681,9 +830,17 @@ export function OrderModal({
             className="h-10"
           />
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>{t("orders.modal.accounting.rowsCount", { count: filteredAccountingOrders.length })}</span>
+            <span>
+              {t("orders.modal.accounting.rowsCount", {
+                count: filteredAccountingOrders.length,
+              })}
+            </span>
             <span>/</span>
-            <span>{t("orders.modal.accounting.selectedCount", { count: selectedAccountingExternalIds.length })}</span>
+            <span>
+              {t("orders.modal.accounting.selectedCount", {
+                count: selectedAccountingExternalIds.length,
+              })}
+            </span>
             <span>/</span>
             <button
               type="button"
@@ -706,7 +863,9 @@ export function OrderModal({
                     <Checkbox
                       variant="box"
                       checked={allVisibleSelected}
-                      onChange={(event) => toggleAllVisible(event.target.checked)}
+                      onChange={(event) =>
+                        toggleAllVisible(event.target.checked)
+                      }
                       aria-label={t("orders.modal.accounting.selectAllVisible")}
                     />
                   </TableHead>
@@ -719,19 +878,28 @@ export function OrderModal({
               <TableBody>
                 {isAccountingLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
+                    <TableCell
+                      colSpan={5}
+                      className="text-center text-sm text-muted-foreground py-6"
+                    >
                       {t("orders.modal.accounting.loading")}
                     </TableCell>
                   </TableRow>
                 ) : accountingLoadError ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-destructive py-6">
+                    <TableCell
+                      colSpan={5}
+                      className="text-center text-sm text-destructive py-6"
+                    >
                       {accountingLoadError}
                     </TableCell>
                   </TableRow>
                 ) : filteredAccountingOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
+                    <TableCell
+                      colSpan={5}
+                      className="text-center text-sm text-muted-foreground py-6"
+                    >
                       {t("orders.modal.accounting.empty")}
                     </TableCell>
                   </TableRow>
@@ -755,12 +923,17 @@ export function OrderModal({
                             onChange={(event) =>
                               toggleRow(order.externalId, event.target.checked)
                             }
-                            aria-label={t("orders.modal.accounting.selectOrder", {
-                              orderNumber: order.orderNumber,
-                            })}
+                            aria-label={t(
+                              "orders.modal.accounting.selectOrder",
+                              {
+                                orderNumber: order.orderNumber,
+                              },
+                            )}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{order.orderNumber}</TableCell>
+                        <TableCell className="font-medium">
+                          {order.orderNumber}
+                        </TableCell>
                         <TableCell>{order.customerName}</TableCell>
                         <TableCell>{order.dueDate}</TableCell>
                         <TableCell>
@@ -789,7 +962,9 @@ export function OrderModal({
           </div>
 
           <div className="rounded-lg border border-border p-4 space-y-3">
-            <div className="text-sm font-semibold">{t("orders.modal.accounting.previewTitle")}</div>
+            <div className="text-sm font-semibold">
+              {t("orders.modal.accounting.previewTitle")}
+            </div>
             {!oneSelected && selectedRows.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 {t("orders.modal.accounting.previewEmpty")}
@@ -797,42 +972,80 @@ export function OrderModal({
             ) : null}
             {selectedRows.length > 1 ? (
               <div className="text-xs text-muted-foreground space-y-1">
-                <p>{t("orders.modal.accounting.selectedCount", { count: selectedRows.length })}</p>
+                <p>
+                  {t("orders.modal.accounting.selectedCount", {
+                    count: selectedRows.length,
+                  })}
+                </p>
                 <p>{t("orders.modal.accounting.singlePreviewHint")}</p>
-                <p>{t("orders.modal.accounting.previewNew", { count: importCounts.new })}</p>
-                <p>{t("orders.modal.accounting.previewSkipped", { count: importCounts.skipped })}</p>
-                <p>{t("orders.modal.accounting.previewImported", { count: importCounts.imported })}</p>
-                <p>{t("orders.modal.accounting.previewErrors", { count: importCounts.error })}</p>
+                <p>
+                  {t("orders.modal.accounting.previewNew", {
+                    count: importCounts.new,
+                  })}
+                </p>
+                <p>
+                  {t("orders.modal.accounting.previewSkipped", {
+                    count: importCounts.skipped,
+                  })}
+                </p>
+                <p>
+                  {t("orders.modal.accounting.previewImported", {
+                    count: importCounts.imported,
+                  })}
+                </p>
+                <p>
+                  {t("orders.modal.accounting.previewErrors", {
+                    count: importCounts.error,
+                  })}
+                </p>
               </div>
             ) : null}
             {oneSelected ? (
               <div className="space-y-2 text-xs">
                 <div>
-                  <span className="text-muted-foreground">{t("orders.page.orderNumberShort")}:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {t("orders.page.orderNumberShort")}:
+                  </span>{" "}
                   <span className="font-medium">{oneSelected.orderNumber}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t("orders.page.customer")}:</span>{" "}
-                  <span className="font-medium">{oneSelected.customerName}</span>
+                  <span className="text-muted-foreground">
+                    {t("orders.page.customer")}:
+                  </span>{" "}
+                  <span className="font-medium">
+                    {oneSelected.customerName}
+                  </span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t("orders.modal.contract")}:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {t("orders.modal.contract")}:
+                  </span>{" "}
                   <span>{oneSelected.contract ?? "-"}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t("orders.modal.category")}:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {t("orders.modal.category")}:
+                  </span>{" "}
                   <span>{oneSelected.category ?? "-"}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t("orders.modal.product")}:</span>{" "}
-                  <span>{oneSelected.productName ?? oneSelected.product ?? "-"}</span>
+                  <span className="text-muted-foreground">
+                    {t("orders.modal.product")}:
+                  </span>{" "}
+                  <span>
+                    {oneSelected.productName ?? oneSelected.product ?? "-"}
+                  </span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t("orders.page.quantity")}:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {t("orders.page.quantity")}:
+                  </span>{" "}
                   <span>{oneSelected.quantity ?? 1}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t("orders.page.dueDate")}:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {t("orders.page.dueDate")}:
+                  </span>{" "}
                   <span>{oneSelected.dueDate}</span>
                 </div>
               </div>
@@ -890,12 +1103,10 @@ export function OrderModal({
       (!customerField?.isRequired || formState.customerName.trim()) &&
       (!quantityField?.isRequired || formState.quantity.trim()) &&
       (!dueDateField?.isRequired || formState.dueDate.trim()) &&
-      (!engineerField?.isRequired || formState.assignedEngineerName.trim()) &&
       (!managerField?.isRequired || formState.assignedManagerName.trim()) &&
       !isDuplicateOrderNumber &&
       !validateField("quantity", formState.quantity) &&
       !validateField("dueDate", formState.dueDate) &&
-      !validateField("assignedEngineerName", formState.assignedEngineerName) &&
       !validateField("assignedManagerName", formState.assignedManagerName);
     if (!baseValid) {
       return false;
@@ -914,7 +1125,8 @@ export function OrderModal({
         return true;
       }
       return Boolean(
-        formState.orderFieldValues[level.id] || orderFieldInput[level.id]?.trim(),
+        formState.orderFieldValues[level.id] ||
+        orderFieldInput[level.id]?.trim(),
       );
     });
     return requiredOrderFieldValuesOk;
@@ -924,13 +1136,35 @@ export function OrderModal({
     (!requiredFieldsValid && !isCategoryProductOnly) ||
     hasErrors ||
     isDuplicateOrderNumber;
+  const modalFieldOrder: Record<string, number> = {
+    order_number: 10,
+    customer_name: 20,
+    delivery_address: 30,
+    customer_phone: 40,
+    customer_email: 50,
+    quantity: 60,
+    due_date: 70,
+    manager: 80,
+    priority: 90,
+  };
   const configuredModalFields = orderFields
-    .filter((field) => field.isActive && field.key !== "actions")
-    .sort((a, b) => a.order - b.order);
+    .filter(
+      (field) =>
+        field.isActive &&
+        field.key !== "actions" &&
+        field.key !== "engineer" &&
+        field.key !== "status",
+    )
+    .sort((a, b) => {
+      const aOrder = modalFieldOrder[a.key] ?? 1000 + a.order;
+      const bOrder = modalFieldOrder[b.key] ?? 1000 + b.order;
+      return aOrder - bOrder;
+    });
   const orderedModalFields = isCategoryProductOnly
     ? configuredModalFields.filter(
         (field) =>
-          !ORDER_CORE_FIELD_KEYS.has(field.key) && editableLevelIds.has(field.id),
+          !ORDER_CORE_FIELD_KEYS.has(field.key) &&
+          editableLevelIds.has(field.id),
       )
     : [
         ...configuredModalFields,
@@ -938,16 +1172,23 @@ export function OrderModal({
           id: "customer-email",
           name: t("orders.modal.customerEmail"),
           key: "customer_email",
-          order: (customerField?.order ?? 20) + 0.5,
+          order: 50,
           isRequired: false,
           isActive: true,
           showInTable: false,
         },
-      ].sort((a, b) => a.order - b.order);
+      ]
+        .filter(
+          (field, index, all) =>
+            all.findIndex((candidate) => candidate.key === field.key) === index,
+        )
+        .sort((a, b) => {
+          const aOrder = modalFieldOrder[a.key] ?? 1000 + a.order;
+          const bOrder = modalFieldOrder[b.key] ?? 1000 + b.order;
+          return aOrder - bOrder;
+        });
 
-  function renderMetadataCoreField(
-    field: (typeof metadataCoreFields)[number],
-  ) {
+  function renderMetadataCoreField(field: (typeof metadataCoreFields)[number]) {
     const errorKey = `orderFieldValues.${field.id}`;
     const label = getOrderFieldLabel(field.key, t, field.name);
     return (
@@ -984,6 +1225,12 @@ export function OrderModal({
           }));
         }}
         type={field.key === "customer_phone" ? "tel" : "text"}
+        icon={field.key === "customer_phone" ? "phone" : undefined}
+        startIcon={
+          field.key === "delivery_address" ? (
+            <MapPinIcon className="h-4 w-4" />
+          ) : undefined
+        }
         className="h-10 text-sm text-foreground"
         wrapperClassName={`h-10 ${
           touched[errorKey] && errors[errorKey]
@@ -1014,10 +1261,7 @@ export function OrderModal({
             if (isCategoryProductOnly) {
               return;
             }
-            const message = validateField(
-              "customerEmail",
-              event.target.value,
-            );
+            const message = validateField("customerEmail", event.target.value);
             setErrors((prev) => ({
               ...prev,
               customerEmail: message,
@@ -1054,7 +1298,12 @@ export function OrderModal({
       return renderOrderField(field);
     }
 
-    const localizedLabel = getOrderFieldLabel(field.key, t, field.name);
+    const localizedLabel =
+      field.key === "engineer"
+        ? engineerLabel
+        : field.key === "manager"
+          ? managerLabel
+          : getOrderFieldLabel(field.key, t, field.name);
 
     switch (field.key) {
       case "order_number":
@@ -1073,7 +1322,10 @@ export function OrderModal({
                 if (isCategoryProductOnly || isEditingOrderNumber) {
                   return;
                 }
-                const message = validateField("orderNumber", event.target.value);
+                const message = validateField(
+                  "orderNumber",
+                  event.target.value,
+                );
                 setErrors((prev) => ({
                   ...prev,
                   orderNumber: message,
@@ -1113,7 +1365,10 @@ export function OrderModal({
                 }))
               }
               onBlur={(event) => {
-                const message = validateField("customerName", event.target.value);
+                const message = validateField(
+                  "customerName",
+                  event.target.value,
+                );
                 setErrors((prev) => ({
                   ...prev,
                   customerName: message,
@@ -1212,20 +1467,23 @@ export function OrderModal({
         );
       case "engineer":
         return (
-          <InputField
+          <SelectField
             key={field.id}
             label={localizedLabel}
-            value={formState.assignedEngineerName}
-            onChange={(event) =>
+            value={formState.assignedEngineerId || "__none__"}
+            onValueChange={(value) => {
+              const selectedId = value === "__none__" ? "" : value;
+              const selectedEngineer = engineers.find(
+                (engineer) => engineer.id === selectedId,
+              );
               setFormState((prev) => ({
                 ...prev,
-                assignedEngineerName: event.target.value,
-              }))
-            }
-            onBlur={(event) => {
+                assignedEngineerId: selectedId,
+                assignedEngineerName: selectedEngineer?.name ?? "",
+              }));
               const message = validateField(
                 "assignedEngineerName",
-                event.target.value,
+                selectedEngineer?.name ?? "",
               );
               setErrors((prev) => ({
                 ...prev,
@@ -1236,14 +1494,20 @@ export function OrderModal({
                 assignedEngineerName: true,
               }));
             }}
+            options={[
+              { value: "__none__", label: "--" },
+              ...engineers.map((engineer) => ({
+                value: engineer.id,
+                label: engineer.name,
+              })),
+            ]}
             required={field.isRequired}
             disabled={isCategoryProductOnly}
-            className="h-10 text-sm text-foreground"
-            wrapperClassName={`h-10 ${
+            triggerClassName={
               touched.assignedEngineerName && errors.assignedEngineerName
                 ? "border-destructive"
                 : "border-border"
-            }`}
+            }
             error={
               touched.assignedEngineerName && errors.assignedEngineerName
                 ? errors.assignedEngineerName
@@ -1253,20 +1517,23 @@ export function OrderModal({
         );
       case "manager":
         return (
-          <InputField
+          <SelectField
             key={field.id}
             label={localizedLabel}
-            value={formState.assignedManagerName}
-            onChange={(event) =>
+            value={formState.assignedManagerId || "__none__"}
+            onValueChange={(value) => {
+              const selectedId = value === "__none__" ? "" : value;
+              const selectedManager = managers.find(
+                (manager) => manager.id === selectedId,
+              );
               setFormState((prev) => ({
                 ...prev,
-                assignedManagerName: event.target.value,
-              }))
-            }
-            onBlur={(event) => {
+                assignedManagerId: selectedId,
+                assignedManagerName: selectedManager?.name ?? "",
+              }));
               const message = validateField(
                 "assignedManagerName",
-                event.target.value,
+                selectedManager?.name ?? "",
               );
               setErrors((prev) => ({
                 ...prev,
@@ -1277,14 +1544,20 @@ export function OrderModal({
                 assignedManagerName: true,
               }));
             }}
+            options={[
+              { value: "__none__", label: "--" },
+              ...managers.map((manager) => ({
+                value: manager.id,
+                label: manager.name,
+              })),
+            ]}
             required={field.isRequired}
             disabled={isCategoryProductOnly}
-            className="h-10 text-sm text-foreground"
-            wrapperClassName={`h-10 ${
+            triggerClassName={
               touched.assignedManagerName && errors.assignedManagerName
                 ? "border-destructive"
                 : "border-border"
-            }`}
+            }
             error={
               touched.assignedManagerName && errors.assignedManagerName
                 ? errors.assignedManagerName
@@ -1376,7 +1649,9 @@ export function OrderModal({
               if (level.isRequired) {
                 setErrors((prev) => ({
                   ...prev,
-                  [errorKey]: t("orders.modal.levelRequired", { level: level.name }),
+                  [errorKey]: t("orders.modal.levelRequired", {
+                    level: level.name,
+                  }),
                 }));
               }
               return;
@@ -1397,7 +1672,9 @@ export function OrderModal({
               ? "border-destructive"
               : "border-border"
           }`}
-          placeholder={t("orders.modal.searchOrEnterLevel", { level: level.name })}
+          placeholder={t("orders.modal.searchOrEnterLevel", {
+            level: level.name,
+          })}
           disabled={!editableLevelIds.has(level.id)}
           error={
             touched[errorKey] && errors[errorKey] ? errors[errorKey] : undefined
@@ -1446,9 +1723,12 @@ export function OrderModal({
             !resolvedOrderFieldValues[level.id] &&
             editableLevelIds.has(level.id)
           ) {
-            nextErrors[`orderFieldValues.${level.id}`] = t("orders.modal.levelRequired", {
-              level: level.name,
-            });
+            nextErrors[`orderFieldValues.${level.id}`] = t(
+              "orders.modal.levelRequired",
+              {
+                level: level.name,
+              },
+            );
           }
         });
         metadataCoreFields.forEach((field) => {
@@ -1478,10 +1758,13 @@ export function OrderModal({
             }
             return acc;
           }, {}),
-          ...metadataCoreFields.reduce<Record<string, boolean>>((acc, field) => {
-            acc[`orderFieldValues.${field.id}`] = true;
-            return acc;
-          }, {}),
+          ...metadataCoreFields.reduce<Record<string, boolean>>(
+            (acc, field) => {
+              acc[`orderFieldValues.${field.id}`] = true;
+              return acc;
+            },
+            {},
+          ),
         });
         if (Object.keys(nextErrors).length > 0) {
           return;
@@ -1503,8 +1786,11 @@ export function OrderModal({
               | "urgent",
             status: formState.status,
             notes: formState.notes.trim() || undefined,
+            assignedEngineerId:
+              formState.assignedEngineerId.trim() || undefined,
             assignedEngineerName:
               formState.assignedEngineerName.trim() || undefined,
+            assignedManagerId: formState.assignedManagerId.trim() || undefined,
             assignedManagerName:
               formState.assignedManagerName.trim() || undefined,
             orderFieldValues: resolvedOrderFieldValues,
@@ -1561,8 +1847,3 @@ export function OrderModal({
     </form>,
   );
 }
-
-
-
-
-

@@ -19,6 +19,7 @@ import { useNotifications } from "@/components/ui/Notifications";
 import { getAccountingAdapter } from "@/lib/integrations/accounting/getAdapter";
 import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { useAssignmentLabels } from "@/hooks/useAssignmentLabels";
 
 interface OrdersContextValue {
   orders: Order[];
@@ -148,13 +149,13 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
   const { notify } = useNotifications();
   const { orderFields } = useOrderFieldSettings();
   const { t } = useI18n();
+  const { manager: managerLabel } = useAssignmentLabels();
   const [orders, setOrders] = useState<Order[]>(mockOrders);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const unknownLabel = t("orders.context.unknown");
   const systemLabel = t("orders.context.system");
   const partnerLabel = t("orders.context.partner");
-  const managerLabel = t("orders.context.manager");
   const userLabel = t("orders.context.user");
   const missingTenantAssignment = t(
     "orders.context.errors.missingTenantAssignment",
@@ -347,6 +348,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     updated_at?: string | null;
     created_by?: string | null;
     created_by_name?: string | null;
+    updated_by?: string | null;
+    updated_by_name?: string | null;
     product_name?: string | null;
     quantity?: number | null;
     order_field_values?: Record<string, string> | null;
@@ -431,6 +434,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     updatedAt: row.updated_at ?? undefined,
     createdBy: row.created_by ?? undefined,
     createdByName: row.created_by_name ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
+    updatedByName: row.updated_by_name ?? undefined,
     productName: row.product_name ?? undefined,
     quantity: row.quantity ?? undefined,
     orderFieldValues: row.order_field_values ?? undefined,
@@ -475,6 +480,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         created_at,
         updated_at,
         created_by,
+        created_by_name,
+        updated_by,
+        updated_by_name,
         product_name,
         quantity,
         order_field_values,
@@ -573,39 +581,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
       return;
     }
-    const createdByIds = Array.from(
-      new Set(
-        (data ?? [])
-          .map((row) => row.created_by)
-          .filter(
-            (value): value is string =>
-              typeof value === "string" && value.length > 0,
-          ),
-      ),
-    );
-    let createdByNameMap = new Map<string, string>();
-    if (createdByIds.length > 0) {
-      const { data: creatorProfiles } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", createdByIds);
-      createdByNameMap = new Map(
-        (creatorProfiles ?? []).map((profile) => [
-          profile.id,
-          profile.full_name ?? unknownLabel,
-        ]),
-      );
-    }
-    setOrders(
-      (data ?? []).map((row) =>
-        mapOrder({
-          ...row,
-          created_by_name: row.created_by
-            ? (createdByNameMap.get(row.created_by) ?? null)
-            : null,
-        }),
-      ),
-    );
+    setOrders((data ?? []).map(mapOrder));
     setIsLoading(false);
   };
   useEffect(() => {
@@ -734,7 +710,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         customer_name: order.customerName,
         product_name: order.productName ?? order.product ?? null,
         quantity: order.quantity ?? null,
-        orderFieldValues:
+        order_field_values:
           Object.keys(orderFieldValues).length > 0 ? orderFieldValues : null,
         due_date: order.dueDate,
         priority: order.priority ?? "normal",
@@ -743,6 +719,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         external_id: order.externalId,
         source_payload: order.sourcePayload ?? null,
         synced_at: new Date().toISOString(),
+        updated_by: user.id ?? null,
+        updated_by_name: user.name ?? systemLabel,
       };
       });
 
@@ -858,6 +836,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       external_id: null,
       source_payload: row.sourcePayload ?? null,
       synced_at: new Date().toISOString(),
+      updated_by: user.id ?? null,
+      updated_by_name: user.name ?? systemLabel,
     }));
 
     const { data: upserted, error: upsertError } = await supabase
@@ -926,6 +906,12 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             id: `o-${Date.now()}`,
             orderNumber: order.orderNumber,
             customerName: order.customerName,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            createdBy: user.id ?? undefined,
+            createdByName: user.name ?? systemLabel,
+            updatedBy: user.id ?? undefined,
+            updatedByName: user.name ?? systemLabel,
             productName: order.productName,
             quantity: order.quantity,
             orderFieldValues: order.orderFieldValues,
@@ -986,6 +972,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             priority: order.priority,
             status: order.status,
             created_by: user.id ?? null,
+            created_by_name: user.name ?? systemLabel,
+            updated_by: user.id ?? null,
+            updated_by_name: user.name ?? systemLabel,
             assigned_engineer_id: order.assignedEngineerId ?? null,
             assigned_engineer_name: order.assignedEngineerName ?? null,
             assigned_engineer_at: order.assignedEngineerAt ?? null,
@@ -1002,6 +991,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             created_at,
             updated_at,
             created_by,
+            created_by_name,
+            updated_by,
+            updated_by_name,
             product_name,
             quantity,
             order_field_values,
@@ -1163,6 +1155,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
                 ? {
                     ...order,
                     ...patch,
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: user.id ?? undefined,
+                    updatedByName: user.name ?? systemLabel,
                     statusHistory: patch.status
                       ? [
                           ...nextHistory,
@@ -1195,6 +1190,8 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (patch.priority !== undefined) {
           updatePayload.priority = patch.priority;
         }
+        updatePayload.updated_by = user.id ?? null;
+        updatePayload.updated_by_name = user.name ?? systemLabel;
         if (patch.status !== undefined) {
           updatePayload.status = patch.status;
         }
@@ -1252,6 +1249,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
             created_at,
             updated_at,
             created_by,
+            created_by_name,
+            updated_by,
+            updated_by_name,
             product_name,
             quantity,
             order_field_values,

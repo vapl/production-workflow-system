@@ -20,6 +20,8 @@ interface OrdersTableProps {
   loadingLabel?: string;
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
+  canEditOrder?: (order: Order) => boolean;
+  canDeleteOrder?: (order: Order) => boolean;
   onTakeOrder?: (order: Order) => void;
   groups?: {
     label: string;
@@ -38,6 +40,8 @@ export function OrdersTable({
   loadingLabel,
   onEdit,
   onDelete,
+  canEditOrder,
+  canDeleteOrder,
   onTakeOrder,
   groups,
   dueSoonDays,
@@ -58,9 +62,9 @@ export function OrdersTable({
   const totalColumns = visibleOrderFields.length;
 
   return (
-    <div className="rounded-md border overflow-x-auto">
+    <div className="rounded-md bg-background border overflow-x-auto">
       <Table className="w-full min-w-225">
-        <TableHeader>
+        <TableHeader className="">
           <TableRow>
             {visibleOrderFields.map((level) => (
               <TableHead
@@ -70,9 +74,11 @@ export function OrdersTable({
                 }`}
               >
                 {level.key === "engineer"
-                  ? engineerLabel ?? getOrderFieldLabel(level.key, t, level.name)
+                  ? (engineerLabel ??
+                    getOrderFieldLabel(level.key, t, level.name))
                   : level.key === "manager"
-                    ? managerLabel ?? getOrderFieldLabel(level.key, t, level.name)
+                    ? (managerLabel ??
+                      getOrderFieldLabel(level.key, t, level.name))
                     : getOrderFieldLabel(level.key, t, level.name)}
               </TableHead>
             ))}
@@ -113,19 +119,27 @@ export function OrdersTable({
                     </td>
                   </TableRow>
                   {!isCollapsed &&
-                    group.orders.map((order) => (
-                      <OrderRow
-                        key={order.id}
-                        order={order}
-                        onEdit={onEdit}
-                        onDelete={onDelete}
-                        onTakeOrder={onTakeOrder}
-                        orderFields={visibleOrderFields}
-                        dueSoonDays={dueSoonDays}
-                        dueIndicatorEnabled={dueIndicatorEnabled}
-                        dueIndicatorStatuses={dueIndicatorStatuses}
-                      />
-                    ))}
+                    group.orders.map((order) => {
+                      const allowEdit = canEditOrder
+                        ? canEditOrder(order)
+                        : Boolean(onEdit);
+                      const allowDelete = canDeleteOrder
+                        ? canDeleteOrder(order)
+                        : Boolean(onDelete);
+                      return (
+                        <OrderRow
+                          key={order.id}
+                          order={order}
+                          onEdit={allowEdit ? onEdit : undefined}
+                          onDelete={allowDelete ? onDelete : undefined}
+                          onTakeOrder={onTakeOrder}
+                          orderFields={visibleOrderFields}
+                          dueSoonDays={dueSoonDays}
+                          dueIndicatorEnabled={dueIndicatorEnabled}
+                          dueIndicatorStatuses={dueIndicatorStatuses}
+                        />
+                      );
+                    })}
                 </Fragment>
               );
             })
@@ -139,19 +153,27 @@ export function OrdersTable({
               </td>
             </TableRow>
           ) : (
-            orders.map((order) => (
-              <OrderRow
-                key={order.id}
-                order={order}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                onTakeOrder={onTakeOrder}
-                orderFields={visibleOrderFields}
-                dueSoonDays={dueSoonDays}
-                dueIndicatorEnabled={dueIndicatorEnabled}
-                dueIndicatorStatuses={dueIndicatorStatuses}
-              />
-            ))
+            orders.map((order) => {
+              const allowEdit = canEditOrder
+                ? canEditOrder(order)
+                : Boolean(onEdit);
+              const allowDelete = canDeleteOrder
+                ? canDeleteOrder(order)
+                : Boolean(onDelete);
+              return (
+                <OrderRow
+                  key={order.id}
+                  order={order}
+                  onEdit={allowEdit ? onEdit : undefined}
+                  onDelete={allowDelete ? onDelete : undefined}
+                  onTakeOrder={onTakeOrder}
+                  orderFields={visibleOrderFields}
+                  dueSoonDays={dueSoonDays}
+                  dueIndicatorEnabled={dueIndicatorEnabled}
+                  dueIndicatorStatuses={dueIndicatorStatuses}
+                />
+              );
+            })
           )}
           {isLoading ? (
             <TableRow>
@@ -172,4 +194,3 @@ export function OrdersTable({
     </div>
   );
 }
-

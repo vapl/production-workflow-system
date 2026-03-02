@@ -36,6 +36,7 @@ import {
 } from "@/lib/domain/workingCalendar";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 import {
   FileIcon,
   FileTextIcon,
@@ -325,6 +326,7 @@ export default function OperatorProductionPage() {
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
   const isWarehouseQueueView = pathname.startsWith("/warehouse");
   const cacheKey =
     currentUser.id && selectedDate && !orderFilter
@@ -3584,10 +3586,14 @@ export default function OperatorProductionPage() {
       ) : null}
 
       <div
-        className={`fixed inset-x-4 z-30 md:hidden ${
+        className={`fixed inset-x-4 z-30 transition-all duration-200 md:hidden ${
           isWarehouseQueueView
             ? "bottom-[calc(6.75rem+env(safe-area-inset-bottom))]"
             : "bottom-[calc(2.75rem+env(safe-area-inset-bottom))]"
+        } ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
         }`}
       >
         <div className="flex items-center justify-between gap-2">

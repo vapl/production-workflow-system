@@ -7,6 +7,7 @@ type DesktopPageHeaderProps = {
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
+  footer?: React.ReactNode;
   className?: string;
   sticky?: boolean;
   fullBleed?: boolean;
@@ -16,6 +17,7 @@ export function DesktopPageHeader({
   title,
   subtitle,
   actions,
+  footer,
   className,
   sticky = false,
   fullBleed = true,
@@ -46,7 +48,7 @@ export function DesktopPageHeader({
     <div
       className={cn(
         "hidden md:relative md:block md:w-full",
-        sticky && "md:-mt-px md:sticky md:top-16 md:z-20 md:bg-background",
+        sticky && "md:-mt-px md:sticky md:top-16 md:z-20 md:bg-app-surface",
         fullBleed && "desktop-sticky-bleed",
         sticky && showStickyShadow
           ? "desktop-sticky-bleed-shadow"
@@ -54,14 +56,17 @@ export function DesktopPageHeader({
         className,
       )}
     >
-      <div className="flex w-full lg:items-end justify-between gap-4 py-3 flex-col lg:flex-row items-start">
-        <div className="min-w-0">
-          <h2 className="text-2xl font-semibold">{title}</h2>
-          {subtitle ? (
-            <p className="text-sm text-muted-foreground">{subtitle}</p>
-          ) : null}
+      <div className="flex w-full flex-col gap-2 py-3">
+        <div className="flex w-full flex-col items-start gap-4 md:flex-row md:items-end md:justify-between flex-wrap">
+          <div className="min-w-0 md:max-w-sm md:shrink-0 xl:max-w-md">
+            <h2 className="text-2xl font-semibold">{title}</h2>
+            {subtitle ? (
+              <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+            ) : null}
+          </div>
+          {actions ? <div className="">{actions}</div> : null}
         </div>
-        {actions ? <div className="shrink-0">{actions}</div> : null}
+        {footer ? <div className="w-full min-w-0">{footer}</div> : null}
       </div>
     </div>
   );

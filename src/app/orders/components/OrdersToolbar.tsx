@@ -63,26 +63,26 @@ export function OrdersToolbar({
   const { t } = useI18n();
 
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex w-full flex-col gap-3 lg:flex-1 lg:flex-row lg:items-center">
+    <div className="flex w-full min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex w-full min-w-0 flex-col gap-3 md:flex-1 md:flex-row md:items-center">
         <Input
           type="search"
           value={searchQuery}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("orders.page.searchPlaceholder")}
           startIcon={<SearchIcon className="h-4 w-4" />}
-          wrapperClassName="w-full"
+          wrapperClassName="w-full min-w-0 md:flex-1"
         />
         {viewMode && onViewModeChange ? (
           <ViewModeToggle
             value={viewMode}
             onChange={onViewModeChange}
-            className="lg:ml-3"
+            className="md:ml-3 md:shrink-0"
           />
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2 lg:shrink-0">
+      <div className="flex items-center gap-2 md:shrink-0">
         <FiltersDropdown contentClassName="w-[320px] p-4">
           <div className="space-y-3">
             {assignmentFilter && onAssignmentChange && (

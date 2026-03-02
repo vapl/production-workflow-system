@@ -50,8 +50,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isPublicRoute = isAuthRoute || isExternalJobRespondRoute;
   const hasAdminAccess = isAdminLike(user);
   const isWarehouseUser = user.role === "Warehouse" && !hasAdminAccess;
+  const isOrderDetailRoute = /^\/orders\/[^/]+$/.test(pathname ?? "");
   const hideTabsNav =
     isExternalJobRespondRoute ||
+    isOrderDetailRoute ||
     pathname?.startsWith("/profile") ||
     pathname?.startsWith("/company") ||
     (pathname?.startsWith("/production/operator") && !isWarehouseUser);
@@ -617,14 +619,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <div className="space-y-3 border-t border-border p-3">
               <div className="space-y-1">
-                  <Link
-                    href="/profile"
-                    onClick={() => setIsMobileDrawerOpen(false)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
-                  >
-                    <UserIcon className="h-4 w-4" />
-                    {t("appShell.profileSettings")}
-                  </Link>
+                <Link
+                  href="/profile"
+                  onClick={() => setIsMobileDrawerOpen(false)}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted/60"
+                >
+                  <UserIcon className="h-4 w-4" />
+                  {t("appShell.profileSettings")}
+                </Link>
                 {canViewCompany ? (
                   <Link
                     href="/company"
@@ -655,17 +657,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </>
       )}
       {!hideTabsNav ? (
-        <div className="sticky top-0 z-30 w-full md:bg-background">
+        <div className="sticky top-0 z-30 w-full md:bg-app-surface">
           <div className="container mx-auto w-full px-0 py-0 md:px-4 md:py-3">
             <TabsNav />
           </div>
         </div>
       ) : null}
-      <div className="flex min-h-screen w-full items-start justify-center overflow-x-clip bg-background font-sans text-foreground">
+      <div className="flex min-h-screen w-full items-start justify-center overflow-x-clip bg-app-surface font-sans text-foreground">
         <main
           className={cn(
-            "container mx-auto px-4 py-6",
-            hideHeader ? null : "pt-[calc(env(safe-area-inset-top))] md:pt-6",
+            "container mx-auto px-4 py-0 pb-8",
+            hideHeader ? null : "",
             hideTabsNav
               ? null
               : "pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-6",

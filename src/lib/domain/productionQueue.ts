@@ -6,11 +6,17 @@ type StationLike = {
 };
 
 type ProductionItemLike = {
+  id: string;
   order_id: string;
   batch_code: string;
+  item_name: string;
+  status: QueueStatus;
   station_id: string | null;
   qty: number;
   material: string | null;
+  meta: Record<string, unknown> | null;
+  started_at?: string | null;
+  done_at?: string | null;
   duration_minutes?: number | null;
 };
 

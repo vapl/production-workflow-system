@@ -99,8 +99,7 @@
     open: "Atvērt",
     noUrl: "Nav URL",
     myStationTasks: "Mani staciju uzdevumi",
-    noStationTasks:
-      "Šai konstrukcijai jūsu stacijām nav piešķirtu uzdevumu.",
+    noStationTasks: "Šai konstrukcijai jūsu stacijām nav piešķirtu uzdevumu.",
     qty: "Daudz.",
     qrToken: "QR tokens",
     errors: {
@@ -111,7 +110,8 @@
   },
   authPage: {
     title: "Production Workflow System",
-    subtitle: "Pierakstieties, lai pārvaldītu pasūtījumus, inženieriju un ražošanu.",
+    subtitle:
+      "Pierakstieties, lai pārvaldītu pasūtījumus, inženieriju un ražošanu.",
     resetPassword: "Atjaunot paroli",
     completeInvite: "Pabeigt ielūgumu",
     accessPws: "Piekļūt PWS",
@@ -175,7 +175,8 @@
       passwordsDoNotMatch: "Paroles nesakrīt.",
       supabaseNotConfigured: "Supabase nav konfigurēts.",
       accessCheckFailed: "Piekļuves pārbaude neizdevās.",
-      signInTookTooLong: "Pierakstīšanās aizņēma pārāk ilgu laiku. Mēģiniet vēlreiz.",
+      signInTookTooLong:
+        "Pierakstīšanās aizņēma pārāk ilgu laiku. Mēģiniet vēlreiz.",
       signInFailed: "Pierakstīšanās neizdevās.",
       enterEmailFirst: "Vispirms ievadiet savu e-pastu.",
       enterNewPassword: "Ievadiet jaunu paroli.",
@@ -304,7 +305,8 @@
     markRead: "Atzīmēt kā izlasītu",
     delete: "Dzēst",
     deleteNotificationTitle: "Dzēst paziņojumu?",
-    deleteNotificationDescription: "Šis paziņojums tiks neatgriezeniski dzēsts.",
+    deleteNotificationDescription:
+      "Šis paziņojums tiks neatgriezeniski dzēsts.",
     deleteReadTitle: "Dzēst izlasītos paziņojumus?",
     deleteReadDescription: "Tiks dzēsti {count} izlasīti paziņojumi.",
   },
@@ -433,16 +435,51 @@
       notFoundDescription: "Šim ID neatbilst neviens pasūtījums.",
       back: "Atpakaļ",
       editOrder: "Rediģēt pasūtījumu",
+      openActions: "Atvērt pasūtījuma darbības",
       openSections: "Atvērt pasūtījuma sadaļas",
       sections: "Pasūtījuma sadaļas",
+      closeActions: "Aizvērt pasūtījuma darbības",
       closeSections: "Aizvērt pasūtījuma sadaļas",
       active: "Aktīvs",
+      noAvailableActions: "Šajā posmā nav pieejamu darbību.",
       tabs: {
         overview: "Pārskats",
         files: "Faili un komentāri",
         details: "Pasūtījuma detaļas",
         workflow: "Process",
         external: "Ārējie darbi",
+        history: "Vēsture",
+      },
+      hero: {
+        dueRisk: "Termiņa risks",
+        progress: "Progress",
+        production: "Ražošana",
+        engineeringTime: "Inženierijas laiks",
+        activity: "Aktivitāte",
+        externalCost: "Ārpakalpojumu summa",
+        activityHint: "{files} faili, {comments} komentāri",
+        priorityBadge: "Prioritāte: {value}",
+        daysLate: "{count} dienas kavējas",
+        dueToday: "Termiņš šodien",
+        dueInDays: "Termiņš pēc {count} d.",
+        completed: "Pabeigts",
+        inProgress: "Procesā",
+        notStarted: "Nav sākts",
+      },
+      overview: {
+        execution: "Operatīvais statuss",
+        assignments: "Atbildīgie",
+        process: "Procesa statuss",
+        preflightChecks: "Pārbaudes pirms sūtīšanas uz ražošanu",
+        engineering: "Inženierija",
+        production: "Ražošana",
+        external: "Ārējie darbi",
+        blockedState: "Bloķējums",
+        onTrack: "Iekļaujas",
+        blocked: "Bloķēts",
+        readyQueue: "Gatavs ražošanai",
+        activeJobs: "{count} aktīvi darbi",
+        none: "Nav",
       },
       summaryTitle: "Pasūtījuma kopsavilkums",
       schedule: "Grafiks",
@@ -452,6 +489,7 @@
       createdAt: "Izveidots",
       updatedAt: "Atjaunots",
       createdBy: "Izveidoja",
+      lastModifiedBy: "Pēdējo reizi atjaunots: {date} · {name}",
       system: "Sistēma",
       orderFields: "Pasūtījuma lauki",
       noOrderFieldsConfigured: "Nav konfigurētu pasūtījuma lauku.",
@@ -471,11 +509,13 @@
       unknown: "Nezināms",
       noStatusChanges: "Statusa izmaiņu vēl nav.",
       sendBackTitle: "Nosūtīt pasūtījumu atpakaļ",
-      sendBackDescription: "Izvēlieties iemeslu un pievienojiet komentāru. Pasūtījums atgriezīsies uz",
+      sendBackDescription:
+        "Izvēlieties iemeslu un pievienojiet komentāru. Pasūtījums atgriezīsies uz",
       reason: "Iemesls",
       selectReason: "Izvēlieties iemeslu",
       comment: "Komentārs",
-      sendBackCommentPlaceholder: "Pievienojiet kontekstu iepriekšējai lomai...",
+      sendBackCommentPlaceholder:
+        "Pievienojiet kontekstu iepriekšējai lomai...",
       noReasonSelected: "Iemesls nav izvēlēts",
       sendBack: "Nosūtīt atpakaļ",
       delete: "Dzēst",
@@ -489,17 +529,26 @@
           "Konfigurējiet laukus Iestatījumi -> Struktūra -> Pasūtījuma ievades lauki un atgriezieties šeit.",
         productionScope: "Ražošanas tvērums",
         orderInfo: "Pasūtījuma informācija",
-        editPermissionHint: "Šos laukus var rediģēt tikai Inženierija un Administrators.",
+        editPermissionHint:
+          "Šos laukus var rediģēt tikai Inženierija un Administrators.",
         save: "Saglabāt ievades",
       },
       attachments: {
         title: "Pielikumi",
         item: "pielikumu",
         category: "Kategorija",
-        categoryDescription: "Pirms augšupielādes izvēlieties atbilstošāko kategoriju.",
-        dragAndDrop: "Ievelciet failus šeit vai noklikšķiniet, lai augšupielādētu",
+        categoryDescription:
+          "Pirms augšupielādes izvēlieties atbilstošāko kategoriju.",
+        dragAndDrop:
+          "Ievelciet failus šeit vai noklikšķiniet, lai augšupielādētu",
         maxPerFile: "Maks. {size}MB katram failam",
         empty: "Pielikumi vēl nav pievienoti.",
+        totalFiles: "{count} faili",
+        latestUpload: "Pēdējais augšupielādēts: {date}",
+        categoriesCount: "{count} kategorijas",
+        selectedCount: "{count} atlasīti",
+        addFiles: "Pievienot failus",
+        pendingFiles: "Gaida augšupielādi",
         downloadAll: "Lejupielādēt visus",
         deleteSelected: "Dzēst atlasītos",
         deleteAll: "Dzēst visus",
@@ -510,12 +559,15 @@
         placeholder: "Pievienojiet piezīmi nākamajai lomai...",
         add: "Pievienot komentāru",
         empty: "Komentāru vēl nav.",
+        totalComments: "{count} komentāri",
+        latestComment: "Pēdējais komentārs: {date}",
       },
       external: {
         title: "Ārējie darbi",
         requestMode: "Pieprasījuma režīms",
         manualEntry: "Manuāla ievade",
-        manualEntryDescription: "Partneris atbild e-pastā, dati tiek ievadīti manuāli.",
+        manualEntryDescription:
+          "Partneris atbild e-pastā, dati tiek ievadīti manuāli.",
         partnerPortal: "Sūtīt caur partnera portālu",
         partnerPortalDescription: "Droša saite un strukturēta atbildes forma.",
         availableOnPro: "Pieejams Pro plānā.",
@@ -530,11 +582,13 @@
         noFieldsDescription2:
           "Konfigurējiet laukus Iestatījumi -> Partneri -> Ārējo darbu shēma un atgriezieties šeit.",
         partnerComment: "Komentārs partnerim (neobligāti)",
-        partnerCommentPlaceholder: "Pievienojiet pieprasījuma piezīmi partnerim...",
+        partnerCommentPlaceholder:
+          "Pievienojiet pieprasījuma piezīmi partnerim...",
         partnerFiles: "Faili partnerim (neobligāti)",
         noFilesSelected: "Nav atlasītu failu.",
         planIncludesSend: "ietver sūtīšanu partnerim.",
-        planManualOnly: "atbalsta tikai manuālu ievadi. Sūtīšana partnerim pieejama Pro plānā.",
+        planManualOnly:
+          "atbalsta tikai manuālu ievadi. Sūtīšana partnerim pieejama Pro plānā.",
         createPortalRequest: "Izveidot portāla pieprasījumu",
         addExternalJob: "Pievienot ārējo darbu",
         empty: "Ārējie darbi vēl nav pievienoti.",
@@ -579,7 +633,8 @@
         returnToQueue: "Atgriezt rindā",
         preparationChecklist: "Sagatavošanas kontrolsaraksts",
         noChecklistConfigured: "Kontrolsaraksta vienības nav konfigurētas.",
-        completeRequired: "Pabeidziet obligātos pielikumus, komentārus un kontrolsaraksta vienības",
+        completeRequired:
+          "Pabeidziet obligātos pielikumus, komentārus un kontrolsaraksta vienības",
         andRequiredOrderInputs: ", kā arī obligātos pasūtījuma ievades laukus",
         beforeSendingToEngineering: "pirms nosūtīšanas uz inženieriju.",
         beforeSendingToProduction: "pirms nosūtīšanas uz ražošanu.",
@@ -636,7 +691,8 @@
         pdfParsed: "PDF apstrādāts",
         noRowsDetected: "Rindas nav atrastas",
         detectedRowsForField: "Laukam {field} atrastas {count} rindas.",
-        checkPdfAndColumns: "Pārbaudiet izvēlēto PDF failu un tabulas kolonnas.",
+        checkPdfAndColumns:
+          "Pārbaudiet izvēlēto PDF failu un tabulas kolonnas.",
         pdfParseFailed: "PDF apstrāde neizdevās",
       },
       errors: {
@@ -658,20 +714,20 @@
         sendToPartnerProOnly: "Sūtīšana partnerim pieejama Pro plānā.",
         partnerRequired: "Partneris ir obligāts.",
         selectValidPartner: "Izvēlieties derīgu partneri.",
-        fieldRequired: "\"{field}\" ir obligāts.",
+        fieldRequired: '"{field}" ir obligāts.',
         uploadPartnerRequestFiles:
           "Neizdevās augšupielādēt partnera pieprasījuma failus.",
         featureProOnly: "Šī funkcija pieejama Pro plānā.",
         sendToPartnerFailed: "Neizdevās nosūtīt partnerim.",
       },
       confirm: {
-        removeNamedFile: "Noņemt \"{name}\"?",
+        removeNamedFile: 'Noņemt "{name}"?',
         removeFile: "Noņemt failu?",
         deleteAttachment: "Dzēst pielikumu?",
-        thisWillRemoveNamed: "Tas noņems \"{name}\".",
-        deleteAllFilesInCategory: "Dzēst visus failus kategorijā \"{category}\"?",
+        thisWillRemoveNamed: 'Tas noņems "{name}".',
+        deleteAllFilesInCategory: 'Dzēst visus failus kategorijā "{category}"?',
         deleteSelectedFilesInCategory:
-          "Dzēst atlasītos failus kategorijā \"{category}\"?",
+          'Dzēst atlasītos failus kategorijā "{category}"?',
         thisWillRemoveFiles: "Tas noņems {count} failu(s).",
         deleteComment: "Dzēst komentāru?",
         removeCommentPermanently: "Tas neatgriezeniski dzēsīs komentāru.",
@@ -713,7 +769,8 @@
         noFilesDownloadableInCategory:
           "Šajā kategorijā nav lejupielādējamu failu.",
         archiveDownloaded: "Arhīvs lejupielādēts",
-        downloadedWithSkipped: "Lejupielādēti {included} faili, izlaisti {skipped}.",
+        downloadedWithSkipped:
+          "Lejupielādēti {included} faili, izlaisti {skipped}.",
         downloadedFiles: "Lejupielādēti {count} faili.",
         couldNotCreateArchive: "Neizdevās izveidot arhīvu šai kategorijai.",
       },
@@ -770,16 +827,19 @@
     },
     externalReceivePage: {
       title: "Partneru pasūtījumi - Saņemšana",
-      subtitle: "Atzīmējiet piegādātās vienības kā Noliktavā un pievienojiet piegādes pavadzīmes.",
+      subtitle:
+        "Atzīmējiet piegādātās vienības kā Noliktavā un pievienojiet piegādes pavadzīmes.",
       backToPartnerOrders: "Atpakaļ uz partneru pasūtījumiem",
       noAccess: "Jums nav piekļuves partneru pasūtījumu saņemšanai.",
       openReceiveSearch: "Atvērt saņemšanas meklēšanu",
       searchAria: "Meklēt saņemamos partneru pasūtījumus",
       closeSearch: "Aizvērt meklēšanu",
       search: "Meklēt",
-      searchPlaceholder: "Pasūtījuma #, partneris, klients, ārējais pasūtījums...",
+      searchPlaceholder:
+        "Pasūtījuma #, partneris, klients, ārējais pasūtījums...",
       quickReceiveScanner: "Ātrās saņemšanas skeneris",
-      scanOrUploadSupplierDocument: "Skenēt vai augšupielādēt piegādātāja dokumentu",
+      scanOrUploadSupplierDocument:
+        "Skenēt vai augšupielādēt piegādātāja dokumentu",
       scanDocument: "Skenēt dokumentu",
       attachedFiles: "Pievienots: {files}",
       scanOnceHint:
@@ -813,7 +873,8 @@
       attachOrScanFirst: "Vispirms pievienojiet vai noskenējiet dokumentu.",
       enableAiFields:
         "Iespējojiet AI izvilkšanas laukus Iestatījumi -> Ārējo darbu shēma.",
-      noMatchingIdentifier: "Dokumentā netika atrasts atbilstošs identifikators.",
+      noMatchingIdentifier:
+        "Dokumentā netika atrasts atbilstošs identifikators.",
       noMatchingPartnerOrder:
         "Netika atrasts atbilstošs partnera pasūtījums. Izmantojiet manuālu meklēšanu.",
       multipleMatchesFound:
@@ -842,8 +903,7 @@
         accountingSyncSkipped: "Grāmatvedības sinhronizācija izlaista",
         accountingSyncAllManualOverrides:
           "Visiem grāmatvedības pasūtījumiem ir manuāli pārrakstījumi.",
-        accountingSyncedCount:
-          "Sinhronizēti {count} grāmatvedības pasūtījumi",
+        accountingSyncedCount: "Sinhronizēti {count} grāmatvedības pasūtījumi",
         noRowsToImport: "Nav rindu importam",
         excelImportFailed: "Excel imports neizdevās",
         importedOrdersCount: "Importēti {count} pasūtījumi",
@@ -858,13 +918,10 @@
         orderDeleted: "Pasūtījums dzēsts",
       },
       errors: {
-        missingTenantAssignment:
-          "Šim lietotājam nav tenant piesaistes.",
-        removeOwnCommentsOnly:
-          "Jūs varat dzēst tikai savus komentārus.",
+        missingTenantAssignment: "Šim lietotājam nav tenant piesaistes.",
+        removeOwnCommentsOnly: "Jūs varat dzēst tikai savus komentārus.",
         failedToAddExternalJob: "Neizdevās pievienot ārējo darbu.",
-        failedToUpdateExternalJob:
-          "Neizdevās atjaunināt ārējo darbu.",
+        failedToUpdateExternalJob: "Neizdevās atjaunināt ārējo darbu.",
         failedToAddAttachment: "Neizdevās pievienot pielikumu.",
       },
     },
@@ -882,7 +939,8 @@
       notesPlaceholder: "Īpašas prasības vai papildu informācija...",
       levelRequired: "{level} ir obligāts.",
       searchOrEnterLevel: "Meklējiet vai ievadiet {level}",
-      createFailed: "Pasūtījumu neizdevās izveidot. Pārbaudiet datus un mēģiniet vēlreiz.",
+      createFailed:
+        "Pasūtījumu neizdevās izveidot. Pārbaudiet datus un mēģiniet vēlreiz.",
       priority: {
         low: "Zema",
         normal: "Normāla",
@@ -903,14 +961,16 @@
         manualTitle: "Manuāla ievade",
         manualDescription: "Ievadiet pasūtījuma datus manuāli.",
         accountingTitle: "Imports no grāmatvedības",
-        accountingDescription: "Izvēlieties vienu vai vairākus pasūtījumus no grāmatvedības.",
+        accountingDescription:
+          "Izvēlieties vienu vai vairākus pasūtījumus no grāmatvedības.",
         csvTitle: "CSV / Excel imports",
         csvDescription: "Atvērt izklājlapas importa vedni.",
       },
       accounting: {
         title: "Grāmatvedības imports",
         loadFailed: "Neizdevās ielādēt grāmatvedības pasūtījumus.",
-        searchPlaceholder: "Meklēt pasūtījuma #, klientu, līgumu, kategoriju, produktu...",
+        searchPlaceholder:
+          "Meklēt pasūtījuma #, klientu, līgumu, kategoriju, produktu...",
         rowsCount: "{count} rindas",
         selectedCount: "{count} atlasīti",
         refresh: "Atjaunot",
@@ -920,7 +980,8 @@
         empty: "Grāmatvedības pasūtījumi nav atrasti.",
         previewTitle: "Priekšskatījums",
         previewEmpty: "Atlasiet vienu rindu, lai redzētu detaļas.",
-        singlePreviewHint: "Vienas rindas priekšskatījums pieejams, ja atlasīta tikai viena rinda.",
+        singlePreviewHint:
+          "Vienas rindas priekšskatījums pieejams, ja atlasīta tikai viena rinda.",
         previewNew: "Jauni: {count}",
         previewSkipped: "Izlaisti: {count}",
         previewImported: "Importēti: {count}",
@@ -928,7 +989,8 @@
         useSelectedInForm: "Lietot atlasīto formā",
         importing: "Importē...",
         importSelected: "Importēt atlasītos uz PWS",
-        importSummary: "Importēti {imported}, izlaisti {skipped}, kļūdas {error}.",
+        importSummary:
+          "Importēti {imported}, izlaisti {skipped}, kļūdas {error}.",
         status: {
           new: "jauns",
           skipped: "izlaists",
@@ -949,7 +1011,8 @@
       invalidQuantity: "Nederīgs daudzums.",
       excelFailedTitle: "Excel imports neizdevās",
       largeWarningTitle: "Liela importa brīdinājums",
-      largeWarningDescription: "Apstipriniet brīdinājumu pirms 1000+ rindu importa.",
+      largeWarningDescription:
+        "Apstipriniet brīdinājumu pirms 1000+ rindu importa.",
       largeWarningRows:
         "Jūs importējat {count} rindas. Tas masveidā atjauninās datubāzi.",
       timeout: "Importa noildze. Lūdzu, mēģiniet vēlreiz.",
@@ -959,7 +1022,8 @@
       dragDropBrowse: "Ievelciet failu šeit vai noklikšķiniet, lai izvēlētos.",
       supportedFormats: "Atbalstītie formāti:",
       downloadTemplate: "Lejupielādēt šablonu",
-      emptyText: "Ievelciet Excel/CSV failu šeit vai noklikšķiniet augšupielādei",
+      emptyText:
+        "Ievelciet Excel/CSV failu šeit vai noklikšķiniet augšupielādei",
       emptyHint: "Pirmajā rindā jābūt kolonnu nosaukumiem (galvenēm)",
       notMapped: "-- Nav kartēts --",
       orderFieldColumns: "Pasūtījuma lauku kolonnas",
@@ -977,7 +1041,8 @@
       createOrderFieldOptions:
         "Izveidot pasūtījuma lauku vērtības iestatījumos no importētajām vērtībām",
       continue: "Turpināt",
-      errorsFound: "Atrastas {count} kļūdas. Salabojiet Excel failu un mēģiniet vēlreiz.",
+      errorsFound:
+        "Atrastas {count} kļūdas. Salabojiet Excel failu un mēģiniet vēlreiz.",
       rowLabel: "Rinda {row}",
       downloadErrorList: "Lejupielādēt kļūdu sarakstu",
       ackLargeImport: "Es saprotu un vēlos turpināt",
@@ -988,7 +1053,8 @@
     main: {
       header: {
         title: "Ražošana",
-        subtitle: "Plānojiet darba uzdevumus, grupējiet līdzīgus un piešķiriet stacijām.",
+        subtitle:
+          "Plānojiet darba uzdevumus, grupējiet līdzīgus un piešķiriet stacijām.",
       },
       tabs: {
         planning: "Plānošana",
@@ -1097,7 +1163,8 @@
         removeWorkOrderTitle: "Noņemt darba uzdevumu?",
         removeDescriptionFrom: " no ",
         removeDescriptionWithParts: "Tas noņems {target} no rindas.",
-        removeDescriptionSingle: "Tas noņems darba uzdevumu no stacijas rindas.",
+        removeDescriptionSingle:
+          "Tas noņems darba uzdevumu no stacijas rindas.",
         clearCurrentStation: "Notīrīt pašreizējo staciju",
         clearAllStations: "Notīrīt visas stacijas",
         clearAllStationsTitle: "Notīrīt no visām stacijām?",
@@ -1138,7 +1205,8 @@
         rowsCount: "{count} rindas",
         noSelectableRows:
           "Nav atlasāmu konstrukciju rindu. Pārliecinieties, ka konstrukciju tabulas iestatījumos ir atzīmētas kā Ražošana.",
-        noRowsForFilters: "Pašreizējiem filtriem konstrukciju rindas nav atrastas.",
+        noRowsForFilters:
+          "Pašreizējiem filtriem konstrukciju rindas nav atrastas.",
       },
       calendar: {
         title: "Ražošanas kalendārs",
@@ -1163,7 +1231,8 @@
         print: "Drukāt QR",
         labelSize: "Etiķetes izmērs",
         contentFields: "Satura lauki",
-        contentFieldsHint: "Pārvelciet, lai mainītu secību. Atzīmētie lauki būs uz etiķetes.",
+        contentFieldsHint:
+          "Pārvelciet, lai mainītu secību. Atzīmētie lauki būs uz etiķetes.",
         orientation: "Orientācija",
         vertical: "Vertikāli",
         horizontal: "Horizontāli",
@@ -1178,7 +1247,8 @@
         missingQueuePermission: "Trūkst tiesību rediģēt stacijas rindu.",
         cannotClearStationsStarted:
           "Nevar notīrīt: šajās stacijās darbs jau ir uzsākts.",
-        selectedItemsCannotMoveDate: "Atlasītos ierakstus nevar pārcelt pēc datuma.",
+        selectedItemsCannotMoveDate:
+          "Atlasītos ierakstus nevar pārcelt pēc datuma.",
         failedMoveSelectedQueueDate:
           "Neizdevās pārcelt atlasīto rindas datumu.",
         cannotClearSelectedStarted:
@@ -1254,7 +1324,8 @@
         loadingQueue: "Ielādē staciju rindu...",
         noStations:
           "Šim skatam nav pieejamu staciju. Palūdziet administratoram piešķirt jums staciju.",
-        noItemsForFilters: "Izvēlētajiem filtriem nav atbilstošu rindas vienību.",
+        noItemsForFilters:
+          "Izvēlētajiem filtriem nav atbilstošu rindas vienību.",
       },
       queue: {
         itemsCount: "{count} vien.",
@@ -1364,10 +1435,12 @@
         "Definējiet pasūtījuma lauku nosaukumus, redzamību un attēlošanas secību.",
       orderFields:
         "Definējiet pasūtījuma lauku nosaukumus, redzamību un attēlošanas secību.",
-      operations: "Konfigurējiet darba laikus, stacijas un darbību noklusējumus.",
+      operations:
+        "Konfigurējiet darba laikus, stacijas un darbību noklusējumus.",
       partners: "Pārvaldiet ārējos partnerus, grupas un lauku kartējumus.",
       users: "Pārvaldiet lietotāju piekļuves, lomas un kontu tiesības.",
-      workflow: "Nosakiet statusu plūsmas noteikumus, prasības un automatizācijas.",
+      workflow:
+        "Nosakiet statusu plūsmas noteikumus, prasības un automatizācijas.",
       integrations: "Savienojiet grāmatvedību, e-pastu un ārējos servisus.",
     },
     sections: "Iestatījumu sadaļas",
@@ -1390,7 +1463,7 @@
       field: "Lauks",
       inTable: "Tabulā",
       addFirstField: "Pievienojiet pirmo pasūtījuma lauku.",
-      removeFieldConfirm: "Noņemt lauku \"{name}\"?",
+      removeFieldConfirm: 'Noņemt lauku "{name}"?',
     },
     operations: {
       loading: "Ielādē ražošanas iestatījumus...",
@@ -1400,7 +1473,8 @@
       workStationsTitle: "Darba stacijas",
       workStationsDescription: "Pārvaldiet ražošanas staciju sarakstu.",
       qrLabelTitle: "QR etiķešu iestatījumi",
-      qrLabelDescription: "Konfigurējiet noklusēto QR etiķešu izkārtojumu ražošanai.",
+      qrLabelDescription:
+        "Konfigurējiet noklusēto QR etiķešu izkārtojumu ražošanai.",
       notificationsTitle: "Paziņojumi",
       notificationsDescription:
         "Izvēlieties, kas saņem sistēmas paziņojumus par bloķētiem un atsāktiem darbiem.",
@@ -1418,7 +1492,7 @@
       addStation: "Pievienot staciju",
       selectAll: "Atlasīt visu",
       noDescription: "Nav apraksta",
-      removeWorkstationConfirm: "Noņemt darba staciju \"{name}\"?",
+      removeWorkstationConfirm: 'Noņemt darba staciju "{name}"?',
       labelSizes: "Etiķešu izmēri",
       defaultSize: "Noklusētais izmērs",
       defaultPrintHint: "Izmanto kā noklusēto drukas formātu ražošanā.",
@@ -1428,7 +1502,8 @@
       stationDependenciesTitle: "Staciju atkarības",
       stationDependenciesDescription:
         "Definējiet, kurām stacijām jābeidz darbs, pirms cita stacija var sākt.",
-      addStationsForDependencies: "Pievienojiet darba stacijas, lai konfigurētu atkarības.",
+      addStationsForDependencies:
+        "Pievienojiet darba stacijas, lai konfigurētu atkarības.",
       noOtherStations: "Citu staciju nav.",
       operatorAssignmentsTitle: "Operatoru staciju piesaistes",
       operatorAssignmentsDescription:
@@ -1437,20 +1512,23 @@
       loadingAssignments: "Ielādē piesaistes...",
       assigned: "Piesaistīts",
       stopReasonsTitle: "Apstādināšanas iemesli",
-      stopReasonsDescription: "Iemesli tiek rādīti, kad stacija aptur uzdevumu.",
+      stopReasonsDescription:
+        "Iemesli tiek rādīti, kad stacija aptur uzdevumu.",
       reason: "Iemesls",
       reasonPlaceholder: "Trūkst materiāla",
       saveReason: "Saglabāt iemeslu",
       addReason: "Pievienot iemeslu",
-      removeReasonConfirm: "Noņemt iemeslu \"{label}\"?",
+      removeReasonConfirm: 'Noņemt iemeslu "{label}"?',
       removeSelectedWorkstationsConfirm:
         "Noņemt {count} atlasīto darba staciju(-as)?",
       removeSelectedReasonsConfirm: "Noņemt {count} atlasīto iemeslu(-us)?",
     },
     orderInputs: {
       title: "Pasūtījuma ievades lauki",
-      description: "Konfigurējiet papildu laukus, kas redzami pasūtījuma skatā.",
-      empty: "Pasūtījuma ievades lauku vēl nav. Pievienojiet noklusētos laukus.",
+      description:
+        "Konfigurējiet papildu laukus, kas redzami pasūtījuma skatā.",
+      empty:
+        "Pasūtījuma ievades lauku vēl nav. Pievienojiet noklusētos laukus.",
       addDefaultFields: "Pievienot noklusētos laukus",
       label: "Nosaukums",
       labelPlaceholder: "Konstrukciju skaits",
@@ -1460,21 +1538,23 @@
       saveField: "Saglabāt lauku",
       addField: "Pievienot lauku",
       unitOptional: "Mērvienība (neobligāti)",
-      selectOptions: "Izvēles opcijas (atdaliet ar komatu, jaunu rindu vai \"\\\\\")",
+      selectOptions:
+        'Izvēles opcijas (atdaliet ar komatu, jaunu rindu vai "\\\\")',
       selectOptionsPlaceholder: "Dīleris, Privātais, Partneris",
       tableColumns: "Tabulas kolonnas",
       dragRows: "Pārvelciet rindas, lai mainītu kolonnu secību",
       addColumn: "Pievienot kolonnu",
-      addAtLeastOneColumn: "Šim tabulas laukam pievienojiet vismaz vienu kolonnu.",
+      addAtLeastOneColumn:
+        "Šim tabulas laukam pievienojiet vismaz vienu kolonnu.",
       dragToReorder: "Pārvelciet, lai mainītu secību",
       positionPlaceholder: "Pozīcija",
       aiKeyOptional: "AI atslēga (neobligāti)",
       aiKeyPlaceholder: "construction",
       unit: "Mērvienība",
       removeColumnConfirm: "Noņemt šo kolonnu?",
-      removeFieldConfirm: "Noņemt \"{label}\"?",
+      removeFieldConfirm: 'Noņemt "{label}"?',
       removeSelectedFieldsConfirm: "Noņemt {count} atlasīto lauku(-us)?",
-      options: "Opcijas (atdaliet ar komatu, jaunu rindu vai \"\\\\\")",
+      options: 'Opcijas (atdaliet ar komatu, jaunu rindu vai "\\\\")',
       optionsPlaceholder: "Tips A, Tips B",
       maxSelects: "Maks. izvēļu skaits (1-3)",
       showInProduction: "Rādīt ražošanā",
@@ -1486,8 +1566,10 @@
       addCategoryPlaceholder: "Pievienot kategoriju",
       addCategory: "Pievienot kategoriju",
       defaultCategoryByRole: "Noklusētā kategorija pēc lomas",
-      newUploadsHint: "Jauniem augšupielādējumiem katrai lomai tiks lietota izvēlētā kategorija.",
-      aiParsingHint: "AI pasūtījuma ievades parsēšana izmanto kategorijas ar atzīmi \"Lietot AI parsēšanai\".",
+      newUploadsHint:
+        "Jauniem augšupielādējumiem katrai lomai tiks lietota izvēlētā kategorija.",
+      aiParsingHint:
+        'AI pasūtījuma ievades parsēšana izmanto kategorijas ar atzīmi "Lietot AI parsēšanai".',
       reset: "Atiestatīt",
       saveAttachmentCategories: "Saglabāt pielikumu kategorijas",
       removeAttachmentCategoryConfirm: "Noņemt šo pielikuma kategoriju?",
@@ -1499,15 +1581,16 @@
       requiredForProduction: "Obligāts ražošanai",
       engineeringShort: "Inž.",
       productionShort: "Raž.",
-      removeChecklistConfirm: "Noņemt kontrolsaraksta vienību \"{label}\"?",
+      removeChecklistConfirm: 'Noņemt kontrolsaraksta vienību "{label}"?',
       noChecklistItems: "Kontrolsaraksta vienību vēl nav.",
       returnReasons: "Atgriešanas iemesli",
       addReasonPlaceholder: "Pievienot iemeslu",
       addReason: "Pievienot iemeslu",
-      removeReasonConfirm: "Noņemt iemeslu \"{reason}\"?",
+      removeReasonConfirm: 'Noņemt iemeslu "{reason}"?',
       noReturnReasons: "Atgriešanas iemeslu vēl nav.",
       rulesTitle: "Plūsmas noteikumi",
-      rulesDescription: "Definējiet, kam jābūt pabeigtam, pirms pasūtījums virzās tālāk.",
+      rulesDescription:
+        "Definējiet, kam jābūt pabeigtam, pirms pasūtījums virzās tālāk.",
       syncing: "Sinhronizē plūsmas noteikumus...",
       coreRules: "Pamatnoteikumi",
       minAttachmentsEngineering: "Min. pielikumi inženierijai",
@@ -1515,17 +1598,16 @@
       dueSoonThresholdDays: "Termiņa slieksnis (dienas)",
       requireCommentEngineering: "Pirms inženierijas pieprasīt komentāru",
       requireCommentProduction: "Pirms ražošanas pieprasīt komentāru",
-      requireOrderInputsEngineering: "Pirms inženierijas pieprasīt ievades laukus",
+      requireOrderInputsEngineering:
+        "Pirms inženierijas pieprasīt ievades laukus",
       requireOrderInputsProduction: "Pirms ražošanas pieprasīt ievades laukus",
       enableDueDateIndicators: "Ieslēgt termiņa indikatorus",
       productionCompletionTitle: "Ražošanas pabeigšana",
       productionCompletionDescription:
         "Nosakiet, kad pasūtījums ražošanā skaitās pabeigts.",
       productionCompletionMode: "Pabeigšanas noteikums",
-      productionCompletionModeAllItems:
-        "Pabeigti visi ražošanas ieraksti",
-      productionCompletionModeStations:
-        "Pabeigtas izvēlētās stacijas",
+      productionCompletionModeAllItems: "Pabeigti visi ražošanas ieraksti",
+      productionCompletionModeStations: "Pabeigtas izvēlētās stacijas",
       productionCompletionStationsTitle: "Pabeigšanas stacijas",
       productionCompletionNoStations:
         "Nav pievienotu staciju. Vispirms pievienojiet stacijas sadaļā Operācijas.",
@@ -1535,10 +1617,15 @@
       saveOrderStatuses: "Saglabāt pasūtījuma statusus",
       externalJobStatusConfiguration: "Ārējo darbu statusu konfigurācija",
       saveExternalStatuses: "Saglabāt ārējos statusus",
-      assignmentLabels: "Piesaistes nosaukumi",
+      assignmentLabels: "Pasūtījuma atbildīgo nosaukumi",
+      assignmentLabelsDescription:
+        "Šie nosaukumi tiek rādīti pasūtījumu sarakstā, detaļu skatā un jauna pasūtījuma formā.",
       engineer: "Inženieris",
       manager: "Vadītājs",
+      engineerRoleLabel: "Tehniskais izpildītājs",
+      managerRoleLabel: "Komerciālais / procesa atbildīgais",
       saveAssignmentLabels: "Saglabāt piesaistes nosaukumus",
+      saveAssignmentRoleLabels: "Saglabāt atbildīgo nosaukumus",
       attachments: "Pielikumi",
       attachmentCategories: "Pielikumu kategorijas",
     },
@@ -1551,7 +1638,7 @@
       groupNamePlaceholder: "Stikls",
       saveGroup: "Saglabāt grupu",
       addGroup: "Pievienot grupu",
-      removeGroupConfirm: "Noņemt grupu \"{name}\"?",
+      removeGroupConfirm: 'Noņemt grupu "{name}"?',
       noPartnerGroups: "Partneru grupu vēl nav.",
       partnerName: "Partnera nosaukums",
       partnerNamePlaceholder: "Baltic Glass",
@@ -1561,19 +1648,21 @@
       noGroup: "Bez grupas",
       savePartner: "Saglabāt partneri",
       addPartner: "Pievienot partneri",
-      removePartnerConfirm: "Noņemt partneri \"{name}\"?",
+      removePartnerConfirm: 'Noņemt partneri "{name}"?',
       noPartners: "Partneru vēl nav.",
       externalSchemaTitle: "Ārējo darbu shēma",
       externalSchemaDescription: "Konfigurējiet laukus ārpakalpojumu darbiem.",
       noExternalFields: "Ārējo darbu lauku vēl nav. Pievienojiet pirmo lauku.",
-      externalFieldsHint: "Pievienojiet vai rediģējiet laukus ārējo darbu formām.",
-      enablePriceReconciliation: "Ieslēgt cenu salīdzināšanu (plānotā pret rēķina)",
+      externalFieldsHint:
+        "Pievienojiet vai rediģējiet laukus ārējo darbu formām.",
+      enablePriceReconciliation:
+        "Ieslēgt cenu salīdzināšanu (plānotā pret rēķina)",
       savePricing: "Saglabāt cenu iestatījumus",
       noExternalTableColumns: "Ārējās tabulas kolonnas nav konfigurētas.",
       removeSelectedFieldsConfirm: "Noņemt {count} atlasīto lauku(s)?",
       removeSelectedPartnersConfirm: "Noņemt {count} atlasīto partneri(-us)?",
       removeSelectedGroupsConfirm: "Noņemt {count} atlasīto grupu(-as)?",
-      removeFieldConfirm: "Noņemt \"{label}\"?",
+      removeFieldConfirm: 'Noņemt "{label}"?',
       externalFieldFallback: "Lauks",
     },
     options: {
@@ -1681,7 +1770,8 @@
       replyTo: "Noklusētais reply-to",
       replyToPlaceholder: "engineering@your-company.com",
       senderMode: "Sūtītāja režīms",
-      useEngineerSender: "Lietot inženiera e-pastu kā sūtītāju, ja domēns sakrīt",
+      useEngineerSender:
+        "Lietot inženiera e-pastu kā sūtītāju, ja domēns sakrīt",
       domainVerified: "Domēns ir verificēts Resend",
       templateTitle: "Ārējā pieprasījuma e-pasta veidne",
       placeholders: "Pieejamie vietturi:",
@@ -1695,7 +1785,8 @@
       comingSoon: "Drīzumā",
       comingSoonDescription:
         "Pasūtījumus varēs sinhronizēt no grāmatvedības rīkiem uz PWS - drīzumā.",
-      expectedFlow: "Paredzētā plūsma: grāmatvedības pasūtījums uz PWS uz ražošanas stacijām.",
+      expectedFlow:
+        "Paredzētā plūsma: grāmatvedības pasūtījums uz PWS uz ražošanas stacijām.",
       requestIntegration: "Pieprasīt integrāciju",
     },
     security: {
@@ -1774,6 +1865,3 @@
 } as const;
 
 export default lv;
-
-
-

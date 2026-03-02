@@ -35,7 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { Tabs, TabsContent } from "@/components/ui/Tabs";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { BottomSheet } from "@/components/ui/BottomSheet";
@@ -43,6 +43,8 @@ import { DataTable } from "@/components/ui/DataTable";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
+import { DetailTabsBar } from "@/components/layout/DetailTabsBar";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 import { useOrderFieldSettings } from "./OrderFieldSettingsContext";
 import { useSettingsData } from "@/hooks/useSettingsData";
 import {
@@ -351,12 +353,8 @@ export default function SettingsPage() {
     savePermissionRoles,
   } = useRbac();
   const { confirm, dialog } = useConfirmDialog();
-  const {
-    orderFields,
-    addOrderField,
-    updateOrderField,
-    removeOrderField,
-  } = useOrderFieldSettings();
+  const { orderFields, addOrderField, updateOrderField, removeOrderField } =
+    useOrderFieldSettings();
 
   const sortedFields = useMemo(
     () => [...orderFields].sort((a, b) => a.order - b.order),
@@ -3155,14 +3153,15 @@ export default function SettingsPage() {
     setPartnerGroupName(group.name);
   }
 
-  const [activeTab, setActiveTab] = useState<SettingsSectionValue>("orderFields");
+  const [activeTab, setActiveTab] =
+    useState<SettingsSectionValue>("orderFields");
   const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
-    const normalizedTab =
-      tab === "structure" ? "orderFields" : tab;
+    const normalizedTab = tab === "structure" ? "orderFields" : tab;
     if (
       normalizedTab &&
       settingsSections.some((section) => section.value === normalizedTab)
@@ -3172,12 +3171,17 @@ export default function SettingsPage() {
   }, [searchParams]);
 
   const setActiveSettingsTab = (nextTab: string) => {
-    setActiveTab(nextTab);
-    const current = new URLSearchParams(searchParams?.toString() ?? "");
-    current.set("tab", nextTab);
-    router.replace(`${pathname ?? "/settings"}?${current.toString()}`, {
-      scroll: false,
-    });
+    const validTab = settingsSections.find(
+      (section) => section.value === nextTab,
+    );
+    if (validTab) {
+      setActiveTab(validTab.value);
+      const current = new URLSearchParams(searchParams?.toString() ?? "");
+      current.set("tab", nextTab);
+      router.replace(`${pathname ?? "/settings"}?${current.toString()}`, {
+        scroll: false,
+      });
+    }
   };
 
   useEffect(() => {
@@ -3239,7 +3243,13 @@ export default function SettingsPage() {
 
   return (
     <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
-      <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] right-4 z-40 md:hidden">
+      <div
+        className={`fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] right-4 z-40 transition-all duration-200 md:hidden ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
         <Button
           type="button"
           variant="outline"
@@ -3272,19 +3282,14 @@ export default function SettingsPage() {
           subtitle={activeSectionSubtitle}
           className="md:z-20"
           actions={
-            <TabsList className="justify-start overflow-x-auto flex-nowrap">
-              {settingsSections.map((section) => (
-                <TabsTrigger
-                  key={section.value}
-                  value={section.value}
-                  className="gap-2"
-                  onClick={() => setActiveSettingsTab(section.value)}
-                >
-                  <section.icon className="h-4 w-4" />
-                  {sectionLabel(section.value)}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+            <DetailTabsBar
+              tabs={settingsSections.map((section) => ({
+                value: section.value,
+                label: sectionLabel(section.value),
+                icon: section.icon,
+              }))}
+              className="py-0"
+            />
           }
         />
 
@@ -3360,7 +3365,9 @@ export default function SettingsPage() {
                     onChange={(event) => {
                       setFieldName(event.target.value);
                     }}
-                    placeholder={t("settings.orderFields.fieldLabelPlaceholder")}
+                    placeholder={t(
+                      "settings.orderFields.fieldLabelPlaceholder",
+                    )}
                     className="h-10 text-sm"
                   />
                   <div className="flex flex-wrap items-center gap-4 pt-2">
@@ -3395,7 +3402,7 @@ export default function SettingsPage() {
                 </p>
 
                 <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="min-w-[760px] w-full table-auto text-sm [&_th]:whitespace-normal [&_th]:wrap-break-word [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4">
+                  <table className="min-w-190 w-full table-auto text-sm [&_th]:whitespace-normal [&_th]:wrap-break-word [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="w-12 px-2 py-2 text-left font-medium">
@@ -4031,7 +4038,7 @@ export default function SettingsPage() {
                   </Button>
                 </div>
                 <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="min-w-[760px] w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
+                  <table className="min-w-190 w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
@@ -4847,7 +4854,7 @@ export default function SettingsPage() {
                     </div>
                   )}
                   <div className="overflow-x-auto rounded-lg border border-border">
-                    <table className="min-w-[760px] w-full text-sm">
+                    <table className="min-w-190 w-full text-sm">
                       <thead className="bg-muted/40 text-muted-foreground">
                         <tr>
                           <th className="px-4 py-2 text-left">
@@ -6275,7 +6282,7 @@ export default function SettingsPage() {
                   {t("settings.users.invites")}
                 </div>
                 <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="min-w-[720px] w-full text-sm">
+                  <table className="min-w-180 w-full text-sm">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left font-medium">
@@ -7101,9 +7108,12 @@ export default function SettingsPage() {
                     <div className="text-sm font-semibold">
                       {t("settings.workflow.assignmentLabels")}
                     </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {t("settings.workflow.assignmentLabelsDescription")}
+                    </p>
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       <label className="space-y-2 text-sm font-medium">
-                        {t("settings.workflow.engineer")}
+                        {t("settings.workflow.engineerRoleLabel")}
                         <Input
                           value={assignmentLabelDrafts.engineer}
                           onChange={(event) =>
@@ -7116,7 +7126,7 @@ export default function SettingsPage() {
                         />
                       </label>
                       <label className="space-y-2 text-sm font-medium">
-                        {t("settings.workflow.manager")}
+                        {t("settings.workflow.managerRoleLabel")}
                         <Input
                           value={assignmentLabelDrafts.manager}
                           onChange={(event) =>
@@ -7153,7 +7163,7 @@ export default function SettingsPage() {
                       >
                         {assignmentLabelState === "saving"
                           ? t("settings.users.saving")
-                          : t("settings.workflow.saveAssignmentLabels")}
+                          : t("settings.workflow.saveAssignmentRoleLabels")}
                       </Button>
                       {assignmentLabelState !== "idle" &&
                         assignmentLabelMessage && (
@@ -7888,4 +7898,3 @@ export default function SettingsPage() {
     </section>
   );
 }
-

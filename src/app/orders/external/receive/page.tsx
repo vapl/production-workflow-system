@@ -31,6 +31,7 @@ import type { ExternalJobStatus } from "@/types/orders";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { canReceiveExternalOrders } from "@/lib/auth/permissions";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 
 type ReceiveJob = {
   id: string;
@@ -103,6 +104,7 @@ export default function ExternalJobsReceivePage() {
   const [jobs, setJobs] = useState<ReceiveJob[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [actionState, setActionState] = useState<
     Record<
@@ -792,7 +794,13 @@ export default function ExternalJobsReceivePage() {
         </div>
       </div>
 
-      <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 md:hidden">
+      <div
+        className={`fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 transition-all duration-200 md:hidden ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
         <div className="flex items-center justify-start">
           <Button
             variant="outline"

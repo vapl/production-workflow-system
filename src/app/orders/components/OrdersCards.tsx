@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate, formatOrderStatus } from "@/lib/domain/formatters";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
@@ -32,6 +33,8 @@ interface OrdersCardsProps {
   loadingLabel?: string;
   onEdit?: (order: Order) => void;
   onDelete?: (order: Order) => void;
+  canEditOrder?: (order: Order) => boolean;
+  canDeleteOrder?: (order: Order) => boolean;
   onTakeOrder?: (order: Order) => void;
   groups?: {
     label: string;
@@ -447,6 +450,8 @@ export function OrdersCards({
   loadingLabel,
   onEdit,
   onDelete,
+  canEditOrder,
+  canDeleteOrder,
   onTakeOrder,
   groups,
   dueSoonDays,
@@ -510,8 +515,18 @@ export function OrdersCards({
                       key={order.id}
                       order={order}
                       activeOrderFields={activeOrderFields}
-                      onEdit={onEdit}
-                      onDelete={onDelete}
+                      onEdit={
+                        (canEditOrder ? canEditOrder(order) : Boolean(onEdit))
+                          ? onEdit
+                          : undefined
+                      }
+                      onDelete={
+                        (canDeleteOrder
+                          ? canDeleteOrder(order)
+                          : Boolean(onDelete))
+                          ? onDelete
+                          : undefined
+                      }
                       onTakeOrder={onTakeOrder}
                       dueSoonDays={dueSoonDays}
                       dueIndicatorEnabled={dueIndicatorEnabled}
@@ -536,8 +551,16 @@ export function OrdersCards({
               key={order.id}
               order={order}
               activeOrderFields={activeOrderFields}
-              onEdit={onEdit}
-              onDelete={onDelete}
+              onEdit={
+                (canEditOrder ? canEditOrder(order) : Boolean(onEdit))
+                  ? onEdit
+                  : undefined
+              }
+              onDelete={
+                (canDeleteOrder ? canDeleteOrder(order) : Boolean(onDelete))
+                  ? onDelete
+                  : undefined
+              }
               onTakeOrder={onTakeOrder}
               dueSoonDays={dueSoonDays}
               dueIndicatorEnabled={dueIndicatorEnabled}

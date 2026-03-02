@@ -132,6 +132,8 @@ export interface Order {
   updatedAt?: string;
   createdBy?: string;
   createdByName?: string;
+  updatedBy?: string;
+  updatedByName?: string;
   productName?: string;
   quantity?: number;
   orderFieldValues?: Record<string, string>;

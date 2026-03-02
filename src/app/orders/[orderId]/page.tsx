@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +11,12 @@ import { SelectField } from "@/components/ui/SelectField";
 import { TextAreaField } from "@/components/ui/TextAreaField";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/Popover";
+import { DetailTabsBar } from "@/components/layout/DetailTabsBar";
 import {
   Card,
   CardContent,
@@ -27,9 +33,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { Tabs, TabsContent } from "@/components/ui/Tabs";
 import { Tooltip } from "@/components/ui/Tooltip";
-import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import {
   formatDate,
   formatDateTime,
@@ -40,6 +45,7 @@ import type {
   ExternalJobAttachment,
   ExternalJobField,
   ExternalJobStatus,
+  Order,
   OrderAttachment,
   OrderComment,
   OrderStatus,
@@ -56,13 +62,15 @@ import {
   FileIcon,
   FileTextIcon,
   ImageIcon,
+  ListChecksIcon,
+  MoreHorizontalIcon,
   PanelRightIcon,
   PencilIcon,
   SparklesIcon,
   Trash2Icon,
+  UploadIcon,
 } from "lucide-react";
 import JSZip from "jszip";
-import { OrderModal } from "@/app/orders/components/OrderModal";
 import { useOrders } from "@/app/orders/OrdersContext";
 import { useOrderFieldSettings } from "@/app/settings/OrderFieldSettingsContext";
 import { useCurrentUser } from "@/contexts/UserContext";
@@ -82,9 +90,27 @@ import {
   getOrderPriorityLabel,
   getOrderStatusLabel,
 } from "@/lib/domain/orderFieldPresentation";
+import { useAssignmentLabels } from "@/hooks/useAssignmentLabels";
+import {
+  canEditOrderInlineField,
+  canEditOrderInputs as canEditOrderInputsByRole,
+} from "@/lib/domain/orderPermissions";
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+function formatFileSize(bytes?: number | null) {
+  if (!bytes || bytes <= 0) {
+    return null;
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 const defaultAttachmentCategories = [
   { id: "order_documents", label: "Order documents" },
   { id: "technical_docs", label: "Technical documentation" },
@@ -99,6 +125,35 @@ function formatDuration(totalMinutes?: number | null) {
   const minutes = totalMinutes % 60;
   if (hours === 0) return `${minutes}m`;
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+}
+
+function getDaysFromToday(dateValue?: string | null) {
+  if (!dateValue) {
+    return null;
+  }
+  const due = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(due.getTime())) {
+    return null;
+  }
+  const today = new Date();
+  const current = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  return Math.round((due.getTime() - current.getTime()) / 86400000);
+}
+
+function parseMoneyValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.replace(",", ".").replace(/[^0-9.-]+/g, "");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function isEmptyExternalFieldValue(value: unknown) {
@@ -177,7 +232,7 @@ function getExternalFieldSemantic(field: ExternalJobField) {
 }
 
 export default function OrderDetailPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const router = useRouter();
   const params = useParams<{ orderId?: string }>();
   const normalizeId = (value: string) =>
@@ -228,10 +283,8 @@ export default function OrderDetailPage() {
       confirmLabel: t("orders.detail.delete"),
     });
   }
-  const engineerLabel =
-    rules.assignmentLabels?.engineer ?? t("orders.page.engineerFallback");
-  const managerLabel =
-    rules.assignmentLabels?.manager ?? t("orders.page.managerFallback");
+  const { engineer: engineerLabel, manager: managerLabel } =
+    useAssignmentLabels();
   const attachmentCategories = useMemo(() => {
     return rules.attachmentCategories && rules.attachmentCategories.length > 0
       ? rules.attachmentCategories
@@ -258,16 +311,6 @@ export default function OrderDetailPage() {
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
     : "";
-  const getInitials = (value?: string) =>
-    value
-      ? value
-          .split(" ")
-          .filter(Boolean)
-          .map((part) => part[0])
-          .slice(0, 2)
-          .join("")
-          .toUpperCase()
-      : "";
   const statusLabel = (status: OrderStatus) =>
     getOrderStatusLabel(
       status,
@@ -297,7 +340,8 @@ export default function OrderDetailPage() {
         .filter(
           (field) =>
             field.isActive &&
-            (field.key === "delivery_address" || field.key === "customer_phone"),
+            (field.key === "delivery_address" ||
+              field.key === "customer_phone"),
         )
         .sort((a, b) => a.order - b.order)
         .map((field) => ({
@@ -305,6 +349,12 @@ export default function OrderDetailPage() {
           name: getOrderFieldLabel(field.key, t, field.name),
         })),
     [orderFields, t],
+  );
+  const deliveryAddressField = summaryMetadataFields.find(
+    (field) => field.key === "delivery_address",
+  );
+  const customerPhoneField = summaryMetadataFields.find(
+    (field) => field.key === "customer_phone",
   );
   const order = useMemo(
     () =>
@@ -323,7 +373,11 @@ export default function OrderDetailPage() {
     useState<{ done: number; total: number; mode: "all" | "stations" } | null>(
       null,
     );
-  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [inlineEditingField, setInlineEditingField] = useState<string | null>(
+    null,
+  );
+  const [inlineDraftValue, setInlineDraftValue] = useState("");
+  const [isSavingInlineField, setIsSavingInlineField] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [attachmentNotice, setAttachmentNotice] = useState("");
@@ -340,7 +394,7 @@ export default function OrderDetailPage() {
   const [engineers, setEngineers] = useState<{ id: string; name: string }[]>(
     [],
   );
-  const [selectedEngineerId, setSelectedEngineerId] = useState("");
+  const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
   const [checklistState, setChecklistState] = useState<Record<string, boolean>>(
     {},
   );
@@ -414,22 +468,43 @@ export default function OrderDetailPage() {
   const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<string[]>(
     [],
   );
+  const [showStickyMobileBadge, setShowStickyMobileBadge] = useState(false);
   const [showDesktopStickyShadow, setShowDesktopStickyShadow] = useState(false);
-  const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const [hideMobileFloatingControls, setHideMobileFloatingControls] =
+    useState(false);
   const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
+  const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
+  const lastScrollYRef = useRef(0);
 
   useEffect(() => {
     const handleScroll = () => {
       if (window.innerWidth < 768) {
+        const currentScrollY = window.scrollY;
+        const scrollDelta = currentScrollY - lastScrollYRef.current;
+
+        setShowStickyMobileBadge(currentScrollY > 180);
         setShowDesktopStickyShadow(false);
-      } else {
-        setShowDesktopStickyShadow(window.scrollY > 8);
+        if (currentScrollY <= 40) {
+          setHideMobileFloatingControls(false);
+        } else if (scrollDelta > 8) {
+          setHideMobileFloatingControls(true);
+        } else if (scrollDelta < -8) {
+          setHideMobileFloatingControls(false);
+        }
+        lastScrollYRef.current = currentScrollY;
+        return;
       }
-      setShowCompactMobileTitle(window.scrollY > 52);
+
+      setShowStickyMobileBadge(false);
+      setHideMobileFloatingControls(false);
+      setShowDesktopStickyShadow(window.scrollY > 0);
+      lastScrollYRef.current = window.scrollY;
     };
+
     handleScroll();
     window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("resize", handleScroll);
+
     return () => {
       window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", handleScroll);
@@ -461,7 +536,6 @@ export default function OrderDetailPage() {
     role === "Engineering" &&
     orderState?.status === "in_engineering" &&
     !isAssignedToAnotherEngineer;
-  const canAssignEngineer = role === "Sales" || isAdmin;
   const canSendBack =
     (role === "Sales" &&
       (orderState?.status === "ready_for_engineering" ||
@@ -485,7 +559,23 @@ export default function OrderDetailPage() {
     "externalJobs.sendToPartner",
   );
   const canUseAiOrderInputImport = hasCapability("orderInputs.aiPdfImport");
-  const canEditOrderRecord = hasPermission("orders.manage");
+  const canEditInlineField = (fieldId: string) =>
+    orderState
+      ? canEditOrderInlineField(
+          { role, isAdmin, isOwner },
+          orderState.status,
+          fieldId as
+            | "customerName"
+            | "dueDate"
+            | "quantity"
+            | "priority"
+            | "assignedEngineer"
+            | "assignedManager"
+            | "deliveryAddress"
+            | "customerPhone"
+            | `orderField:${string}`,
+        )
+      : false;
 
   const activeChecklistItems = rules.checklistItems.filter(
     (item) => item.isActive,
@@ -572,14 +662,6 @@ export default function OrderDetailPage() {
   );
 
   useEffect(() => {
-    if (!orderState?.assignedEngineerId) {
-      setSelectedEngineerId("");
-      return;
-    }
-    setSelectedEngineerId(orderState.assignedEngineerId);
-  }, [orderState?.assignedEngineerId]);
-
-  useEffect(() => {
     const sb = supabase;
     if (!sb) {
       setEngineers([
@@ -619,6 +701,47 @@ export default function OrderDetailPage() {
       isMounted = false;
     };
   }, [engineerLabel, tenantId]);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb) {
+      setManagers([
+        { id: "mgr-1", name: `${managerLabel} 1` },
+        { id: "mgr-2", name: `${managerLabel} 2` },
+      ]);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchManagers = async () => {
+      const query = sb
+        .from("profiles")
+        .select("id, full_name")
+        .in("role", ["Sales", "Admin"]);
+      if (tenantId) {
+        query.eq("tenant_id", tenantId);
+      }
+      const { data, error } = await query;
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setManagers([]);
+        return;
+      }
+      setManagers(
+        (data ?? []).map((row) => ({
+          id: row.id,
+          name: row.full_name ?? managerLabel,
+        })),
+      );
+    };
+
+    fetchManagers();
+    return () => {
+      isMounted = false;
+    };
+  }, [managerLabel, tenantId]);
 
   useEffect(() => {
     setOrderState(order);
@@ -1085,9 +1208,28 @@ export default function OrderDetailPage() {
           mimeLower.includes("spreadsheet");
         return isProductionDocumentation && isSupported;
       }),
-    [attachments, attachmentCategoryLabels, effectiveAiAttachmentCategoryIds, t],
+    [
+      attachments,
+      attachmentCategoryLabels,
+      effectiveAiAttachmentCategoryIds,
+      t,
+    ],
   );
-  const comments = orderState?.comments ?? [];
+  const comments = useMemo(
+    () => orderState?.comments ?? [],
+    [orderState?.comments],
+  );
+  const latestComment = useMemo(
+    () =>
+      comments.reduce<OrderComment | null>((latest, comment) => {
+        if (!latest) return comment;
+        return new Date(comment.createdAt).getTime() >
+          new Date(latest.createdAt).getTime()
+          ? comment
+          : latest;
+      }, null),
+    [comments],
+  );
   const canManageAllComments =
     isAdmin || isOwner || hasPermission("orders.manage");
   const canRemoveComment = (comment: OrderComment) =>
@@ -1232,6 +1374,14 @@ export default function OrderDetailPage() {
       items,
     }));
   }, [attachmentCategoryLabels, attachments]);
+  const latestAttachment = useMemo(
+    () =>
+      [...attachments]
+        .filter((attachment) => Boolean(attachment.createdAt))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null,
+    [attachments],
+  );
+  const selectedAttachmentsCount = selectedAttachmentIds.length;
   const activeOrderInputFields = useMemo(
     () =>
       orderInputFields
@@ -1348,7 +1498,7 @@ export default function OrderDetailPage() {
   ];
   const productionGateItems = [
     {
-      label: t("orders.page.engineerFallback"),
+      label: engineerLabel,
       ok: hasAssignedEngineer,
       value: hasAssignedEngineer
         ? t("orders.detail.workflow.gates.assigned")
@@ -1400,11 +1550,6 @@ export default function OrderDetailPage() {
     : canSendToProduction
       ? productionGateItems
       : [];
-  const activeGateLabel = canSendToEngineering
-    ? t("orders.detail.workflow.sendToEngineeringChecks")
-    : canSendToProduction
-      ? t("orders.detail.workflow.sendToProductionChecks")
-      : "";
   const manualExternalJobFields = useMemo(
     () =>
       externalJobFields
@@ -1496,7 +1641,10 @@ export default function OrderDetailPage() {
     });
     return groups;
   }, [activeOrderInputFields]);
-  const canEditOrderInputs = role === "Engineering" || isAdmin || isOwner;
+  const canEditOrderInputs =
+    orderState != null
+      ? canEditOrderInputsByRole({ role, isAdmin, isOwner }, orderState.status)
+      : false;
   function normalizeOrderInputValue(field: OrderInputField, value: unknown) {
     if (field.fieldType === "table") {
       return Array.isArray(value) ? value : [];
@@ -1649,7 +1797,7 @@ export default function OrderDetailPage() {
   );
   if (!orderState && (isLoadingOrder || isOrdersLoading || !showNotFound)) {
     return (
-      <section className="space-y-3">
+      <section className="space-y-3 pt-20">
         <h1 className="text-xl font-semibold">
           {t("orders.detail.loadingTitle")}
         </h1>
@@ -1661,15 +1809,45 @@ export default function OrderDetailPage() {
     );
   }
 
+  const detailTabs = [
+    { value: "overview", label: t("orders.detail.tabs.overview") },
+    { value: "files", label: t("orders.detail.tabs.files") },
+    { value: "details", label: t("orders.detail.tabs.details") },
+    { value: "external", label: t("orders.detail.tabs.external") },
+    { value: "history", label: t("orders.detail.tabs.history") },
+  ];
+  const activeDetailTab =
+    detailTabs.find((tab) => tab.value === activeTab) ?? detailTabs[0];
+
   if (!orderState) {
     return (
-      <section className="space-y-3">
-        <h1 className="text-xl font-semibold">
-          {t("orders.detail.notFoundTitle")}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {t("orders.detail.notFoundDescription")}
-        </p>
+      <section className="space-y-4 md:space-y-6">
+        <div className="desktop-sticky-bleed sticky top-0 z-30 bg-background/95 pb-2 backdrop-blur md:desktop-sticky-bleed-no-shadow">
+          <Tabs value="overview" className="pointer-events-none">
+            <DetailTabsBar
+              backHref="/orders"
+              backLabel={t("orders.detail.back")}
+              tabs={detailTabs}
+              disabled
+              className="pb-1"
+            />
+          </Tabs>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("orders.detail.notFoundTitle")}</CardTitle>
+            <CardDescription>
+              {t("orders.detail.notFoundDescription")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={() => router.push("/orders")}>
+                {t("orders.detail.back")}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </section>
     );
   }
@@ -1727,6 +1905,476 @@ export default function OrderDetailPage() {
     const rule = rules.externalJobRules.find((item) => item.status === status);
     return rule?.minAttachments ?? 0;
   };
+  const dueInDays = getDaysFromToday(orderState.dueDate);
+  const dueState =
+    displayStatus === "done" || dueInDays === null
+      ? null
+      : dueInDays < 0
+        ? {
+            tone: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200",
+            label: t("orders.detail.hero.daysLate", {
+              count: Math.abs(dueInDays),
+            }),
+          }
+        : dueInDays === 0
+          ? {
+              tone: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200",
+              label: t("orders.detail.hero.dueToday"),
+            }
+          : dueInDays <= 3
+            ? {
+                tone: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200",
+                label: t("orders.detail.hero.dueInDays", {
+                  count: dueInDays,
+                }),
+              }
+            : null;
+  const dueRiskKpi = dueState
+    ? {
+        value: dueState.label,
+        tone: dueState.tone,
+      }
+    : {
+        value:
+          displayStatus === "done"
+            ? t("orders.detail.hero.completed")
+            : t("orders.detail.overview.onTrack"),
+        tone: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200",
+      };
+  const progressPercent = productionCompletionProgress
+    ? Math.round(
+        (productionCompletionProgress.done /
+          Math.max(productionCompletionProgress.total, 1)) *
+          100,
+      )
+    : displayStatus === "done"
+      ? 100
+      : displayStatus === "in_production"
+        ? 75
+        : displayStatus === "ready_for_production"
+          ? 60
+          : displayStatus === "engineering_blocked"
+            ? 35
+            : displayStatus === "in_engineering"
+              ? 35
+              : displayStatus === "ready_for_engineering"
+                ? 15
+                : 0;
+  const productionSummary = productionCompletionProgress
+    ? `${productionCompletionProgress.done} / ${productionCompletionProgress.total} ${
+        productionCompletionProgress.mode === "stations"
+          ? t("orders.detail.productionCompletion.stations")
+          : t("orders.detail.productionCompletion.items")
+      }`
+    : displayStatus === "done"
+      ? t("orders.detail.hero.completed")
+      : displayStatus === "in_production"
+        ? t("orders.detail.hero.inProgress")
+        : t("orders.detail.hero.notStarted");
+  const customFieldRows = [
+    ...activeLevels.map((level) => {
+      const valueId = orderState.orderFieldValues?.[level.id];
+      return {
+        id: level.id,
+        label: level.name,
+        value: valueId
+          ? (orderState.orderFieldLabels?.[level.id] ?? valueId)
+          : "--",
+      };
+    }),
+  ];
+  const activeExternalJobsCount = visibleExternalJobs.filter(
+    (job) => !["approved", "cancelled"].includes(job.status),
+  ).length;
+  const invoicePriceField = externalJobFields.find(
+    (field) => field.fieldRole === "invoice_price",
+  );
+  const plannedPriceField = externalJobFields.find(
+    (field) => field.fieldRole === "planned_price",
+  );
+  const externalCostTotal = visibleExternalJobs.reduce((total, job) => {
+    const invoiceValue = invoicePriceField
+      ? parseMoneyValue(
+          externalJobValuesByJobId[job.id]?.[invoicePriceField.id],
+        )
+      : null;
+    const plannedValue = plannedPriceField
+      ? parseMoneyValue(
+          externalJobValuesByJobId[job.id]?.[plannedPriceField.id],
+        )
+      : null;
+    return total + (invoiceValue ?? plannedValue ?? 0);
+  }, 0);
+  const externalCostLabel =
+    externalCostTotal > 0
+      ? new Intl.NumberFormat(locale, {
+          style: "currency",
+          currency: "EUR",
+          maximumFractionDigits: 2,
+        }).format(externalCostTotal)
+      : "--";
+  const heroKpis = [
+    {
+      key: "due-risk",
+      title: t("orders.detail.hero.dueRisk"),
+      value: dueRiskKpi.value,
+      meta: formatDate(orderState.dueDate),
+      className: dueRiskKpi.tone,
+      valueClassName: "text-lg font-semibold md:text-xl",
+      titleClassName: "opacity-80",
+      metaClassName: "opacity-80",
+    },
+    {
+      key: "progress",
+      title: t("orders.detail.hero.progress"),
+      value: `${progressPercent}%`,
+      className: "border-border bg-muted/20",
+      valueClassName: "text-xl font-semibold md:text-2xl",
+      titleClassName: "text-muted-foreground",
+    },
+    {
+      key: "production",
+      title: t("orders.detail.hero.production"),
+      value: productionSummary,
+      className: "border-border bg-muted/20",
+      valueClassName: "text-lg font-semibold md:text-xl",
+      titleClassName: "text-muted-foreground",
+    },
+    ...(externalCostTotal > 0
+      ? [
+          {
+            key: "external-cost",
+            title: t("orders.detail.hero.externalCost"),
+            value: externalCostLabel,
+            className: "border-border bg-muted/20",
+            valueClassName: "text-xl font-semibold md:text-2xl",
+            titleClassName: "text-muted-foreground",
+          },
+        ]
+      : []),
+  ] as const;
+  const heroKpiGridClass =
+    heroKpis.length >= 4
+      ? "xl:grid-cols-4"
+      : heroKpis.length === 3
+        ? "md:grid-cols-3"
+        : "md:grid-cols-2";
+  const orderTitle = `#${orderState.orderNumber} - ${orderState.customerName}`;
+  const createdByDisplayName =
+    orderState.createdByName ?? t("orders.detail.system");
+  const updatedByDisplayName =
+    orderState.updatedByName ??
+    orderState.createdByName ??
+    t("orders.detail.system");
+  const getInlineFieldValue = (fieldId: string) => {
+    switch (fieldId) {
+      case "customerName":
+        return orderState.customerName ?? "";
+      case "dueDate":
+        return orderState.dueDate ?? "";
+      case "quantity":
+        return orderState.quantity != null ? String(orderState.quantity) : "";
+      case "priority":
+        return orderState.priority ?? "normal";
+      case "assignedEngineer":
+        return orderState.assignedEngineerId ?? "";
+      case "assignedManager":
+        return orderState.assignedManagerId ?? "";
+      case "deliveryAddress":
+        return deliveryAddressField
+          ? ((orderState.orderFieldValues?.[deliveryAddressField.id] as
+              | string
+              | undefined) ?? "")
+          : "";
+      case "customerPhone":
+        return customerPhoneField
+          ? ((orderState.orderFieldValues?.[customerPhoneField.id] as
+              | string
+              | undefined) ?? "")
+          : "";
+      default:
+        return "";
+    }
+  };
+  const openInlineField = (fieldId: string) => {
+    if (!canEditInlineField(fieldId) || isSavingInlineField) {
+      return;
+    }
+    setInlineEditingField(fieldId);
+    setInlineDraftValue(getInlineFieldValue(fieldId));
+  };
+  const closeInlineField = () => {
+    setInlineEditingField(null);
+    setInlineDraftValue("");
+  };
+  const renderInlineEditButton = (fieldId: string) =>
+    canEditInlineField(fieldId) ? (
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7 shrink-0"
+        onClick={() => openInlineField(fieldId)}
+        aria-label={t("orders.detail.editOrder")}
+      >
+        <PencilIcon className="h-3.5 w-3.5" />
+      </Button>
+    ) : null;
+  const saveInlineField = async () => {
+    if (
+      !inlineEditingField ||
+      !orderState ||
+      !canEditInlineField(inlineEditingField)
+    ) {
+      return;
+    }
+
+    const rawValue = inlineDraftValue.trim();
+    let patch: Parameters<typeof updateOrder>[1] | null = null;
+
+    if (inlineEditingField === "customerName") {
+      patch = { customerName: rawValue };
+      setOrderState((prev) =>
+        prev ? { ...prev, customerName: rawValue } : prev,
+      );
+    } else if (inlineEditingField === "dueDate") {
+      patch = { dueDate: inlineDraftValue };
+      setOrderState((prev) =>
+        prev ? { ...prev, dueDate: inlineDraftValue } : prev,
+      );
+    } else if (inlineEditingField === "quantity") {
+      const parsed = Number(inlineDraftValue);
+      if (!Number.isFinite(parsed)) {
+        return;
+      }
+      patch = { quantity: parsed };
+      setOrderState((prev) => (prev ? { ...prev, quantity: parsed } : prev));
+    } else if (inlineEditingField === "priority") {
+      patch = {
+        priority: inlineDraftValue as Order["priority"],
+      };
+      setOrderState((prev) =>
+        prev
+          ? { ...prev, priority: inlineDraftValue as Order["priority"] }
+          : prev,
+      );
+    } else if (inlineEditingField === "assignedEngineer") {
+      const engineer = engineers.find((item) => item.id === inlineDraftValue);
+      patch = {
+        assignedEngineerId: inlineDraftValue,
+        assignedEngineerName: engineer?.name ?? "",
+      };
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              assignedEngineerId: inlineDraftValue || undefined,
+              assignedEngineerName: engineer?.name ?? undefined,
+            }
+          : prev,
+      );
+    } else if (inlineEditingField === "assignedManager") {
+      const manager = managers.find((item) => item.id === inlineDraftValue);
+      patch = {
+        assignedManagerId: inlineDraftValue,
+        assignedManagerName: manager?.name ?? "",
+      };
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              assignedManagerId: inlineDraftValue || undefined,
+              assignedManagerName: manager?.name ?? undefined,
+            }
+          : prev,
+      );
+    } else if (
+      inlineEditingField === "deliveryAddress" &&
+      deliveryAddressField
+    ) {
+      const nextValues = {
+        ...(orderState.orderFieldValues ?? {}),
+        [deliveryAddressField.id]: rawValue,
+      };
+      patch = { orderFieldValues: nextValues };
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              orderFieldValues: nextValues,
+              orderFieldLabels: {
+                ...(prev.orderFieldLabels ?? {}),
+                [deliveryAddressField.id]: rawValue,
+              },
+            }
+          : prev,
+      );
+    } else if (inlineEditingField === "customerPhone" && customerPhoneField) {
+      const nextValues = {
+        ...(orderState.orderFieldValues ?? {}),
+        [customerPhoneField.id]: rawValue,
+      };
+      patch = { orderFieldValues: nextValues };
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              orderFieldValues: nextValues,
+              orderFieldLabels: {
+                ...(prev.orderFieldLabels ?? {}),
+                [customerPhoneField.id]: rawValue,
+              },
+            }
+          : prev,
+      );
+    } else if (inlineEditingField.startsWith("orderField:")) {
+      const fieldId = inlineEditingField.replace("orderField:", "");
+      const nextValues = {
+        ...(orderState.orderFieldValues ?? {}),
+        [fieldId]: rawValue,
+      };
+      patch = { orderFieldValues: nextValues };
+      setOrderState((prev) =>
+        prev
+          ? {
+              ...prev,
+              orderFieldValues: nextValues,
+              orderFieldLabels: {
+                ...(prev.orderFieldLabels ?? {}),
+                [fieldId]: rawValue,
+              },
+            }
+          : prev,
+      );
+    }
+
+    if (!patch) {
+      return;
+    }
+
+    try {
+      setIsSavingInlineField(true);
+      await updateOrder(orderState.id, patch);
+      closeInlineField();
+    } finally {
+      setIsSavingInlineField(false);
+    }
+  };
+  const engineeringHealth = engineeringTiming?.inProgress
+    ? {
+        title: t("orders.detail.overview.engineering"),
+        value: t("orders.detail.hero.inProgress"),
+        tone: "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200",
+      }
+    : displayStatus === "engineering_blocked"
+      ? {
+          title: t("orders.detail.overview.engineering"),
+          value: t("orders.detail.overview.blocked"),
+          tone: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200",
+        }
+      : {
+          title: t("orders.detail.overview.engineering"),
+          value: t("orders.detail.overview.onTrack"),
+          tone: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200",
+        };
+  const externalHealth =
+    activeExternalJobsCount > 0
+      ? {
+          title: t("orders.detail.overview.external"),
+          value: t("orders.detail.overview.activeJobs", {
+            count: activeExternalJobsCount,
+          }),
+          tone: "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200",
+        }
+      : {
+          title: t("orders.detail.overview.external"),
+          value: t("orders.detail.overview.none"),
+          tone: "border-muted bg-muted/20 text-foreground",
+        };
+  const blockedHealth =
+    displayStatus === "engineering_blocked"
+      ? {
+          title: t("orders.detail.overview.blockedState"),
+          value: getOrderStatusLabel(
+            displayStatus,
+            t,
+            statusLabel(displayStatus),
+          ),
+          tone: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200",
+        }
+      : null;
+  type TopActionButton = {
+    key: string;
+    label: string;
+    onClick: () => void;
+    disabled: boolean;
+    variant: "default" | "outline";
+  };
+  const topActionButtons: TopActionButton[] = [
+    canSendToEngineering
+      ? {
+          key: "ready_for_engineering",
+          label: t("orders.detail.workflow.sendToEngineering"),
+          onClick: () => {
+            void handleStatusChange("ready_for_engineering");
+          },
+          disabled: !canAdvanceToEngineering,
+          variant: "default" as const,
+        }
+      : null,
+    canStartEngineering
+      ? {
+          key: "in_engineering",
+          label: t("orders.detail.workflow.startEngineering"),
+          onClick: () => {
+            void handleStatusChange("in_engineering");
+          },
+          disabled: false,
+          variant: "default" as const,
+        }
+      : null,
+    canSendToProduction
+      ? {
+          key: "ready_for_production",
+          label: statusLabel("ready_for_production"),
+          onClick: () => {
+            void handleStatusChange("ready_for_production");
+          },
+          disabled: !canAdvanceToProduction,
+          variant: "default" as const,
+        }
+      : null,
+    canSendBack
+      ? {
+          key: "send_back",
+          label: t("orders.detail.sendBack"),
+          onClick: () => setIsReturnOpen(true),
+          disabled: false,
+          variant: "outline" as const,
+        }
+      : null,
+    canTakeOrder
+      ? {
+          key: "take_order",
+          label: t("orders.page.takeOrder"),
+          onClick: () => {
+            void handleTakeOrder();
+          },
+          disabled: false,
+          variant: "outline" as const,
+        }
+      : null,
+    canReturnToQueue
+      ? {
+          key: "return_to_queue",
+          label: t("orders.detail.workflow.returnToQueue"),
+          onClick: () => {
+            void handleReturnToQueue();
+          },
+          disabled: false,
+          variant: "outline" as const,
+        }
+      : null,
+  ].filter((action): action is TopActionButton => action !== null);
   const buildExternalTimeline = (job: ExternalJob) => {
     const events: Array<{ label: string; at: string }> = [
       {
@@ -3714,9 +4362,6 @@ export default function OrderDetailPage() {
       nextStatus === "in_engineering" &&
       role === "Engineering" &&
       !orderState.assignedEngineerId;
-    if (shouldAssignCurrentEngineer) {
-      setSelectedEngineerId(userId);
-    }
     setOrderState((prev) =>
       prev
         ? {
@@ -3759,51 +4404,6 @@ export default function OrderDetailPage() {
       statusChangedBy: name,
       statusChangedByRole: role,
       statusChangedAt: now,
-    });
-  }
-
-  async function handleAssignEngineer() {
-    if (!orderState || !selectedEngineerId) {
-      return;
-    }
-    const engineer = engineers.find((item) => item.id === selectedEngineerId);
-    const now = new Date().toISOString();
-    setOrderState((prev) =>
-      prev
-        ? {
-            ...prev,
-            assignedEngineerId: selectedEngineerId,
-            assignedEngineerName: engineer?.name ?? prev.assignedEngineerName,
-            assignedEngineerAt: now,
-          }
-        : prev,
-    );
-    await updateOrder(orderState.id, {
-      assignedEngineerId: selectedEngineerId,
-      assignedEngineerName: engineer?.name ?? orderState.assignedEngineerName,
-      assignedEngineerAt: now,
-    });
-  }
-
-  async function handleClearEngineer() {
-    if (!orderState) {
-      return;
-    }
-    setSelectedEngineerId("");
-    setOrderState((prev) =>
-      prev
-        ? {
-            ...prev,
-            assignedEngineerId: undefined,
-            assignedEngineerName: undefined,
-            assignedEngineerAt: undefined,
-          }
-        : prev,
-    );
-    await updateOrder(orderState.id, {
-      assignedEngineerId: "",
-      assignedEngineerName: "",
-      assignedEngineerAt: "",
     });
   }
 
@@ -3978,7 +4578,27 @@ export default function OrderDetailPage() {
   }
 
   return (
-    <section className="space-y-0 pt-16 md:space-y-4 md:pt-0">
+    <section className="space-y-0 pt-32 md:space-y-4 md:pt-0">
+      <div
+        className={`pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top)+0.75rem)] z-40 -translate-x-1/2 transition-all duration-150 md:hidden ${
+          showStickyMobileBadge
+            ? "opacity-100 translate-y-0"
+            : "opacity-0 -translate-y-1"
+        }`}
+      >
+        <div className="flex flex-col justify-center items-center pointer-events-auto rounded-xl border border-border/80 bg-card/95 px-6 py-2 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
+          <div className="truncate text-sm font-semibold">{orderTitle}</div>
+          <div className="mt-1 flex items-center gap-2">
+            <Badge
+              variant={statusVariant}
+              className="max-w-full truncate text-[11px]"
+            >
+              {statusLabel(displayStatus)}
+            </Badge>
+          </div>
+        </div>
+      </div>
+
       <div className="pointer-events-none fixed right-4 top-[calc(env(safe-area-inset-top)+0.75rem)] z-40 md:hidden">
         <div className="pointer-events-auto inline-flex rounded-xl border border-border/80 bg-card/95 p-1.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-card/80">
           <Button
@@ -3997,45 +4617,118 @@ export default function OrderDetailPage() {
           </Button>
         </div>
       </div>
-
-      <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] left-4 z-40 md:hidden">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-11 w-11 rounded-full shadow-lg disabled:opacity-100"
-          onClick={() => setIsEditOpen(true)}
-          aria-label={t("orders.detail.editOrder")}
-          disabled={!canEditOrderRecord}
-        >
-          <PencilIcon className="h-4 w-4" />
-        </Button>
+      <div className="pointer-events-none fixed inset-x-4 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 md:hidden">
+        <div className="pointer-events-auto flex items-center justify-between gap-2">
+          <div
+            className={`relative transition-all duration-200 ${
+              hideMobileFloatingControls
+                ? "-translate-x-16 opacity-0"
+                : "translate-x-0 opacity-100"
+            }`}
+          >
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full px-3 shadow-lg"
+              onClick={() => setIsMobileActionsOpen(true)}
+              aria-label={t("orders.detail.openActions")}
+              aria-haspopup="dialog"
+              aria-expanded={isMobileActionsOpen}
+              aria-controls="order-actions-drawer"
+            >
+              <ListChecksIcon className="mr-2 h-4 w-4" />
+              <span className="text-sm font-medium">
+                {t("orders.page.actions")}
+              </span>
+            </Button>
+            {activeGateItems.some((item) => !item.ok) ? (
+              <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white shadow">
+                {activeGateItems.filter((item) => !item.ok).length}
+              </span>
+            ) : null}
+          </div>
+          <div
+            className={`transition-all duration-200 ${
+              hideMobileFloatingControls
+                ? "translate-x-16 opacity-0"
+                : "translate-x-0 opacity-100"
+            }`}
+          >
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full px-3 shadow-lg"
+              onClick={() => setIsMobileSectionsOpen(true)}
+              aria-label={t("orders.detail.openSections")}
+              aria-haspopup="dialog"
+              aria-expanded={isMobileSectionsOpen}
+              aria-controls="order-sections-drawer"
+            >
+              <PanelRightIcon className="mr-2 h-4 w-4" />
+              <span className="max-w-28 truncate text-sm font-medium">
+                {activeDetailTab.label}
+              </span>
+            </Button>
+          </div>
+        </div>
       </div>
-
-      <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] right-4 z-40 md:hidden">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-11 w-11 rounded-full shadow-lg"
-          onClick={() => setIsMobileSectionsOpen(true)}
-          aria-label={t("orders.detail.openSections")}
-          aria-haspopup="dialog"
-          aria-expanded={isMobileSectionsOpen}
-          aria-controls="order-sections-drawer"
-        >
-          <PanelRightIcon className="h-4 w-4" />
-        </Button>
-      </div>
-
-      <MobilePageTitle
-        title={orderState.orderNumber}
-        showCompact={showCompactMobileTitle}
-        subtitle={orderState.customerName}
-        compactTitle={`${orderState.orderNumber} - ${orderState.customerName}`}
-        className="pt-6 pb-6"
-      />
-
+      <BottomSheet
+        id="order-actions-drawer"
+        open={isMobileActionsOpen}
+        onClose={() => setIsMobileActionsOpen(false)}
+        ariaLabel={t("orders.detail.openActions")}
+        closeButtonLabel={t("orders.detail.closeActions")}
+        title={t("orders.page.actions")}
+        enableSwipeToClose
+      >
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="space-y-3">
+            {topActionButtons.slice(0, 3).length > 0 ? (
+              <div className="grid gap-2">
+                {topActionButtons.slice(0, 3).map((action) => (
+                  <Button
+                    key={action.key}
+                    variant={action.variant}
+                    onClick={() => {
+                      action.onClick();
+                      setIsMobileActionsOpen(false);
+                    }}
+                    disabled={action.disabled}
+                    className="w-full justify-center"
+                  >
+                    {action.label}
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                {t("orders.detail.noAvailableActions")}
+              </div>
+            )}
+            {activeGateItems.length > 0 ? (
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">
+                  {t("orders.detail.overview.preflightChecks")}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {activeGateItems.map((item) => (
+                    <span
+                      key={item.label}
+                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
+                        item.ok
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700"
+                      }`}
+                    >
+                      {item.label}: {item.value}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </BottomSheet>
       <BottomSheet
         id="order-sections-drawer"
         open={isMobileSectionsOpen}
@@ -4051,8 +4744,8 @@ export default function OrderDetailPage() {
               { value: "overview", label: t("orders.detail.tabs.overview") },
               { value: "files", label: t("orders.detail.tabs.files") },
               { value: "details", label: t("orders.detail.tabs.details") },
-              { value: "workflow", label: t("orders.detail.tabs.workflow") },
               { value: "external", label: t("orders.detail.tabs.external") },
+              { value: "history", label: t("orders.detail.tabs.history") },
             ].map((section) => {
               const isActive = activeTab === section.value;
               return (
@@ -4080,257 +4773,742 @@ export default function OrderDetailPage() {
           </div>
         </div>
       </BottomSheet>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-2">
         <div
-          className={`desktop-sticky-bleed sticky top-16 z-20 hidden w-full bg-background/90 pb-3 pt-2 backdrop-blur md:block ${
+          className={`desktop-sticky-bleed sticky top-0 z-30 hidden bg-background/95 pb-2 backdrop-blur md:block ${
             showDesktopStickyShadow
               ? "desktop-sticky-bleed-shadow"
               : "desktop-sticky-bleed-no-shadow"
           }`}
         >
-          <div className="grid gap-3 lg:grid-cols-[auto_1fr_auto] lg:items-center">
-            <div className="pl-6 mr-6">
-              <h1 className="text-xl font-semibold">
-                {orderState.orderNumber}
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                {orderState.customerName}
-              </p>
+          <div className="space-y-3 pb-0">
+            <div className="flex justify-between flex-wrap items-end">
+              <DetailTabsBar
+                backHref="/orders"
+                backLabel={t("orders.detail.back")}
+                tabs={detailTabs}
+              />
+              <div className="flex items-center gap-2">
+                <Badge variant={statusVariant}>
+                  {statusLabel(displayStatus)}
+                </Badge>
+                {dueState ? (
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${dueState.tone}`}
+                  >
+                    {dueState.label}
+                  </span>
+                ) : null}
+                <Badge variant={priorityVariant}>
+                  {t("orders.detail.hero.priorityBadge", {
+                    value: getOrderPriorityLabel(orderState.priority, t),
+                  })}
+                </Badge>
+              </div>
             </div>
-            <div className="flex flex-nowrap py-1 items-center gap-2 overflow-x-auto">
-              <Link
-                href="/orders"
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-(--tabs-border) bg-(--tabs-bg) px-3 text-sm font-medium text-(--tabs-text) shadow-sm transition hover:text-(--tabs-hover-text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--tabs-ring)"
-              >
-                <ArrowLeftIcon className="h-4 w-4" />
-                {t("orders.detail.back")}
-              </Link>
-              <TabsList className="min-w-max h-9 shadow-sm **:data-[slot=tabs-trigger]:h-7 **:data-[slot=tabs-trigger]:py-1">
-                <TabsTrigger value="overview">
-                  {t("orders.detail.tabs.overview")}
-                </TabsTrigger>
-                <TabsTrigger value="files">
-                  {t("orders.detail.tabs.files")}
-                </TabsTrigger>
-                <TabsTrigger value="details">
-                  {t("orders.detail.tabs.details")}
-                </TabsTrigger>
-                <TabsTrigger value="workflow">
-                  {t("orders.detail.tabs.workflow")}
-                </TabsTrigger>
-                <TabsTrigger value="external">
-                  {t("orders.detail.tabs.external")}
-                </TabsTrigger>
-              </TabsList>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-              <Badge variant={priorityVariant}>
-                {getOrderPriorityLabel(orderState.priority, t)}
-              </Badge>
-              <Badge variant={statusVariant}>
-                {statusLabel(displayStatus)}
-              </Badge>
-              {productionCompletionProgress ? (
-                <span className="text-xs text-muted-foreground">
-                  {productionCompletionProgress.done}/
-                  {productionCompletionProgress.total}{" "}
-                  {productionCompletionProgress.mode === "stations"
-                    ? t("orders.detail.productionCompletion.stations")
-                    : t("orders.detail.productionCompletion.items")}
-                </span>
-              ) : null}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="gap-2"
-                onClick={() => setIsEditOpen(true)}
-                disabled={!canEditOrderRecord}
-              >
-                <PencilIcon className="h-4 w-4" />
-                {t("orders.page.edit")}
-              </Button>
+            <div className="flex justify-between gap-3">
+              <div>
+                <div className="space-y-1">
+                  <div className="flex min-w-0 items-center gap-2 text-xl font-semibold md:text-2xl">
+                    <Link
+                      href="/orders"
+                      className="shrink-0 text-xl font-medium text-muted-foreground transition hover:text-foreground"
+                    >
+                      {t("orders.page.title")}
+                    </Link>
+                    <span className="shrink-0 text-muted-foreground/70">
+                      &gt;
+                    </span>
+                    <span className="truncate text-foreground">
+                      {orderTitle}
+                    </span>
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    {t("orders.detail.lastModifiedBy", {
+                      date: orderState.updatedAt
+                        ? formatDateTime(orderState.updatedAt)
+                        : "--",
+                      name: updatedByDisplayName,
+                    })}
+                  </span>
+                </div>
+              </div>
+              <div className="hidden flex-col md:flex items-end justify-end gap-2">
+                <div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    {topActionButtons.slice(0, 3).map((action) => (
+                      <Button
+                        key={action.key}
+                        size="sm"
+                        variant={action.variant}
+                        onClick={action.onClick}
+                        disabled={action.disabled}
+                      >
+                        {action.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {activeGateItems.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {activeGateItems.map((item) => (
+                        <span
+                          key={item.label}
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
+                            item.ok
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-amber-200 bg-amber-50 text-amber-700"
+                          }`}
+                        >
+                          {item.label}: {item.value}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 px-1 md:hidden">
-          <Badge variant={priorityVariant}>
-            {getOrderPriorityLabel(orderState.priority, t)}
-          </Badge>
-          <Badge variant={statusVariant}>{statusLabel(displayStatus)}</Badge>
-          {productionCompletionProgress ? (
-            <span className="text-xs text-muted-foreground">
-              {productionCompletionProgress.done}/
-              {productionCompletionProgress.total}{" "}
-              {productionCompletionProgress.mode === "stations"
-                ? t("orders.detail.productionCompletion.stations")
-                : t("orders.detail.productionCompletion.items")}
-            </span>
-          ) : null}
+        <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between">
+          <div className="space-y-3">
+            <div className="flex flex-col md:hidden">
+              <div className="flex min-w-0 items-center gap-2 text-xl font-semibold">
+                <Link
+                  href="/orders"
+                  className="shrink-0 text-lg font-medium text-muted-foreground transition hover:text-foreground"
+                >
+                  {t("orders.page.title")}
+                </Link>
+                <span className="shrink-0 text-muted-foreground/70">&gt;</span>
+                <span className="truncate text-foreground">{orderTitle}</span>
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {t("orders.detail.lastModifiedBy", {
+                  date: orderState.updatedAt
+                    ? formatDateTime(orderState.updatedAt)
+                    : "--",
+                  name: updatedByDisplayName,
+                })}
+              </span>
+            </div>
+            <div className="flex flex-wrap mb-3 items-center gap-2 md:hidden">
+              <Badge variant={statusVariant}>
+                {statusLabel(displayStatus)}
+              </Badge>
+              {dueState ? (
+                <span
+                  className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${dueState.tone}`}
+                >
+                  {dueState.label}
+                </span>
+              ) : null}
+              <Badge variant={priorityVariant}>
+                {t("orders.detail.hero.priorityBadge", {
+                  value: getOrderPriorityLabel(orderState.priority, t),
+                })}
+              </Badge>
+            </div>
+          </div>
         </div>
 
         <TabsContent value="overview">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("orders.detail.summaryTitle")}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6 text-sm">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-3">
-                    <div className="text-xs font-semibold text-muted-foreground">
-                      {t("orders.detail.orderInfo")}
+          <div className="flex flex-col gap-6">
+            <div
+              className={`grid grid-cols-2 gap-3 sm:grid-cols-2 ${heroKpiGridClass}`}
+            >
+              {heroKpis.map((kpi) => (
+                <Card key={kpi.key} className="h-full">
+                  <div
+                    className={`flex h-full min-h-24 flex-col justify-start rounded-xl px-3 py-2.5 md:min-h-30 md:px-3.5 md:py-3 ${kpi.className}`}
+                  >
+                    <div
+                      className={`text-[11px] md:text-xs ${kpi.titleClassName}`}
+                    >
+                      {kpi.title}
                     </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
-                          {t("orders.page.orderNumberShort")}
-                        </span>
-                        <span className="font-medium">
-                          {orderState.orderNumber}
-                        </span>
+                    <div className="flex h-full flex-col justify-between">
+                      <div
+                        className={`mt-2 flex flex-1 items-center ${kpi.valueClassName}`}
+                      >
+                        {kpi.value}
                       </div>
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
-                          {t("orders.page.customer")}
-                        </span>
-                        <span className="font-medium">
-                          {orderState.customerName}
-                        </span>
+                      <div
+                        className={`mt-2 min-h-4 text-[10px] md:text-[11px] ${kpi.className ?? "text-muted-foreground"}`}
+                      >
+                        {"meta" in kpi && kpi.meta ? kpi.meta : null}
                       </div>
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
-                          {t("orders.page.dueDate")}
-                        </span>
-                        <span className="font-medium">
-                          {formatDate(orderState.dueDate)}
-                        </span>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.9fr)]">
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{t("orders.detail.orderInfo")}</CardTitle>
+                    <span className="text-sm text-muted-foreground">
+                      {t("orders.detail.createdAt")}:{" "}
+                      {orderState.createdAt
+                        ? formatDateTime(orderState.createdAt)
+                        : "--"}{" "}
+                      · {createdByDisplayName}
+                    </span>
+                  </CardHeader>
+                  <CardContent className="grid items-start gap-3 text-sm md:grid-cols-2">
+                    <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">
+                        {t("orders.page.orderNumberShort")}
                       </div>
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
-                          {t("orders.page.quantity")}
-                        </span>
-                        <span className="font-medium">
-                          {orderState.quantity ?? "--"}
-                        </span>
+                      <div className="mt-1 text-lg font-semibold">
+                        {orderState.orderNumber}
                       </div>
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
-                          {t("orders.detail.productionTime")}
-                        </span>
-                        <span className="font-medium">
-                          {orderState.productionDurationMinutes != null
-                            ? formatDuration(orderState.productionDurationMinutes)
-                            : "--"}
-                        </span>
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">
+                        {t("orders.page.customer")}
                       </div>
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
+                      {inlineEditingField === "customerName" ? (
+                        <div className="mt-2 space-y-2">
+                          <Input
+                            value={inlineDraftValue}
+                            onChange={(event) =>
+                              setInlineDraftValue(event.target.value)
+                            }
+                            disabled={isSavingInlineField}
+                          />
+                          <div className="flex flex-wrap mt-2 items-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={saveInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.saveChanges")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={closeInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.cancel")}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex items-start justify-between gap-3">
+                          <div className="text-lg font-semibold">
+                            {orderState.customerName}
+                          </div>
+                          {renderInlineEditButton("customerName")}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">
+                        {t("orders.page.dueDate")}
+                      </div>
+                      {inlineEditingField === "dueDate" ? (
+                        <div className="mt-2 space-y-2">
+                          <DatePicker
+                            value={inlineDraftValue}
+                            onChange={setInlineDraftValue}
+                            disabled={isSavingInlineField}
+                            className="space-y-2"
+                            triggerClassName="h-10"
+                            placeholder={t("orders.modal.dueDatePlaceholder")}
+                          />
+                          <div className="flex flex-wrap mt-2 items-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={saveInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.saveChanges")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={closeInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.cancel")}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex items-start justify-between gap-3">
+                          <div className="text-lg font-semibold">
+                            {formatDate(orderState.dueDate)}
+                          </div>
+                          {renderInlineEditButton("dueDate")}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">
+                        {t("orders.page.quantity")}
+                      </div>
+                      {inlineEditingField === "quantity" ? (
+                        <div className="mt-2 space-y-2">
+                          <Input
+                            type="number"
+                            min="0"
+                            value={inlineDraftValue}
+                            onChange={(event) =>
+                              setInlineDraftValue(event.target.value)
+                            }
+                            disabled={isSavingInlineField}
+                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={saveInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.saveChanges")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={closeInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.cancel")}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex items-start justify-between gap-3">
+                          <div className="text-lg font-semibold">
+                            {orderState.quantity ?? "--"}
+                          </div>
+                          {renderInlineEditButton("quantity")}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">
+                        {t("orders.page.priority")}
+                      </div>
+                      {inlineEditingField === "priority" ? (
+                        <div className="mt-2 space-y-2">
+                          <Select
+                            value={inlineDraftValue}
+                            onValueChange={setInlineDraftValue}
+                            disabled={isSavingInlineField}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(
+                                ["low", "normal", "high", "urgent"] as const
+                              ).map((priority) => (
+                                <SelectItem key={priority} value={priority}>
+                                  {getOrderPriorityLabel(priority, t)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={saveInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.saveChanges")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={closeInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.cancel")}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex items-start justify-between gap-3">
+                          <div className="text-lg font-semibold">
+                            {getOrderPriorityLabel(orderState.priority, t)}
+                          </div>
+                          {renderInlineEditButton("priority")}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">
+                        {t("orders.page.deliveryAddress")}
+                      </div>
+                      {inlineEditingField === "deliveryAddress" ? (
+                        <div className="mt-2 space-y-2">
+                          <Input
+                            value={inlineDraftValue}
+                            onChange={(event) =>
+                              setInlineDraftValue(event.target.value)
+                            }
+                            disabled={isSavingInlineField}
+                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={saveInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.saveChanges")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={closeInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.cancel")}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex items-start justify-between gap-3">
+                          <div className="text-lg font-semibold">
+                            {deliveryAddressField
+                              ? ((orderState.orderFieldValues?.[
+                                  deliveryAddressField.id
+                                ] as string | undefined) ?? "--")
+                              : "--"}
+                          </div>
+                          {deliveryAddressField
+                            ? renderInlineEditButton("deliveryAddress")
+                            : null}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">
+                        {t("orders.page.customerPhone")}
+                      </div>
+                      {inlineEditingField === "customerPhone" ? (
+                        <div className="mt-2 space-y-2">
+                          <Input
+                            value={inlineDraftValue}
+                            onChange={(event) =>
+                              setInlineDraftValue(event.target.value)
+                            }
+                            disabled={isSavingInlineField}
+                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              size="sm"
+                              onClick={saveInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.saveChanges")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={closeInlineField}
+                              disabled={isSavingInlineField}
+                            >
+                              {t("orders.page.cancel")}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex items-start justify-between gap-3">
+                          <div className="text-lg font-semibold">
+                            {customerPhoneField
+                              ? ((orderState.orderFieldValues?.[
+                                  customerPhoneField.id
+                                ] as string | undefined) ?? "--")
+                              : "--"}
+                          </div>
+                          {customerPhoneField
+                            ? renderInlineEditButton("customerPhone")
+                            : null}
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      {t("orders.detail.overview.assignments")}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4 text-sm">
+                    <div className="grid items-start gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                        <div className="text-xs text-muted-foreground">
                           {engineerLabel}
-                        </span>
-                        <span className="font-medium">
-                          {orderState.assignedEngineerName ?? "--"}
-                        </span>
+                        </div>
+                        {inlineEditingField === "assignedEngineer" ? (
+                          <div className="mt-2 space-y-2">
+                            <Select
+                              value={inlineDraftValue || "__none__"}
+                              onValueChange={(value) =>
+                                setInlineDraftValue(
+                                  value === "__none__" ? "" : value,
+                                )
+                              }
+                              disabled={isSavingInlineField}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder={engineerLabel} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">--</SelectItem>
+                                {engineers
+                                  .filter((engineer) => engineer.id)
+                                  .map((engineer) => (
+                                    <SelectItem
+                                      key={engineer.id}
+                                      value={engineer.id}
+                                    >
+                                      {engineer.name}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                size="sm"
+                                onClick={saveInlineField}
+                                disabled={isSavingInlineField}
+                              >
+                                {t("orders.page.saveChanges")}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={closeInlineField}
+                                disabled={isSavingInlineField}
+                              >
+                                {t("orders.page.cancel")}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-1 flex items-start justify-between gap-3">
+                            <span className="text-lg font-semibold">
+                              {orderState.assignedEngineerName ?? "--"}
+                            </span>
+                            {renderInlineEditButton("assignedEngineer")}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
+
+                      <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                        <div className="text-xs text-muted-foreground">
                           {managerLabel}
-                        </span>
-                        <span className="font-medium">
-                          {orderState.assignedManagerName ?? "--"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
-                          {t("orders.page.priority")}
-                        </span>
-                        <span className="font-medium">
-                          {getOrderPriorityLabel(orderState.priority, t)}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                        <span className="text-muted-foreground">
-                          {t("orders.page.status")}
-                        </span>
-                        <span className="font-medium">
-                          {getOrderStatusLabel(displayStatus, t, statusLabel(displayStatus))}
-                        </span>
-                      </div>
-                      {summaryMetadataFields.map((field) => {
-                        const rawValue = orderState.orderFieldValues?.[field.id];
-                        const valueLabel = rawValue
-                          ? (orderState.orderFieldLabels?.[field.id] ?? rawValue)
-                          : "--";
-                        return (
-                          <div
-                            key={field.id}
-                            className="flex items-center justify-between rounded-md border border-border px-3 py-2"
-                          >
-                            <span className="text-muted-foreground">
-                              {field.name}
-                            </span>
-                            <span className="font-medium">{valueLabel}</span>
+                        </div>
+                        {inlineEditingField === "assignedManager" ? (
+                          <div className="mt-2 space-y-2">
+                            <Select
+                              value={inlineDraftValue || "__none__"}
+                              onValueChange={(value) =>
+                                setInlineDraftValue(
+                                  value === "__none__" ? "" : value,
+                                )
+                              }
+                              disabled={isSavingInlineField}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder={managerLabel} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">--</SelectItem>
+                                {managers
+                                  .filter((manager) => manager.id)
+                                  .map((manager) => (
+                                    <SelectItem
+                                      key={manager.id}
+                                      value={manager.id}
+                                    >
+                                      {manager.name}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                size="sm"
+                                onClick={saveInlineField}
+                                disabled={isSavingInlineField}
+                              >
+                                {t("orders.page.saveChanges")}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={closeInlineField}
+                                disabled={isSavingInlineField}
+                              >
+                                {t("orders.page.cancel")}
+                              </Button>
+                            </div>
                           </div>
-                        );
-                      })}
-                      {activeLevels.map((level) => {
-                        const valueId = orderState.orderFieldValues?.[level.id];
-                        const valueLabel = valueId
-                          ? (orderState.orderFieldLabels?.[level.id] ?? valueId)
-                          : "--";
-                        return (
-                          <div
-                            key={level.id}
-                            className="flex items-center justify-between rounded-md border border-border px-3 py-2"
-                          >
-                            <span className="text-muted-foreground">
-                              {level.name}
+                        ) : (
+                          <div className="mt-1 flex items-start justify-between gap-3">
+                            <span className="text-lg font-semibold">
+                              {orderState.assignedManagerName ?? "--"}
                             </span>
-                            <span className="font-medium">{valueLabel}</span>
+                            {renderInlineEditButton("assignedManager")}
                           </div>
-                        );
-                      })}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="space-y-3">
-                    <div className="text-xs font-semibold text-muted-foreground">
-                      {t("orders.detail.audit")}
-                    </div>
-                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">
-                        {t("orders.detail.createdAt")}
-                      </span>
-                      <span className="font-medium">
-                        {orderState.createdAt
-                          ? formatDateTime(orderState.createdAt)
+                  </CardContent>
+                </Card>
+
+                {customFieldRows.length > 0 ? (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>{t("orders.detail.orderFields")}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      {customFieldRows.map((field) => (
+                        <div
+                          key={field.id}
+                          className="rounded-md border border-border px-3 py-2"
+                        >
+                          <div className="text-muted-foreground">
+                            {field.label}
+                          </div>
+                          {inlineEditingField === `orderField:${field.id}` ? (
+                            <div className="mt-2 space-y-2">
+                              <Input
+                                value={inlineDraftValue}
+                                onChange={(event) =>
+                                  setInlineDraftValue(event.target.value)
+                                }
+                                disabled={isSavingInlineField}
+                              />
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={saveInlineField}
+                                  disabled={isSavingInlineField}
+                                >
+                                  {t("orders.page.saveChanges")}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={closeInlineField}
+                                  disabled={isSavingInlineField}
+                                >
+                                  {t("orders.page.cancel")}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-1 flex items-start justify-between gap-3">
+                              <span className="font-medium">{field.value}</span>
+                              {renderInlineEditButton(`orderField:${field.id}`)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                ) : null}
+              </div>
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      {t("orders.detail.overview.execution")}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-1">
+                    {[engineeringHealth, externalHealth]
+                      .concat(blockedHealth ? [blockedHealth] : [])
+                      .map((item) => (
+                        <div
+                          key={item.title}
+                          className={`rounded-xl border px-4 py-3 ${item.tone}`}
+                        >
+                          <div className="text-xs opacity-80">{item.title}</div>
+                          <div className="mt-1 text-lg font-semibold">
+                            {item.value}
+                          </div>
+                        </div>
+                      ))}
+                    <div className="rounded-xl border border-border bg-muted/10 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">
+                        {t("orders.detail.hero.engineeringTime")}
+                      </div>
+                      <div className="mt-1 text-lg font-semibold">
+                        {engineeringTiming
+                          ? formatDuration(engineeringTiming.durationMinutes)
                           : "--"}
-                      </span>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">
-                        {t("orders.detail.updatedAt")}
-                      </span>
-                      <span className="font-medium">
-                        {orderState.updatedAt
-                          ? formatDateTime(orderState.updatedAt)
-                          : "--"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                      <span className="text-muted-foreground">
-                        {t("orders.detail.createdBy")}
-                      </span>
-                      <span className="font-medium">
-                        {orderState.createdByName ??
-                          orderState.createdBy ??
-                          t("orders.detail.system")}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+
+                {activeChecklistItems.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardTitle>
+                          {t("orders.detail.workflow.preparationChecklist")}
+                        </CardTitle>
+                        <div className="text-xs text-muted-foreground">
+                          {checklistDoneCount}/{activeChecklistItems.length}
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      {activeChecklistItems.map((item) => (
+                        <label
+                          key={item.id}
+                          className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                        >
+                          <span className="font-medium">{item.label}</span>
+                          <Checkbox
+                            checked={Boolean(checklistState[item.id])}
+                            onChange={(event) =>
+                              handleChecklistToggle(
+                                item.id,
+                                event.target.checked,
+                              )
+                            }
+                          />
+                        </label>
+                      ))}
+                      {canSendToEngineering && !canAdvanceToEngineering && (
+                        <p className="text-xs text-muted-foreground">
+                          {t("orders.detail.workflow.completeRequired")}
+                          {rules.requireOrderInputsForEngineering
+                            ? t("orders.detail.workflow.andRequiredOrderInputs")
+                            : ""}{" "}
+                          {t(
+                            "orders.detail.workflow.beforeSendingToEngineering",
+                          )}
+                        </p>
+                      )}
+                      {canSendToProduction && !canAdvanceToProduction && (
+                        <p className="text-xs text-muted-foreground">
+                          {t("orders.detail.workflow.completeRequired")}
+                          {rules.requireOrderInputsForProduction
+                            ? t("orders.detail.workflow.andRequiredOrderInputs")
+                            : ""}{" "}
+                          {t(
+                            "orders.detail.workflow.beforeSendingToProduction",
+                          )}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </div>
           </div>
         </TabsContent>
 
@@ -4366,7 +5544,7 @@ export default function OrderDetailPage() {
                     </p>
                     <div className="mt-3">
                       <Button variant="outline" size="sm" asChild>
-                        <Link href="/settings?tab=structure">
+                        <Link href="/settings?tab=orderFields">
                           {t("orders.detail.openSettings")}
                         </Link>
                       </Button>
@@ -4416,266 +5594,8 @@ export default function OrderDetailPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="workflow">
+        <TabsContent value="history">
           <div className="space-y-6">
-            <div
-              className={`grid gap-6 ${
-                activeChecklistItems.length > 0
-                  ? "lg:grid-cols-[minmax(0,1fr)_360px]"
-                  : "lg:grid-cols-1"
-              }`}
-            >
-              <Card className="lg:sticky lg:top-6">
-                <CardHeader>
-                  <CardTitle>{t("orders.detail.workflow.title")}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4 text-sm">
-                  <div className="space-y-2 text-xs text-muted-foreground">
-                    {orderState.assignedManagerName && (
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
-                          {getInitials(orderState.assignedManagerName)}
-                        </div>
-                        <span>
-                          {managerLabel}: {orderState.assignedManagerName}
-                        </span>
-                      </div>
-                    )}
-                    {orderState.assignedEngineerName && (
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground">
-                          {getInitials(orderState.assignedEngineerName)}
-                        </div>
-                        <span>
-                          {engineerLabel}: {orderState.assignedEngineerName}
-                        </span>
-                      </div>
-                    )}
-                    {canAssignEngineer && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Select
-                          value={selectedEngineerId || "__none__"}
-                          onValueChange={(value) =>
-                            setSelectedEngineerId(
-                              value === "__none__" ? "" : value,
-                            )
-                          }
-                        >
-                          <SelectTrigger className="h-8 w-55 rounded-md text-xs">
-                            <SelectValue
-                              placeholder={t(
-                                "orders.detail.workflow.assignPlaceholder",
-                                {
-                                  role: engineerLabel.toLowerCase(),
-                                },
-                              )}
-                            />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">
-                              {t("orders.detail.workflow.assignPlaceholder", {
-                                role: engineerLabel.toLowerCase(),
-                              })}
-                            </SelectItem>
-                            {engineers
-                              .filter((engineer) => engineer.id)
-                              .map((engineer) => (
-                                <SelectItem
-                                  key={engineer.id}
-                                  value={engineer.id}
-                                >
-                                  {engineer.name}
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleAssignEngineer}
-                          disabled={!selectedEngineerId}
-                        >
-                          {t("orders.detail.workflow.assign")}
-                        </Button>
-                        {orderState.assignedEngineerId && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleClearEngineer}
-                          >
-                            {t("orders.detail.workflow.clear")}
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                    {orderState.statusChangedAt && (
-                      <div>
-                        {t("orders.detail.workflow.statusUpdated")}{" "}
-                        {orderState.statusChangedBy
-                          ? `${t("orders.detail.workflow.by")} ${orderState.statusChangedBy}`
-                          : ""}
-                        {orderState.statusChangedByRole
-                          ? ` (${orderState.statusChangedByRole})`
-                          : ""}
-                        {` ${t("orders.detail.on")} ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
-                      </div>
-                    )}
-                    {engineeringTiming && (
-                      <div>
-                        {t("orders.detail.workflow.engineeringTimeTotal")}:{" "}
-                        {formatDuration(engineeringTiming.durationMinutes)}
-                        {engineeringTiming.completedCycles > 0
-                          ? `, ${t("orders.detail.workflow.cycles")}: ${engineeringTiming.completedCycles}`
-                          : ""}
-                        {engineeringTiming.inProgress &&
-                        engineeringTiming.activeStartedAt
-                          ? `, ${t("orders.detail.workflow.inProgressSince")} ${formatDateTime(engineeringTiming.activeStartedAt)}`
-                          : engineeringTiming.completedAt
-                            ? ` (${t("orders.detail.workflow.lastCompleted")} ${formatDateTime(engineeringTiming.completedAt)})`
-                            : ""}
-                      </div>
-                    )}
-                  </div>
-                  {activeGateItems.length > 0 && (
-                    <div className="space-y-2 rounded-md border border-border bg-muted/20 px-3 py-2">
-                      <p className="text-[11px] font-medium text-muted-foreground">
-                        {activeGateLabel}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {activeGateItems.map((item) => (
-                          <span
-                            key={item.label}
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
-                              item.ok
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-amber-200 bg-amber-50 text-amber-700"
-                            }`}
-                          >
-                            {item.label}: {item.value}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {canSendToEngineering && (
-                      <Button
-                        size="sm"
-                        disabled={!canAdvanceToEngineering}
-                        onClick={() =>
-                          handleStatusChange("ready_for_engineering")
-                        }
-                      >
-                        {t("orders.detail.workflow.sendToEngineering")}
-                      </Button>
-                    )}
-                    {canStartEngineering && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleStatusChange("in_engineering")}
-                      >
-                        {t("orders.detail.workflow.startEngineering")}
-                      </Button>
-                    )}
-                    {canSendToProduction && (
-                      <Button
-                        size="sm"
-                        disabled={!canAdvanceToProduction}
-                        onClick={() =>
-                          handleStatusChange("ready_for_production")
-                        }
-                      >
-                        {statusLabel("ready_for_production")}
-                      </Button>
-                    )}
-                    {canSendBack && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setIsReturnOpen(true)}
-                      >
-                        {t("orders.detail.sendBack")}
-                      </Button>
-                    )}
-                    {canTakeOrder && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleTakeOrder}
-                      >
-                        {t("orders.page.takeOrder")}
-                      </Button>
-                    )}
-                    {canReturnToQueue && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleReturnToQueue}
-                      >
-                        {t("orders.detail.workflow.returnToQueue")}
-                      </Button>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-              {activeChecklistItems.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle>
-                        {t("orders.detail.workflow.preparationChecklist")}
-                      </CardTitle>
-                      <div className="text-xs text-muted-foreground">
-                        {checklistDoneCount}/{activeChecklistItems.length}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    {activeChecklistItems.length === 0 ? (
-                      <p className="text-muted-foreground">
-                        {t("orders.detail.workflow.noChecklistConfigured")}
-                      </p>
-                    ) : (
-                      activeChecklistItems.map((item) => (
-                        <label
-                          key={item.id}
-                          className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                        >
-                          <span className="font-medium">{item.label}</span>
-                          <Checkbox
-                            checked={Boolean(checklistState[item.id])}
-                            onChange={(event) =>
-                              handleChecklistToggle(
-                                item.id,
-                                event.target.checked,
-                              )
-                            }
-                          />
-                        </label>
-                      ))
-                    )}
-                    {canSendToEngineering && !canAdvanceToEngineering && (
-                      <p className="text-xs text-muted-foreground">
-                        {t("orders.detail.workflow.completeRequired")}
-                        {rules.requireOrderInputsForEngineering
-                          ? t("orders.detail.workflow.andRequiredOrderInputs")
-                          : ""}{" "}
-                        {t("orders.detail.workflow.beforeSendingToEngineering")}
-                      </p>
-                    )}
-                    {canSendToProduction && !canAdvanceToProduction && (
-                      <p className="text-xs text-muted-foreground">
-                        {t("orders.detail.workflow.completeRequired")}
-                        {rules.requireOrderInputsForProduction
-                          ? t("orders.detail.workflow.andRequiredOrderInputs")
-                          : ""}{" "}
-                        {t("orders.detail.workflow.beforeSendingToProduction")}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-            </div>
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -4735,7 +5655,7 @@ export default function OrderDetailPage() {
                       {orderState.statusChangedByRole
                         ? ` (${orderState.statusChangedByRole})`
                         : ""}
-                      {` on ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
+                      {` ${t("orders.detail.on")} ${formatDate(orderState.statusChangedAt.slice(0, 10))}`}
                     </div>
                   </div>
                 ) : (
@@ -4754,114 +5674,159 @@ export default function OrderDetailPage() {
               <CardHeader>
                 <CardTitle>{t("orders.detail.attachments.title")}</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <SelectField
-                  label={t("orders.detail.attachments.category")}
-                  value={attachmentCategory}
-                  onValueChange={(value) => {
-                    setAttachmentCategory(value);
-                    setIsAttachmentCategoryManual(true);
-                  }}
-                  description={t(
-                    "orders.detail.attachments.categoryDescription",
-                  )}
-                >
-                  <Select
-                    value={attachmentCategory}
-                    onValueChange={(value) => {
-                      setAttachmentCategory(value);
-                      setIsAttachmentCategoryManual(true);
-                    }}
-                  >
-                    <SelectTrigger className="h-10 w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {attachmentCategories.map((category) => (
-                        <SelectItem key={category.id} value={category.id}>
-                          {category.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </SelectField>
-                <div className="space-y-2">
-                  <div
-                    className="flex min-h-21.5 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      handleFilesAdded(event.dataTransfer.files);
-                    }}
-                    onClick={() => {
-                      const input = document.getElementById(
-                        "attachment-file-input",
-                      ) as HTMLInputElement | null;
-                      input?.click();
-                    }}
-                  >
-                    <ImageIcon className="h-5 w-5" />
-                    <span>{t("orders.detail.attachments.dragAndDrop")}</span>
-                    <FileField
-                      id="attachment-file-input"
-                      multiple
-                      wrapperClassName="hidden"
-                      onChange={(event) => {
-                        if (event.target.files) {
-                          handleFilesAdded(event.target.files);
-                        }
-                        event.target.value = "";
-                      }}
-                    />
-                    <span className="text-[11px]">
-                      {t("orders.detail.attachments.maxPerFile", {
-                        size: MAX_FILE_SIZE_MB,
+              <CardContent className="space-y-5 text-sm">
+                <div className="flex flex-wrap gap-2">
+                  <span className="inline-flex items-center rounded-full border border-border bg-muted/20 px-3 py-1 text-xs text-muted-foreground">
+                    {t("orders.detail.attachments.totalFiles", {
+                      count: attachments.length,
+                    })}
+                  </span>
+                  {latestAttachment ? (
+                    <span className="inline-flex items-center rounded-full border border-border bg-muted/20 px-3 py-1 text-xs text-muted-foreground">
+                      {t("orders.detail.attachments.latestUpload", {
+                        date: formatDate(
+                          latestAttachment.createdAt.slice(0, 10),
+                        ),
                       })}
                     </span>
-                  </div>
-                  {attachmentError && (
-                    <p className="text-xs text-destructive">
-                      {attachmentError}
-                    </p>
-                  )}
-                  {attachmentNotice && (
-                    <p className="text-xs text-muted-foreground">
-                      {attachmentNotice}
-                    </p>
-                  )}
+                  ) : null}
+                  <span className="inline-flex items-center rounded-full border border-border bg-muted/20 px-3 py-1 text-xs text-muted-foreground">
+                    {t("orders.detail.attachments.categoriesCount", {
+                      count: attachmentGroups.length,
+                    })}
+                  </span>
+                  {selectedAttachmentsCount > 0 ? (
+                    <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs text-primary">
+                      {t("orders.detail.attachments.selectedCount", {
+                        count: selectedAttachmentsCount,
+                      })}
+                    </span>
+                  ) : null}
                 </div>
 
-                {attachmentFiles.length > 0 && (
-                  <div className="space-y-2 text-xs text-muted-foreground">
-                    {attachmentFiles.map((file, index) => (
-                      <div
-                        key={`${file.name}-${index}`}
-                        className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2"
-                      >
-                        <span>{file.name}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemovePendingFile(index)}
-                        >
-                          <Trash2Icon className="h-4 w-4" />
-                        </Button>
+                <div className="rounded-xl border border-border bg-muted/10 p-3">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start">
+                    <div className="min-w-0">
+                      <div className="mb-1 text-xs font-medium text-muted-foreground">
+                        {t("orders.detail.attachments.category")}
                       </div>
-                    ))}
-                    <div className="flex justify-end">
+                      <Select
+                        value={attachmentCategory}
+                        onValueChange={(value) => {
+                          setAttachmentCategory(value);
+                          setIsAttachmentCategoryManual(true);
+                        }}
+                      >
+                        <SelectTrigger className="h-10 w-full bg-background">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {attachmentCategories.map((category) => (
+                            <SelectItem key={category.id} value={category.id}>
+                              {category.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {t("orders.detail.attachments.categoryDescription")}
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <div
+                        className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-background px-4 py-4 text-center text-xs text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5"
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          handleFilesAdded(event.dataTransfer.files);
+                        }}
+                        onClick={() => {
+                          const input = document.getElementById(
+                            "attachment-file-input",
+                          ) as HTMLInputElement | null;
+                          input?.click();
+                        }}
+                      >
+                        <UploadIcon className="h-4 w-4" />
+                        <span>
+                          {t("orders.detail.attachments.dragAndDrop")}
+                        </span>
+                        <span className="text-[11px]">
+                          {t("orders.detail.attachments.maxPerFile", {
+                            size: MAX_FILE_SIZE_MB,
+                          })}
+                        </span>
+                      </div>
+                      <FileField
+                        id="attachment-file-input"
+                        multiple
+                        wrapperClassName="hidden"
+                        onChange={(event) => {
+                          if (event.target.files) {
+                            handleFilesAdded(event.target.files);
+                          }
+                          event.target.value = "";
+                        }}
+                      />
+                      {attachmentError ? (
+                        <p className="text-xs text-destructive">
+                          {attachmentError}
+                        </p>
+                      ) : null}
+                      {attachmentNotice ? (
+                        <p className="text-xs text-muted-foreground">
+                          {attachmentNotice}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                {attachmentFiles.length > 0 ? (
+                  <div className="rounded-xl border border-border bg-muted/10 p-3">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-semibold text-muted-foreground">
+                        {t("orders.detail.attachments.pendingFiles")}
+                      </div>
                       <Button
+                        size="sm"
                         onClick={handleAddAttachment}
                         disabled={isUploading}
                       >
+                        <UploadIcon className="h-4 w-4" />
                         {isUploading
                           ? t("orders.detail.uploading")
                           : t("orders.detail.upload")}
                       </Button>
                     </div>
+                    <div className="space-y-2 text-xs text-muted-foreground">
+                      {attachmentFiles.map((file, index) => (
+                        <div
+                          key={`${file.name}-${index}`}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-foreground">
+                              {file.name}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground">
+                              {formatFileSize(file.size)}
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemovePendingFile(index)}
+                          >
+                            <Trash2Icon className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                )}
+                ) : null}
 
                 {attachments.length === 0 ? (
                   <p className="text-muted-foreground">
@@ -4869,140 +5834,208 @@ export default function OrderDetailPage() {
                   </p>
                 ) : (
                   <div className="space-y-4">
-                    {attachmentGroups.map((group) => (
-                      <div key={group.key} className="space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs font-semibold text-muted-foreground">
-                            {group.label}
-                          </div>
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              disabled={
-                                downloadingAttachmentGroup === group.key
-                              }
-                              onClick={() => {
-                                void handleDownloadAttachmentGroup(group);
-                              }}
-                            >
-                              <DownloadIcon className="h-3.5 w-3.5" />
-                              {downloadingAttachmentGroup === group.key
-                                ? t("orders.detail.preparing")
-                                : t("orders.detail.attachments.downloadAll")}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              disabled={
-                                deletingAttachmentGroup === group.key ||
-                                !group.items.some((item) =>
-                                  selectedAttachmentIds.includes(item.id),
-                                )
-                              }
-                              onClick={() => {
-                                void handleDeleteAttachmentGroup(
-                                  group,
-                                  "selected",
-                                );
-                              }}
-                            >
-                              {deletingAttachmentGroup === group.key
-                                ? t("orders.detail.deleting")
-                                : t("orders.detail.attachments.deleteSelected")}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs text-destructive hover:text-destructive"
-                              disabled={deletingAttachmentGroup === group.key}
-                              onClick={() => {
-                                void handleDeleteAttachmentGroup(group, "all");
-                              }}
-                            >
-                              {deletingAttachmentGroup === group.key
-                                ? t("orders.detail.deleting")
-                                : t("orders.detail.attachments.deleteAll")}
-                            </Button>
-                          </div>
-                        </div>
-                        {group.items.map((attachment) => (
-                          <div
-                            key={attachment.id}
-                            className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                          >
-                            <div className="flex min-w-0 items-center gap-3">
-                              {renderAttachmentPreview(
-                                attachment,
-                                resolveAttachmentUrl(attachment),
-                              )}
-                              <div className="min-w-0">
-                                <div className="break-all font-medium">
-                                  {attachment.name}
+                    {attachmentGroups.map((group) => {
+                      const selectedInGroup = group.items.filter((item) =>
+                        selectedAttachmentIds.includes(item.id),
+                      );
+                      return (
+                        <div
+                          key={group.key}
+                          className="overflow-hidden rounded-xl border border-border bg-background"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/10 px-3 py-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-semibold">
+                                  {group.label}
                                 </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {t("orders.detail.attachments.addedBy", {
-                                    name: attachment.addedBy,
+                                <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
+                                  {t("orders.detail.attachments.totalFiles", {
+                                    count: group.items.length,
                                   })}
-                                  {attachment.addedByRole
-                                    ? ` (${attachment.addedByRole})`
-                                    : ""}{" "}
-                                  {t("orders.detail.on")}{" "}
-                                  {formatDate(
-                                    attachment.createdAt.slice(0, 10),
-                                  )}
-                                </div>
+                                </span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <Checkbox
-                                variant="box"
-                                checked={selectedAttachmentIds.includes(
-                                  attachment.id,
-                                )}
-                                onChange={(event) => {
-                                  const checked = event.target.checked;
-                                  setSelectedAttachmentIds((prev) => {
-                                    if (checked) {
-                                      return prev.includes(attachment.id)
-                                        ? prev
-                                        : [...prev, attachment.id];
-                                    }
-                                    return prev.filter(
-                                      (itemId) => itemId !== attachment.id,
-                                    );
-                                  });
-                                }}
-                              />
-                              {resolveAttachmentUrl(attachment) && (
-                                <a
-                                  href={resolveAttachmentUrl(attachment)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-xs text-primary underline"
-                                >
-                                  {t("orders.detail.open")}
-                                </a>
-                              )}
+                            <div className="flex flex-wrap items-center justify-end gap-2">
                               <Button
-                                variant="ghost"
+                                type="button"
                                 size="sm"
-                                onClick={() =>
-                                  handleRemoveAttachment(attachment.id)
+                                variant="outline"
+                                className="h-8 text-xs"
+                                disabled={
+                                  downloadingAttachmentGroup === group.key
                                 }
+                                onClick={() => {
+                                  void handleDownloadAttachmentGroup(group);
+                                }}
                               >
-                                <Trash2Icon className="h-4 w-4" />
+                                <DownloadIcon className="h-3.5 w-3.5" />
+                                {downloadingAttachmentGroup === group.key
+                                  ? t("orders.detail.preparing")
+                                  : t("orders.detail.attachments.downloadAll")}
                               </Button>
+                              {selectedInGroup.length > 0 ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 text-xs"
+                                  disabled={
+                                    deletingAttachmentGroup === group.key
+                                  }
+                                  onClick={() => {
+                                    void handleDeleteAttachmentGroup(
+                                      group,
+                                      "selected",
+                                    );
+                                  }}
+                                >
+                                  {deletingAttachmentGroup === group.key
+                                    ? t("orders.detail.deleting")
+                                    : t(
+                                        "orders.detail.attachments.deleteSelected",
+                                      )}
+                                </Button>
+                              ) : null}
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 w-8 p-0 text-muted-foreground"
+                                    aria-label={t(
+                                      "orders.detail.attachments.deleteAll",
+                                    )}
+                                  >
+                                    <MoreHorizontalIcon className="h-4 w-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  align="end"
+                                  className="w-48 p-2"
+                                >
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="w-full justify-start text-destructive hover:text-destructive"
+                                    disabled={
+                                      deletingAttachmentGroup === group.key
+                                    }
+                                    onClick={() => {
+                                      void handleDeleteAttachmentGroup(
+                                        group,
+                                        "all",
+                                      );
+                                    }}
+                                  >
+                                    {deletingAttachmentGroup === group.key
+                                      ? t("orders.detail.deleting")
+                                      : t(
+                                          "orders.detail.attachments.deleteAll",
+                                        )}
+                                  </Button>
+                                </PopoverContent>
+                              </Popover>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    ))}
+                          <div className="divide-y divide-border">
+                            {group.items.map((attachment) => {
+                              const fileUrl = resolveAttachmentUrl(attachment);
+                              const sizeLabel = formatFileSize(attachment.size);
+                              const attachmentCategoryKey =
+                                attachment.category ?? "";
+                              return (
+                                <div
+                                  key={attachment.id}
+                                  className="flex flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between"
+                                >
+                                  <div className="flex min-w-0 items-start gap-3">
+                                    {renderAttachmentPreview(
+                                      attachment,
+                                      fileUrl,
+                                    )}
+                                    <div className="min-w-0">
+                                      <div className="break-all text-sm font-medium">
+                                        {attachment.name}
+                                      </div>
+                                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                        <span className="rounded-full border border-border bg-muted/10 px-2 py-0.5 text-[11px]">
+                                          {attachmentCategoryLabels[
+                                            attachmentCategoryKey
+                                          ] ?? attachment.category}
+                                        </span>
+                                        <span>
+                                          {t(
+                                            "orders.detail.attachments.addedBy",
+                                            {
+                                              name: attachment.addedBy,
+                                            },
+                                          )}
+                                          {attachment.addedByRole
+                                            ? ` (${attachment.addedByRole})`
+                                            : ""}
+                                        </span>
+                                        <span>
+                                          {formatDate(
+                                            attachment.createdAt.slice(0, 10),
+                                          )}
+                                        </span>
+                                        {sizeLabel ? (
+                                          <span>{sizeLabel}</span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-end gap-2 md:self-start">
+                                    <Checkbox
+                                      variant="box"
+                                      checked={selectedAttachmentIds.includes(
+                                        attachment.id,
+                                      )}
+                                      onChange={(event) => {
+                                        const checked = event.target.checked;
+                                        setSelectedAttachmentIds((prev) => {
+                                          if (checked) {
+                                            return prev.includes(attachment.id)
+                                              ? prev
+                                              : [...prev, attachment.id];
+                                          }
+                                          return prev.filter(
+                                            (itemId) =>
+                                              itemId !== attachment.id,
+                                          );
+                                        });
+                                      }}
+                                    />
+                                    {fileUrl ? (
+                                      <a
+                                        href={fileUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs text-primary underline underline-offset-2"
+                                      >
+                                        {t("orders.detail.open")}
+                                      </a>
+                                    ) : null}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() =>
+                                        handleRemoveAttachment(attachment.id)
+                                      }
+                                    >
+                                      <Trash2Icon className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -5012,18 +6045,37 @@ export default function OrderDetailPage() {
               <CardHeader>
                 <CardTitle>{t("orders.detail.comments.title")}</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="space-y-2">
-                  <textarea
-                    value={commentMessage}
-                    onChange={(event) => setCommentMessage(event.target.value)}
-                    className="min-h-22.5 w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-                    placeholder={t("orders.detail.comments.placeholder")}
-                  />
-                  <div className="flex justify-end">
-                    <Button onClick={handleAddComment}>
-                      {t("orders.detail.comments.add")}
-                    </Button>
+              <CardContent className="space-y-4 text-sm">
+                <div className="flex flex-wrap gap-2">
+                  <span className="inline-flex items-center rounded-full border border-border bg-muted/20 px-3 py-1 text-xs text-muted-foreground">
+                    {t("orders.detail.comments.totalComments", {
+                      count: comments.length,
+                    })}
+                  </span>
+                  {latestComment ? (
+                    <span className="inline-flex items-center rounded-full border border-border bg-muted/20 px-3 py-1 text-xs text-muted-foreground">
+                      {t("orders.detail.comments.latestComment", {
+                        date: formatDate(latestComment.createdAt.slice(0, 10)),
+                      })}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="rounded-xl border border-border bg-muted/10 p-3">
+                  <div className="space-y-2">
+                    <textarea
+                      value={commentMessage}
+                      onChange={(event) =>
+                        setCommentMessage(event.target.value)
+                      }
+                      className="min-h-22.5 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                      placeholder={t("orders.detail.comments.placeholder")}
+                    />
+                    <div className="flex justify-end">
+                      <Button onClick={handleAddComment}>
+                        {t("orders.detail.comments.add")}
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 {comments.length === 0 ? (
@@ -5031,22 +6083,21 @@ export default function OrderDetailPage() {
                     {t("orders.detail.comments.empty")}
                   </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {comments.map((comment) => (
                       <div
                         key={comment.id}
-                        className="rounded-md border border-border px-3 py-2"
+                        className="rounded-xl border border-border bg-background px-3 py-3"
                       >
-                        <div className="text-xs text-muted-foreground">
-                          {comment.author}
-                          {comment.authorRole
-                            ? ` (${comment.authorRole})`
-                            : ""}{" "}
-                          - {formatDate(comment.createdAt.slice(0, 10))}
-                        </div>
-                        <div className="mt-1">{comment.message}</div>
-                        {canRemoveComment(comment) && (
-                          <div className="mt-2 flex justify-end">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="text-xs text-muted-foreground">
+                            {comment.author}
+                            {comment.authorRole
+                              ? ` (${comment.authorRole})`
+                              : ""}{" "}
+                            - {formatDate(comment.createdAt.slice(0, 10))}
+                          </div>
+                          {canRemoveComment(comment) ? (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -5054,8 +6105,11 @@ export default function OrderDetailPage() {
                             >
                               <Trash2Icon className="h-4 w-4" />
                             </Button>
-                          </div>
-                        )}
+                          ) : null}
+                        </div>
+                        <div className="mt-2 whitespace-pre-wrap text-sm">
+                          {comment.message}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -5864,59 +6918,6 @@ export default function OrderDetailPage() {
         </TabsContent>
       </Tabs>
 
-      <OrderModal
-        open={isEditOpen && canEditOrderRecord}
-        onClose={() => setIsEditOpen(false)}
-        onSubmit={async (values) => {
-          if (!canEditOrderRecord) {
-            return false;
-          }
-          setOrderState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  customerName: values.customerName,
-                  productName: values.productName,
-                  quantity: values.quantity,
-                  orderFieldValues: values.orderFieldValues,
-                  dueDate: values.dueDate,
-                  priority: values.priority,
-                  status: values.status,
-                  assignedEngineerName: values.assignedEngineerName,
-                  assignedManagerName: values.assignedManagerName,
-                }
-              : prev,
-          );
-          await updateOrder(orderState.id, {
-            customerName: values.customerName,
-            productName: values.productName,
-            quantity: values.quantity,
-            orderFieldValues: values.orderFieldValues,
-            dueDate: values.dueDate,
-            priority: values.priority,
-            status: values.status,
-            assignedEngineerName: values.assignedEngineerName,
-            assignedManagerName: values.assignedManagerName,
-          });
-          return true;
-        }}
-        title={t("orders.page.editOrderTitle")}
-        submitLabel={t("orders.page.saveChanges")}
-        editMode="full"
-        initialValues={{
-          orderNumber: orderState.orderNumber,
-          customerName: orderState.customerName,
-          productName: orderState.productName ?? "",
-          quantity: orderState.quantity ?? 1,
-          dueDate: orderState.dueDate,
-          priority: orderState.priority,
-          status: orderState.status,
-          assignedEngineerName: orderState.assignedEngineerName ?? "",
-          assignedManagerName: orderState.assignedManagerName ?? "",
-          orderFieldValues: orderState.orderFieldValues,
-        }}
-      />
-
       {isReturnOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
@@ -6013,4 +7014,3 @@ export default function OrderDetailPage() {
     </section>
   );
 }
-

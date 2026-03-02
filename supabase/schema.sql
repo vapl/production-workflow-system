@@ -60,6 +60,9 @@ create table if not exists public.orders (
   synced_at timestamptz,
   production_duration_minutes integer,
   created_by uuid references auth.users(id) on delete set null,
+  created_by_name text,
+  updated_by uuid references auth.users(id) on delete set null,
+  updated_by_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -68,6 +71,7 @@ create index if not exists orders_tenant_id_idx on public.orders(tenant_id);
 create index if not exists orders_status_idx on public.orders(status);
 create index if not exists orders_due_date_idx on public.orders(due_date);
 create index if not exists orders_external_id_idx on public.orders(external_id);
+create index if not exists orders_updated_by_idx on public.orders(updated_by);
 
 create table if not exists public.order_attachments (
   id uuid primary key default gen_random_uuid(),

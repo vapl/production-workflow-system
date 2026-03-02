@@ -37,6 +37,12 @@ import { Input } from "@/components/ui/Input";
 import { getOrderStatusLabel } from "@/lib/domain/orderFieldPresentation";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
+import { useAssignmentLabels } from "@/hooks/useAssignmentLabels";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
+import {
+  canDeleteOrderInstance,
+  canEditOrderInstanceViaModal,
+} from "@/lib/domain/orderPermissions";
 
 function getStoragePathFromUrl(url: string, bucket: string) {
   if (!url) {
@@ -69,9 +75,17 @@ export default function OrdersPage() {
   const { activeGroups, partners } = usePartners();
   const canEditOrDeleteOrders = hasPermission("orders.manage");
   const canOpenExternalOrders = canViewExternalOrders(user);
-  const engineerLabel = rules.assignmentLabels?.engineer ?? t("orders.page.engineerFallback");
-  const managerLabel = rules.assignmentLabels?.manager ?? t("orders.page.managerFallback");
+  const { engineer: engineerLabel, manager: managerLabel } =
+    useAssignmentLabels();
   const isEngineeringUser = user.role.toLowerCase().startsWith("engineer");
+  const canEditOrderFromList = useCallback(
+    (order: Order) => canEditOrderInstanceViaModal(user, order),
+    [user],
+  );
+  const canDeleteOrderFromList = useCallback(
+    (order: Order) => canDeleteOrderInstance(user, order),
+    [user],
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const roleStatusOptions = useMemo<StatusOption[]>(() => {
@@ -109,15 +123,27 @@ export default function OrdersPage() {
         }));
 
     if (isEngineeringUser) {
-      return [{ value: "all", label: t("orders.page.all") }, ...build(engineeringStatuses)];
+      return [
+        { value: "all", label: t("orders.page.all") },
+        ...build(engineeringStatuses),
+      ];
     }
     if (user.role === "Warehouse") {
-      return [{ value: "all", label: t("orders.page.all") }, ...build(productionStatuses)];
+      return [
+        { value: "all", label: t("orders.page.all") },
+        ...build(productionStatuses),
+      ];
     }
     if (user.role === "Sales") {
-      return [{ value: "all", label: t("orders.page.all") }, ...build(salesStatuses)];
+      return [
+        { value: "all", label: t("orders.page.all") },
+        ...build(salesStatuses),
+      ];
     }
-    return [{ value: "all", label: t("orders.page.all") }, ...build(salesStatuses)];
+    return [
+      { value: "all", label: t("orders.page.all") },
+      ...build(salesStatuses),
+    ];
   }, [
     isEngineeringUser,
     rules.orderStatusConfig,
@@ -139,12 +165,11 @@ export default function OrdersPage() {
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
   const [partnerGroupFilter, setPartnerGroupFilter] = useState("");
   const [assignmentFilter, setAssignmentFilter] = useState<
     "all" | "queue" | "my"
-  >(
-    isEngineeringUser ? "all" : "queue",
-  );
+  >(isEngineeringUser ? "all" : "queue");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [blockedOnly, setBlockedOnly] = useState(false);
   const [unassignedOnly, setUnassignedOnly] = useState(false);
@@ -183,88 +208,97 @@ export default function OrdersPage() {
     return data?.signedUrl ?? url;
   }, []);
 
-  const resolveOrderAvatars = useCallback(async (rows: Order[]) => {
-    if (!supabase) {
-      return rows;
-    }
-    const ids = new Set<string>();
-    rows.forEach((order) => {
-      if (order.assignedEngineerId) {
-        ids.add(order.assignedEngineerId);
+  const resolveOrderAvatars = useCallback(
+    async (rows: Order[]) => {
+      if (!supabase) {
+        return rows;
       }
-      if (order.assignedManagerId) {
-        ids.add(order.assignedManagerId);
-      }
-    });
-    if (ids.size === 0) {
-      return rows;
-    }
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, avatar_url")
-      .in("id", Array.from(ids));
-    if (!data) {
-      return rows;
-    }
-    const avatarMap = new Map<string, string | null>();
-    await Promise.all(
-      data.map(async (profile) => {
-        const resolved = await resolveSignedAvatarUrl(profile.avatar_url);
-        avatarMap.set(profile.id, resolved ?? null);
-      }),
-    );
-    return rows.map((order) => ({
-      ...order,
-      assignedEngineerAvatarUrl: order.assignedEngineerId
-        ? (avatarMap.get(order.assignedEngineerId) ?? undefined)
-        : undefined,
-      assignedManagerAvatarUrl: order.assignedManagerId
-        ? (avatarMap.get(order.assignedManagerId) ?? undefined)
-        : undefined,
-    }));
-  }, [resolveSignedAvatarUrl]);
-
-  const applyProductionStatus = useCallback(async (rows: Order[]) => {
-    if (!supabase) {
-      return rows;
-    }
-    const orderIds = rows.map((row) => row.id).filter(Boolean);
-    if (orderIds.length === 0) {
-      return rows;
-    }
-    const { data, error: prodError } = await supabase
-      .from("production_items")
-      .select("order_id, station_id, status")
-      .in("order_id", orderIds);
-    if (prodError || !data) {
-      return rows;
-    }
-    const counts = new Map<string, Array<{ status: string; stationId: string | null }>>();
-    data.forEach((item) => {
-      const entry = counts.get(item.order_id) ?? [];
-      entry.push({
-        status: item.status,
-        stationId: item.station_id,
+      const ids = new Set<string>();
+      rows.forEach((order) => {
+        if (order.assignedEngineerId) {
+          ids.add(order.assignedEngineerId);
+        }
+        if (order.assignedManagerId) {
+          ids.add(order.assignedManagerId);
+        }
       });
-      counts.set(item.order_id, entry);
-    });
-    return rows.map((row) => {
-      const stat = counts.get(row.id);
-      if (!stat || stat.length === 0) {
-        return row;
+      if (ids.size === 0) {
+        return rows;
       }
-      const displayStatus: OrderStatus = isOrderProductionComplete(
-        stat,
-        rules.productionCompletionConfig,
-      )
-        ? "done"
-        : "in_production";
-      return {
-        ...row,
-        statusDisplay: displayStatus,
-      };
-    });
-  }, [rules.productionCompletionConfig]);
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, avatar_url")
+        .in("id", Array.from(ids));
+      if (!data) {
+        return rows;
+      }
+      const avatarMap = new Map<string, string | null>();
+      await Promise.all(
+        data.map(async (profile) => {
+          const resolved = await resolveSignedAvatarUrl(profile.avatar_url);
+          avatarMap.set(profile.id, resolved ?? null);
+        }),
+      );
+      return rows.map((order) => ({
+        ...order,
+        assignedEngineerAvatarUrl: order.assignedEngineerId
+          ? (avatarMap.get(order.assignedEngineerId) ?? undefined)
+          : undefined,
+        assignedManagerAvatarUrl: order.assignedManagerId
+          ? (avatarMap.get(order.assignedManagerId) ?? undefined)
+          : undefined,
+      }));
+    },
+    [resolveSignedAvatarUrl],
+  );
+
+  const applyProductionStatus = useCallback(
+    async (rows: Order[]) => {
+      if (!supabase) {
+        return rows;
+      }
+      const orderIds = rows.map((row) => row.id).filter(Boolean);
+      if (orderIds.length === 0) {
+        return rows;
+      }
+      const { data, error: prodError } = await supabase
+        .from("production_items")
+        .select("order_id, station_id, status")
+        .in("order_id", orderIds);
+      if (prodError || !data) {
+        return rows;
+      }
+      const counts = new Map<
+        string,
+        Array<{ status: string; stationId: string | null }>
+      >();
+      data.forEach((item) => {
+        const entry = counts.get(item.order_id) ?? [];
+        entry.push({
+          status: item.status,
+          stationId: item.station_id,
+        });
+        counts.set(item.order_id, entry);
+      });
+      return rows.map((row) => {
+        const stat = counts.get(row.id);
+        if (!stat || stat.length === 0) {
+          return row;
+        }
+        const displayStatus: OrderStatus = isOrderProductionComplete(
+          stat,
+          rules.productionCompletionConfig,
+        )
+          ? "done"
+          : "in_production";
+        return {
+          ...row,
+          statusDisplay: displayStatus,
+        };
+      });
+    },
+    [rules.productionCompletionConfig],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -498,9 +532,7 @@ export default function OrdersPage() {
     visibleOrders.forEach((order) => {
       const contractId = order.orderFieldValues?.[contractLevel.id] ?? "none";
       const label =
-        contractId === "none"
-          ? t("orders.page.noContract")
-          : contractId;
+        contractId === "none" ? t("orders.page.noContract") : contractId;
       if (!groups.has(label)) {
         groups.set(label, []);
       }
@@ -510,13 +542,7 @@ export default function OrdersPage() {
       label,
       orders,
     }));
-  }, [
-    canGroupByContract,
-    contractLevel,
-    visibleOrders,
-    groupByContract,
-    t,
-  ]);
+  }, [canGroupByContract, contractLevel, visibleOrders, groupByContract, t]);
 
   useEffect(() => {
     if (!canGroupByContract && groupByContract) {
@@ -539,72 +565,75 @@ export default function OrdersPage() {
     });
   }
 
-  const getLocalFilteredOrders = useCallback((source: Order[]) => {
-    const todayIso = new Date().toISOString().slice(0, 10);
-    let filtered = source;
-    if (isEngineeringUser) {
-      filtered = filtered.filter((order) =>
-        assignmentFilter === "all"
-          ? true
-          : isEngineeringAlwaysVisibleStatus(getEffectiveStatus(order))
+  const getLocalFilteredOrders = useCallback(
+    (source: Order[]) => {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      let filtered = source;
+      if (isEngineeringUser) {
+        filtered = filtered.filter((order) =>
+          assignmentFilter === "all"
             ? true
-            : assignmentFilter === "queue"
-              ? !order.assignedEngineerId
-              : order.assignedEngineerId === user.id,
-      );
-    }
-    if (statusFilter !== "all") {
-      filtered = filtered.filter(
-        (order) => getEffectiveStatus(order) === statusFilter,
-      );
-    }
-    if (isEngineeringUser && blockedOnly) {
-      filtered = filtered.filter(
-        (order) => order.status === "engineering_blocked",
-      );
-    }
-    if (isEngineeringUser && unassignedOnly) {
-      filtered = filtered.filter((order) => !order.assignedEngineerId);
-    }
-    if (overdueOnly) {
-      filtered = filtered.filter((order) => order.dueDate < todayIso);
-    }
-    const q = searchQuery.trim().toLowerCase();
-    if (q.length > 0) {
-      filtered = filtered.filter((order) =>
-        [order.orderNumber, order.customerName, order.productName ?? ""]
-          .join(" ")
-          .toLowerCase()
-          .includes(q),
-      );
-    }
-    if (partnerGroupFilter) {
-      const groupPartnerIds = new Set(
-        partners
-          .filter((partner) => partner.groupId === partnerGroupFilter)
-          .map((partner) => partner.id),
-      );
-      filtered = filtered.filter((order) =>
-        (order.externalJobs ?? []).some(
-          (job) => !!job.partnerId && groupPartnerIds.has(job.partnerId),
-        ),
-      );
-    }
-    return filtered;
-  }, [
-    assignmentFilter,
-    blockedOnly,
-    getEffectiveStatus,
-    isEngineeringAlwaysVisibleStatus,
-    isEngineeringUser,
-    overdueOnly,
-    partnerGroupFilter,
-    partners,
-    searchQuery,
-    statusFilter,
-    unassignedOnly,
-    user.id,
-  ]);
+            : isEngineeringAlwaysVisibleStatus(getEffectiveStatus(order))
+              ? true
+              : assignmentFilter === "queue"
+                ? !order.assignedEngineerId
+                : order.assignedEngineerId === user.id,
+        );
+      }
+      if (statusFilter !== "all") {
+        filtered = filtered.filter(
+          (order) => getEffectiveStatus(order) === statusFilter,
+        );
+      }
+      if (isEngineeringUser && blockedOnly) {
+        filtered = filtered.filter(
+          (order) => order.status === "engineering_blocked",
+        );
+      }
+      if (isEngineeringUser && unassignedOnly) {
+        filtered = filtered.filter((order) => !order.assignedEngineerId);
+      }
+      if (overdueOnly) {
+        filtered = filtered.filter((order) => order.dueDate < todayIso);
+      }
+      const q = searchQuery.trim().toLowerCase();
+      if (q.length > 0) {
+        filtered = filtered.filter((order) =>
+          [order.orderNumber, order.customerName, order.productName ?? ""]
+            .join(" ")
+            .toLowerCase()
+            .includes(q),
+        );
+      }
+      if (partnerGroupFilter) {
+        const groupPartnerIds = new Set(
+          partners
+            .filter((partner) => partner.groupId === partnerGroupFilter)
+            .map((partner) => partner.id),
+        );
+        filtered = filtered.filter((order) =>
+          (order.externalJobs ?? []).some(
+            (job) => !!job.partnerId && groupPartnerIds.has(job.partnerId),
+          ),
+        );
+      }
+      return filtered;
+    },
+    [
+      assignmentFilter,
+      blockedOnly,
+      getEffectiveStatus,
+      isEngineeringAlwaysVisibleStatus,
+      isEngineeringUser,
+      overdueOnly,
+      partnerGroupFilter,
+      partners,
+      searchQuery,
+      statusFilter,
+      unassignedOnly,
+      user.id,
+    ],
+  );
 
   const getOrderIdsForPartnerGroup = useCallback(
     async (groupId: string) => {
@@ -958,7 +987,9 @@ export default function OrdersPage() {
     priority: "low" | "normal" | "high" | "urgent";
     status: OrderStatus;
     notes?: string;
+    assignedEngineerId?: string;
     assignedEngineerName?: string;
+    assignedManagerId?: string;
     assignedManagerName?: string;
     orderFieldValues?: Record<string, string>;
   }) {
@@ -972,7 +1003,9 @@ export default function OrdersPage() {
       priority: values.priority,
       status: values.status,
       notes: values.notes,
+      assignedEngineerId: values.assignedEngineerId,
       assignedEngineerName: values.assignedEngineerName,
+      assignedManagerId: values.assignedManagerId,
       assignedManagerName: values.assignedManagerName,
       authorName: user.name,
       authorRole: user.role,
@@ -992,11 +1025,13 @@ export default function OrdersPage() {
     priority: "low" | "normal" | "high" | "urgent";
     status: OrderStatus;
     notes?: string;
+    assignedEngineerId?: string;
     assignedEngineerName?: string;
+    assignedManagerId?: string;
     assignedManagerName?: string;
     orderFieldValues?: Record<string, string>;
   }) {
-    if (!editingOrder || !canEditOrDeleteOrders) {
+    if (!editingOrder || !canEditOrderFromList(editingOrder)) {
       return false;
     }
     const updated = await updateOrder(editingOrder.id, {
@@ -1007,7 +1042,9 @@ export default function OrdersPage() {
       dueDate: values.dueDate,
       priority: values.priority,
       status: values.status,
+      assignedEngineerId: values.assignedEngineerId,
       assignedEngineerName: values.assignedEngineerName,
+      assignedManagerId: values.assignedManagerId,
       assignedManagerName: values.assignedManagerName,
     });
     setEditingOrder(null);
@@ -1113,7 +1150,9 @@ export default function OrdersPage() {
             />
           </div>
           <div className="space-y-2">
-            <div className="text-sm font-medium">{t("orders.page.quickFilters")}</div>
+            <div className="text-sm font-medium">
+              {t("orders.page.quickFilters")}
+            </div>
             <div className="flex flex-wrap gap-2">
               <Checkbox
                 checked={overdueOnly}
@@ -1168,7 +1207,7 @@ export default function OrdersPage() {
         subtitle={t("orders.page.subtitle")}
         className="md:z-20"
         actions={
-          <div className="hidden items-center gap-2 md:flex">
+          <div className="hidden items-center justify-end gap-2 md:flex">
             {canOpenExternalOrders ? (
               <Link href="/orders/external">
                 <Button variant="outline" className="gap-2">
@@ -1190,16 +1229,8 @@ export default function OrdersPage() {
             </Button>
           </div>
         }
-      />
-
-      <Card className="rounded-none border-0 bg-transparent shadow-none">
-        <CardContent className="space-y-4 px-0">
-          {error && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-          <div className="hidden md:block">
+        footer={
+          <div className="hidden min-w-0 md:block">
             <OrdersToolbar
               searchQuery={searchQuery}
               statusFilter={statusFilter}
@@ -1229,11 +1260,24 @@ export default function OrdersPage() {
               blockedOnly={blockedOnly}
               onToggleBlockedOnly={() => setBlockedOnly((prev) => !prev)}
               unassignedOnly={unassignedOnly}
-              onToggleUnassignedOnly={() => setUnassignedOnly((prev) => !prev)}
+              onToggleUnassignedOnly={() =>
+                setUnassignedOnly((prev) => !prev)
+              }
               viewMode={viewMode}
               onViewModeChange={setViewMode}
             />
           </div>
+        }
+      />
+
+      <Card className="rounded-none border-0 bg-transparent shadow-none">
+        <CardContent className="space-y-4 px-0">
+          {error && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+
           {viewMode === "cards" ? (
             <OrdersCards
               orders={visibleOrders}
@@ -1252,6 +1296,9 @@ export default function OrdersPage() {
               onEdit={
                 canEditOrDeleteOrders
                   ? (order) => {
+                      if (!canEditOrderFromList(order)) {
+                        return;
+                      }
                       setEditingOrder(order);
                       setIsModalOpen(true);
                     }
@@ -1260,10 +1307,15 @@ export default function OrdersPage() {
               onDelete={
                 canEditOrDeleteOrders
                   ? (order) => {
+                      if (!canDeleteOrderFromList(order)) {
+                        return;
+                      }
                       setPendingDelete(order);
                     }
                   : undefined
               }
+              canEditOrder={canEditOrderFromList}
+              canDeleteOrder={canDeleteOrderFromList}
               onTakeOrder={isEngineeringUser ? handleQuickTakeOrder : undefined}
             />
           ) : (
@@ -1284,6 +1336,9 @@ export default function OrdersPage() {
               onEdit={
                 canEditOrDeleteOrders
                   ? (order) => {
+                      if (!canEditOrderFromList(order)) {
+                        return;
+                      }
                       setEditingOrder(order);
                       setIsModalOpen(true);
                     }
@@ -1292,10 +1347,15 @@ export default function OrdersPage() {
               onDelete={
                 canEditOrDeleteOrders
                   ? (order) => {
+                      if (!canDeleteOrderFromList(order)) {
+                        return;
+                      }
                       setPendingDelete(order);
                     }
                   : undefined
               }
+              canEditOrder={canEditOrderFromList}
+              canDeleteOrder={canDeleteOrderFromList}
               onTakeOrder={isEngineeringUser ? handleQuickTakeOrder : undefined}
             />
           )}
@@ -1340,7 +1400,10 @@ export default function OrdersPage() {
                       query.eq("tenant_id", user.tenantId);
                     }
                     if (statusFilter === "in_production") {
-                      query.in("status", ["ready_for_production", "in_production"]);
+                      query.in("status", [
+                        "ready_for_production",
+                        "in_production",
+                      ]);
                     } else if (statusFilter !== "all") {
                       query.eq("status", statusFilter);
                     }
@@ -1393,9 +1456,11 @@ export default function OrdersPage() {
                       priority: row.priority,
                       status: row.status,
                       assignedEngineerId: row.assigned_engineer_id ?? undefined,
-                      assignedEngineerName: row.assigned_engineer_name ?? undefined,
+                      assignedEngineerName:
+                        row.assigned_engineer_name ?? undefined,
                       assignedManagerId: row.assigned_manager_id ?? undefined,
-                      assignedManagerName: row.assigned_manager_name ?? undefined,
+                      assignedManagerName:
+                        row.assigned_manager_name ?? undefined,
                       attachments: row.order_attachments?.map((item) => ({
                         id: item.id,
                         name: t("orders.page.attachmentFallback"),
@@ -1444,10 +1509,14 @@ export default function OrdersPage() {
         }}
         onSubmit={editingOrder ? handleEditOrder : handleCreateOrder}
         title={
-          editingOrder ? t("orders.page.editOrderTitle") : t("orders.page.createOrderTitle")
+          editingOrder
+            ? t("orders.page.editOrderTitle")
+            : t("orders.page.createOrderTitle")
         }
         submitLabel={
-          editingOrder ? t("orders.page.saveChanges") : t("orders.page.createOrder")
+          editingOrder
+            ? t("orders.page.saveChanges")
+            : t("orders.page.createOrder")
         }
         editMode="full"
         initialValues={
@@ -1460,7 +1529,9 @@ export default function OrdersPage() {
                 dueDate: editingOrder.dueDate,
                 priority: editingOrder.priority,
                 status: editingOrder.status,
+                assignedEngineerId: editingOrder.assignedEngineerId ?? "",
                 assignedEngineerName: editingOrder.assignedEngineerName ?? "",
+                assignedManagerId: editingOrder.assignedManagerId ?? "",
                 assignedManagerName: editingOrder.assignedManagerName ?? "",
                 orderFieldValues: editingOrder.orderFieldValues,
               }
@@ -1477,7 +1548,9 @@ export default function OrdersPage() {
       {pendingDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
-            <h2 className="text-lg font-semibold">{t("orders.page.deleteOrderTitle")}</h2>
+            <h2 className="text-lg font-semibold">
+              {t("orders.page.deleteOrderTitle")}
+            </h2>
             <p className="mt-2 text-sm text-muted-foreground">
               {t("orders.page.deleteOrderDescription", {
                 orderNumber: pendingDelete.orderNumber,
@@ -1487,7 +1560,8 @@ export default function OrdersPage() {
               <Button variant="outline" onClick={() => setPendingDelete(null)}>
                 {t("orders.page.cancel")}
               </Button>
-              {canEditOrDeleteOrders ? (
+              {canEditOrDeleteOrders &&
+              canDeleteOrderFromList(pendingDelete) ? (
                 <Button
                   variant="destructive"
                   onClick={async () => {
@@ -1502,7 +1576,13 @@ export default function OrdersPage() {
           </div>
         </div>
       )}
-      <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 md:hidden">
+      <div
+        className={`fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-30 transition-all duration-200 md:hidden ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Button
@@ -1542,7 +1622,13 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      <div className="fixed inset-x-4 bottom-[calc(10.75rem+env(safe-area-inset-bottom))] z-30 flex justify-end md:hidden">
+      <div
+        className={`fixed inset-x-4 bottom-[calc(10.75rem+env(safe-area-inset-bottom))] z-30 flex justify-end transition-all duration-200 md:hidden ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
         <Button
           className="h-11 max-w-full rounded-full px-4 shadow-lg"
           onClick={() => {
@@ -1558,5 +1644,3 @@ export default function OrdersPage() {
     </section>
   );
 }
-
-

@@ -19,11 +19,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { Tabs, TabsContent } from "@/components/ui/Tabs";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { DetailTabsBar } from "@/components/layout/DetailTabsBar";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useCurrentUser } from "@/contexts/UserContext";
@@ -347,6 +349,7 @@ export default function ProductionPage() {
   const [isMobileQueueFiltersOpen, setIsMobileQueueFiltersOpen] =
     useState(false);
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
   const [removingQueueId, setRemovingQueueId] = useState<string | null>(null);
   const [selectedQueueRunIds, setSelectedQueueRunIds] = useState<string[]>([]);
   const [queueConstructionSelections, setQueueConstructionSelections] =
@@ -2368,10 +2371,14 @@ export default function ProductionPage() {
   return (
     <>
       <div
-        className={`fixed right-4 z-40 md:hidden ${
+        className={`fixed right-4 z-40 transition-all duration-200 md:hidden ${
           showMobilePlanningActions || showMobileQueueActions
             ? "bottom-[calc(11.5rem+env(safe-area-inset-bottom))]"
             : "bottom-[calc(6.75rem+env(safe-area-inset-bottom))]"
+        } ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
         }`}
       >
         <Button
@@ -2389,7 +2396,13 @@ export default function ProductionPage() {
         </Button>
       </div>
       {showMobilePlanningActions ? (
-        <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-40 md:hidden">
+        <div
+          className={`fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-40 transition-all duration-200 md:hidden ${
+            hideMobileFloatingControls
+              ? "translate-y-16 opacity-0"
+              : "translate-y-0 opacity-100"
+          }`}
+        >
           <div className="flex items-center justify-between gap-2">
             {routes.length > 1 ? (
               <Button
@@ -2417,7 +2430,13 @@ export default function ProductionPage() {
         </div>
       ) : null}
       {showMobileQueueActions ? (
-        <div className="fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-40 md:hidden">
+        <div
+          className={`fixed inset-x-4 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-40 transition-all duration-200 md:hidden ${
+            hideMobileFloatingControls
+              ? "translate-y-16 opacity-0"
+              : "translate-y-0 opacity-100"
+          }`}
+        >
           <div className="flex items-center justify-end">
             <Button
               type="button"
@@ -2733,20 +2752,26 @@ export default function ProductionPage() {
           subtitle={t("production.main.header.subtitle")}
           className="md:z-20"
           actions={
-            <TabsList className="hidden md:flex">
-              <TabsTrigger value="planning" className="gap-2">
-                <ClipboardListIcon className="h-4 w-4" />
-                {t("production.main.tabs.planning")}
-              </TabsTrigger>
-              <TabsTrigger value="list" className="gap-2">
-                <ListIcon className="h-4 w-4" />
-                {t("production.main.tabs.orders")}
-              </TabsTrigger>
-              <TabsTrigger value="calendar" className="gap-2">
-                <CalendarIcon className="h-4 w-4" />
-                {t("production.main.tabs.calendar")}
-              </TabsTrigger>
-            </TabsList>
+            <DetailTabsBar
+              tabs={[
+                {
+                  value: "planning",
+                  label: t("production.main.tabs.planning"),
+                  icon: ClipboardListIcon,
+                },
+                {
+                  value: "list",
+                  label: t("production.main.tabs.orders"),
+                  icon: ListIcon,
+                },
+                {
+                  value: "calendar",
+                  label: t("production.main.tabs.calendar"),
+                  icon: CalendarIcon,
+                },
+              ]}
+              className="hidden py-0 md:flex"
+            />
           }
         />
 
