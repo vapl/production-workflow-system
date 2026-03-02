@@ -548,6 +548,8 @@
         empty: "No comments yet.",
         totalComments: "{count} comments",
         latestComment: "Latest comment: {date}",
+        composerHint: "Conversation and handoff context between roles.",
+        roleUnknown: "Role not specified",
       },
       external: {
         title: "External Jobs",
@@ -622,6 +624,17 @@
         beforeSendingToEngineering: "before sending to engineering.",
         beforeSendingToProduction: "before sending to production.",
         statusHistory: "Status History",
+        historyEmpty: "No events in the selected filter.",
+        historyFilter: {
+          all: "All",
+          status: "Statuses",
+          comment: "Comments",
+          file: "Files",
+        },
+        historyEvent: {
+          commentAdded: "Comment added",
+          fileAdded: "File added",
+        },
         sendToEngineeringChecks: "Send to engineering checks",
         sendToProductionChecks: "Send to production checks",
         gates: {

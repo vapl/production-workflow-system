@@ -561,6 +561,8 @@
         empty: "Komentāru vēl nav.",
         totalComments: "{count} komentāri",
         latestComment: "Pēdējais komentārs: {date}",
+        composerHint: "Sarunas un darba nodošanas konteksts starp lomām.",
+        roleUnknown: "Loma nav norādīta",
       },
       external: {
         title: "Ārējie darbi",
@@ -639,6 +641,17 @@
         beforeSendingToEngineering: "pirms nosūtīšanas uz inženieriju.",
         beforeSendingToProduction: "pirms nosūtīšanas uz ražošanu.",
         statusHistory: "Statusa vēsture",
+        historyEmpty: "Nav aktivitāšu izvēlētajā filtrā.",
+        historyFilter: {
+          all: "Viss",
+          status: "Statusi",
+          comment: "Komentāri",
+          file: "Faili",
+        },
+        historyEvent: {
+          commentAdded: "Pievienots komentārs",
+          fileAdded: "Pievienots fails",
+        },
         sendToEngineeringChecks: "Pārbaudes pirms sūtīšanas uz inženieriju",
         sendToProductionChecks: "Pārbaudes pirms sūtīšanas uz ražošanu",
         gates: {

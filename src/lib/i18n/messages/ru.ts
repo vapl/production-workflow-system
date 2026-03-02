@@ -533,6 +533,8 @@
         empty: "Комментариев пока нет.",
         totalComments: "{count} комментариев",
         latestComment: "Последний комментарий: {date}",
+        composerHint: "Контекст обсуждения и передачи работы между ролями.",
+        roleUnknown: "Роль не указана",
       },
       external: {
         title: "Внешние работы",
@@ -607,6 +609,17 @@
         beforeSendingToEngineering: "перед отправкой в инженерию.",
         beforeSendingToProduction: "перед отправкой в производство.",
         statusHistory: "История статусов",
+        historyEmpty: "В выбранном фильтре нет событий.",
+        historyFilter: {
+          all: "Все",
+          status: "Статусы",
+          comment: "Комментарии",
+          file: "Файлы",
+        },
+        historyEvent: {
+          commentAdded: "Добавлен комментарий",
+          fileAdded: "Добавлен файл",
+        },
         sendToEngineeringChecks: "Проверки перед отправкой в инженерию",
         sendToProductionChecks: "Проверки перед отправкой в производство",
         gates: {
