@@ -50,10 +50,10 @@ import {
   prepareProductionQrRows,
 } from "@/lib/domain/prepareProductionQrRows";
 import {
-  buildTableRowsFromOrderItems,
+  buildConstructionRowsFromOrderItems,
   isMissingOrderItemsSchema,
   mapOrderItemRow,
-} from "@/lib/domain/orderItemsBridge";
+} from "@/lib/domain/orderItems";
 import type { OrderInputField } from "@/types/orderInputs";
 import {
   CalendarIcon,
@@ -613,13 +613,13 @@ export default function ProductionPage() {
           ) {
             const items = orderItemsResult.data.map(mapOrderItemRow);
             tableFields.forEach((field) => {
-              const rowsByOrder = new Map<string, ReturnType<typeof buildTableRowsFromOrderItems>>();
+              const rowsByOrder = new Map<string, ReturnType<typeof buildConstructionRowsFromOrderItems>>();
               items
                 .filter((item) => item.sourceFieldId === field.id)
                 .forEach((item) => {
                   const current = rowsByOrder.get(item.orderId) ?? [];
                   current.push(
-                    ...buildTableRowsFromOrderItems(field, [item]),
+                    ...buildConstructionRowsFromOrderItems(field, [item]),
                   );
                   rowsByOrder.set(item.orderId, current);
                 });
