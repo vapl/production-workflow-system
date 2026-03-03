@@ -604,14 +604,10 @@ export default function ProductionPage() {
           const orderItemsResult = await supabase
             .from("order_items")
             .select(
-              "id, order_id, source_kind, source_field_id, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
+              "id, order_id, source_kind, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
             )
             .in("order_id", orderIds)
             .eq("source_kind", "order_input_table")
-            .in(
-              "source_field_id",
-              tableFields.map((field) => field.id),
-            )
             .order("sort_order", { ascending: true })
             .order("created_at", { ascending: true });
 
@@ -624,25 +620,24 @@ export default function ProductionPage() {
             !isMissingOrderItemsSchema(orderItemsResult.error)
           ) {
             const items = orderItemsResult.data.map(mapOrderItemRow);
-            tableFields.forEach((field) => {
+            const primaryField = tableFields[0] ?? null;
+            if (primaryField) {
               const rowsByOrder = new Map<string, ReturnType<typeof buildConstructionRowsFromOrderItems>>();
-              items
-                .filter((item) => item.sourceFieldId === field.id)
-                .forEach((item) => {
-                  const current = rowsByOrder.get(item.orderId) ?? [];
-                  current.push(
-                    ...buildConstructionRowsFromOrderItems(field, [item]),
-                  );
-                  rowsByOrder.set(item.orderId, current);
-                });
+              items.forEach((item) => {
+                const current = rowsByOrder.get(item.orderId) ?? [];
+                current.push(
+                  ...buildConstructionRowsFromOrderItems(primaryField, [item]),
+                );
+                rowsByOrder.set(item.orderId, current);
+              });
 
               rowsByOrder.forEach((rows, orderId) => {
                 if (!nextValues[orderId]) {
                   nextValues[orderId] = {};
                 }
-                nextValues[orderId][field.id] = rows;
+                nextValues[orderId][primaryField.id] = rows;
               });
-            });
+            }
           }
         }
 

@@ -189,6 +189,10 @@ type OrderItemBomLineRow = {
   updated_at?: string;
 };
 
+type OrderItemImportBatchRow = {
+  id: string;
+};
+
 const DEFAULT_BOM_DRAFT: OrderItemBomLineDraft = {
   componentName: "",
   componentCode: "",
@@ -615,6 +619,7 @@ export default function OrderDetailPage() {
   const [constructionImportRows, setConstructionImportRows] = useState<Record<string, unknown>[]>([]);
   const [constructionImportMapping, setConstructionImportMapping] = useState<Record<string, string>>({});
   const [constructionImportError, setConstructionImportError] = useState("");
+  const [constructionImportBatchId, setConstructionImportBatchId] = useState<string | null>(null);
   const getConstructionRows = useCallback(
     (fieldId: string) =>
       ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
@@ -1290,7 +1295,7 @@ export default function OrderDetailPage() {
         const orderItemsResult = await sb
           .from("order_items")
           .select(
-            "id, order_id, source_kind, source_field_id, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
+            "id, order_id, source_kind, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
           )
           .eq("order_id", orderState.id)
           .eq("source_kind", "order_input_table")
@@ -1367,7 +1372,14 @@ export default function OrderDetailPage() {
           setOrderItemDocumentIdsByRowKey(documentMap);
           tableFields.forEach((field) => {
             delete nextValues[field.id];
-            const builtRows = buildConstructionRowsFromOrderItems(field, items).map(
+            nextConstructionValues[field.id] = [];
+          });
+          const primaryField =
+            tableFields.find((field) => field.isPrimaryConstructionTable) ??
+            tableFields[0] ??
+            null;
+          if (primaryField) {
+            const builtRows = buildConstructionRowsFromOrderItems(primaryField, items).map(
               (row) =>
                 attachOrderInputTableRowDocuments(
                   row,
@@ -2086,10 +2098,42 @@ export default function OrderDetailPage() {
         const headers = Array.from(
           new Set(parsedRows.flatMap((row) => Object.keys(row).map((key) => key.trim()))),
         );
+        const nextMapping = suggestConstructionImportMapping(headers);
         setConstructionImportFileName(file.name);
         setConstructionImportRows(parsedRows);
         setConstructionImportHeaders(headers);
-        setConstructionImportMapping(suggestConstructionImportMapping(headers));
+        setConstructionImportMapping(nextMapping);
+
+        if (supabase && orderState?.id) {
+          const { data: batchData, error: batchError } = await supabase
+            .from("order_item_import_batches")
+            .insert({
+              order_id: orderState.id,
+              source_file_name: file.name,
+              source_sheet_name: "Sheet1",
+              mapping_profile: nextMapping,
+              status: "preview",
+            })
+            .select("id")
+            .single();
+
+          if (!batchError && batchData) {
+            const batchId = (batchData as OrderItemImportBatchRow).id;
+            setConstructionImportBatchId(batchId);
+            const previewRows = parsedRows.map((row, index) => ({
+              batch_id: batchId,
+              source_row_ref: String(index + 2),
+              raw_payload: row,
+              status: "preview",
+            }));
+            const { error: rowsError } = await supabase
+              .from("order_item_import_rows")
+              .insert(previewRows);
+            if (rowsError) {
+              setConstructionImportError(rowsError.message);
+            }
+          }
+        }
         setConstructionImportError("");
       } catch (error) {
         setConstructionImportError(
@@ -2097,10 +2141,10 @@ export default function OrderDetailPage() {
         );
       }
     },
-    [primaryConstructionField, suggestConstructionImportMapping],
+    [orderState?.id, primaryConstructionField, suggestConstructionImportMapping],
   );
 
-  const handleApplyConstructionImport = useCallback(() => {
+  const handleApplyConstructionImport = useCallback(async () => {
     if (!primaryConstructionField) {
       setConstructionImportError("Primary construction table is missing.");
       return;
@@ -2131,6 +2175,21 @@ export default function OrderDetailPage() {
       return ensureOrderInputTableRow(mappedRow);
     });
 
+    const importRowPayloads = importedRows.map((mapped, index) => {
+      const itemName = Object.values(mapped).some((value) => {
+        if (value === null || value === undefined) {
+          return false;
+        }
+        const text = String(value).trim();
+        return text.length > 0;
+      });
+      return {
+        source_row_ref: String(index + 2),
+        mapped_payload: mapped,
+        validation_errors: itemName ? [] : [{ message: "Empty mapped row" }],
+      };
+    });
+
     setConstructionRowsByFieldId((prev) => ({
       ...prev,
       [primaryConstructionField.id]: [
@@ -2138,8 +2197,34 @@ export default function OrderDetailPage() {
         ...importedRows,
       ],
     }));
+
+    if (supabase && constructionImportBatchId) {
+      for (const payload of importRowPayloads) {
+        await supabase
+          .from("order_item_import_rows")
+          .update({
+            mapped_payload: payload.mapped_payload,
+            validation_errors: payload.validation_errors,
+          })
+          .eq("batch_id", constructionImportBatchId)
+          .eq("source_row_ref", payload.source_row_ref);
+      }
+      await supabase
+        .from("order_item_import_batches")
+        .update({
+          status: "applied",
+          mapping_profile: constructionImportMapping,
+        })
+        .eq("id", constructionImportBatchId);
+      await supabase
+        .from("order_item_import_rows")
+        .update({ status: "applied" })
+        .eq("batch_id", constructionImportBatchId);
+    }
+
     setConstructionImportError("");
   }, [
+    constructionImportBatchId,
     constructionImportFileName,
     constructionImportMapping,
     constructionImportRows,
@@ -3587,17 +3672,20 @@ export default function OrderDetailPage() {
       (field) => field.fieldType === "table",
     );
     if (tableFields.length > 0) {
-      const desiredItems = tableFields.flatMap((field) =>
-        buildOrderItemsFromConstructionField({
-          orderId: orderState.id,
-          field,
-          value: constructionRowsByFieldId[field.id],
-        }),
-      );
-      const tableFieldIds = tableFields.map((field) => field.id);
+      const primaryField =
+        tableFields.find((field) => field.isPrimaryConstructionTable) ??
+        tableFields[0] ??
+        null;
+      const desiredItems = primaryField
+        ? buildOrderItemsFromConstructionField({
+            orderId: orderState.id,
+            field: primaryField,
+            value: constructionRowsByFieldId[primaryField.id],
+          })
+        : [];
       const existingItemsResult = await supabase
         .from("order_items")
-        .select("id, source_field_id, source_row_id")
+        .select("id, source_row_id")
         .eq("order_id", orderState.id)
         .eq("source_kind", "order_input_table");
 
@@ -3632,7 +3720,7 @@ export default function OrderDetailPage() {
           const { error: upsertOrderItemsError } = await supabase
             .from("order_items")
             .upsert(desiredItems, {
-              onConflict: "order_id,source_kind,source_field_id,source_row_id",
+              onConflict: "order_id,source_kind,source_row_id",
             });
           if (upsertOrderItemsError) {
             setOrderInputError(upsertOrderItemsError.message);
@@ -3644,7 +3732,7 @@ export default function OrderDetailPage() {
         const savedItemsResult = await supabase
           .from("order_items")
           .select(
-            "id, order_id, source_kind, source_field_id, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
+            "id, order_id, source_kind, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
           )
           .eq("order_id", orderState.id)
           .eq("source_kind", "order_input_table");
@@ -3662,7 +3750,6 @@ export default function OrderDetailPage() {
           const savedItems = (savedItemsResult.data ?? []).map(mapOrderItemRow);
           const desiredDocuments = primaryField
             ? buildOrderItemDocumentsFromTableField({
-                fieldId: primaryField.id,
                 rows: constructionRowsByFieldId[primaryField.id],
                 orderItems: savedItems,
               })
@@ -4685,6 +4772,17 @@ export default function OrderDetailPage() {
                     <div className="mt-1 text-sm font-medium">
                       {activeConstructionDetailData.attachments.length}
                     </div>
+                    {activeConstructionDetailData.orderItem ? (
+                      <div className="mt-3">
+                        <Button size="sm" variant="outline" asChild>
+                          <Link
+                            href={`/orders/${orderState?.id}/items/${activeConstructionDetailData.orderItem.id}`}
+                          >
+                            Open item page
+                          </Link>
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="rounded-md border border-border bg-background px-3 py-3">
                     <div className="text-sm font-medium">
@@ -6108,6 +6206,17 @@ export default function OrderDetailPage() {
                 <div className="mt-1 break-all text-sm font-medium">
                   {activeConstructionDetailData.rowId}
                 </div>
+                {activeConstructionDetailData.orderItem ? (
+                  <div className="mt-3">
+                    <Button size="sm" variant="outline" asChild>
+                      <Link
+                        href={`/orders/${orderState?.id}/items/${activeConstructionDetailData.orderItem.id}`}
+                      >
+                        Open item page
+                      </Link>
+                    </Button>
+                  </div>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <div className="text-sm font-medium">
