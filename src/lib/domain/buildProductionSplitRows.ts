@@ -29,6 +29,7 @@ export type ProductionSplitRow = {
   itemName: string;
   qty: number;
   material: string;
+  sourceRowId: string | null;
   rowIndex: number;
   rawRow: Record<string, unknown>;
 };
@@ -97,7 +98,7 @@ export function buildProductionSplitRows(
         const raw = values[field.id];
         const tableRows = Array.isArray(raw) ? raw : [];
         tableRows.forEach((row, rowIndex) => {
-        const normalized =
+          const normalized =
             typeof row === "object" && row !== null
               ? (row as Record<string, unknown>)
               : {};
@@ -124,6 +125,7 @@ export function buildProductionSplitRows(
             itemName,
             qty: resolveRowQty(field, normalized),
             material: group.material ?? "",
+            sourceRowId: stableRowId ?? null,
             rowIndex,
             rawRow: normalized,
           });
@@ -144,6 +146,7 @@ export function buildProductionSplitRows(
         itemName: group.material || group.orderNumber,
         qty: group.totalQty || 1,
         material: group.material ?? "",
+        sourceRowId: null,
         rowIndex: 0,
         rawRow: {},
       });
