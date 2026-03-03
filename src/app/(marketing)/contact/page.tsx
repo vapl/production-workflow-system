@@ -22,7 +22,7 @@ const copy: Record<MarketingLocale, ContactCopy> = {
     faqs: [
       "Vai PWS var ieviest bez ERP nomaiņas?",
       "Cik ilgi ilgst ieviešana?",
-      "Vai nodrošināt operatoru apmācību?",
+      "Vai nodrošināt operatoru apmācības?",
     ],
   },
   en: {
