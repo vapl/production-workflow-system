@@ -26,18 +26,38 @@ export function buildOrdersTemplate(levelNames: string[]): Blob {
   });
 }
 
-export async function parseOrdersWorkbook(
+export type ParsedOrdersWorkbook = {
+  sheetName: string;
+  headers: string[];
+  rows: Record<string, unknown>[];
+};
+
+export async function parseOrdersWorkbookDetailed(
   file: File,
-): Promise<Record<string, unknown>[]> {
+): Promise<ParsedOrdersWorkbook> {
   const lowerName = file.name.toLowerCase();
   const isCsv = lowerName.endsWith(".csv");
   const workbook = isCsv
     ? XLSX.read(await file.text(), { type: "string" })
     : XLSX.read(await file.arrayBuffer(), { type: "array" });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) {
-    return [];
-  }
+  const sheetName = workbook.SheetNames[0] ?? "Sheet1";
   const sheet = workbook.Sheets[sheetName];
-  return XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+  if (!sheet) {
+    return { sheetName, headers: [], rows: [] };
+  }
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: "",
+    raw: false,
+  });
+  const headers = Array.from(
+    new Set(rows.flatMap((row) => Object.keys(row).map((key) => key.trim()))),
+  );
+  return { sheetName, headers, rows };
+}
+
+export async function parseOrdersWorkbook(
+  file: File,
+): Promise<Record<string, unknown>[]> {
+  const parsed = await parseOrdersWorkbookDetailed(file);
+  return parsed.rows;
 }
