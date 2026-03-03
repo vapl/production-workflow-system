@@ -3358,51 +3358,12 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.2fr)_minmax(280px,1fr)_auto] lg:items-end">
-                  <InputField
-                    label={t("settings.orderFields.fieldLabel")}
-                    value={fieldName}
-                    onChange={(event) => {
-                      setFieldName(event.target.value);
-                    }}
-                    placeholder={t(
-                      "settings.orderFields.fieldLabelPlaceholder",
-                    )}
-                    className="h-10 text-sm"
-                  />
-                  <div className="flex flex-wrap items-center gap-4 pt-2">
-                    <Checkbox
-                      checked={fieldRequired}
-                      onChange={(event) =>
-                        setFieldRequired(event.target.checked)
-                      }
-                      label={t("settings.common.required")}
-                    />
-                    <Checkbox
-                      checked={fieldActive}
-                      onChange={(event) => setFieldActive(event.target.checked)}
-                      label={t("settings.common.active")}
-                    />
-                    <Checkbox
-                      checked={fieldShowInTable}
-                      onChange={(event) =>
-                        setFieldShowInTable(event.target.checked)
-                      }
-                      label={t("settings.orderFields.showInTable")}
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button onClick={handleSaveField}>
-                      {t("settings.orderFields.addField")}
-                    </Button>
-                  </div>
-                </div>
                 <p className="text-xs text-muted-foreground">
                   {t("settings.orderFields.defaultMeaningHint")}
                 </p>
 
                 <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="min-w-190 w-full table-auto text-sm [&_th]:whitespace-normal [&_th]:wrap-break-word [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4">
+                  <table className="min-w-160 w-full table-auto text-sm [&_th]:whitespace-normal [&_th]:wrap-break-word [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top [&_th]:px-3 [&_td]:px-3 [&_th]:py-2 [&_td]:py-2 [&_th]:text-xs [&_td]:text-sm md:[&_th]:px-4 md:[&_td]:px-4">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
                         <th className="w-12 px-2 py-2 text-left font-medium">
@@ -3410,9 +3371,6 @@ export default function SettingsPage() {
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
                           {t("settings.orderFields.field")}
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.orderFields.displayOrder")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
                           {t("settings.common.required")}
@@ -3501,14 +3459,13 @@ export default function SettingsPage() {
                                     )}
                                   </div>
                                 )}
-                                {lockedFieldKeys.has(field.key) &&
+                              {lockedFieldKeys.has(field.key) &&
                                   defaultFieldDescriptions[field.key] && (
                                     <div className="text-xs text-muted-foreground">
                                       {defaultFieldDescriptions[field.key]}
                                     </div>
                                   )}
                               </td>
-                              <td className="px-4 py-2">{field.order}</td>
                               <td className="px-4 py-2">
                                 <Checkbox
                                   checked={field.isRequired}
@@ -3627,10 +3584,61 @@ export default function SettingsPage() {
                             : "h-0"
                         }`}
                       />
+                      <tr className="border-t border-border bg-muted/20">
+                        <td className="px-2 py-2" />
+                        <td className="px-4 py-2">
+                          <Input
+                            aria-label={t("settings.orderFields.fieldLabel")}
+                            value={fieldName}
+                            onChange={(event) => {
+                              setFieldName(event.target.value);
+                            }}
+                            placeholder={t(
+                              "settings.orderFields.fieldLabelPlaceholder",
+                            )}
+                            className="h-9 text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <Checkbox
+                            checked={fieldRequired}
+                            onChange={(event) =>
+                              setFieldRequired(event.target.checked)
+                            }
+                            label={t("settings.common.required")}
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <Checkbox
+                            checked={fieldActive}
+                            onChange={(event) =>
+                              setFieldActive(event.target.checked)
+                            }
+                            label={t("settings.common.active")}
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <Checkbox
+                            checked={fieldShowInTable}
+                            onChange={(event) =>
+                              setFieldShowInTable(event.target.checked)
+                            }
+                            label={t("settings.orderFields.showInTable")}
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <Button
+                            onClick={handleSaveField}
+                            disabled={!fieldName.trim()}
+                          >
+                            {t("settings.orderFields.addField")}
+                          </Button>
+                        </td>
+                      </tr>
                       {sortedFields.length === 0 && (
                         <tr>
                           <td
-                            colSpan={7}
+                            colSpan={6}
                             className="px-4 py-6 text-center text-muted-foreground"
                           >
                             {t("settings.orderFields.addFirstField")}
