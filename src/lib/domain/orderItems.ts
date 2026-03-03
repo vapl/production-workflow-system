@@ -158,17 +158,6 @@ function buildItemAttributes(
       attributes[column.key] = value;
     }
   });
-  const traceabilityKeys = [
-    "__import_source_file",
-    "__import_source_sheet",
-    "__import_source_row_ref",
-  ] as const;
-  traceabilityKeys.forEach((key) => {
-    const value = row[key];
-    if (value !== undefined && value !== null && value !== "") {
-      attributes[key] = value;
-    }
-  });
   return attributes;
 }
 
@@ -281,7 +270,7 @@ export function buildConstructionRowsFromOrderItems(
     .filter(
       (item) =>
         item.sourceKind === ORDER_ITEM_TABLE_SOURCE_KIND &&
-        (field.isPrimaryConstructionTable || item.sourceFieldId === field.id),
+        item.sourceFieldId === field.id,
     )
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((item) => {

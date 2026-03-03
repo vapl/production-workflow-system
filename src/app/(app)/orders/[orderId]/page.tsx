@@ -1367,14 +1367,7 @@ export default function OrderDetailPage() {
           setOrderItemDocumentIdsByRowKey(documentMap);
           tableFields.forEach((field) => {
             delete nextValues[field.id];
-            nextConstructionValues[field.id] = [];
-          });
-          const primaryField =
-            tableFields.find((field) => field.isPrimaryConstructionTable) ??
-            tableFields[0] ??
-            null;
-          if (primaryField) {
-            const builtRows = buildConstructionRowsFromOrderItems(primaryField, items).map(
+            const builtRows = buildConstructionRowsFromOrderItems(field, items).map(
               (row) =>
                 attachOrderInputTableRowDocuments(
                   row,
@@ -3594,17 +3587,14 @@ export default function OrderDetailPage() {
       (field) => field.fieldType === "table",
     );
     if (tableFields.length > 0) {
-      const primaryField =
-        tableFields.find((field) => field.isPrimaryConstructionTable) ??
-        tableFields[0] ??
-        null;
-      const desiredItems = primaryField
-        ? buildOrderItemsFromConstructionField({
-            orderId: orderState.id,
-            field: primaryField,
-            value: constructionRowsByFieldId[primaryField.id],
-          })
-        : [];
+      const desiredItems = tableFields.flatMap((field) =>
+        buildOrderItemsFromConstructionField({
+          orderId: orderState.id,
+          field,
+          value: constructionRowsByFieldId[field.id],
+        }),
+      );
+      const tableFieldIds = tableFields.map((field) => field.id);
       const existingItemsResult = await supabase
         .from("order_items")
         .select("id, source_field_id, source_row_id")
