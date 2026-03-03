@@ -35,6 +35,9 @@ interface SettingsDataState {
   workStations: WorkStation[];
   stationDependencies: StationDependency[];
   orderInputFields: OrderInputField[];
+  orderInfoFields: OrderInputField[];
+  constructionTableFields: OrderInputField[];
+  constructionAttributeFields: OrderInputField[];
   externalJobFields: ExternalJobField[];
   stopReasons: StopReason[];
   partners: Partner[];
@@ -636,11 +639,31 @@ export function useSettingsData(): SettingsDataState {
     void refreshAll();
   }, [user.isAuthenticated, user.loading, user.tenantId]);
 
+  const orderInfoFields = useMemo(
+    () => orderInputFields.filter((field) => field.scope === "order_additional"),
+    [orderInputFields],
+  );
+  const constructionTableFields = useMemo(
+    () =>
+      orderInputFields.filter(
+        (field) => field.fieldType === "table" || field.scope === "construction_table",
+      ),
+    [orderInputFields],
+  );
+  const constructionAttributeFields = useMemo(
+    () =>
+      orderInputFields.filter((field) => field.scope === "construction_attribute"),
+    [orderInputFields],
+  );
+
   const value = useMemo<SettingsDataState>(
     () => ({
       workStations,
       stationDependencies,
       orderInputFields,
+      orderInfoFields,
+      constructionTableFields,
+      constructionAttributeFields,
       externalJobFields,
       stopReasons,
       partners,
@@ -1358,6 +1381,9 @@ export function useSettingsData(): SettingsDataState {
       workStations,
       stationDependencies,
       orderInputFields,
+      orderInfoFields,
+      constructionTableFields,
+      constructionAttributeFields,
       externalJobFields,
       stopReasons,
       partners,
