@@ -2098,10 +2098,11 @@ export default function OrderDetailPage() {
         const headers = Array.from(
           new Set(parsedRows.flatMap((row) => Object.keys(row).map((key) => key.trim()))),
         );
+        const nextMapping = suggestConstructionImportMapping(headers);
         setConstructionImportFileName(file.name);
         setConstructionImportRows(parsedRows);
         setConstructionImportHeaders(headers);
-        setConstructionImportMapping(suggestConstructionImportMapping(headers));
+        setConstructionImportMapping(nextMapping);
 
         if (supabase && orderState?.id) {
           const { data: batchData, error: batchError } = await supabase
@@ -2110,6 +2111,7 @@ export default function OrderDetailPage() {
               order_id: orderState.id,
               source_file_name: file.name,
               source_sheet_name: "Sheet1",
+              mapping_profile: nextMapping,
               status: "preview",
             })
             .select("id")
@@ -2173,6 +2175,21 @@ export default function OrderDetailPage() {
       return ensureOrderInputTableRow(mappedRow);
     });
 
+    const importRowPayloads = importedRows.map((mapped, index) => {
+      const itemName = Object.values(mapped).some((value) => {
+        if (value === null || value === undefined) {
+          return false;
+        }
+        const text = String(value).trim();
+        return text.length > 0;
+      });
+      return {
+        source_row_ref: String(index + 2),
+        mapped_payload: mapped,
+        validation_errors: itemName ? [] : [{ message: "Empty mapped row" }],
+      };
+    });
+
     setConstructionRowsByFieldId((prev) => ({
       ...prev,
       [primaryConstructionField.id]: [
@@ -2182,9 +2199,22 @@ export default function OrderDetailPage() {
     }));
 
     if (supabase && constructionImportBatchId) {
+      for (const payload of importRowPayloads) {
+        await supabase
+          .from("order_item_import_rows")
+          .update({
+            mapped_payload: payload.mapped_payload,
+            validation_errors: payload.validation_errors,
+          })
+          .eq("batch_id", constructionImportBatchId)
+          .eq("source_row_ref", payload.source_row_ref);
+      }
       await supabase
         .from("order_item_import_batches")
-        .update({ status: "applied" })
+        .update({
+          status: "applied",
+          mapping_profile: constructionImportMapping,
+        })
         .eq("id", constructionImportBatchId);
       await supabase
         .from("order_item_import_rows")

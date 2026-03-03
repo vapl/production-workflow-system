@@ -278,11 +278,7 @@ export function buildConstructionRowsFromOrderItems(
   const columns = field.columns ?? [];
 
   return items
-    .filter(
-      (item) =>
-        item.sourceKind === ORDER_ITEM_TABLE_SOURCE_KIND &&
-        (field.isPrimaryConstructionTable || item.sourceFieldId === field.id),
-    )
+    .filter((item) => item.sourceKind === ORDER_ITEM_TABLE_SOURCE_KIND)
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((item) => {
       const row = ensureOrderInputTableRow({
