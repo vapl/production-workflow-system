@@ -445,9 +445,9 @@
       tabs: {
         overview: "Pārskats",
         files: "Faili un komentāri",
-        details: "Pasūtījuma detaļas",
+        details: "Konstrukcijas",
         workflow: "Process",
-        external: "Ārējie darbi",
+        external: "Ārpakalpojumi",
         history: "Vēsture",
       },
       hero: {
@@ -473,7 +473,7 @@
         preflightChecks: "Pārbaudes pirms sūtīšanas uz ražošanu",
         engineering: "Inženierija",
         production: "Ražošana",
-        external: "Ārējie darbi",
+        external: "Ārpakalpojumi",
         blockedState: "Bloķējums",
         onTrack: "Iekļaujas",
         blocked: "Bloķēts",
@@ -520,18 +520,66 @@
       sendBack: "Nosūtīt atpakaļ",
       delete: "Dzēst",
       orderInputs: {
-        title: "Pasūtījuma ievades lauki",
-        description: "Pārdošanas piezīmes un ražošanas tvēruma detaļas.",
-        noneConfiguredTitle: "Nav konfigurētu pasūtījuma ievades lauku",
+        title: "Konstrukcijas",
+        description:
+          "Ražojamās vienības, to atribūti un saistītie importa dati.",
+        noneConfiguredTitle: "Konstrukciju struktūra nav konfigurēta",
         noneConfiguredDescription1:
-          "Pasūtījuma ievades lauki tiek izmantoti, lai saglabātu pārdošanas detaļas un ražošanas tvērumu katram pasūtījumam.",
+          "Šajā sadaļā tiek uzturētas pasūtījuma konstrukcijas un to papildatribūti, ko izmanto imports, ražošana un izsekojamība.",
         noneConfiguredDescription2:
-          "Konfigurējiet laukus Iestatījumi -> Struktūra -> Pasūtījuma ievades lauki un atgriezieties šeit.",
+          "Konfigurējiet konstrukciju un pasūtījuma papildlaukus sadaļā Iestatījumi -> Struktūra un atgriezieties šeit.",
+        constructionsSection: "Konstrukciju saraksts",
+        constructionsSectionDescription:
+          "Galvenās ražojamās vienības šajā pasūtījumā.",
+        additionalSection: "Papildinformācija",
+        additionalSectionDescription:
+          "Papildlauki un metadati, kas papildina konstrukciju datus.",
+        noConstructionTableTitle: "Konstrukciju tabula nav konfigurēta",
+        noConstructionTableDescription:
+          "Lai importētu un uzturētu ražojamās vienības, iestatījumos pievienojiet vismaz vienu konstrukciju tabulu.",
+        openDetail: "Atvērt detaļas",
+        detailTitle: "Konstrukcijas detaļas",
+        detailDescription:
+          "Atlasītās konstrukcijas atribūti, izcelsme un saistītie faili.",
+        detailEmpty: "Izvēlieties konstrukciju no saraksta, lai apskatītu detaļas.",
+        detailAttributes: "Atribūti",
+        detailDocuments: "Saistītie faili",
+        detailNoDocuments: "Šai konstrukcijai vēl nav piesaistītu failu.",
+        detailSource: "Avots",
+        detailSourceField: "Datu avots",
+        detailRowId: "Rindas ID",
+        detailFileCount: "Faili",
+        detailOpenFile: "Atvērt failu",
+        detailUnknownFile: "Fails",
+        bomTitle: "BOM / komponentes",
+        bomDescription:
+          "Materiāli, detaļas un furnitūra, kas pieder šai konstrukcijai.",
+        bomEmpty: "BOM rindas šai konstrukcijai vēl nav pievienotas.",
+        bomAdd: "Pievienot BOM rindu",
+        bomAdding: "Pievieno...",
+        bomSave: "Saglabāt BOM rindu",
+        bomDelete: "Dzēst BOM rindu?",
+        bomDeleteDescription: "Tas noņems izvēlēto BOM rindu no konstrukcijas.",
+        bomComponentName: "Komponentes nosaukums",
+        bomComponentCode: "Kods",
+        bomComponentType: "Tips",
+        bomQty: "Daudzums",
+        bomUnit: "Mērvienība",
+        bomLength: "Garums",
+        bomWidth: "Platums",
+        bomHeight: "Augstums",
+        bomNotes: "Piezīmes",
+        bomSortOrder: "Secība",
+        bomLoadFailed: "Neizdevās ielādēt BOM rindas.",
+        bomSaveFailed: "Neizdevās saglabāt BOM rindu.",
+        bomDeleteFailed: "Neizdevās dzēst BOM rindu.",
+        bomSaved: "BOM rinda saglabāta.",
+        bomDeleted: "BOM rinda dzēsta.",
         productionScope: "Ražošanas tvērums",
         orderInfo: "Pasūtījuma informācija",
         editPermissionHint:
           "Šos laukus var rediģēt tikai Inženierija un Administrators.",
-        save: "Saglabāt ievades",
+        save: "Saglabāt konstrukcijas",
       },
       attachments: {
         title: "Pielikumi",
@@ -565,7 +613,7 @@
         roleUnknown: "Loma nav norādīta",
       },
       external: {
-        title: "Ārējie darbi",
+        title: "Ārpakalpojumi",
         requestMode: "Pieprasījuma režīms",
         manualEntry: "Manuāla ievade",
         manualEntryDescription:
@@ -580,7 +628,7 @@
         selectValue: "Izvēlieties vērtību",
         noFieldsTitle: "Nav konfigurētu ārējo darbu lauku",
         noFieldsDescription1:
-          "Ārējie darbi tiek izmantoti ārpakalpojumu uzskaitei ar partneriem: detaļas, termiņi, cenas un piegādes piezīmes.",
+          "Ārpakalpojumi tiek izmantoti sadarbībai ar partneriem: detaļas, termiņi, cenas un piegādes piezīmes.",
         noFieldsDescription2:
           "Konfigurējiet laukus Iestatījumi -> Partneri -> Ārējo darbu shēma un atgriezieties šeit.",
         partnerComment: "Komentārs partnerim (neobligāti)",
@@ -592,8 +640,8 @@
         planManualOnly:
           "atbalsta tikai manuālu ievadi. Sūtīšana partnerim pieejama Pro plānā.",
         createPortalRequest: "Izveidot portāla pieprasījumu",
-        addExternalJob: "Pievienot ārējo darbu",
-        empty: "Ārējie darbi vēl nav pievienoti.",
+        addExternalJob: "Pievienot ārpakalpojumu",
+        empty: "Ārpakalpojumi vēl nav pievienoti.",
         requestNote: "Pieprasījuma piezīme",
         note: "Piezīme",
         resendRequest: "Sūtīt pieprasījumu atkārtoti",
@@ -748,8 +796,8 @@
         thisWillRemoveRow: "Tas noņems rindu.",
         deleteSelectedRows: "Dzēst atlasītās rindas?",
         thisWillRemoveSelectedRows: "Tas noņems {count} atlasīto rindu(as).",
-        deleteExternalJob: "Dzēst ārējo darbu?",
-        thisWillRemoveExternalJob: "Tas noņems ārējo darbu no pasūtījuma.",
+        deleteExternalJob: "Dzēst ārpakalpojumu?",
+        thisWillRemoveExternalJob: "Tas noņems ārpakalpojumu no pasūtījuma.",
       },
       notifications: {
         noFilesSelectedTitle: "Nav atlasītu failu",
@@ -1437,6 +1485,7 @@
     section: {
       structure: "Pasūtījuma lauki",
       orderFields: "Pasūtījuma lauki",
+      constructions: "Konstrukcijas",
       operations: "Ražošana",
       partners: "Partneri",
       users: "Lietotāji",
@@ -1448,6 +1497,8 @@
         "Definējiet pasūtījuma lauku nosaukumus, redzamību un attēlošanas secību.",
       orderFields:
         "Definējiet pasūtījuma lauku nosaukumus, redzamību un attēlošanas secību.",
+      constructions:
+        "Konfigurējiet konstrukciju kolonnas, papildatribūtus un importa laukus.",
       operations:
         "Konfigurējiet darba laikus, stacijas un darbību noklusējumus.",
       partners: "Pārvaldiet ārējos partnerus, grupas un lauku kartējumus.",
@@ -1537,19 +1588,34 @@
       removeSelectedReasonsConfirm: "Noņemt {count} atlasīto iemeslu(-us)?",
     },
     orderInputs: {
-      title: "Pasūtījuma ievades lauki",
+      title: "Konstrukcijas",
       description:
-        "Konfigurējiet papildu laukus, kas redzami pasūtījuma skatā.",
+        "Konfigurējiet konstrukciju saraksta kolonnas, papildatribūtus un importa laukus.",
+      guidanceTitle: "Kas tiek konfigurēts šeit",
+      guidanceDescription:
+        "Šī sadaļa ir paredzēta papildlaukiem un papildu tabulu kolonnām. Core konstrukciju modelis un nākotnes BOM loģika netiek balstīta tikai uz šo konfiguratoru.",
+      coreFieldsTitle: "Core lauki paliek sistēmas modelī",
+      coreFieldsDescription:
+        "Pozīcija, konstrukcija, nosaukums, daudzums, izmērs, sistēma, materiāls un līdzīgi pamatdati jāuztver kā biznesa modelis, nevis brīvi definējams form builder.",
+      customFieldsTitle: "Šeit pievieno tikai papildus atribūtus",
+      customFieldsDescription:
+        "Piemēram: atvēruma tips, stikla pakete, furnitūras grupa, piezīmes, klasifikatori un citas uzņēmumam specifiskas kolonnas.",
       empty:
-        "Pasūtījuma ievades lauku vēl nav. Pievienojiet noklusētos laukus.",
+        "Papildlauki vēl nav konfigurēti. Pievienojiet noklusētos laukus.",
       addDefaultFields: "Pievienot noklusētos laukus",
+      createConstructionTable: "Izveidot konstrukciju tabulu",
+      coreColumnsTitle: "Core konstrukciju kolonnas",
+      coreColumnsDescription:
+        "Primārā konstrukciju tabula ir viena un tiek izmantota order_items, ražošanas un importa plūsmās.",
       label: "Nosaukums",
       labelPlaceholder: "Konstrukciju skaits",
+      scope: "Piemērojums",
       group: "Grupa",
       type: "Tips",
       order: "Secība",
       saveField: "Saglabāt lauku",
       addField: "Pievienot lauku",
+      inlineAddHint: "Pievienot jaunu atribūtu",
       unitOptional: "Mērvienība (neobligāti)",
       selectOptions:
         'Izvēles opcijas (atdaliet ar komatu, jaunu rindu vai "\\\\")',
@@ -1563,6 +1629,7 @@
       positionPlaceholder: "Pozīcija",
       aiKeyOptional: "AI atslēga (neobligāti)",
       aiKeyPlaceholder: "construction",
+      semanticRole: "Semantiskā loma",
       unit: "Mērvienība",
       removeColumnConfirm: "Noņemt šo kolonnu?",
       removeFieldConfirm: 'Noņemt "{label}"?',
@@ -1570,9 +1637,10 @@
       options: 'Opcijas (atdaliet ar komatu, jaunu rindu vai "\\\\")',
       optionsPlaceholder: "Tips A, Tips B",
       maxSelects: "Maks. izvēļu skaits (1-3)",
+      primaryConstructionTable: "Primārā konstrukciju tabula",
       showInProduction: "Rādīt ražošanā",
       production: "Ražošana",
-      noOrderInputs: "Pasūtījuma ievades lauki nav konfigurēti.",
+      noOrderInputs: "Papildlauki nav konfigurēti.",
     },
     workflow: {
       useForAiParsing: "Lietot AI parsēšanai",
@@ -1689,8 +1757,8 @@
         "0": "Sv",
       },
       orderInputGroup: {
-        order_info: "Pasūtījuma informācija",
-        production_scope: "Ražošanas apjoms",
+        order_info: "Pasūtījuma metadati",
+        production_scope: "Konstrukciju un ražošanas dati",
       },
       orderInputFieldType: {
         text: "Teksts",

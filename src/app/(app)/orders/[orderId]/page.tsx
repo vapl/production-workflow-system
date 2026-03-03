@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -54,6 +54,11 @@ import type {
   OrderInputField,
   OrderInputTableColumn,
 } from "@/types/orderInputs";
+import type { OrderItem } from "@/types/orderItems";
+import type {
+  OrderItemBomLine,
+  OrderItemBomLineType,
+} from "@/types/orderItemBomLines";
 import Link from "next/link";
 import {
   ArrowLeftIcon,
@@ -85,6 +90,25 @@ import { useRbac } from "@/contexts/RbacContext";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 import { ORDER_CORE_FIELD_KEYS } from "@/lib/domain/orderCoreFields";
+import {
+  cloneOrderInputTableRow,
+  ensureOrderInputTableRow,
+  ensureOrderInputTableRows,
+  getOrderInputTableRowId,
+  isOrderInputTableRowEmpty,
+} from "@/lib/domain/orderInputTableRows";
+import {
+  getOrderInputTableRowAttachmentIds,
+  attachOrderInputTableRowDocuments,
+  buildOrderItemDocumentsFromTableField,
+  isMissingOrderItemDocumentsSchema,
+} from "@/lib/domain/orderItemDocumentsBridge";
+import {
+  buildOrderItemsFromTableField,
+  buildTableRowsFromOrderItems,
+  isMissingOrderItemsSchema,
+  mapOrderItemRow,
+} from "@/lib/domain/orderItemsBridge";
 import {
   getOrderFieldLabel,
   getOrderPriorityLabel,
@@ -120,6 +144,89 @@ const defaultAttachmentCategories = [
 const EMPTY_ATTACHMENTS: OrderAttachment[] = [];
 
 type HistoryFilter = "all" | "status" | "comment" | "file";
+type ConstructionDetailTarget = {
+  fieldId: string;
+  rowId: string;
+};
+type OrderItemBomLineDraft = {
+  componentName: string;
+  componentCode: string;
+  componentType: OrderItemBomLineType;
+  qty: string;
+  unit: string;
+  length: string;
+  width: string;
+  height: string;
+  notes: string;
+};
+
+type OrderItemBomLineRow = {
+  id: string;
+  order_item_id: string;
+  line_no: number | null;
+  component_code?: string | null;
+  component_name: string;
+  component_type: OrderItemBomLineType;
+  qty: number | null;
+  unit: string | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  attributes?: Record<string, unknown> | null;
+  source_kind?: "manual" | "import" | "cad" | null;
+  sort_order: number | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+const DEFAULT_BOM_DRAFT: OrderItemBomLineDraft = {
+  componentName: "",
+  componentCode: "",
+  componentType: "other",
+  qty: "1",
+  unit: "pcs",
+  length: "",
+  width: "",
+  height: "",
+  notes: "",
+};
+
+const BOM_COMPONENT_TYPE_OPTIONS: Array<{
+  value: OrderItemBomLineType;
+  label: string;
+}> = [
+  { value: "profile", label: "Profile" },
+  { value: "glass", label: "Glass" },
+  { value: "panel", label: "Panel" },
+  { value: "hardware", label: "Hardware" },
+  { value: "gasket", label: "Gasket" },
+  { value: "accessory", label: "Accessory" },
+  { value: "sheet", label: "Sheet" },
+  { value: "edge_band", label: "Edge band" },
+  { value: "fitting", label: "Fitting" },
+  { value: "other", label: "Other" },
+];
+
+function mapOrderItemBomLineRow(row: OrderItemBomLineRow): OrderItemBomLine {
+  return {
+    id: row.id,
+    orderItemId: row.order_item_id,
+    lineNo: row.line_no ?? 0,
+    componentCode: row.component_code ?? null,
+    componentName: row.component_name,
+    componentType: row.component_type ?? "other",
+    qty: Number(row.qty ?? 1),
+    unit: row.unit ?? "pcs",
+    length: row.length ?? null,
+    width: row.width ?? null,
+    height: row.height ?? null,
+    attributes: row.attributes ?? {},
+    sourceKind: row.source_kind ?? "manual",
+    sortOrder: row.sort_order ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function formatDuration(totalMinutes?: number | null) {
   if (!totalMinutes || totalMinutes <= 0) return "0m";
@@ -289,13 +396,15 @@ export default function OrderDetailPage() {
   const { notify } = useNotifications();
   const { subscription, hasCapability } = useTenantSubscription();
 
-  async function confirmRemove(title: string, description?: string) {
-    return confirm({
-      title,
-      description,
-      confirmLabel: t("orders.detail.delete"),
-    });
-  }
+  const confirmRemove = useCallback(
+    async (title: string, description?: string) =>
+      confirm({
+        title,
+        description,
+        confirmLabel: t("orders.detail.delete"),
+      }),
+    [confirm, t],
+  );
   const { engineer: engineerLabel, manager: managerLabel } =
     useAssignmentLabels();
   const attachmentCategories = useMemo(() => {
@@ -451,9 +560,35 @@ export default function OrderDetailPage() {
   const [orderInputInitialValues, setOrderInputInitialValues] = useState<
     Record<string, unknown>
   >({});
+  const [constructionRowsByFieldId, setConstructionRowsByFieldId] = useState<
+    Record<string, Array<Record<string, unknown>>>
+  >({});
+  const [
+    constructionInitialRowsByFieldId,
+    setConstructionInitialRowsByFieldId,
+  ] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const [tableRowSelections, setTableRowSelections] = useState<
     Record<string, number[]>
   >({});
+  const [activeConstructionDetail, setActiveConstructionDetail] =
+    useState<ConstructionDetailTarget | null>(null);
+  const [orderItemsByRowKey, setOrderItemsByRowKey] = useState<
+    Record<string, OrderItem>
+  >({});
+  const [orderItemDocumentIdsByRowKey, setOrderItemDocumentIdsByRowKey] =
+    useState<Record<string, string[]>>({});
+  const [bomLinesByOrderItemId, setBomLinesByOrderItemId] = useState<
+    Record<string, OrderItemBomLine[]>
+  >({});
+  const [bomDraftsByOrderItemId, setBomDraftsByOrderItemId] = useState<
+    Record<string, OrderItemBomLineDraft>
+  >({});
+  const [savingBomForItemId, setSavingBomForItemId] = useState<string | null>(
+    null,
+  );
+  const [deletingBomLineId, setDeletingBomLineId] = useState<string | null>(
+    null,
+  );
   const [orderInputError, setOrderInputError] = useState("");
   const [isSavingOrderInputs, setIsSavingOrderInputs] = useState(false);
   const [tableImportAttachmentIds, setTableImportAttachmentIds] = useState<
@@ -965,7 +1100,16 @@ export default function OrderDetailPage() {
         fieldType: row.field_type as OrderInputField["fieldType"],
         unit: row.unit ?? undefined,
         options: row.options?.options ?? undefined,
-        columns: row.options?.columns ?? undefined,
+        columns:
+          (
+            row.options?.columns as Partial<OrderInputTableColumn>[] | undefined
+          )?.map((column) => ({
+            ...column,
+            isActive: column.isActive ?? true,
+            showInTable: column.showInTable ?? true,
+            showInProduction: column.showInProduction ?? true,
+          })) as OrderInputTableColumn[] | undefined,
+        showInTable: row.options?.showInTable ?? true,
         isRequired: row.is_required ?? false,
         isActive: row.is_active ?? true,
         showInProduction: row.show_in_production ?? false,
@@ -1084,6 +1228,11 @@ export default function OrderDetailPage() {
     if (!sb || !orderState?.id) {
       setOrderInputValues({});
       setOrderInputInitialValues({});
+      setConstructionRowsByFieldId({});
+      setConstructionInitialRowsByFieldId({});
+      setOrderItemsByRowKey({});
+      setOrderItemDocumentIdsByRowKey({});
+      setBomLinesByOrderItemId({});
       return;
     }
     let isMounted = true;
@@ -1101,17 +1250,138 @@ export default function OrderDetailPage() {
       }
       setOrderInputError("");
       const nextValues: Record<string, unknown> = {};
+      const nextConstructionValues: Record<string, Array<Record<string, unknown>>> =
+        {};
       (data ?? []).forEach((row) => {
         nextValues[row.field_id] = row.value ?? undefined;
       });
+
+      const tableFields = orderInputFields.filter(
+        (field) => field.fieldType === "table",
+      );
+      if (tableFields.length > 0) {
+        const orderItemsResult = await sb
+          .from("order_items")
+          .select(
+            "id, order_id, source_kind, source_field_id, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
+          )
+          .eq("order_id", orderState.id)
+          .eq("source_kind", "order_input_table")
+          .in(
+            "source_field_id",
+            tableFields.map((field) => field.id),
+          )
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true });
+
+        if (!isMounted) {
+          return;
+        }
+        if (
+          orderItemsResult.data &&
+          !isMissingOrderItemsSchema(orderItemsResult.error)
+        ) {
+          const items = orderItemsResult.data.map(mapOrderItemRow);
+          const itemMapByRowKey: Record<string, OrderItem> = {};
+          items.forEach((item) => {
+            if (!item.sourceFieldId) {
+              return;
+            }
+            itemMapByRowKey[`${item.sourceFieldId}:${item.sourceRowId}`] = item;
+          });
+          setOrderItemsByRowKey(itemMapByRowKey);
+          const documentMap: Record<string, string[]> = {};
+          if (items.length > 0) {
+            const orderItemIds = items.map((item) => item.id);
+            const orderItemMap = new Map(
+              items.map((item) => [item.id, item] as const),
+            );
+            const orderItemDocumentsResult = await sb
+              .from("order_item_documents")
+              .select("order_item_id, order_attachment_id, sort_order")
+              .in("order_item_id", orderItemIds)
+              .order("sort_order", { ascending: true })
+              .order("created_at", { ascending: true });
+
+            if (
+              isMounted &&
+              orderItemDocumentsResult.data &&
+              !isMissingOrderItemDocumentsSchema(orderItemDocumentsResult.error)
+            ) {
+              orderItemDocumentsResult.data.forEach((document) => {
+                const item = orderItemMap.get(document.order_item_id);
+                if (!item?.sourceFieldId) {
+                  return;
+                }
+                const key = `${item.sourceFieldId}:${item.sourceRowId}`;
+                documentMap[key] = [
+                  ...(documentMap[key] ?? []),
+                  document.order_attachment_id,
+                ];
+              });
+            }
+
+            const bomLinesResult = await sb
+              .from("order_item_bom_lines")
+              .select(
+                "id, order_item_id, line_no, component_code, component_name, component_type, qty, unit, length, width, height, attributes, source_kind, sort_order, created_at, updated_at",
+              )
+              .in("order_item_id", orderItemIds)
+              .order("sort_order", { ascending: true })
+              .order("line_no", { ascending: true })
+              .order("created_at", { ascending: true });
+
+            if (isMounted && bomLinesResult.data) {
+              const bomMap: Record<string, OrderItemBomLine[]> = {};
+              bomLinesResult.data
+                .map((row) => mapOrderItemBomLineRow(row as OrderItemBomLineRow))
+                .forEach((line) => {
+                  bomMap[line.orderItemId] = [
+                    ...(bomMap[line.orderItemId] ?? []),
+                    line,
+                  ];
+                });
+              setBomLinesByOrderItemId(bomMap);
+            }
+          }
+          setOrderItemDocumentIdsByRowKey(documentMap);
+          tableFields.forEach((field) => {
+            delete nextValues[field.id];
+            const builtRows = buildTableRowsFromOrderItems(field, items).map(
+              (row) =>
+                attachOrderInputTableRowDocuments(
+                  row,
+                  documentMap[
+                    `${field.id}:${getOrderInputTableRowId(row) ?? ""}`
+                  ] ?? [],
+                ),
+            );
+            nextConstructionValues[field.id] = builtRows;
+          });
+        } else {
+          setOrderItemsByRowKey({});
+          setOrderItemDocumentIdsByRowKey({});
+          setBomLinesByOrderItemId({});
+          tableFields.forEach((field) => {
+            delete nextValues[field.id];
+            nextConstructionValues[field.id] = [];
+          });
+        }
+      } else {
+        setConstructionRowsByFieldId({});
+        setConstructionInitialRowsByFieldId({});
+      }
+
       setOrderInputValues(nextValues);
       setOrderInputInitialValues(nextValues);
+      setConstructionRowsByFieldId(nextConstructionValues);
+      setConstructionInitialRowsByFieldId(nextConstructionValues);
     };
     void loadOrderInputValues();
     return () => {
       isMounted = false;
     };
-  }, [orderState?.id, t]);
+  }, [orderInputFields, orderState?.id, t]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1452,30 +1722,38 @@ export default function OrderDetailPage() {
     (field) => field.isRequired,
   );
   const productionScopedOrderInputFields = activeOrderInputFields.filter(
-    (field) => field.showInProduction || field.groupKey === "production_scope",
+    (field) =>
+      field.showInProduction ||
+      field.groupKey === "production_scope" ||
+      field.scope === "construction_table" ||
+      field.scope === "construction_attribute",
   );
   const requiredProductionOrderInputFields = requiredOrderInputFields.filter(
-    (field) => field.showInProduction || field.groupKey === "production_scope",
+    (field) =>
+      field.showInProduction ||
+      field.groupKey === "production_scope" ||
+      field.scope === "construction_table" ||
+      field.scope === "construction_attribute",
   );
   const completedRequiredOrderInputCount = requiredOrderInputFields.filter(
     (field) =>
       shouldPersistOrderInputValue(
         field,
-        normalizeOrderInputValue(field, orderInputValues[field.id]),
+        normalizeOrderInputValue(field, getFieldCurrentValue(field)),
       ),
   ).length;
   const completedRequiredProductionOrderInputCount =
     requiredProductionOrderInputFields.filter((field) =>
       shouldPersistOrderInputValue(
         field,
-        normalizeOrderInputValue(field, orderInputValues[field.id]),
+        normalizeOrderInputValue(field, getFieldCurrentValue(field)),
       ),
     ).length;
   const persistedProductionOrderInputCount =
     productionScopedOrderInputFields.filter((field) =>
       shouldPersistOrderInputValue(
         field,
-        normalizeOrderInputValue(field, orderInputValues[field.id]),
+        normalizeOrderInputValue(field, getFieldCurrentValue(field)),
       ),
     ).length;
   const hasRequiredOrderInputs =
@@ -1683,22 +1961,534 @@ export default function OrderDetailPage() {
     }
     return field.unit ? `${text} ${field.unit}` : text;
   };
-  const orderInputGroups = useMemo(() => {
-    const groups = new Map<string, OrderInputField[]>();
-    activeOrderInputFields.forEach((field) => {
-      const current = groups.get(field.groupKey) ?? [];
-      current.push(field);
-      groups.set(field.groupKey, current);
+  const constructionTableFields = useMemo(() => {
+    const tableFields = activeOrderInputFields.filter(
+      (field) => field.fieldType === "table",
+    );
+    const explicitConstructionTables = tableFields.filter(
+      (field) =>
+        field.isPrimaryConstructionTable ||
+        field.scope === "construction_table",
+    );
+    const relevantFields =
+      explicitConstructionTables.length > 0
+        ? explicitConstructionTables
+        : tableFields;
+    return [...relevantFields].sort((left, right) => {
+      const leftPrimary = left.isPrimaryConstructionTable ? 0 : 1;
+      const rightPrimary = right.isPrimaryConstructionTable ? 0 : 1;
+      if (leftPrimary !== rightPrimary) {
+        return leftPrimary - rightPrimary;
+      }
+      const leftScope = left.scope === "construction_table" ? 0 : 1;
+      const rightScope = right.scope === "construction_table" ? 0 : 1;
+      if (leftScope !== rightScope) {
+        return leftScope - rightScope;
+      }
+      const leftPriority = left.groupKey === "production_scope" ? 0 : 1;
+      const rightPriority = right.groupKey === "production_scope" ? 0 : 1;
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+      return left.sortOrder - right.sortOrder;
     });
+  }, [activeOrderInputFields]);
+  const supplementalOrderInputGroups = useMemo(() => {
+    const groups = new Map<string, OrderInputField[]>();
+    activeOrderInputFields
+      .filter((field) => field.fieldType !== "table")
+      .forEach((field) => {
+        const current = groups.get(field.groupKey) ?? [];
+        current.push(field);
+        groups.set(field.groupKey, current);
+      });
     return groups;
   }, [activeOrderInputFields]);
+  const getConstructionRows = useCallback(
+    (fieldId: string) => ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
+    [constructionRowsByFieldId],
+  );
+  const getFieldCurrentValue = useCallback(
+    (field: OrderInputField) =>
+      field.fieldType === "table"
+        ? getConstructionRows(field.id)
+        : orderInputValues[field.id],
+    [getConstructionRows, orderInputValues],
+  );
+  const getConstructionRowKey = useCallback((fieldId: string, row: unknown) => {
+    const rowId = getOrderInputTableRowId(row);
+    return rowId ? `${fieldId}:${rowId}` : null;
+  }, []);
+  const getConstructionAttachmentIds = useCallback(
+    (fieldId: string, row: unknown) => {
+      const rowIds = getOrderInputTableRowAttachmentIds(row);
+      const rowKey = getConstructionRowKey(fieldId, row);
+      const linkedIds = rowKey ? orderItemDocumentIdsByRowKey[rowKey] ?? [] : [];
+      return Array.from(new Set([...linkedIds, ...rowIds]));
+    },
+    [getConstructionRowKey, orderItemDocumentIdsByRowKey],
+  );
+  const activeConstructionDetailData = useMemo(() => {
+    if (!activeConstructionDetail) {
+      return null;
+    }
+    const field = orderInputFields.find(
+      (item) => item.id === activeConstructionDetail.fieldId,
+    );
+    if (!field || field.fieldType !== "table") {
+      return null;
+    }
+    const rows = getConstructionRows(field.id);
+    const row = rows.find(
+      (item) => getOrderInputTableRowId(item) === activeConstructionDetail.rowId,
+    );
+    if (!row) {
+      return null;
+    }
+    const rowKey = `${field.id}:${activeConstructionDetail.rowId}`;
+    const orderItem = orderItemsByRowKey[rowKey] ?? null;
+    const attachmentIds = getConstructionAttachmentIds(field.id, row);
+    const linkedAttachments = attachmentIds
+      .map((attachmentId) =>
+        attachments.find((attachment) => attachment.id === attachmentId),
+      )
+      .filter((attachment): attachment is OrderAttachment => Boolean(attachment));
+    return {
+      field,
+      row,
+      rowId: activeConstructionDetail.rowId,
+      orderItem,
+      bomLines: orderItem ? (bomLinesByOrderItemId[orderItem.id] ?? []) : [],
+      attachments: linkedAttachments,
+    };
+  }, [
+    activeConstructionDetail,
+    attachments,
+    bomLinesByOrderItemId,
+    getConstructionAttachmentIds,
+    getConstructionRows,
+    orderInputFields,
+    orderItemsByRowKey,
+  ]);
+  const activeConstructionAttachmentIds = useMemo(
+    () =>
+      activeConstructionDetailData?.attachments.map((attachment) => attachment.id) ??
+      [],
+    [activeConstructionDetailData],
+  );
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb || activeConstructionAttachmentIds.length === 0) {
+      return;
+    }
+    const pending = attachments.filter(
+      (attachment) =>
+        activeConstructionAttachmentIds.includes(attachment.id) &&
+        attachment.url &&
+        !signedAttachmentUrls[attachment.id],
+    );
+    if (pending.length === 0) {
+      return;
+    }
+    let isMounted = true;
+    const signAll = async () => {
+      const results = await Promise.all(
+        pending.map(async (attachment) => {
+          let path = attachment.url as string;
+          if (storagePublicPrefix && path.startsWith(storagePublicPrefix)) {
+            path = path.slice(storagePublicPrefix.length);
+          }
+          const { data } = await sb.storage
+            .from(supabaseBucket)
+            .createSignedUrl(path, 60 * 60);
+          return { id: attachment.id, url: data?.signedUrl };
+        }),
+      );
+      if (!isMounted) {
+        return;
+      }
+      setSignedAttachmentUrls((prev) => {
+        const next = { ...prev };
+        results.forEach((result) => {
+          if (result.url) {
+            next[result.id] = result.url;
+          }
+        });
+        return next;
+      });
+    };
+    void signAll();
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    activeConstructionAttachmentIds,
+    attachments,
+    signedAttachmentUrls,
+    storagePublicPrefix,
+  ]);
   const canEditOrderInputs =
     orderState != null
       ? canEditOrderInputsByRole({ role, isAdmin, isOwner }, orderState.status)
       : false;
+
+  const updateBomDraft = useCallback(
+    (
+      orderItemId: string,
+      patch: Partial<OrderItemBomLineDraft> | ((draft: OrderItemBomLineDraft) => OrderItemBomLineDraft),
+    ) => {
+      setBomDraftsByOrderItemId((prev) => {
+        const current = prev[orderItemId] ?? DEFAULT_BOM_DRAFT;
+        const nextDraft =
+          typeof patch === "function"
+            ? patch(current)
+            : { ...current, ...patch };
+        return {
+          ...prev,
+          [orderItemId]: nextDraft,
+        };
+      });
+    },
+    [],
+  );
+
+  const handleSaveBomLine = useCallback(
+    async (orderItemId: string) => {
+      const sb = supabase;
+      if (!sb) {
+        notify({
+          title: t("header.notificationDefaultTitle"),
+          description: t("orders.detail.errors.supabaseNotConfigured"),
+          variant: "error",
+        });
+        return;
+      }
+      const draft = bomDraftsByOrderItemId[orderItemId] ?? DEFAULT_BOM_DRAFT;
+      if (!draft.componentName.trim()) {
+        notify({
+          title: t("header.notificationDefaultTitle"),
+          description: t("orders.detail.orderInputs.bomSaveFailed"),
+          variant: "error",
+        });
+        return;
+      }
+      const existing = bomLinesByOrderItemId[orderItemId] ?? [];
+      const numericOrNull = (value: string) => {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return null;
+        }
+        const parsed = Number(trimmed.replace(",", "."));
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+
+      setSavingBomForItemId(orderItemId);
+      const { data, error } = await sb
+        .from("order_item_bom_lines")
+        .insert({
+          order_item_id: orderItemId,
+          line_no: existing.length,
+          component_code: draft.componentCode.trim() || null,
+          component_name: draft.componentName.trim(),
+          component_type: draft.componentType,
+          qty: Number(draft.qty.replace(",", ".")) || 1,
+          unit: draft.unit.trim() || "pcs",
+          length: numericOrNull(draft.length),
+          width: numericOrNull(draft.width),
+          height: numericOrNull(draft.height),
+          attributes: draft.notes.trim() ? { notes: draft.notes.trim() } : {},
+          source_kind: "manual",
+          sort_order: existing.length,
+        })
+        .select(
+          "id, order_item_id, line_no, component_code, component_name, component_type, qty, unit, length, width, height, attributes, source_kind, sort_order, created_at, updated_at",
+        )
+        .single();
+
+      setSavingBomForItemId(null);
+
+      if (error || !data) {
+        notify({
+          title: t("header.notificationDefaultTitle"),
+          description: t("orders.detail.orderInputs.bomSaveFailed"),
+          variant: "error",
+        });
+        return;
+      }
+
+      const mapped = mapOrderItemBomLineRow(data as OrderItemBomLineRow);
+      setBomLinesByOrderItemId((prev) => ({
+        ...prev,
+        [orderItemId]: [...(prev[orderItemId] ?? []), mapped].sort(
+          (a, b) => a.sortOrder - b.sortOrder || a.lineNo - b.lineNo,
+        ),
+      }));
+      setBomDraftsByOrderItemId((prev) => ({
+        ...prev,
+        [orderItemId]: DEFAULT_BOM_DRAFT,
+      }));
+      notify({
+        title: t("header.notificationDefaultTitle"),
+        description: t("orders.detail.orderInputs.bomSaved"),
+      });
+    },
+    [bomDraftsByOrderItemId, bomLinesByOrderItemId, notify, t],
+  );
+
+  const handleDeleteBomLine = useCallback(
+    async (line: OrderItemBomLine) => {
+      const sb = supabase;
+      if (!sb) {
+        notify({
+          title: t("header.notificationDefaultTitle"),
+          description: t("orders.detail.errors.supabaseNotConfigured"),
+          variant: "error",
+        });
+        return;
+      }
+      if (
+        !(await confirmRemove(
+          t("orders.detail.orderInputs.bomDelete"),
+          t("orders.detail.orderInputs.bomDeleteDescription"),
+        ))
+      ) {
+        return;
+      }
+      setDeletingBomLineId(line.id);
+      const { error } = await sb
+        .from("order_item_bom_lines")
+        .delete()
+        .eq("id", line.id);
+      setDeletingBomLineId(null);
+      if (error) {
+        notify({
+          title: t("header.notificationDefaultTitle"),
+          description: t("orders.detail.orderInputs.bomDeleteFailed"),
+          variant: "error",
+        });
+        return;
+      }
+      setBomLinesByOrderItemId((prev) => ({
+        ...prev,
+        [line.orderItemId]: (prev[line.orderItemId] ?? []).filter(
+          (item) => item.id !== line.id,
+        ),
+      }));
+      notify({
+        title: t("header.notificationDefaultTitle"),
+        description: t("orders.detail.orderInputs.bomDeleted"),
+      });
+    },
+    [confirmRemove, notify, t],
+  );
+
+  const renderConstructionBomSection = useCallback(
+    (detail: NonNullable<typeof activeConstructionDetailData>) => {
+      const orderItemId = detail.orderItem?.id;
+      const draft = orderItemId
+        ? bomDraftsByOrderItemId[orderItemId] ?? DEFAULT_BOM_DRAFT
+        : DEFAULT_BOM_DRAFT;
+      return (
+        <div className="rounded-md border border-border bg-background px-3 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">
+                {t("orders.detail.orderInputs.bomTitle")}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {t("orders.detail.orderInputs.bomDescription")}
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {detail.bomLines.length}
+            </div>
+          </div>
+          {detail.bomLines.length === 0 ? (
+            <div className="mt-3 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              {t("orders.detail.orderInputs.bomEmpty")}
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {detail.bomLines.map((line) => (
+                <div
+                  key={line.id}
+                  className="rounded-md border border-border bg-muted/20 px-3 py-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium">
+                        {line.componentName}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {[
+                          line.componentCode,
+                          BOM_COMPONENT_TYPE_OPTIONS.find(
+                            (option) => option.value === line.componentType,
+                          )?.label ?? line.componentType,
+                          `${line.qty} ${line.unit}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </div>
+                      {(line.length || line.width || line.height) && (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {[
+                            line.length ? `L ${line.length}` : "",
+                            line.width ? `W ${line.width}` : "",
+                            line.height ? `H ${line.height}` : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                      )}
+                      {typeof line.attributes.notes === "string" &&
+                      line.attributes.notes.trim() ? (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {String(line.attributes.notes)}
+                        </div>
+                      ) : null}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void handleDeleteBomLine(line)}
+                      disabled={deletingBomLineId === line.id}
+                    >
+                      <Trash2Icon className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {orderItemId ? (
+            <div className="mt-4 space-y-3 rounded-md border border-border bg-muted/10 p-3">
+              <div className="text-sm font-medium">
+                {t("orders.detail.orderInputs.bomAdd")}
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <Input
+                  value={draft.componentName}
+                  onChange={(event) =>
+                    updateBomDraft(orderItemId, {
+                      componentName: event.target.value,
+                    })
+                  }
+                  placeholder={t("orders.detail.orderInputs.bomComponentName")}
+                  className="h-9"
+                />
+                <Input
+                  value={draft.componentCode}
+                  onChange={(event) =>
+                    updateBomDraft(orderItemId, {
+                      componentCode: event.target.value,
+                    })
+                  }
+                  placeholder={t("orders.detail.orderInputs.bomComponentCode")}
+                  className="h-9"
+                />
+                <Select
+                  value={draft.componentType}
+                  onValueChange={(value) =>
+                    updateBomDraft(orderItemId, {
+                      componentType: value as OrderItemBomLineType,
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-9 w-full">
+                    <SelectValue
+                      placeholder={t("orders.detail.orderInputs.bomComponentType")}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BOM_COMPONENT_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="grid grid-cols-[1fr_120px] gap-2">
+                  <Input
+                    value={draft.qty}
+                    onChange={(event) =>
+                      updateBomDraft(orderItemId, { qty: event.target.value })
+                    }
+                    placeholder={t("orders.detail.orderInputs.bomQty")}
+                    className="h-9"
+                  />
+                  <Input
+                    value={draft.unit}
+                    onChange={(event) =>
+                      updateBomDraft(orderItemId, { unit: event.target.value })
+                    }
+                    placeholder={t("orders.detail.orderInputs.bomUnit")}
+                    className="h-9"
+                  />
+                </div>
+                <Input
+                  value={draft.length}
+                  onChange={(event) =>
+                    updateBomDraft(orderItemId, { length: event.target.value })
+                  }
+                  placeholder={t("orders.detail.orderInputs.bomLength")}
+                  className="h-9"
+                />
+                <Input
+                  value={draft.width}
+                  onChange={(event) =>
+                    updateBomDraft(orderItemId, { width: event.target.value })
+                  }
+                  placeholder={t("orders.detail.orderInputs.bomWidth")}
+                  className="h-9"
+                />
+                <Input
+                  value={draft.height}
+                  onChange={(event) =>
+                    updateBomDraft(orderItemId, { height: event.target.value })
+                  }
+                  placeholder={t("orders.detail.orderInputs.bomHeight")}
+                  className="h-9"
+                />
+                <Input
+                  value={draft.notes}
+                  onChange={(event) =>
+                    updateBomDraft(orderItemId, { notes: event.target.value })
+                  }
+                  placeholder={t("orders.detail.orderInputs.bomNotes")}
+                  className="h-9"
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={() => void handleSaveBomLine(orderItemId)}
+                  disabled={savingBomForItemId === orderItemId}
+                >
+                  {savingBomForItemId === orderItemId
+                    ? t("orders.detail.orderInputs.bomAdding")
+                    : t("orders.detail.orderInputs.bomSave")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      );
+    },
+    [
+      bomDraftsByOrderItemId,
+      deletingBomLineId,
+      handleDeleteBomLine,
+      handleSaveBomLine,
+      savingBomForItemId,
+      t,
+      updateBomDraft,
+    ],
+  );
+
   function normalizeOrderInputValue(field: OrderInputField, value: unknown) {
     if (field.fieldType === "table") {
-      return Array.isArray(value) ? value : [];
+      return ensureOrderInputTableRows(value);
     }
     if (field.fieldType === "toggle_number") {
       const raw =
@@ -1734,9 +2524,7 @@ export default function OrderDetailPage() {
     const normalized = normalizeOrderInputValue(field, value);
     if (field.fieldType === "table") {
       const rows = normalized as Array<Record<string, unknown>>;
-      return rows.some((row) =>
-        Object.values(row).some((cell) => String(cell ?? "").trim().length > 0),
-      );
+      return rows.some((row) => !isOrderInputTableRowEmpty(row));
     }
     if (field.fieldType === "toggle_number") {
       const payload = normalized as { enabled: boolean; amount: number | null };
@@ -1798,6 +2586,7 @@ export default function OrderDetailPage() {
   const normalizeAiTableRows = (
     rows: unknown[],
     columns: OrderInputTableColumn[],
+    options?: { attachmentId?: string },
   ) => {
     return rows
       .map((row) => {
@@ -1827,13 +2616,27 @@ export default function OrderDetailPage() {
           }
           return String(value ?? "").trim().length > 0;
         });
-        return hasAnyValue ? next : null;
+        if (!hasAnyValue) {
+          return null;
+        }
+        return options?.attachmentId
+          ? attachOrderInputTableRowDocuments(next, [options.attachmentId])
+          : next;
       })
       .filter((row): row is Record<string, unknown> => Boolean(row));
   };
   const isOrderInputsDirty = useMemo(
     () =>
       activeOrderInputFields.some((field) => {
+        if (field.fieldType === "table") {
+          const current = ensureOrderInputTableRows(
+            constructionRowsByFieldId[field.id],
+          );
+          const initial = ensureOrderInputTableRows(
+            constructionInitialRowsByFieldId[field.id],
+          );
+          return JSON.stringify(current) !== JSON.stringify(initial);
+        }
         const current = normalizeOrderInputValue(
           field,
           orderInputValues[field.id],
@@ -1844,7 +2647,13 @@ export default function OrderDetailPage() {
         );
         return JSON.stringify(current) !== JSON.stringify(initial);
       }),
-    [activeOrderInputFields, orderInputInitialValues, orderInputValues],
+    [
+      activeOrderInputFields,
+      constructionInitialRowsByFieldId,
+      constructionRowsByFieldId,
+      orderInputInitialValues,
+      orderInputValues,
+    ],
   );
   if (!orderState && (isLoadingOrder || isOrdersLoading || !showNotFound)) {
     return (
@@ -2592,6 +3401,10 @@ export default function OrderDetailPage() {
     }> = [];
     const deleteFieldIds: string[] = [];
     activeOrderInputFields.forEach((field) => {
+      if (field.fieldType === "table") {
+        deleteFieldIds.push(field.id);
+        return;
+      }
       const value = normalizeOrderInputValue(field, orderInputValues[field.id]);
       if (shouldPersistOrderInputValue(field, value)) {
         upsertRows.push({
@@ -2628,7 +3441,152 @@ export default function OrderDetailPage() {
       }
     }
 
+    const tableFields = activeOrderInputFields.filter(
+      (field) => field.fieldType === "table",
+    );
+    if (tableFields.length > 0) {
+      const desiredItems = tableFields.flatMap((field) =>
+        buildOrderItemsFromTableField({
+          orderId: orderState.id,
+          field,
+          value: constructionRowsByFieldId[field.id],
+        }),
+      );
+      const tableFieldIds = tableFields.map((field) => field.id);
+      const existingItemsResult = await supabase
+        .from("order_items")
+        .select("id, source_field_id, source_row_id")
+        .eq("order_id", orderState.id)
+        .eq("source_kind", "order_input_table")
+        .in("source_field_id", tableFieldIds);
+
+      if (
+        existingItemsResult.error &&
+        !isMissingOrderItemsSchema(existingItemsResult.error)
+      ) {
+        setOrderInputError(existingItemsResult.error.message);
+        setIsSavingOrderInputs(false);
+        return;
+      }
+
+      if (!isMissingOrderItemsSchema(existingItemsResult.error)) {
+        const desiredKeys = new Set(
+          desiredItems.map(
+            (item) => `${item.source_field_id}:${item.source_row_id}`,
+          ),
+        );
+        const idsToDelete = (existingItemsResult.data ?? [])
+          .filter((item) => {
+            const key = `${item.source_field_id}:${item.source_row_id}`;
+            return !desiredKeys.has(key);
+          })
+          .map((item) => item.id);
+
+        if (idsToDelete.length > 0) {
+          const { error: deleteOrderItemsError } = await supabase
+            .from("order_items")
+            .delete()
+            .in("id", idsToDelete);
+          if (deleteOrderItemsError) {
+            setOrderInputError(deleteOrderItemsError.message);
+            setIsSavingOrderInputs(false);
+            return;
+          }
+        }
+
+        if (desiredItems.length > 0) {
+          const { error: upsertOrderItemsError } = await supabase
+            .from("order_items")
+            .upsert(desiredItems, {
+              onConflict: "order_id,source_kind,source_field_id,source_row_id",
+            });
+          if (upsertOrderItemsError) {
+            setOrderInputError(upsertOrderItemsError.message);
+            setIsSavingOrderInputs(false);
+            return;
+          }
+        }
+
+        const savedItemsResult = await supabase
+          .from("order_items")
+          .select(
+            "id, order_id, source_kind, source_field_id, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
+          )
+          .eq("order_id", orderState.id)
+          .eq("source_kind", "order_input_table")
+          .in("source_field_id", tableFieldIds);
+
+        if (
+          savedItemsResult.error &&
+          !isMissingOrderItemsSchema(savedItemsResult.error)
+        ) {
+          setOrderInputError(savedItemsResult.error.message);
+          setIsSavingOrderInputs(false);
+          return;
+        }
+
+        if (!isMissingOrderItemsSchema(savedItemsResult.error)) {
+          const savedItems = (savedItemsResult.data ?? []).map(mapOrderItemRow);
+          const desiredDocuments = tableFields.flatMap((field) =>
+            buildOrderItemDocumentsFromTableField({
+              fieldId: field.id,
+              rows: constructionRowsByFieldId[field.id],
+              orderItems: savedItems,
+            }),
+          );
+
+          const itemIds = savedItems.map((item) => item.id);
+          if (itemIds.length > 0) {
+            const existingDocumentsResult = await supabase
+              .from("order_item_documents")
+              .select("id, order_item_id")
+              .in("order_item_id", itemIds);
+
+            if (
+              existingDocumentsResult.error &&
+              !isMissingOrderItemDocumentsSchema(existingDocumentsResult.error)
+            ) {
+              setOrderInputError(existingDocumentsResult.error.message);
+              setIsSavingOrderInputs(false);
+              return;
+            }
+
+            if (
+              !isMissingOrderItemDocumentsSchema(existingDocumentsResult.error)
+            ) {
+              const existingIds = (existingDocumentsResult.data ?? []).map(
+                (item) => item.id,
+              );
+              if (existingIds.length > 0) {
+                const { error: deleteDocumentsError } = await supabase
+                  .from("order_item_documents")
+                  .delete()
+                  .in("id", existingIds);
+                if (deleteDocumentsError) {
+                  setOrderInputError(deleteDocumentsError.message);
+                  setIsSavingOrderInputs(false);
+                  return;
+                }
+              }
+
+              if (desiredDocuments.length > 0) {
+                const { error: insertDocumentsError } = await supabase
+                  .from("order_item_documents")
+                  .insert(desiredDocuments);
+                if (insertDocumentsError) {
+                  setOrderInputError(insertDocumentsError.message);
+                  setIsSavingOrderInputs(false);
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     setOrderInputInitialValues({ ...orderInputValues });
+    setConstructionInitialRowsByFieldId({ ...constructionRowsByFieldId });
     setOrderInputError("");
     setIsSavingOrderInputs(false);
   }
@@ -2740,13 +3698,16 @@ export default function OrderDetailPage() {
         setTableImportNotices((prev) => ({ ...prev, [field.id]: message }));
         return;
       }
-      const normalizedRows = normalizeAiTableRows(payload.rows ?? [], columns);
+      const normalizedRows = normalizeAiTableRows(payload.rows ?? [], columns, {
+        attachmentId,
+      });
       let totalRowsCount = normalizedRows.length;
-      setOrderInputValues((prev) => {
-        const existingRows = Array.isArray(prev[field.id])
-          ? (prev[field.id] as Array<Record<string, unknown>>)
-          : [];
-        const nextRows = [...existingRows, ...normalizedRows];
+      setConstructionRowsByFieldId((prev) => {
+        const existingRows = ensureOrderInputTableRows(prev[field.id]);
+        const nextRows = [
+          ...existingRows,
+          ...normalizedRows.map((row) => ensureOrderInputTableRow(row)),
+        ];
         totalRowsCount = nextRows.length;
         return {
           ...prev,
@@ -2803,7 +3764,10 @@ export default function OrderDetailPage() {
   }
 
   function renderOrderInputField(field: OrderInputField) {
-    const value = orderInputValues[field.id];
+    const value =
+      field.fieldType === "table"
+        ? constructionRowsByFieldId[field.id]
+        : orderInputValues[field.id];
     const normalized = normalizeOrderInputValue(field, value);
     const label = (
       <span className="font-medium">
@@ -2934,7 +3898,10 @@ export default function OrderDetailPage() {
 
     if (field.fieldType === "table") {
       const columns = field.columns ?? [];
-      const rows = Array.isArray(normalized) ? normalized : [];
+      const rows = getConstructionRows(field.id);
+      const visibleColumns = columns.filter(
+        (column) => (column.isActive ?? true) && (column.showInTable ?? true),
+      );
       const selectedAttachmentId = tableImportAttachmentIds[field.id] ?? "";
       const availableParseAttachments = productionDocumentationParseAttachments;
       const selectedAttachment = availableParseAttachments.find(
@@ -2946,6 +3913,11 @@ export default function OrderDetailPage() {
       const selectedRows = tableRowSelections[field.id] ?? [];
       const allSelected =
         rows.length > 0 && selectedRows.length === rows.length;
+      const selectedConstructionRowId = activeConstructionDetail?.fieldId
+        ? activeConstructionDetail.fieldId === field.id
+          ? activeConstructionDetail.rowId
+          : null
+        : null;
       const toggleSelectAll = (checked: boolean) => {
         setTableRowSelections((prev) => ({
           ...prev,
@@ -2957,21 +3929,21 @@ export default function OrderDetailPage() {
         columnKey: string,
         nextValue: string,
       ) => {
-        setOrderInputValues((prev) => {
+        setConstructionRowsByFieldId((prev) => {
           const nextRows = [...rows];
           const currentRow =
             typeof nextRows[rowIndex] === "object" && nextRows[rowIndex]
-              ? { ...(nextRows[rowIndex] as Record<string, unknown>) }
-              : {};
+              ? ensureOrderInputTableRow(nextRows[rowIndex])
+              : ensureOrderInputTableRow({});
           currentRow[columnKey] = nextValue;
           nextRows[rowIndex] = currentRow;
           return { ...prev, [field.id]: nextRows };
         });
       };
       const addRow = () => {
-        setOrderInputValues((prev) => ({
+        setConstructionRowsByFieldId((prev) => ({
           ...prev,
-          [field.id]: [...rows, {}],
+          [field.id]: [...rows, ensureOrderInputTableRow({})],
         }));
       };
       const removeRow = async (rowIndex: number) => {
@@ -2983,7 +3955,7 @@ export default function OrderDetailPage() {
         ) {
           return;
         }
-        setOrderInputValues((prev) => ({
+        setConstructionRowsByFieldId((prev) => ({
           ...prev,
           [field.id]: rows.filter((_, idx) => idx !== rowIndex),
         }));
@@ -3009,7 +3981,7 @@ export default function OrderDetailPage() {
           return;
         }
         const removeSet = new Set(selectedRows);
-        setOrderInputValues((prev) => ({
+        setConstructionRowsByFieldId((prev) => ({
           ...prev,
           [field.id]: rows.filter((_, idx) => !removeSet.has(idx)),
         }));
@@ -3192,7 +4164,7 @@ export default function OrderDetailPage() {
               {t("orders.detail.aiImport.proOnly")}
             </div>
           )}
-          {columns.length === 0 ? (
+          {visibleColumns.length === 0 ? (
             <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
               {t("orders.detail.aiImport.noColumnsConfigured")}
             </div>
@@ -3206,7 +4178,7 @@ export default function OrderDetailPage() {
               )}
               <table className="w-full table-fixed text-sm">
                 <colgroup>
-                  {columns.map((column) => (
+                  {visibleColumns.map((column) => (
                     <col
                       key={`col-${column.key}`}
                       style={{ width: resolveColumnWidth(column) }}
@@ -3216,7 +4188,7 @@ export default function OrderDetailPage() {
                 </colgroup>
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
-                    {columns.map((column) => (
+                    {visibleColumns.map((column) => (
                       <th
                         key={column.key}
                         className="whitespace-nowrap px-3 py-2 text-left"
@@ -3244,7 +4216,7 @@ export default function OrderDetailPage() {
                   {rows.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={columns.length + 1}
+                        colSpan={visibleColumns.length + 1}
                         className="px-3 py-4 text-center text-xs text-muted-foreground"
                       >
                         {t("orders.detail.aiImport.noRowsYet")}
@@ -3252,11 +4224,19 @@ export default function OrderDetailPage() {
                     </tr>
                   ) : (
                     rows.map((row, rowIndex) => (
+                      (() => {
+                        const rowId = getOrderInputTableRowId(row);
+                        const isActiveRow =
+                          selectedConstructionRowId !== null &&
+                          rowId === selectedConstructionRowId;
+                        return (
                       <tr
-                        key={`row-${rowIndex}`}
-                        className="border-t border-border"
+                        key={rowId ?? `row-${rowIndex}`}
+                        className={`border-t border-border ${
+                          isActiveRow ? "bg-primary/5" : ""
+                        }`}
                       >
-                        {columns.map((column) => {
+                        {visibleColumns.map((column) => {
                           const cellValue =
                             typeof row === "object" && row !== null
                               ? (row as Record<string, unknown>)[column.key]
@@ -3287,18 +4267,15 @@ export default function OrderDetailPage() {
                                 ...currentValues,
                                 value,
                               ].slice(0, maxSelect);
-                              setOrderInputValues((prev) => {
+                              setConstructionRowsByFieldId((prev) => {
                                 const nextRows = [...rows];
                                 const currentRow =
                                   typeof nextRows[rowIndex] === "object" &&
                                   nextRows[rowIndex]
-                                    ? {
-                                        ...(nextRows[rowIndex] as Record<
-                                          string,
-                                          unknown
-                                        >),
-                                      }
-                                    : {};
+                                    ? ensureOrderInputTableRow(
+                                        nextRows[rowIndex],
+                                      )
+                                    : ensureOrderInputTableRow({});
                                 currentRow[column.key] =
                                   maxSelect === 1 ? value : nextValues;
                                 nextRows[rowIndex] = currentRow;
@@ -3375,20 +4352,15 @@ export default function OrderDetailPage() {
                                             currentValues.filter(
                                               (item) => item !== chip,
                                             );
-                                          setOrderInputValues((prev) => {
+                                          setConstructionRowsByFieldId((prev) => {
                                             const nextRows = [...rows];
                                             const currentRow =
                                               typeof nextRows[rowIndex] ===
                                                 "object" && nextRows[rowIndex]
-                                                ? {
-                                                    ...(nextRows[
-                                                      rowIndex
-                                                    ] as Record<
-                                                      string,
-                                                      unknown
-                                                    >),
-                                                  }
-                                                : {};
+                                                ? ensureOrderInputTableRow(
+                                                    nextRows[rowIndex],
+                                                  )
+                                                : ensureOrderInputTableRow({});
                                             currentRow[column.key] =
                                               maxSelect === 1
                                                 ? (nextValues[0] ?? "")
@@ -3441,10 +4413,28 @@ export default function OrderDetailPage() {
                           <div className="flex items-start justify-end gap-2">
                             <Button
                               size="sm"
+                              variant={isActiveRow ? "default" : "outline"}
+                              onClick={() => {
+                                if (!rowId) {
+                                  return;
+                                }
+                                setActiveConstructionDetail({
+                                  fieldId: field.id,
+                                  rowId,
+                                });
+                              }}
+                            >
+                              <PanelRightIcon className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
                               variant="outline"
                               onClick={() => {
-                                const nextRows = [...rows, row];
-                                setOrderInputValues((prev) => ({
+                                const nextRows = [
+                                  ...rows,
+                                  cloneOrderInputTableRow(row),
+                                ];
+                                setConstructionRowsByFieldId((prev) => ({
                                   ...prev,
                                   [field.id]: nextRows,
                                 }));
@@ -3486,12 +4476,143 @@ export default function OrderDetailPage() {
                           </div>
                         </td>
                       </tr>
+                        );
+                      })()
                     ))
                   )}
                 </tbody>
               </table>
             </div>
           )}
+          {activeConstructionDetailData?.field.id === field.id ? (
+            <div className="hidden rounded-lg border border-border bg-muted/10 p-4 md:block">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">
+                    {t("orders.detail.orderInputs.detailTitle")}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {t("orders.detail.orderInputs.detailDescription")}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setActiveConstructionDetail(null)}
+                >
+                  {t("profile.close")}
+                </Button>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_320px]">
+                <div className="space-y-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {activeConstructionDetailData.field.columns?.map((column) => {
+                      const rawValue =
+                        activeConstructionDetailData.row[column.key];
+                      const value = Array.isArray(rawValue)
+                        ? rawValue.join(" / ")
+                        : String(rawValue ?? "").trim();
+                      if (!value) {
+                        return null;
+                      }
+                      return (
+                        <div
+                          key={column.key}
+                          className="rounded-md border border-border bg-background px-3 py-2"
+                        >
+                          <div className="text-xs text-muted-foreground">
+                            {column.label}
+                          </div>
+                          <div className="mt-1 text-sm font-medium text-foreground">
+                            {value}
+                            {column.unit ? ` ${column.unit}` : ""}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="rounded-md border border-border bg-background px-3 py-3">
+                    <div className="text-xs text-muted-foreground">
+                      {t("orders.detail.orderInputs.detailSourceField")}
+                    </div>
+                    <div className="mt-1 text-sm font-medium">
+                      {activeConstructionDetailData.field.label}
+                    </div>
+                    <div className="mt-3 text-xs text-muted-foreground">
+                      {t("orders.detail.orderInputs.detailRowId")}
+                    </div>
+                    <div className="mt-1 text-sm font-medium break-all">
+                      {activeConstructionDetailData.rowId}
+                    </div>
+                    <div className="mt-3 text-xs text-muted-foreground">
+                      {t("orders.detail.orderInputs.detailFileCount")}
+                    </div>
+                    <div className="mt-1 text-sm font-medium">
+                      {activeConstructionDetailData.attachments.length}
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-border bg-background px-3 py-3">
+                    <div className="text-sm font-medium">
+                      {t("orders.detail.orderInputs.detailDocuments")}
+                    </div>
+                    {activeConstructionDetailData.attachments.length === 0 ? (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        {t("orders.detail.orderInputs.detailNoDocuments")}
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        {activeConstructionDetailData.attachments.map(
+                          (attachment) => (
+                            <div
+                              key={attachment.id}
+                              className="rounded-md border border-border bg-muted/20 px-3 py-2"
+                            >
+                              <div className="text-sm font-medium break-all">
+                                {attachment.name ||
+                                  t("orders.detail.orderInputs.detailUnknownFile")}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {attachment.createdAt
+                                  ? formatDateTime(attachment.createdAt)
+                                  : t("orders.detail.unknown")}
+                              </div>
+                              <div className="mt-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  asChild={
+                                    Boolean(signedAttachmentUrls[attachment.id])
+                                  }
+                                  disabled={!signedAttachmentUrls[attachment.id]}
+                                >
+                                  {signedAttachmentUrls[attachment.id] ? (
+                                    <a
+                                      href={signedAttachmentUrls[attachment.id]}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      {t("orders.detail.orderInputs.detailOpenFile")}
+                                    </a>
+                                  ) : (
+                                    <span>
+                                      {t("orders.detail.orderInputs.detailOpenFile")}
+                                    </span>
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {renderConstructionBomSection(activeConstructionDetailData)}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -4824,6 +5945,135 @@ export default function OrderDetailPage() {
           </div>
         </div>
       </BottomSheet>
+      <BottomSheet
+        id="construction-detail-drawer"
+        open={activeConstructionDetailData !== null}
+        onClose={() => setActiveConstructionDetail(null)}
+        ariaLabel={t("orders.detail.orderInputs.detailTitle")}
+        closeButtonLabel={t("profile.close")}
+        title={t("orders.detail.orderInputs.detailTitle")}
+        enableSwipeToClose
+      >
+        <div className="flex-1 overflow-y-auto p-3">
+          {activeConstructionDetailData ? (
+            <div className="space-y-4">
+              <div>
+                <div className="text-sm text-muted-foreground">
+                  {t("orders.detail.orderInputs.detailDescription")}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <div className="text-xs text-muted-foreground">
+                  {t("orders.detail.orderInputs.detailSourceField")}
+                </div>
+                <div className="mt-1 text-sm font-medium">
+                  {activeConstructionDetailData.field.label}
+                </div>
+                <div className="mt-3 text-xs text-muted-foreground">
+                  {t("orders.detail.orderInputs.detailRowId")}
+                </div>
+                <div className="mt-1 break-all text-sm font-medium">
+                  {activeConstructionDetailData.rowId}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">
+                  {t("orders.detail.orderInputs.detailAttributes")}
+                </div>
+                <div className="grid gap-2">
+                  {activeConstructionDetailData.field.columns?.map((column) => {
+                    const rawValue = activeConstructionDetailData.row[column.key];
+                    const value = Array.isArray(rawValue)
+                      ? rawValue.join(" / ")
+                      : String(rawValue ?? "").trim();
+                    if (!value) {
+                      return null;
+                    }
+                    return (
+                      <div
+                        key={column.key}
+                        className="rounded-lg border border-border bg-background px-3 py-2"
+                      >
+                        <div className="text-xs text-muted-foreground">
+                          {column.label}
+                        </div>
+                        <div className="mt-1 text-sm font-medium">
+                          {value}
+                          {column.unit ? ` ${column.unit}` : ""}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium">
+                    {t("orders.detail.orderInputs.detailDocuments")}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("orders.detail.orderInputs.detailFileCount")}:{" "}
+                    {activeConstructionDetailData.attachments.length}
+                  </div>
+                </div>
+                {activeConstructionDetailData.attachments.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                    {t("orders.detail.orderInputs.detailNoDocuments")}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {activeConstructionDetailData.attachments.map(
+                      (attachment) => (
+                        <div
+                          key={attachment.id}
+                          className="rounded-lg border border-border bg-background px-3 py-2"
+                        >
+                          <div className="break-all text-sm font-medium">
+                            {attachment.name ||
+                              t("orders.detail.orderInputs.detailUnknownFile")}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {attachment.createdAt
+                              ? formatDateTime(attachment.createdAt)
+                              : t("orders.detail.unknown")}
+                          </div>
+                          <div className="mt-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              asChild={Boolean(signedAttachmentUrls[attachment.id])}
+                              disabled={!signedAttachmentUrls[attachment.id]}
+                            >
+                              {signedAttachmentUrls[attachment.id] ? (
+                                <a
+                                  href={signedAttachmentUrls[attachment.id]}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {t("orders.detail.orderInputs.detailOpenFile")}
+                                </a>
+                              ) : (
+                                <span>
+                                  {t("orders.detail.orderInputs.detailOpenFile")}
+                                </span>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                )}
+              </div>
+              {renderConstructionBomSection(activeConstructionDetailData)}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+              {t("orders.detail.orderInputs.detailEmpty")}
+            </div>
+          )}
+        </div>
+      </BottomSheet>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-2">
         <div
           className={`desktop-sticky-bleed sticky top-0 z-30 hidden bg-background/95 pb-2 backdrop-blur md:block ${
@@ -5595,7 +6845,7 @@ export default function OrderDetailPage() {
                     </p>
                     <div className="mt-3">
                       <Button variant="outline" size="sm" asChild>
-                        <Link href="/settings?tab=orderFields">
+                        <Link href="/settings?tab=constructions">
                           {t("orders.detail.openSettings")}
                         </Link>
                       </Button>
@@ -5603,22 +6853,75 @@ export default function OrderDetailPage() {
                   </div>
                 ) : (
                   <div className="space-y-6">
-                    {Array.from(orderInputGroups.entries()).map(
-                      ([groupKey, fields]) => (
-                        <div key={groupKey} className="space-y-3">
-                          <div className="text-sm font-semibold">
-                            {groupKey === "production_scope"
-                              ? t("orders.detail.orderInputs.productionScope")
-                              : t("orders.detail.orderInputs.orderInfo")}
-                          </div>
-                          <div className="grid gap-3 md:grid-cols-2">
-                            {fields.map((field) =>
-                              renderOrderInputField(field),
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-sm font-semibold">
+                          {t("orders.detail.orderInputs.constructionsSection")}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {t(
+                            "orders.detail.orderInputs.constructionsSectionDescription",
+                          )}
+                        </p>
+                      </div>
+                      {constructionTableFields.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
+                          <p className="text-sm font-medium">
+                            {t(
+                              "orders.detail.orderInputs.noConstructionTableTitle",
                             )}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {t(
+                              "orders.detail.orderInputs.noConstructionTableDescription",
+                            )}
+                          </p>
+                          <div className="mt-3">
+                            <Button variant="outline" size="sm" asChild>
+                              <Link href="/settings?tab=constructions">
+                                {t("orders.detail.openSettings")}
+                              </Link>
+                            </Button>
                           </div>
                         </div>
-                      ),
-                    )}
+                      ) : (
+                        <div className="space-y-4">
+                          {constructionTableFields.map((field) =>
+                            renderOrderInputField(field),
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {supplementalOrderInputGroups.size > 0 ? (
+                      <div className="space-y-3">
+                        <div>
+                          <div className="text-sm font-semibold">
+                            {t("orders.detail.orderInputs.additionalSection")}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {t(
+                              "orders.detail.orderInputs.additionalSectionDescription",
+                            )}
+                          </p>
+                        </div>
+                        {Array.from(supplementalOrderInputGroups.entries()).map(
+                          ([groupKey, fields]) => (
+                            <div key={groupKey} className="space-y-3">
+                              <div className="text-sm font-semibold">
+                                {groupKey === "production_scope"
+                                  ? t("orders.detail.orderInputs.productionScope")
+                                  : t("orders.detail.orderInputs.orderInfo")}
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                {fields.map((field) =>
+                                  renderOrderInputField(field),
+                                )}
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 )}
                 <div className="flex items-center justify-between gap-3">
@@ -6162,7 +7465,7 @@ export default function OrderDetailPage() {
                   </p>
                 ) : (
                   <div className="space-y-3">
-                    {comments.map((comment, index) => (
+                    {comments.map((comment) => (
                       <div
                         key={comment.id}
                         className="relative rounded-xl border border-border/80 bg-background px-3 py-3"

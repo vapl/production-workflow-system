@@ -13,6 +13,7 @@ type QrRow = {
   order_id: string;
   field_id: string;
   row_index: number;
+  source_row_id?: string | null;
   token: string;
 };
 
@@ -38,6 +39,8 @@ type AttachmentRow = {
   url: string | null;
   created_at: string;
 };
+
+type ItemAttachmentRow = AttachmentRow;
 
 type ProductionItemRow = {
   id: string;
@@ -100,6 +103,7 @@ export default function QrTokenPage({
   const [field, setField] = useState<OrderField | null>(null);
   const [rowData, setRowData] = useState<Record<string, unknown> | null>(null);
   const [attachments, setAttachments] = useState<AttachmentRow[]>([]);
+  const [itemAttachments, setItemAttachments] = useState<ItemAttachmentRow[]>([]);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [productionItems, setProductionItems] = useState<ProductionItemRow[]>(
     [],
@@ -119,10 +123,11 @@ export default function QrTokenPage({
     const load = async () => {
       setIsLoading(true);
       setError(null);
+      setItemAttachments([]);
       try {
         const { data: qrData, error: qrError } = await sb
           .from("production_qr_codes")
-          .select("order_id, field_id, row_index, token")
+          .select("order_id, field_id, row_index, source_row_id, token")
           .eq("token", params.token)
           .maybeSingle();
         if (!isMounted) {
@@ -154,22 +159,50 @@ export default function QrTokenPage({
         }
         setField(fieldData ?? null);
 
-        const { data: valueData } = await sb
-          .from("order_input_values")
-          .select("value")
-          .eq("order_id", qrData.order_id)
-          .eq("field_id", qrData.field_id)
-          .maybeSingle();
-        if (!isMounted) {
-          return;
+        let nextRowData: Record<string, unknown> | null = null;
+        if (qrData.source_row_id) {
+          const { data: orderItemData } = await sb
+            .from("order_items")
+            .select("id, attributes")
+            .eq("order_id", qrData.order_id)
+            .eq("source_row_id", qrData.source_row_id)
+            .maybeSingle();
+          if (!isMounted) {
+            return;
+          }
+          nextRowData =
+            orderItemData?.attributes &&
+            typeof orderItemData.attributes === "object"
+              ? (orderItemData.attributes as Record<string, unknown>)
+              : null;
+          if (orderItemData?.id) {
+            const { data: itemAttachmentData } = await sb
+              .from("order_item_documents")
+              .select(
+                "order_attachments(id, name, url, created_at)",
+              )
+              .eq("order_item_id", orderItemData.id)
+              .order("sort_order", { ascending: true });
+            if (!isMounted) {
+              return;
+            }
+            const nextItemAttachments = (itemAttachmentData ?? [])
+              .map((row) => {
+                const attachment = Array.isArray(row.order_attachments)
+                  ? row.order_attachments[0]
+                  : row.order_attachments;
+                if (!attachment) {
+                  return null;
+                }
+                return attachment as ItemAttachmentRow;
+              })
+              .filter(Boolean) as ItemAttachmentRow[];
+            setItemAttachments(nextItemAttachments);
+          } else {
+            setItemAttachments([]);
+          }
         }
-        const values = Array.isArray(valueData?.value) ? valueData?.value : [];
-        const rawRow =
-          typeof values[qrData.row_index] === "object" &&
-          values[qrData.row_index] !== null
-            ? (values[qrData.row_index] as Record<string, unknown>)
-            : null;
-        setRowData(rawRow);
+        setRowData(nextRowData);
 
         const { data: attachmentData } = await sb
           .from("order_attachments")
@@ -201,6 +234,13 @@ export default function QrTokenPage({
             return;
           }
           const filtered = (items ?? []).filter((item) => {
+            if (
+              qrData.source_row_id &&
+              typeof item.meta?.rowKey === "string" &&
+              item.meta.rowKey.endsWith(`:${qrData.source_row_id}`)
+            ) {
+              return true;
+            }
             const rowIndex =
               typeof item.meta?.rowIndex === "number"
                 ? item.meta?.rowIndex
@@ -256,6 +296,37 @@ export default function QrTokenPage({
       isMounted = false;
     };
   }, [attachments]);
+
+  useEffect(() => {
+    if (!itemAttachments.length) {
+      return;
+    }
+    let isMounted = true;
+    const signAll = async () => {
+      const results = await Promise.all(
+        itemAttachments.map(async (attachment) => {
+          const url = await resolveSignedUrl(attachment.url, supabaseBucket);
+          return { id: attachment.id, url };
+        }),
+      );
+      if (!isMounted) {
+        return;
+      }
+      setSignedUrls((prev) => {
+        const next = { ...prev };
+        results.forEach((entry) => {
+          if (entry.url) {
+            next[entry.id] = entry.url;
+          }
+        });
+        return next;
+      });
+    };
+    void signAll();
+    return () => {
+      isMounted = false;
+    };
+  }, [itemAttachments]);
 
   const rowDetails = useMemo(() => {
     if (!field || !rowData) {
@@ -353,6 +424,29 @@ export default function QrTokenPage({
 
             <div className="rounded-xl border border-border bg-card p-4">
               <div className="text-sm font-semibold">{t("qrTokenPage.productionFiles")}</div>
+              {itemAttachments.length > 0 ? (
+                <div className="mb-4">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    {t("qrTokenPage.construction")}
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    {itemAttachments.map((file) => (
+                      <a
+                        key={file.id}
+                        href={signedUrls[file.id] ?? file.url ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/30"
+                      >
+                        <span>{file.name ?? t("qrTokenPage.file")}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(file.created_at).toLocaleString()}
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {attachments.length === 0 ? (
                 <div className="mt-2 text-sm text-muted-foreground">
                   {t("qrTokenPage.noProductionFiles")}

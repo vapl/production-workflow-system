@@ -65,10 +65,11 @@ import { supabase } from "@/lib/supabaseClient";
 import { getStatusBadgeColorClass } from "@/lib/domain/statusBadgeColor";
 import type { StationTrackingMode, WorkStation } from "@/types/workstation";
 import type {
+  ConstructionColumnSemanticKey,
   OrderInputFieldType,
   OrderInputGroupKey,
+  OrderInputFieldScope,
   OrderInputTableColumn,
-  OrderInputTableColumnType,
 } from "@/types/orderInputs";
 import {
   useWorkflowRules,
@@ -175,11 +176,6 @@ const weekdayOptions: Array<{ value: number; label: string }> = [
   { value: 0, label: "Sun" },
 ];
 
-const orderInputGroupOptions: { value: OrderInputGroupKey; label: string }[] = [
-  { value: "order_info", label: "Order info" },
-  { value: "production_scope", label: "Production scope" },
-];
-
 const orderInputFieldTypeOptions: {
   value: OrderInputFieldType;
   label: string;
@@ -274,14 +270,180 @@ const externalJobFieldRoleOptions: {
   { value: "invoice_price", label: "Invoice price" },
 ];
 
-const orderInputColumnTypeOptions: {
-  value: OrderInputTableColumnType;
+const constructionColumnSemanticOptions: Array<{
+  value: ConstructionColumnSemanticKey;
   label: string;
-}[] = [
-  { value: "text", label: "Text" },
-  { value: "number", label: "Number" },
-  { value: "select", label: "Select" },
+}> = [
+  { value: "position", label: "Pozīcija" },
+  { value: "item_type", label: "Tips" },
+  { value: "item_name", label: "Nosaukums" },
+  { value: "qty", label: "Daudzums" },
+  { value: "dimensions", label: "Izmēri" },
+  { value: "color", label: "Apdare / krāsa" },
+  { value: "system", label: "Sistēma" },
+  { value: "material", label: "Materiāls" },
+  { value: "notes", label: "Piezīmes" },
+  { value: "custom", label: "Custom" },
 ];
+
+const defaultConstructionTableColumns: OrderInputTableColumn[] = [
+  {
+    key: "position",
+    label: "Pozīcija",
+    semanticKey: "position",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "item_type",
+    label: "Tips",
+    semanticKey: "item_type",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "item_name",
+    label: "Nosaukums",
+    semanticKey: "item_name",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "dimensions",
+    label: "Izmēri",
+    semanticKey: "dimensions",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "qty",
+    label: "Daudzums",
+    semanticKey: "qty",
+    fieldType: "number",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "system",
+    label: "Sistēma",
+    semanticKey: "system",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "material",
+    label: "Materiāls",
+    semanticKey: "material",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "color",
+    label: "Apdare / krāsa",
+    semanticKey: "color",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+];
+
+const recommendedConstructionLabels: Partial<
+  Record<ConstructionColumnSemanticKey, string>
+> = Object.fromEntries(
+  defaultConstructionTableColumns.map((column) => [
+    column.semanticKey ?? "custom",
+    column.label,
+  ]),
+);
+
+const legacyConstructionColumnLabelMap: Partial<
+  Record<ConstructionColumnSemanticKey, string[]>
+> = {
+  position: ["position", "pozicija", "pozīcija"],
+  item_type: ["construction", "konstrukcija", "tips", "type"],
+  item_name: ["name", "nosaukums"],
+  dimensions: ["dimensions", "izmeri", "izmēri", "izmers", "izmērs", "size"],
+  qty: ["qty", "quantity", "daudzums", "skaits"],
+  system: ["system", "sistema", "sistēma"],
+  material: ["material", "materials", "materiāls", "materials"],
+  color: ["color", "colour", "krasa", "krāsa", "apdare", "finish"],
+  notes: ["notes", "piezimes", "piezīmes"],
+};
+
+function normalizeConstructionToken(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function inferConstructionSemanticKey(
+  column: Pick<OrderInputTableColumn, "key" | "label" | "semanticKey">,
+): ConstructionColumnSemanticKey {
+  if (column.semanticKey) {
+    return column.semanticKey;
+  }
+  const candidates = [
+    normalizeConstructionToken(column.key),
+    normalizeConstructionToken(column.label),
+  ];
+  const matched = constructionColumnSemanticOptions.find((option) => {
+    if (option.value === "custom") {
+      return false;
+    }
+    const aliases = legacyConstructionColumnLabelMap[option.value] ?? [];
+    return candidates.some((candidate) => aliases.includes(candidate));
+  });
+  return matched?.value ?? "custom";
+}
+
+function normalizeConstructionColumns(columns: OrderInputTableColumn[]) {
+  let changed = false;
+  const nextColumns = columns.map((column) => {
+    const semanticKey = inferConstructionSemanticKey(column);
+    const recommendedLabel = recommendedConstructionLabels[semanticKey];
+    const normalizedLabelToken = normalizeConstructionToken(column.label);
+    const legacyAliases = legacyConstructionColumnLabelMap[semanticKey] ?? [];
+    const shouldReplaceLabel =
+      Boolean(recommendedLabel) &&
+      legacyAliases.includes(normalizedLabelToken) &&
+      column.label !== recommendedLabel;
+    const nextColumn: OrderInputTableColumn = {
+      ...column,
+      semanticKey,
+      isActive: column.isActive ?? true,
+      showInTable: column.showInTable ?? true,
+      showInProduction: column.showInProduction ?? true,
+      label: shouldReplaceLabel ? recommendedLabel ?? column.label : column.label,
+    };
+    if (
+      nextColumn.semanticKey !== column.semanticKey ||
+      nextColumn.isActive !== column.isActive ||
+      nextColumn.showInTable !== column.showInTable ||
+      nextColumn.showInProduction !== column.showInProduction ||
+      nextColumn.label !== column.label
+    ) {
+      changed = true;
+    }
+    return nextColumn;
+  });
+  return { columns: nextColumns, changed };
+}
 
 const qrLabelSizeOptions = [
   { value: "A4", label: "A4 (210 x 297 mm)" },
@@ -323,6 +485,7 @@ const defaultQrContentFields = [
 
 const settingsSections = [
   { value: "orderFields", icon: NetworkIcon },
+  { value: "constructions", icon: PanelRightIcon },
   { value: "operations", icon: FactoryIcon },
   { value: "partners", icon: GitBranchIcon },
   { value: "users", icon: UsersIcon },
@@ -414,6 +577,46 @@ export default function SettingsPage() {
       }),
     [orderInputFields],
   );
+  const constructionConfigFields = useMemo(
+    () =>
+      sortedOrderInputFields.filter(
+        (field) =>
+          field.scope === "construction_table" ||
+          field.scope === "construction_attribute" ||
+          field.fieldType === "table",
+      ),
+    [sortedOrderInputFields],
+  );
+  const primaryConstructionTableField = useMemo(
+    () =>
+      constructionConfigFields.find(
+        (field) => field.isPrimaryConstructionTable,
+      ) ??
+      constructionConfigFields.find(
+        (field) =>
+          field.scope === "construction_table" || field.fieldType === "table",
+      ) ??
+      null,
+    [constructionConfigFields],
+  );
+  const constructionAttributeFields = useMemo(
+    () =>
+      constructionConfigFields.filter((field) => {
+        if (primaryConstructionTableField?.id === field.id) {
+          return false;
+        }
+        if (field.scope === "construction_attribute") {
+          return true;
+        }
+        return !field.scope && field.groupKey === "production_scope";
+      }),
+    [constructionConfigFields, primaryConstructionTableField],
+  );
+  const constructionAttributeTypeOptions = useMemo(
+    () =>
+      orderInputFieldTypeOptions.filter((option) => option.value !== "table"),
+    [],
+  );
   const sortedExternalJobFields = useMemo(() => {
     const uniqueById = Array.from(
       new Map(externalJobFields.map((field) => [field.id, field])).values(),
@@ -472,29 +675,17 @@ export default function SettingsPage() {
   const [isWorkdaySaving, setIsWorkdaySaving] = useState(false);
   const [orderFieldLabel, setOrderFieldLabel] = useState("");
   const [orderFieldKey, setOrderFieldKey] = useState("");
-  const [orderFieldGroup, setOrderFieldGroup] =
-    useState<OrderInputGroupKey>("order_info");
   const [orderFieldType, setOrderFieldType] =
     useState<OrderInputFieldType>("text");
   const [orderFieldUnit, setOrderFieldUnit] = useState("");
   const [orderFieldOptions, setOrderFieldOptions] = useState("");
-  const [orderFieldColumns, setOrderFieldColumns] = useState<
-    OrderInputTableColumn[]
-  >([]);
-  const [dragColumnIndex, setDragColumnIndex] = useState<number | null>(null);
-  const [dragOverColumnIndex, setDragOverColumnIndex] = useState<number | null>(
-    null,
-  );
   const [orderFieldRequired, setOrderFieldRequired] = useState(false);
   const [orderFieldActive, setOrderFieldActive] = useState(true);
+  const [orderFieldShowInTable, setOrderFieldShowInTable] = useState(true);
   const [orderFieldShowInProduction, setOrderFieldShowInProduction] =
     useState(false);
-  const [orderFieldSortOrder, setOrderFieldSortOrder] = useState(0);
   const [editingOrderFieldId, setEditingOrderFieldId] = useState<string | null>(
     null,
-  );
-  const [selectedOrderFieldIds, setSelectedOrderFieldIds] = useState<string[]>(
-    [],
   );
   const [externalJobFieldLabel, setExternalJobFieldLabel] = useState("");
   const [externalJobFieldType, setExternalJobFieldType] =
@@ -532,6 +723,20 @@ export default function SettingsPage() {
   const [selectedPartnerGroupIds, setSelectedPartnerGroupIds] = useState<
     string[]
   >([]);
+  const [editingConstructionColumnKey, setEditingConstructionColumnKey] =
+    useState<string | null>(null);
+  const [inlineConstructionColumnLabel, setInlineConstructionColumnLabel] =
+    useState("");
+  const [draggedConstructionColumnKey, setDraggedConstructionColumnKey] =
+    useState<string | null>(null);
+  const [constructionColumnDropIndex, setConstructionColumnDropIndex] =
+    useState<number | null>(null);
+  const [draggedConstructionFieldId, setDraggedConstructionFieldId] = useState<
+    string | null
+  >(null);
+  const [constructionFieldDropIndex, setConstructionFieldDropIndex] = useState<
+    number | null
+  >(null);
 
   const [stopReasonLabel, setStopReasonLabel] = useState("");
   const [editingStopReasonId, setEditingStopReasonId] = useState<string | null>(
@@ -2067,10 +2272,12 @@ export default function SettingsPage() {
       key: slugify(label),
       label,
       groupKey: target.groupKey,
+      scope: target.scope,
       fieldType: target.fieldType,
       unit: target.unit,
       options: target.options,
       columns: target.columns,
+      isPrimaryConstructionTable: false,
       isRequired: target.isRequired,
       isActive: target.isActive,
       sortOrder: target.sortOrder + 1,
@@ -2434,15 +2641,13 @@ export default function SettingsPage() {
   function resetOrderFieldForm() {
     setOrderFieldLabel("");
     setOrderFieldKey("");
-    setOrderFieldGroup("order_info");
     setOrderFieldType("text");
     setOrderFieldUnit("");
     setOrderFieldOptions("");
-    setOrderFieldColumns([]);
     setOrderFieldRequired(false);
     setOrderFieldActive(true);
+    setOrderFieldShowInTable(true);
     setOrderFieldShowInProduction(false);
-    setOrderFieldSortOrder(0);
     setEditingOrderFieldId(null);
   }
 
@@ -2463,48 +2668,6 @@ export default function SettingsPage() {
     setEditingExternalJobFieldId(null);
   }
 
-  function updateOrderFieldColumn(
-    index: number,
-    patch: Partial<OrderInputTableColumn>,
-  ) {
-    setOrderFieldColumns((prev) =>
-      prev.map((column, idx) =>
-        idx === index ? { ...column, ...patch } : column,
-      ),
-    );
-  }
-
-  function addOrderFieldColumn() {
-    setOrderFieldColumns((prev) => [
-      ...prev,
-      { key: "", label: "", aiKey: "", fieldType: "text", maxSelect: 1 },
-    ]);
-  }
-
-  function removeOrderFieldColumn(index: number) {
-    setOrderFieldColumns((prev) => prev.filter((_, idx) => idx !== index));
-  }
-
-  function reorderOrderFieldColumns(fromIndex: number, toIndex: number) {
-    if (fromIndex === toIndex) {
-      return;
-    }
-    setOrderFieldColumns((prev) => {
-      if (
-        fromIndex < 0 ||
-        toIndex < 0 ||
-        fromIndex >= prev.length ||
-        toIndex >= prev.length
-      ) {
-        return prev;
-      }
-      const next = [...prev];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      return next;
-    });
-  }
-
   function parseOrderFieldOptions(value: string) {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -2518,19 +2681,104 @@ export default function SettingsPage() {
     return confirm({ description: message });
   }
 
-  useEffect(() => {
-    if (orderInputFields.length === 0) {
-      if (selectedOrderFieldIds.length > 0) {
-        setSelectedOrderFieldIds([]);
-      }
+  async function updatePrimaryConstructionColumns(
+    nextColumns: OrderInputTableColumn[],
+  ) {
+    if (!primaryConstructionTableField) {
       return;
     }
-    const valid = new Set(orderInputFields.map((field) => field.id));
-    const next = selectedOrderFieldIds.filter((id) => valid.has(id));
-    if (next.length !== selectedOrderFieldIds.length) {
-      setSelectedOrderFieldIds(next);
+    await updateOrderInputField(primaryConstructionTableField.id, {
+      columns: normalizeConstructionColumns(nextColumns).columns,
+      isPrimaryConstructionTable: true,
+    });
+  }
+
+  function startInlineConstructionColumnEdit(columnKey: string, label: string) {
+    setEditingConstructionColumnKey(columnKey);
+    setInlineConstructionColumnLabel(label);
+  }
+
+  function cancelInlineConstructionColumnEdit() {
+    setEditingConstructionColumnKey(null);
+    setInlineConstructionColumnLabel("");
+  }
+
+  async function handleSaveInlineConstructionColumn() {
+    if (!primaryConstructionTableField || !editingConstructionColumnKey) {
+      return;
     }
-  }, [orderInputFields, selectedOrderFieldIds]);
+    const nextLabel = inlineConstructionColumnLabel.trim();
+    if (!nextLabel) {
+      return;
+    }
+    const nextColumns = (primaryConstructionTableField.columns ?? []).map(
+      (column) =>
+        column.key === editingConstructionColumnKey
+          ? { ...column, label: nextLabel }
+          : column,
+    );
+    await updatePrimaryConstructionColumns(nextColumns);
+    cancelInlineConstructionColumnEdit();
+  }
+
+  useEffect(() => {
+    if (!primaryConstructionTableField?.columns?.length) {
+      return;
+    }
+    const normalized = normalizeConstructionColumns(
+      primaryConstructionTableField.columns,
+    );
+    if (!normalized.changed) {
+      return;
+    }
+    void updateOrderInputField(primaryConstructionTableField.id, {
+      columns: normalized.columns,
+      isPrimaryConstructionTable: true,
+    });
+  }, [
+    primaryConstructionTableField?.columns,
+    primaryConstructionTableField?.id,
+    updateOrderInputField,
+  ]);
+
+  async function handleDropConstructionColumn() {
+    const columns = primaryConstructionTableField?.columns ?? [];
+    if (
+      draggedConstructionColumnKey === null ||
+      constructionColumnDropIndex === null ||
+      columns.length === 0
+    ) {
+      setDraggedConstructionColumnKey(null);
+      setConstructionColumnDropIndex(null);
+      return;
+    }
+
+    const fromIndex = columns.findIndex(
+      (column) => column.key === draggedConstructionColumnKey,
+    );
+    if (fromIndex === -1) {
+      setDraggedConstructionColumnKey(null);
+      setConstructionColumnDropIndex(null);
+      return;
+    }
+
+    let targetIndex = constructionColumnDropIndex;
+    if (constructionColumnDropIndex > fromIndex) {
+      targetIndex -= 1;
+    }
+    if (targetIndex === fromIndex) {
+      setDraggedConstructionColumnKey(null);
+      setConstructionColumnDropIndex(null);
+      return;
+    }
+
+    const reordered = [...columns];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    await updatePrimaryConstructionColumns(reordered);
+    setDraggedConstructionColumnKey(null);
+    setConstructionColumnDropIndex(null);
+  }
 
   useEffect(() => {
     if (externalJobFields.length === 0) {
@@ -2604,72 +2852,6 @@ export default function SettingsPage() {
     }
   }, [partnerGroups, selectedPartnerGroupIds]);
 
-  async function handleSaveOrderField() {
-    const trimmedLabel = orderFieldLabel.trim();
-    if (!trimmedLabel) {
-      return;
-    }
-    const resolvedKey = orderFieldKey.trim() || slugify(trimmedLabel);
-    const options =
-      orderFieldType === "select"
-        ? parseOrderFieldOptions(orderFieldOptions)
-        : undefined;
-    const columns =
-      orderFieldType === "table"
-        ? orderFieldColumns
-            .map((column) => {
-              const trimmedColumnLabel = column.label.trim();
-              if (!trimmedColumnLabel) {
-                return null;
-              }
-              const columnKey =
-                column.key?.trim() || slugify(trimmedColumnLabel);
-              const columnOptions =
-                column.fieldType === "select"
-                  ? (column.options ?? [])
-                      .map((item) => item.trim())
-                      .filter(Boolean)
-                  : undefined;
-              return {
-                key: columnKey,
-                label: trimmedColumnLabel,
-                aiKey: column.aiKey?.trim() || undefined,
-                fieldType: column.fieldType,
-                unit: column.unit?.trim() || undefined,
-                options: columnOptions,
-                isRequired: column.isRequired ?? false,
-                maxSelect:
-                  column.fieldType === "select"
-                    ? Math.max(1, Math.min(3, Number(column.maxSelect ?? 1)))
-                    : undefined,
-              } as OrderInputTableColumn;
-            })
-            .filter((column): column is OrderInputTableColumn =>
-              Boolean(column),
-            )
-        : undefined;
-    const payload = {
-      key: resolvedKey,
-      label: trimmedLabel,
-      groupKey: orderFieldGroup,
-      fieldType: orderFieldType,
-      unit: orderFieldUnit.trim() || undefined,
-      options,
-      columns,
-      isRequired: orderFieldRequired,
-      isActive: orderFieldActive,
-      showInProduction: orderFieldShowInProduction,
-      sortOrder: Number.isFinite(orderFieldSortOrder) ? orderFieldSortOrder : 0,
-    };
-    if (editingOrderFieldId) {
-      await updateOrderInputField(editingOrderFieldId, payload);
-      resetOrderFieldForm();
-      return;
-    }
-    await addOrderInputField(payload);
-    resetOrderFieldForm();
-  }
-
   async function handleSaveExternalJobField() {
     const trimmedLabel = externalJobFieldLabel.trim();
     if (!trimmedLabel) {
@@ -2732,22 +2914,127 @@ export default function SettingsPage() {
     setEditingOrderFieldId(fieldId);
     setOrderFieldLabel(target.label);
     setOrderFieldKey(target.key);
-    setOrderFieldGroup(target.groupKey);
     setOrderFieldType(target.fieldType);
     setOrderFieldUnit(target.unit ?? "");
     setOrderFieldOptions((target.options ?? []).join(", "));
-    setOrderFieldColumns(
-      target.columns?.map((column) => ({
-        ...column,
-        aiKey: column.aiKey ?? "",
-        options: column.options ?? [],
-        maxSelect: column.maxSelect ?? 1,
-      })) ?? [],
-    );
     setOrderFieldRequired(target.isRequired);
     setOrderFieldActive(target.isActive);
+    setOrderFieldShowInTable(target.showInTable ?? true);
     setOrderFieldShowInProduction(target.showInProduction ?? false);
-    setOrderFieldSortOrder(target.sortOrder);
+  }
+
+  async function handleCreateConstructionTable() {
+    if (primaryConstructionTableField) {
+      return;
+    }
+    await addOrderInputField({
+      key: "constructions",
+      label: "Konstrukcijas",
+      groupKey: "production_scope",
+      scope: "construction_table",
+      fieldType: "table",
+      columns: defaultConstructionTableColumns,
+      isPrimaryConstructionTable: true,
+      isRequired: false,
+      isActive: true,
+      showInProduction: true,
+      sortOrder: 0,
+    });
+  }
+
+  async function handleSaveConstructionAttribute() {
+    if (orderFieldType === "table") {
+      setOrderFieldType("text");
+      return;
+    }
+    const trimmedLabel = orderFieldLabel.trim();
+    if (!trimmedLabel) {
+      return;
+    }
+    const resolvedKey = orderFieldKey.trim() || slugify(trimmedLabel);
+    const options =
+      orderFieldType === "select"
+        ? parseOrderFieldOptions(orderFieldOptions)
+        : undefined;
+    const payload = {
+      key: resolvedKey,
+      label: trimmedLabel,
+      groupKey: "production_scope" as OrderInputGroupKey,
+      scope: "construction_attribute" as OrderInputFieldScope,
+      fieldType: orderFieldType,
+      unit: orderFieldUnit.trim() || undefined,
+      options,
+      columns: undefined,
+      isPrimaryConstructionTable: false,
+      isRequired: orderFieldRequired,
+      isActive: orderFieldActive,
+      showInTable: orderFieldShowInTable,
+      showInProduction: orderFieldShowInProduction,
+      sortOrder: editingOrderFieldId
+        ? (orderInputFields.find((field) => field.id === editingOrderFieldId)
+            ?.sortOrder ?? 0)
+        : constructionAttributeFields.reduce(
+            (maxSortOrder, field) => Math.max(maxSortOrder, field.sortOrder),
+            -1,
+          ) + 1,
+    };
+    if (editingOrderFieldId) {
+      await updateOrderInputField(editingOrderFieldId, payload);
+      resetOrderFieldForm();
+      return;
+    }
+    await addOrderInputField(payload);
+    resetOrderFieldForm();
+  }
+
+  async function persistConstructionAttributeOrder(
+    nextFields: typeof constructionAttributeFields,
+  ) {
+    await Promise.all(
+      nextFields.map((field, index) =>
+        updateOrderInputField(field.id, {
+          sortOrder: index + 1,
+        }),
+      ),
+    );
+  }
+
+  async function handleDropConstructionAttribute() {
+    if (
+      draggedConstructionFieldId === null ||
+      constructionFieldDropIndex === null ||
+      constructionAttributeFields.length === 0
+    ) {
+      setDraggedConstructionFieldId(null);
+      setConstructionFieldDropIndex(null);
+      return;
+    }
+
+    const fromIndex = constructionAttributeFields.findIndex(
+      (field) => field.id === draggedConstructionFieldId,
+    );
+    if (fromIndex === -1) {
+      setDraggedConstructionFieldId(null);
+      setConstructionFieldDropIndex(null);
+      return;
+    }
+
+    let targetIndex = constructionFieldDropIndex;
+    if (constructionFieldDropIndex > fromIndex) {
+      targetIndex -= 1;
+    }
+    if (targetIndex === fromIndex) {
+      setDraggedConstructionFieldId(null);
+      setConstructionFieldDropIndex(null);
+      return;
+    }
+
+    const reordered = [...constructionAttributeFields];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    await persistConstructionAttributeOrder(reordered);
+    setDraggedConstructionFieldId(null);
+    setConstructionFieldDropIndex(null);
   }
 
   function handleEditExternalJobField(fieldId: string) {
@@ -2782,28 +3069,6 @@ export default function SettingsPage() {
       return;
     }
     await removeOrderInputField(fieldId);
-    setSelectedOrderFieldIds((prev) => prev.filter((id) => id !== fieldId));
-  }
-
-  async function handleDeleteSelectedOrderFields() {
-    if (selectedOrderFieldIds.length === 0) {
-      return;
-    }
-    if (
-      !(await confirmRemove(
-        t("settings.orderInputs.removeSelectedFieldsConfirm", {
-          count: selectedOrderFieldIds.length,
-        }),
-      ))
-    ) {
-      return;
-    }
-    const ids = [...selectedOrderFieldIds];
-    for (const id of ids) {
-      // Sequential deletes to keep UI feedback consistent.
-      await removeOrderInputField(id);
-    }
-    setSelectedOrderFieldIds([]);
   }
 
   async function handleDeleteExternalJobField(fieldId: string) {
@@ -3161,7 +3426,12 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
-    const normalizedTab = tab === "structure" ? "orderFields" : tab;
+    const normalizedTab =
+      tab === "structure"
+        ? "orderFields"
+        : tab === "orderInputs"
+          ? "constructions"
+          : tab;
     if (
       normalizedTab &&
       settingsSections.some((section) => section.value === normalizedTab)
@@ -3374,6 +3644,9 @@ export default function SettingsPage() {
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
                           {t("settings.common.required")}
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium">
+                          {t("settings.orderFields.inTable")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
                           {t("settings.common.active")}
@@ -3650,6 +3923,11 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="constructions">
+          <div className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>{t("settings.orderInputs.title")}</CardTitle>
@@ -3658,408 +3936,42 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {orderInputFields.length === 0 && (
+                {primaryConstructionTableField === null && (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
                     {t("settings.orderInputs.empty")}
                     <div className="mt-3">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={ensureDefaultOrderInputFields}
-                      >
-                        {t("settings.orderInputs.addDefaultFields")}
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleCreateConstructionTable}
+                        >
+                          {t("settings.orderInputs.createConstructionTable")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={ensureDefaultOrderInputFields}
+                        >
+                          {t("settings.orderInputs.addDefaultFields")}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                <div className="grid gap-3 lg:grid-cols-[minmax(200px,1.2fr)_minmax(160px,0.6fr)_minmax(160px,0.6fr)_minmax(120px,0.4fr)_auto] lg:items-end">
-                  <InputField
-                    label={t("settings.orderInputs.label")}
-                    value={orderFieldLabel}
-                    onChange={(event) => setOrderFieldLabel(event.target.value)}
-                    placeholder={t("settings.orderInputs.labelPlaceholder")}
-                    className="h-10 text-sm"
-                  />
-                  <SelectField
-                    label={t("settings.orderInputs.group")}
-                    value={orderFieldGroup}
-                    onValueChange={(value) =>
-                      setOrderFieldGroup(value as OrderInputGroupKey)
-                    }
-                  >
-                    <Select
-                      value={orderFieldGroup}
-                      onValueChange={(value) =>
-                        setOrderFieldGroup(value as OrderInputGroupKey)
-                      }
-                    >
-                      <SelectTrigger className="h-10 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {orderInputGroupOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {optionLabel(
-                              "orderInputGroup",
-                              option.value,
-                              option.label,
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </SelectField>
-                  <SelectField
-                    label={t("settings.orderInputs.type")}
-                    value={orderFieldType}
-                    onValueChange={(value) =>
-                      setOrderFieldType(value as OrderInputFieldType)
-                    }
-                  >
-                    <Select
-                      value={orderFieldType}
-                      onValueChange={(value) =>
-                        setOrderFieldType(value as OrderInputFieldType)
-                      }
-                    >
-                      <SelectTrigger className="h-10 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {orderInputFieldTypeOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {optionLabel(
-                              "orderInputFieldType",
-                              option.value,
-                              option.label,
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </SelectField>
-                  <InputField
-                    label={t("settings.orderInputs.order")}
-                    type="number"
-                    value={orderFieldSortOrder}
-                    onChange={(event) =>
-                      setOrderFieldSortOrder(Number(event.target.value) || 0)
-                    }
-                    className="h-10 text-sm"
-                  />
-                  <div className="flex gap-2">
-                    <Button onClick={handleSaveOrderField}>
-                      {editingOrderFieldId
-                        ? t("settings.orderInputs.saveField")
-                        : t("settings.orderInputs.addField")}
-                    </Button>
-                    {editingOrderFieldId && (
-                      <Button variant="outline" onClick={resetOrderFieldForm}>
-                        {t("settings.common.cancel")}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <InputField
-                    label={t("settings.orderInputs.unitOptional")}
-                    value={orderFieldUnit}
-                    onChange={(event) => setOrderFieldUnit(event.target.value)}
-                    placeholder="pcs"
-                    className="h-10 text-sm"
-                  />
-                  <TextAreaField
-                    label={t("settings.orderInputs.selectOptions")}
-                    value={orderFieldOptions}
-                    onChange={(event) =>
-                      setOrderFieldOptions(event.target.value)
-                    }
-                    disabled={orderFieldType !== "select"}
-                    placeholder={t(
-                      "settings.orderInputs.selectOptionsPlaceholder",
-                    )}
-                    className="min-h-20 disabled:opacity-50"
-                  />
-                </div>
-
-                {orderFieldType === "table" && (
-                  <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-medium">
-                        {t("settings.orderInputs.tableColumns")}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {t("settings.orderInputs.dragRows")}
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={addOrderFieldColumn}
-                      >
-                        {t("settings.orderInputs.addColumn")}
-                      </Button>
-                    </div>
-                    {orderFieldColumns.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        {t("settings.orderInputs.addAtLeastOneColumn")}
-                      </p>
-                    ) : (
-                      <div className="space-y-3">
-                        {orderFieldColumns.map((column, index) => (
-                          <div
-                            key={index}
-                            className={`group space-y-2 rounded-md border px-2 py-2 transition-colors ${
-                              dragOverColumnIndex === index
-                                ? "border-primary/50 bg-primary/5"
-                                : "border-border hover:border-primary/40"
-                            }`}
-                            draggable
-                            onDragStart={() => {
-                              setDragColumnIndex(index);
-                              setDragOverColumnIndex(index);
-                            }}
-                            onDragOver={(event) => {
-                              event.preventDefault();
-                              setDragOverColumnIndex(index);
-                            }}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              if (dragColumnIndex === null) {
-                                return;
-                              }
-                              reorderOrderFieldColumns(dragColumnIndex, index);
-                              setDragColumnIndex(null);
-                              setDragOverColumnIndex(null);
-                            }}
-                            onDragEnd={() => {
-                              setDragColumnIndex(null);
-                              setDragOverColumnIndex(null);
-                            }}
-                          >
-                            <div className="grid gap-2 md:grid-cols-[24px_1.4fr_1fr_0.9fr_0.7fr_0.5fr_auto] md:items-end">
-                              <div
-                                className="mb-2 select-none text-center text-xs text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100 md:mb-0 md:cursor-grab"
-                                title={t("settings.orderInputs.dragToReorder")}
-                              >
-                                ||
-                              </div>
-                              <InputField
-                                label={t("settings.orderInputs.label")}
-                                value={column.label}
-                                onChange={(event) =>
-                                  updateOrderFieldColumn(index, {
-                                    label: event.target.value,
-                                  })
-                                }
-                                placeholder={t(
-                                  "settings.orderInputs.positionPlaceholder",
-                                )}
-                                className="h-9 text-sm"
-                                labelClassName="text-xs font-medium"
-                              />
-                              <InputField
-                                label={t("settings.orderInputs.aiKeyOptional")}
-                                value={column.aiKey ?? ""}
-                                onChange={(event) =>
-                                  updateOrderFieldColumn(index, {
-                                    aiKey: event.target.value,
-                                  })
-                                }
-                                placeholder={t(
-                                  "settings.orderInputs.aiKeyPlaceholder",
-                                )}
-                                className="h-9 text-sm"
-                                labelClassName="text-xs font-medium"
-                              />
-                              <SelectField
-                                label={t("settings.orderInputs.type")}
-                                value={column.fieldType}
-                                onValueChange={(value) =>
-                                  updateOrderFieldColumn(index, {
-                                    fieldType:
-                                      value as OrderInputTableColumnType,
-                                  })
-                                }
-                                labelClassName="text-xs font-medium"
-                                className="space-y-1"
-                              >
-                                <Select
-                                  value={column.fieldType}
-                                  onValueChange={(value) =>
-                                    updateOrderFieldColumn(index, {
-                                      fieldType:
-                                        value as OrderInputTableColumnType,
-                                    })
-                                  }
-                                >
-                                  <SelectTrigger className="h-9 w-full rounded-md text-sm">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {orderInputColumnTypeOptions.map(
-                                      (option) => (
-                                        <SelectItem
-                                          key={option.value}
-                                          value={option.value}
-                                        >
-                                          {optionLabel(
-                                            "orderInputColumnType",
-                                            option.value,
-                                            option.label,
-                                          )}
-                                        </SelectItem>
-                                      ),
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              </SelectField>
-                              <InputField
-                                label={t("settings.orderInputs.unit")}
-                                value={column.unit ?? ""}
-                                onChange={(event) =>
-                                  updateOrderFieldColumn(index, {
-                                    unit: event.target.value,
-                                  })
-                                }
-                                placeholder="mm"
-                                className="h-9 text-sm"
-                                labelClassName="text-xs font-medium"
-                              />
-                              <div className="space-y-1">
-                                <div className="text-xs font-medium">
-                                  {t("settings.common.required")}
-                                </div>
-                                <Checkbox
-                                  checked={column.isRequired ?? false}
-                                  onChange={(event) =>
-                                    updateOrderFieldColumn(index, {
-                                      isRequired: event.target.checked,
-                                    })
-                                  }
-                                />
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={async () => {
-                                    if (
-                                      !(await confirmRemove(
-                                        t(
-                                          "settings.orderInputs.removeColumnConfirm",
-                                        ),
-                                      ))
-                                    ) {
-                                      return;
-                                    }
-                                    removeOrderFieldColumn(index);
-                                  }}
-                                >
-                                  <Trash2Icon className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                            {column.fieldType === "select" && (
-                              <div className="grid gap-2 md:grid-cols-[1fr_160px] md:items-end">
-                                <TextAreaField
-                                  label={t("settings.orderInputs.options")}
-                                  value={(column.options ?? []).join("\n")}
-                                  onChange={(event) =>
-                                    updateOrderFieldColumn(index, {
-                                      options: parseOrderFieldOptions(
-                                        event.target.value,
-                                      ),
-                                    })
-                                  }
-                                  placeholder={t(
-                                    "settings.orderInputs.optionsPlaceholder",
-                                  )}
-                                  className="min-h-17.5 rounded-md px-2 py-2 text-sm"
-                                  labelClassName="text-xs font-medium"
-                                />
-                                <label className="flex flex-col gap-1 text-xs font-medium">
-                                  {t("settings.orderInputs.maxSelects")}
-                                  <Input
-                                    type="number"
-                                    min={1}
-                                    max={3}
-                                    value={column.maxSelect ?? 1}
-                                    onChange={(event) =>
-                                      updateOrderFieldColumn(index, {
-                                        maxSelect:
-                                          Number(event.target.value) || 1,
-                                      })
-                                    }
-                                    className="h-9 rounded-md bg-input-background px-2 text-sm"
-                                  />
-                                </label>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center gap-4 text-sm">
-                  <Checkbox
-                    checked={orderFieldRequired}
-                    onChange={(event) =>
-                      setOrderFieldRequired(event.target.checked)
-                    }
-                    label={t("settings.common.required")}
-                  />
-                  <Checkbox
-                    checked={orderFieldActive}
-                    onChange={(event) =>
-                      setOrderFieldActive(event.target.checked)
-                    }
-                    label={t("settings.common.active")}
-                  />
-                  <Checkbox
-                    checked={orderFieldShowInProduction}
-                    onChange={(event) =>
-                      setOrderFieldShowInProduction(event.target.checked)
-                    }
-                    label={t("settings.orderInputs.showInProduction")}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm text-muted-foreground">
-                    {selectedOrderFieldIds.length > 0
-                      ? t("settings.common.selectedCount", {
-                          count: selectedOrderFieldIds.length,
-                        })
-                      : " "}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleDeleteSelectedOrderFields}
-                    disabled={selectedOrderFieldIds.length === 0}
-                  >
-                    {t("settings.common.removeSelected")}
-                  </Button>
-                </div>
                 <div className="overflow-x-auto rounded-lg border border-border">
                   <table className="min-w-190 w-full table-fixed text-sm [&_th]:whitespace-normal [&_td]:whitespace-normal [&_td]:wrap-break-word [&_td]:align-top">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
+                        <th className="w-12 px-2 py-2 text-left font-medium">
+                          <span className="sr-only">Drag</span>
+                        </th>
                         <th className="px-4 py-2 text-left font-medium">
                           {t("settings.orderInputs.label")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.orderInputs.group")}
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
                           {t("settings.orderInputs.type")}
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.orderInputs.order")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
                           {t("settings.common.required")}
@@ -4071,74 +3983,379 @@ export default function SettingsPage() {
                           {t("settings.orderInputs.production")}
                         </th>
                         <th className="px-4 py-2 text-right font-medium">
-                          <div className="flex items-center justify-end gap-2">
-                            <span>{t("settings.common.actions")}</span>
-                            <Checkbox
-                              variant="box"
-                              checked={
-                                sortedOrderInputFields.length > 0 &&
-                                selectedOrderFieldIds.length ===
-                                  sortedOrderInputFields.length
-                              }
-                              onChange={(event) => {
-                                if (event.target.checked) {
-                                  setSelectedOrderFieldIds(
-                                    sortedOrderInputFields.map(
-                                      (field) => field.id,
-                                    ),
-                                  );
-                                } else {
-                                  setSelectedOrderFieldIds([]);
-                                }
-                              }}
-                            />
-                          </div>
+                          {t("settings.common.actions")}
                         </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedOrderInputFields.length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={8}
-                            className="px-4 py-6 text-center text-muted-foreground"
+                      {primaryConstructionTableField ? (
+                        <>
+                          <tr className="border-t border-border bg-muted/20">
+                            <td
+                              colSpan={8}
+                              className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                            >
+                              {t("settings.orderInputs.coreColumnsTitle")}
+                            </td>
+                          </tr>
+                          {(primaryConstructionTableField.columns ?? []).map(
+                            (column, rowIndex) => {
+                              const semanticKey =
+                                inferConstructionSemanticKey(column);
+                              const isInlineEditing =
+                                editingConstructionColumnKey === column.key;
+                              return (
+                                <Fragment key={column.key}>
+                                  <tr
+                                    className={`border-t border-border transition-all ${
+                                      constructionColumnDropIndex ===
+                                        rowIndex && draggedConstructionColumnKey
+                                        ? "h-4 bg-primary/10"
+                                        : "h-0"
+                                    }`}
+                                  />
+                                  <tr
+                                    className={`border-t border-border ${
+                                      draggedConstructionColumnKey ===
+                                      column.key
+                                        ? "bg-primary/5"
+                                        : "bg-background"
+                                    }`}
+                                    draggable={!isInlineEditing}
+                                    onDragStart={() => {
+                                      setDraggedConstructionColumnKey(
+                                        column.key,
+                                      );
+                                      setConstructionColumnDropIndex(rowIndex);
+                                    }}
+                                    onDragOver={(event) => {
+                                      if (!draggedConstructionColumnKey) {
+                                        return;
+                                      }
+                                      event.preventDefault();
+                                      const rect =
+                                        event.currentTarget.getBoundingClientRect();
+                                      const before =
+                                        event.clientY <
+                                        rect.top + rect.height / 2;
+                                      setConstructionColumnDropIndex(
+                                        before ? rowIndex : rowIndex + 1,
+                                      );
+                                    }}
+                                    onDrop={(event) => {
+                                      event.preventDefault();
+                                      void handleDropConstructionColumn();
+                                    }}
+                                    onDragEnd={() => {
+                                      setDraggedConstructionColumnKey(null);
+                                      setConstructionColumnDropIndex(null);
+                                    }}
+                                  >
+                                    <td className="px-2 py-2 align-middle text-muted-foreground">
+                                      <span
+                                        className="cursor-grab select-none"
+                                        aria-hidden
+                                      >
+                                        ::
+                                      </span>
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      {isInlineEditing ? (
+                                        <Input
+                                          value={inlineConstructionColumnLabel}
+                                          onChange={(event) =>
+                                            setInlineConstructionColumnLabel(
+                                              event.target.value,
+                                            )
+                                          }
+                                          className="h-9 text-sm"
+                                        />
+                                      ) : (
+                                        <div className="font-medium">
+                                          {column.label}
+                                        </div>
+                                      )}
+                                      <div className="text-xs text-muted-foreground">
+                                        {constructionColumnSemanticOptions.find(
+                                          (option) =>
+                                            option.value === semanticKey,
+                                        )?.label ?? semanticKey}
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-2 text-sm">
+                                      {orderInputFieldTypeOptions.find(
+                                        (option) =>
+                                          option.value === column.fieldType,
+                                      )?.label ?? column.fieldType}
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      <Checkbox
+                                        variant="toggle"
+                                        checked={column.isRequired ?? false}
+                                        onChange={(event) => {
+                                          const nextColumns = (
+                                            primaryConstructionTableField.columns ??
+                                            []
+                                          ).map((currentColumn) =>
+                                            currentColumn.key === column.key
+                                              ? {
+                                                  ...currentColumn,
+                                                  isRequired:
+                                                    event.target.checked,
+                                                }
+                                              : currentColumn,
+                                          );
+                                          void updatePrimaryConstructionColumns(
+                                            nextColumns,
+                                          );
+                                        }}
+                                      />
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      <Checkbox
+                                        variant="toggle"
+                                        checked={column.showInTable ?? true}
+                                        onChange={(event) => {
+                                          const nextColumns = (
+                                            primaryConstructionTableField.columns ??
+                                            []
+                                          ).map((currentColumn) =>
+                                            currentColumn.key === column.key
+                                              ? {
+                                                  ...currentColumn,
+                                                  showInTable:
+                                                    event.target.checked,
+                                                }
+                                              : currentColumn,
+                                          );
+                                          void updatePrimaryConstructionColumns(
+                                            nextColumns,
+                                          );
+                                        }}
+                                      />
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      <Checkbox
+                                        variant="toggle"
+                                        checked={column.isActive ?? true}
+                                        onChange={(event) => {
+                                          const nextColumns = (
+                                            primaryConstructionTableField.columns ??
+                                            []
+                                          ).map((currentColumn) =>
+                                            currentColumn.key === column.key
+                                              ? {
+                                                  ...currentColumn,
+                                                  isActive: event.target.checked,
+                                                }
+                                              : currentColumn,
+                                          );
+                                          void updatePrimaryConstructionColumns(
+                                            nextColumns,
+                                          );
+                                        }}
+                                      />
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      <Checkbox
+                                        variant="toggle"
+                                        checked={
+                                          column.showInProduction ?? true
+                                        }
+                                        onChange={(event) => {
+                                          const nextColumns = (
+                                            primaryConstructionTableField.columns ??
+                                            []
+                                          ).map((currentColumn) =>
+                                            currentColumn.key === column.key
+                                              ? {
+                                                  ...currentColumn,
+                                                  showInProduction:
+                                                    event.target.checked,
+                                                }
+                                              : currentColumn,
+                                          );
+                                          void updatePrimaryConstructionColumns(
+                                            nextColumns,
+                                          );
+                                        }}
+                                      />
+                                    </td>
+                                    <td className="px-4 py-2 text-right">
+                                      <div className="flex justify-end gap-2">
+                                        {isInlineEditing ? (
+                                          <>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() =>
+                                                void handleSaveInlineConstructionColumn()
+                                              }
+                                              disabled={
+                                                !inlineConstructionColumnLabel.trim()
+                                              }
+                                            >
+                                              {t(
+                                                "settings.orderFields.saveField",
+                                              )}
+                                            </Button>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={
+                                                cancelInlineConstructionColumnEdit
+                                              }
+                                            >
+                                              {t("settings.common.cancel")}
+                                            </Button>
+                                          </>
+                                        ) : (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() =>
+                                              startInlineConstructionColumnEdit(
+                                                column.key,
+                                                column.label,
+                                              )
+                                            }
+                                          >
+                                            <PencilIcon className="h-4 w-4" />
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </Fragment>
+                              );
+                            },
+                          )}
+                          <tr
+                            className={`border-t border-border transition-all ${
+                              constructionColumnDropIndex ===
+                                (primaryConstructionTableField.columns ?? [])
+                                  .length && draggedConstructionColumnKey
+                                ? "h-4 bg-primary/10"
+                                : "h-0"
+                            }`}
+                          />
+                        </>
+                      ) : null}
+                      <tr className="border-t border-border bg-muted/20">
+                        <td
+                          colSpan={8}
+                          className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        >
+                          {t("settings.orderInputs.customFieldsTitle")}
+                        </td>
+                      </tr>
+                      {constructionAttributeFields.map((field, rowIndex) => (
+                        <Fragment key={field.id}>
+                          <tr
+                            className={`border-t border-border transition-all ${
+                              constructionFieldDropIndex === rowIndex &&
+                              draggedConstructionFieldId
+                                ? "h-4 bg-primary/10"
+                                : "h-0"
+                            }`}
+                          />
+                          <tr
+                            className={`border-t border-border ${
+                              draggedConstructionFieldId === field.id
+                                ? "bg-primary/5"
+                                : "bg-background"
+                            }`}
+                            draggable={editingOrderFieldId !== field.id}
+                            onDragStart={() => {
+                              setDraggedConstructionFieldId(field.id);
+                              setConstructionFieldDropIndex(rowIndex);
+                            }}
+                            onDragOver={(event) => {
+                              if (!draggedConstructionFieldId) {
+                                return;
+                              }
+                              event.preventDefault();
+                              const rect =
+                                event.currentTarget.getBoundingClientRect();
+                              const before =
+                                event.clientY < rect.top + rect.height / 2;
+                              setConstructionFieldDropIndex(
+                                before ? rowIndex : rowIndex + 1,
+                              );
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              void handleDropConstructionAttribute();
+                            }}
+                            onDragEnd={() => {
+                              setDraggedConstructionFieldId(null);
+                              setConstructionFieldDropIndex(null);
+                            }}
                           >
-                            {t("settings.orderInputs.noOrderInputs")}
-                          </td>
-                        </tr>
-                      ) : (
-                        sortedOrderInputFields.map((field) => (
-                          <tr key={field.id} className="border-t border-border">
+                            <td className="px-2 py-2 align-middle text-muted-foreground">
+                              <span
+                                className="cursor-grab select-none"
+                                aria-hidden
+                              >
+                                ::
+                              </span>
+                            </td>
                             <td className="px-4 py-2">
                               <div className="font-medium">{field.label}</div>
-                            </td>
-                            <td className="px-4 py-2 text-sm">
-                              {orderInputGroupOptions.find(
-                                (option) => option.value === field.groupKey,
-                              )?.label ?? field.groupKey}
+                              {field.unit ? (
+                                <div className="text-xs text-muted-foreground">
+                                  {field.unit}
+                                </div>
+                              ) : null}
                             </td>
                             <td className="px-4 py-2 text-sm">
                               {orderInputFieldTypeOptions.find(
                                 (option) => option.value === field.fieldType,
                               )?.label ?? field.fieldType}
                             </td>
-                            <td className="px-4 py-2 text-sm">
-                              {field.sortOrder}
+                            <td className="px-4 py-2">
+                              <Checkbox
+                                variant="toggle"
+                                checked={field.isRequired}
+                                onChange={(event) =>
+                                  updateOrderInputField(field.id, {
+                                    isRequired: event.target.checked,
+                                  })
+                                }
+                              />
                             </td>
-                            <td className="px-4 py-2 text-sm">
-                              {field.isRequired
-                                ? t("settings.common.yes")
-                                : t("settings.common.no")}
+                            <td className="px-4 py-2">
+                              <Checkbox
+                                variant="toggle"
+                                checked={field.showInTable ?? true}
+                                onChange={(event) =>
+                                  updateOrderInputField(field.id, {
+                                    showInTable: event.target.checked,
+                                  })
+                                }
+                              />
                             </td>
-                            <td className="px-4 py-2 text-sm">
-                              {field.isActive
-                                ? t("settings.common.yes")
-                                : t("settings.common.no")}
+                            <td className="px-4 py-2">
+                              <Checkbox
+                                variant="toggle"
+                                checked={field.isActive}
+                                onChange={(event) =>
+                                  updateOrderInputField(field.id, {
+                                    isActive: event.target.checked,
+                                  })
+                                }
+                              />
                             </td>
-                            <td className="px-4 py-2 text-sm">
-                              {field.showInProduction
-                                ? t("settings.common.yes")
-                                : t("settings.common.no")}
+                            <td className="px-4 py-2">
+                              <Checkbox
+                                variant="toggle"
+                                checked={field.showInProduction ?? false}
+                                onChange={(event) =>
+                                  updateOrderInputField(field.id, {
+                                    showInProduction: event.target.checked,
+                                  })
+                                }
+                              />
                             </td>
                             <td className="px-4 py-2 text-right">
                               <div className="flex justify-end items-center gap-2">
@@ -4165,27 +4382,152 @@ export default function SettingsPage() {
                                 >
                                   <Trash2Icon className="h-4 w-4" />
                                 </Button>
-                                <Checkbox
-                                  variant="box"
-                                  checked={selectedOrderFieldIds.includes(
-                                    field.id,
-                                  )}
-                                  onChange={(event) => {
-                                    setSelectedOrderFieldIds((prev) => {
-                                      if (event.target.checked) {
-                                        return [...prev, field.id];
-                                      }
-                                      return prev.filter(
-                                        (id) => id !== field.id,
-                                      );
-                                    });
-                                  }}
-                                />
                               </div>
                             </td>
                           </tr>
-                        ))
-                      )}
+                        </Fragment>
+                      ))}
+                      <tr
+                        className={`border-t border-border transition-all ${
+                          constructionFieldDropIndex ===
+                            constructionAttributeFields.length &&
+                          draggedConstructionFieldId
+                            ? "h-4 bg-primary/10"
+                            : "h-0"
+                        }`}
+                      />
+                      <tr className="border-t border-border bg-muted/10">
+                        <td className="px-2 py-2 align-middle text-center text-lg text-muted-foreground">
+                          +
+                        </td>
+                        <td className="px-4 py-2">
+                          <Input
+                            value={orderFieldLabel}
+                            onChange={(event) =>
+                              setOrderFieldLabel(event.target.value)
+                            }
+                            placeholder={t(
+                              "settings.orderInputs.inlineAddHint",
+                            )}
+                            className="h-9 text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <Select
+                            value={orderFieldType}
+                            onValueChange={(value) =>
+                              setOrderFieldType(value as OrderInputFieldType)
+                            }
+                          >
+                            <SelectTrigger className="h-9 w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {constructionAttributeTypeOptions.map(
+                                (option) => (
+                                  <SelectItem
+                                    key={option.value}
+                                    value={option.value}
+                                  >
+                                    {optionLabel(
+                                      "orderInputFieldType",
+                                      option.value,
+                                      option.label,
+                                    )}
+                                  </SelectItem>
+                                ),
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="px-4 py-2">
+                          <Checkbox
+                            variant="box"
+                            checked={orderFieldRequired}
+                            onChange={(event) =>
+                              setOrderFieldRequired(event.target.checked)
+                            }
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <Checkbox
+                            variant="box"
+                            checked={orderFieldShowInTable}
+                            onChange={(event) =>
+                              setOrderFieldShowInTable(event.target.checked)
+                            }
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <Checkbox
+                            variant="box"
+                            checked={orderFieldActive}
+                            onChange={(event) =>
+                              setOrderFieldActive(event.target.checked)
+                            }
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <Checkbox
+                            variant="box"
+                            checked={orderFieldShowInProduction}
+                            onChange={(event) =>
+                              setOrderFieldShowInProduction(
+                                event.target.checked,
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              onClick={handleSaveConstructionAttribute}
+                              disabled={!orderFieldLabel.trim()}
+                            >
+                              {editingOrderFieldId
+                                ? t("settings.orderInputs.saveField")
+                                : t("settings.orderInputs.addField")}
+                            </Button>
+                            {editingOrderFieldId ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={resetOrderFieldForm}
+                              >
+                                {t("settings.common.cancel")}
+                              </Button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                      <tr className="border-t border-border bg-muted/5">
+                        <td colSpan={8} className="px-4 py-3">
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <InputField
+                              label={t("settings.orderInputs.unitOptional")}
+                              value={orderFieldUnit}
+                              onChange={(event) =>
+                                setOrderFieldUnit(event.target.value)
+                              }
+                              placeholder="pcs"
+                              className="h-9 text-sm"
+                            />
+                            <TextAreaField
+                              label={t("settings.orderInputs.selectOptions")}
+                              value={orderFieldOptions}
+                              onChange={(event) =>
+                                setOrderFieldOptions(event.target.value)
+                              }
+                              disabled={orderFieldType !== "select"}
+                              placeholder={t(
+                                "settings.orderInputs.selectOptionsPlaceholder",
+                              )}
+                              className="min-h-18 disabled:opacity-50"
+                            />
+                          </div>
+                        </td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>

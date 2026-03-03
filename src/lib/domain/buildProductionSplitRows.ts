@@ -1,4 +1,8 @@
 import type { OrderInputField } from "@/types/orderInputs";
+import {
+  getOrderInputTableRowId,
+  isOrderInputTableRowEmpty,
+} from "@/lib/domain/orderInputTableRows";
 
 export type ProductionBatchGroup = {
   key: string;
@@ -93,16 +97,22 @@ export function buildProductionSplitRows(
         const raw = values[field.id];
         const tableRows = Array.isArray(raw) ? raw : [];
         tableRows.forEach((row, rowIndex) => {
-          const normalized =
+        const normalized =
             typeof row === "object" && row !== null
               ? (row as Record<string, unknown>)
               : {};
+          if (isOrderInputTableRowEmpty(normalized)) {
+            return;
+          }
           const itemName = formatTableRow(field, normalized);
           if (!itemName) {
             return;
           }
+          const stableRowId = getOrderInputTableRowId(normalized);
           rows.push({
-            id: `${group.orderId}:${field.id}:${rowIndex}`,
+            id: stableRowId
+              ? `${group.orderId}:${field.id}:${stableRowId}`
+              : `${group.orderId}:${field.id}:${rowIndex}`,
             orderId: group.orderId,
             orderNumber: group.orderNumber,
             customerName: group.customerName,

@@ -10,14 +10,35 @@ export type OrderInputFieldType =
 
 export type OrderInputTableColumnType = "text" | "number" | "select";
 
+export type OrderInputFieldScope =
+  | "order_additional"
+  | "construction_table"
+  | "construction_attribute";
+
+export type ConstructionColumnSemanticKey =
+  | "position"
+  | "item_type"
+  | "item_name"
+  | "qty"
+  | "dimensions"
+  | "color"
+  | "system"
+  | "material"
+  | "notes"
+  | "custom";
+
 export interface OrderInputTableColumn {
   key: string;
   label: string;
   aiKey?: string;
+  semanticKey?: ConstructionColumnSemanticKey;
   fieldType: OrderInputTableColumnType;
   unit?: string;
   options?: string[];
   isRequired?: boolean;
+  isActive?: boolean;
+  showInTable?: boolean;
+  showInProduction?: boolean;
   maxSelect?: number;
 }
 
@@ -28,12 +49,15 @@ export interface OrderInputField {
   key: string;
   label: string;
   groupKey: OrderInputGroupKey;
+  scope?: OrderInputFieldScope;
   fieldType: OrderInputFieldType;
   unit?: string;
   options?: string[];
   columns?: OrderInputTableColumn[];
+  isPrimaryConstructionTable?: boolean;
   isRequired: boolean;
   isActive: boolean;
+  showInTable?: boolean;
   showInProduction?: boolean;
   sortOrder: number;
 }

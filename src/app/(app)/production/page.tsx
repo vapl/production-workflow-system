@@ -49,6 +49,11 @@ import {
   getProductionQrFieldValue,
   prepareProductionQrRows,
 } from "@/lib/domain/prepareProductionQrRows";
+import {
+  buildTableRowsFromOrderItems,
+  isMissingOrderItemsSchema,
+  mapOrderItemRow,
+} from "@/lib/domain/orderItemsBridge";
 import type { OrderInputField } from "@/types/orderInputs";
 import {
   CalendarIcon,
@@ -555,26 +560,80 @@ export default function ProductionPage() {
       if (normalizedFields.length === 0) {
         setProductionValues({});
       } else {
-        const fieldIds = normalizedFields.map((field) => field.id);
-        const valuesResult = await supabase
-          .from("order_input_values")
-          .select("order_id, field_id, value")
-          .in("order_id", orderIds)
-          .in("field_id", fieldIds);
-        if (!isMounted) {
-          return;
-        }
         const nextValues: Record<string, Record<string, unknown>> = {};
-        (valuesResult.data ?? []).forEach(
-          (row: { order_id: string; field_id: string; value: unknown }) => {
-            const orderId = row.order_id as string;
-            const fieldId = row.field_id as string;
-            if (!nextValues[orderId]) {
-              nextValues[orderId] = {};
-            }
-            nextValues[orderId][fieldId] = row.value;
-          },
+        const nonTableFieldIds = normalizedFields
+          .filter((field) => field.fieldType !== "table")
+          .map((field) => field.id);
+        if (nonTableFieldIds.length > 0) {
+          const valuesResult = await supabase
+            .from("order_input_values")
+            .select("order_id, field_id, value")
+            .in("order_id", orderIds)
+            .in("field_id", nonTableFieldIds);
+          if (!isMounted) {
+            return;
+          }
+          (valuesResult.data ?? []).forEach(
+            (row: { order_id: string; field_id: string; value: unknown }) => {
+              const orderId = row.order_id as string;
+              const fieldId = row.field_id as string;
+              if (!nextValues[orderId]) {
+                nextValues[orderId] = {};
+              }
+              nextValues[orderId][fieldId] = row.value;
+            },
+          );
+        }
+
+        const tableFields = normalizedFields.filter(
+          (field) => field.fieldType === "table",
         );
+        if (tableFields.length > 0) {
+          const orderItemsResult = await supabase
+            .from("order_items")
+            .select(
+              "id, order_id, source_kind, source_field_id, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
+            )
+            .in("order_id", orderIds)
+            .eq("source_kind", "order_input_table")
+            .in(
+              "source_field_id",
+              tableFields.map((field) => field.id),
+            )
+            .order("sort_order", { ascending: true })
+            .order("created_at", { ascending: true });
+
+          if (!isMounted) {
+            return;
+          }
+
+          if (
+            orderItemsResult.data &&
+            !isMissingOrderItemsSchema(orderItemsResult.error)
+          ) {
+            const items = orderItemsResult.data.map(mapOrderItemRow);
+            tableFields.forEach((field) => {
+              const rowsByOrder = new Map<string, ReturnType<typeof buildTableRowsFromOrderItems>>();
+              items
+                .filter((item) => item.sourceFieldId === field.id)
+                .forEach((item) => {
+                  const current = rowsByOrder.get(item.orderId) ?? [];
+                  current.push(
+                    ...buildTableRowsFromOrderItems(field, [item]),
+                  );
+                  rowsByOrder.set(item.orderId, current);
+                });
+
+              rowsByOrder.forEach((rows, orderId) => {
+                if (!nextValues[orderId]) {
+                  nextValues[orderId] = {};
+                }
+                nextValues[orderId][field.id] = rows;
+              });
+            });
+          }
+        }
+
         setProductionValues(nextValues);
       }
 
@@ -932,8 +991,16 @@ export default function ProductionPage() {
         seen.add(rowKey);
       }
       const parts = rowKey ? rowKey.split(":") : [];
-      const fieldId = parts[1] ?? "fallback";
-      const rowIndex = Number(parts[2] ?? 0);
+      const fieldId =
+        typeof item.meta?.fieldId === "string"
+          ? item.meta.fieldId
+          : (parts[1] ?? "fallback");
+      const rawRowIndex =
+        typeof item.meta?.rowIndex === "number" ||
+        typeof item.meta?.rowIndex === "string"
+          ? item.meta.rowIndex
+          : (parts[2] ?? 0);
+      const rowIndex = Number(rawRowIndex);
       const normalizedIndex = Number.isFinite(rowIndex) ? rowIndex : 0;
       rows.push({
         id: rowKey ?? item.id,
@@ -971,7 +1038,7 @@ export default function ProductionPage() {
         );
 
   const rowKeyForRow = (row: SplitRow) =>
-    `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
+    row.id;
 
   const executionKey = (
     orderId: string,
@@ -1647,6 +1714,7 @@ export default function ProductionPage() {
           status: "queued",
           station_id: stationId,
           meta: {
+            fieldId: row.fieldId,
             fieldLabel: row.fieldLabel,
             rowIndex: row.rowIndex,
             rowKey: row.id,

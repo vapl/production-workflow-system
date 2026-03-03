@@ -186,6 +186,99 @@ create index if not exists order_input_values_tenant_id_idx
 create index if not exists order_input_values_order_id_idx
   on public.order_input_values(order_id);
 
+create table if not exists public.order_items (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid references public.tenants(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  source_kind text not null default 'order_input_table'
+    check (source_kind in ('order_input_table', 'manual', 'import', 'cad')),
+  source_field_id uuid references public.order_input_fields(id) on delete set null,
+  source_row_id text not null,
+  sort_order integer not null default 0,
+  position text,
+  item_name text not null,
+  item_type text,
+  qty numeric not null default 1,
+  material text,
+  dimensions text,
+  attributes jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists order_items_source_row_uidx
+  on public.order_items(order_id, source_kind, source_field_id, source_row_id);
+create index if not exists order_items_tenant_id_idx
+  on public.order_items(tenant_id);
+create index if not exists order_items_order_id_idx
+  on public.order_items(order_id);
+create index if not exists order_items_source_field_id_idx
+  on public.order_items(source_field_id);
+create index if not exists order_items_item_name_idx
+  on public.order_items(item_name);
+
+create table if not exists public.order_item_documents (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid references public.tenants(id) on delete cascade,
+  order_item_id uuid not null references public.order_items(id) on delete cascade,
+  order_attachment_id uuid not null references public.order_attachments(id) on delete cascade,
+  role text not null default 'source'
+    check (role in ('source', 'production', 'reference')),
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists order_item_documents_unique
+  on public.order_item_documents(order_item_id, order_attachment_id);
+create index if not exists order_item_documents_tenant_id_idx
+  on public.order_item_documents(tenant_id);
+create index if not exists order_item_documents_order_item_id_idx
+  on public.order_item_documents(order_item_id);
+create index if not exists order_item_documents_attachment_id_idx
+  on public.order_item_documents(order_attachment_id);
+
+create table if not exists public.order_item_bom_lines (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid references public.tenants(id) on delete cascade,
+  order_item_id uuid not null references public.order_items(id) on delete cascade,
+  line_no integer not null default 0,
+  component_code text,
+  component_name text not null,
+  component_type text not null default 'other'
+    check (component_type in (
+      'profile',
+      'glass',
+      'panel',
+      'hardware',
+      'gasket',
+      'accessory',
+      'sheet',
+      'edge_band',
+      'fitting',
+      'other'
+    )),
+  qty numeric not null default 1,
+  unit text not null default 'pcs',
+  length numeric,
+  width numeric,
+  height numeric,
+  attributes jsonb not null default '{}'::jsonb,
+  source_kind text not null default 'manual'
+    check (source_kind in ('manual', 'import', 'cad')),
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists order_item_bom_lines_tenant_id_idx
+  on public.order_item_bom_lines(tenant_id);
+create index if not exists order_item_bom_lines_order_item_id_idx
+  on public.order_item_bom_lines(order_item_id);
+create index if not exists order_item_bom_lines_component_code_idx
+  on public.order_item_bom_lines(component_code);
+create index if not exists order_item_bom_lines_component_type_idx
+  on public.order_item_bom_lines(component_type);
+
 create table if not exists public.external_job_fields (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
@@ -357,6 +450,61 @@ create trigger set_order_input_values_tenant_id
 before insert on public.order_input_values
 for each row execute procedure public.set_order_child_tenant_id();
 
+drop trigger if exists set_order_items_updated_at on public.order_items;
+create trigger set_order_items_updated_at
+before update on public.order_items
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_order_items_tenant_id on public.order_items;
+create trigger set_order_items_tenant_id
+before insert on public.order_items
+for each row execute procedure public.set_order_child_tenant_id();
+
+create or replace function public.set_order_item_document_tenant_id()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.tenant_id is null then
+    select oi.tenant_id
+      into new.tenant_id
+    from public.order_items oi
+    where oi.id = new.order_item_id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists set_order_item_documents_tenant_id on public.order_item_documents;
+create trigger set_order_item_documents_tenant_id
+before insert on public.order_item_documents
+for each row execute procedure public.set_order_item_document_tenant_id();
+
+create or replace function public.set_order_item_bom_line_tenant_id()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.tenant_id is null then
+    select oi.tenant_id
+      into new.tenant_id
+    from public.order_items oi
+    where oi.id = new.order_item_id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists set_order_item_bom_lines_updated_at on public.order_item_bom_lines;
+create trigger set_order_item_bom_lines_updated_at
+before update on public.order_item_bom_lines
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_order_item_bom_lines_tenant_id on public.order_item_bom_lines;
+create trigger set_order_item_bom_lines_tenant_id
+before insert on public.order_item_bom_lines
+for each row execute procedure public.set_order_item_bom_line_tenant_id();
+
 drop trigger if exists seed_default_order_field_settings_on_tenant_insert on public.tenants;
 create trigger seed_default_order_field_settings_on_tenant_insert
 after insert on public.tenants
@@ -377,6 +525,9 @@ alter table public.order_comments enable row level security;
 alter table public.order_input_fields enable row level security;
 alter table public.order_field_settings enable row level security;
 alter table public.order_input_values enable row level security;
+alter table public.order_items enable row level security;
+alter table public.order_item_documents enable row level security;
+alter table public.order_item_bom_lines enable row level security;
 alter table public.tenants enable row level security;
 alter table public.profiles enable row level security;
 
@@ -691,6 +842,132 @@ create policy "order_input_values_delete_by_tenant" on public.order_input_values
     exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.tenant_id = order_input_values.tenant_id
+    )
+  );
+
+create policy "order_items_select_by_tenant" on public.order_items
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_items.tenant_id
+    )
+  );
+
+create policy "order_items_insert_by_tenant" on public.order_items
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_items.tenant_id
+    )
+  );
+
+create policy "order_items_update_by_tenant" on public.order_items
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_items.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_items.tenant_id
+    )
+  );
+
+create policy "order_items_delete_by_tenant" on public.order_items
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_items.tenant_id
+    )
+  );
+
+create policy "order_item_documents_select_by_tenant" on public.order_item_documents
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_documents.tenant_id
+    )
+  );
+
+create policy "order_item_documents_insert_by_tenant" on public.order_item_documents
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_documents.tenant_id
+    )
+  );
+
+create policy "order_item_documents_update_by_tenant" on public.order_item_documents
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_documents.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_documents.tenant_id
+    )
+  );
+
+create policy "order_item_documents_delete_by_tenant" on public.order_item_documents
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_documents.tenant_id
+    )
+  );
+
+create policy "order_item_bom_lines_select_by_tenant" on public.order_item_bom_lines
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_bom_lines.tenant_id
+    )
+  );
+
+create policy "order_item_bom_lines_insert_by_tenant" on public.order_item_bom_lines
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_bom_lines.tenant_id
+    )
+  );
+
+create policy "order_item_bom_lines_update_by_tenant" on public.order_item_bom_lines
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_bom_lines.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_bom_lines.tenant_id
+    )
+  );
+
+create policy "order_item_bom_lines_delete_by_tenant" on public.order_item_bom_lines
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = order_item_bom_lines.tenant_id
     )
   );
 

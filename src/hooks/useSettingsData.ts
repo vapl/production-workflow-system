@@ -9,9 +9,11 @@ import type {
   WorkStation,
 } from "@/types/workstation";
 import type {
+  ConstructionColumnSemanticKey,
   OrderInputField,
   OrderInputFieldType,
   OrderInputGroupKey,
+  OrderInputFieldScope,
 } from "@/types/orderInputs";
 import type {
   ExternalJobField,
@@ -168,7 +170,13 @@ function mapOrderInputField(row: {
   group_key?: string | null;
   field_type: string;
   unit?: string | null;
-  options?: { options?: string[]; columns?: OrderInputField["columns"] } | null;
+  options?: {
+    options?: string[];
+    columns?: OrderInputField["columns"];
+    scope?: OrderInputFieldScope;
+    isPrimaryConstructionTable?: boolean;
+    showInTable?: boolean;
+  } | null;
   is_required?: boolean | null;
   is_active?: boolean | null;
   show_in_production?: boolean | null;
@@ -179,8 +187,14 @@ function mapOrderInputField(row: {
     key: decodeUtf8Mojibake(column.key),
     label: decodeUtf8Mojibake(column.label),
     aiKey: normalizeMaybeString(column.aiKey),
+    semanticKey:
+      (normalizeMaybeString(column.semanticKey) as ConstructionColumnSemanticKey | undefined) ??
+      undefined,
     unit: normalizeMaybeString(column.unit),
     options: normalizeStringArray(column.options),
+    isActive: column.isActive ?? true,
+    showInTable: column.showInTable ?? true,
+    showInProduction: column.showInProduction ?? true,
   }));
 
   return {
@@ -188,14 +202,43 @@ function mapOrderInputField(row: {
     key: decodeUtf8Mojibake(row.key),
     label: decodeUtf8Mojibake(row.label),
     groupKey: (row.group_key ?? "order_info") as OrderInputGroupKey,
+    scope: row.options?.scope ?? undefined,
     fieldType: row.field_type as OrderInputFieldType,
     unit: normalizeMaybeString(row.unit),
     options: normalizeStringArray(row.options?.options),
     columns: normalizedColumns,
+    isPrimaryConstructionTable:
+      row.options?.isPrimaryConstructionTable ?? false,
     isRequired: row.is_required ?? false,
     isActive: row.is_active ?? true,
+    showInTable: row.options?.showInTable ?? true,
     showInProduction: row.show_in_production ?? false,
     sortOrder: row.sort_order ?? 0,
+  };
+}
+
+function buildOrderInputOptionsPayload(payload: {
+  options?: string[];
+  columns?: OrderInputField["columns"];
+  scope?: OrderInputFieldScope;
+  isPrimaryConstructionTable?: boolean;
+  showInTable?: boolean;
+}) {
+  if (
+    !payload.options &&
+    !payload.columns &&
+    !payload.scope &&
+    !payload.isPrimaryConstructionTable &&
+    payload.showInTable === undefined
+  ) {
+    return null;
+  }
+  return {
+    options: payload.options,
+    columns: payload.columns,
+    scope: payload.scope,
+    isPrimaryConstructionTable: payload.isPrimaryConstructionTable ?? false,
+    showInTable: payload.showInTable ?? true,
   };
 }
 
@@ -744,10 +787,7 @@ export function useSettingsData(): SettingsDataState {
         if (!supabase || !user.tenantId) {
           return;
         }
-        const optionsPayload =
-          payload.options || payload.columns
-            ? { options: payload.options, columns: payload.columns }
-            : null;
+        const optionsPayload = buildOrderInputOptionsPayload(payload);
         const { data, error: insertError } = await supabase
           .from("order_input_fields")
           .insert({
@@ -791,11 +831,23 @@ export function useSettingsData(): SettingsDataState {
         if (patch.fieldType !== undefined)
           updatePayload.field_type = patch.fieldType;
         if (patch.unit !== undefined) updatePayload.unit = patch.unit ?? null;
-        if (patch.options !== undefined || patch.columns !== undefined) {
-          updatePayload.options =
-            patch.options || patch.columns
-              ? { options: patch.options, columns: patch.columns }
-              : null;
+        if (
+          patch.options !== undefined ||
+          patch.columns !== undefined ||
+          patch.scope !== undefined ||
+          patch.isPrimaryConstructionTable !== undefined ||
+          patch.showInTable !== undefined
+        ) {
+          const currentField = orderInputFields.find((field) => field.id === fieldId);
+          updatePayload.options = buildOrderInputOptionsPayload({
+            options: patch.options ?? currentField?.options,
+            columns: patch.columns ?? currentField?.columns,
+            scope: patch.scope ?? currentField?.scope,
+            isPrimaryConstructionTable:
+              patch.isPrimaryConstructionTable ??
+              currentField?.isPrimaryConstructionTable,
+            showInTable: patch.showInTable ?? currentField?.showInTable,
+          });
         }
         if (patch.isRequired !== undefined)
           updatePayload.is_required = patch.isRequired;
@@ -862,10 +914,7 @@ export function useSettingsData(): SettingsDataState {
           group_key: field.groupKey,
           field_type: field.fieldType,
           unit: field.unit ?? null,
-          options:
-            field.options || field.columns
-              ? { options: field.options, columns: field.columns }
-              : null,
+          options: buildOrderInputOptionsPayload(field),
           is_required: field.isRequired,
           is_active: field.isActive,
           show_in_production: field.showInProduction ?? false,

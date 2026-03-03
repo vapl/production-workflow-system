@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import QRCode from "qrcode";
 import type { ProductionSplitRow } from "@/lib/domain/buildProductionSplitRows";
+import { getOrderInputTableRowId } from "@/lib/domain/orderInputTableRows";
 
 type ProductionQrCodeRow = {
   order_id: string;
   field_id: string;
   row_index: number;
+  source_row_id?: string | null;
   token: string;
 };
 
@@ -49,27 +51,37 @@ export async function prepareProductionQrRows(params: {
   }
 
   const orderIds = Array.from(new Set(rows.map((row) => row.orderId)));
-  const fieldIds = Array.from(new Set(rows.map((row) => row.fieldId)));
 
   const { data: existingRows, error: existingError } = await client
     .from("production_qr_codes")
-    .select("order_id, field_id, row_index, token")
-    .in("order_id", orderIds)
-    .in("field_id", fieldIds);
+    .select("order_id, field_id, row_index, source_row_id, token")
+    .in("order_id", orderIds);
   if (existingError) {
     throw new Error(existingError.message);
   }
 
+  const rowLookupKeys = (row: ProductionSplitRow) => {
+    const sourceRowId = getOrderInputTableRowId(row.rawRow);
+    const keys = [`${row.orderId}:${row.fieldId}:${row.rowIndex}`];
+    if (sourceRowId) {
+      keys.unshift(`${row.orderId}:${sourceRowId}`);
+    }
+    return keys;
+  };
+
   const existingMap = new Map<string, string>();
   const existingList = (existingRows as ProductionQrCodeRow[]) ?? [];
   existingList.forEach((entry) => {
-    const key = `${entry.order_id}:${entry.field_id}:${entry.row_index}`;
-    existingMap.set(key, entry.token);
+    const legacyKey = `${entry.order_id}:${entry.field_id}:${entry.row_index}`;
+    existingMap.set(legacyKey, entry.token);
+    if (entry.source_row_id && entry.source_row_id.trim().length > 0) {
+      existingMap.set(`${entry.order_id}:${entry.source_row_id}`, entry.token);
+    }
   });
 
   const missing = rows.filter((row) => {
-    const key = `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
-    return !existingMap.has(key);
+    const keys = rowLookupKeys(row);
+    return !keys.some((key) => existingMap.has(key));
   });
 
   if (missing.length > 0) {
@@ -80,24 +92,29 @@ export async function prepareProductionQrRows(params: {
           order_id: row.orderId,
           field_id: row.fieldId,
           row_index: row.rowIndex,
+          source_row_id: getOrderInputTableRowId(row.rawRow),
           created_by: userId ?? null,
         })),
       )
-      .select("order_id, field_id, row_index, token");
+      .select("order_id, field_id, row_index, source_row_id, token");
     if (insertError) {
       throw new Error(insertError.message);
     }
     const insertedList = (inserted as ProductionQrCodeRow[]) ?? [];
     insertedList.forEach((entry) => {
-      const key = `${entry.order_id}:${entry.field_id}:${entry.row_index}`;
-      existingMap.set(key, entry.token);
+      const legacyKey = `${entry.order_id}:${entry.field_id}:${entry.row_index}`;
+      existingMap.set(legacyKey, entry.token);
+      if (entry.source_row_id && entry.source_row_id.trim().length > 0) {
+        existingMap.set(`${entry.order_id}:${entry.source_row_id}`, entry.token);
+      }
     });
   }
 
   const withTokens = rows
     .map((row) => {
-      const key = `${row.orderId}:${row.fieldId}:${row.rowIndex}`;
-      const token = existingMap.get(key);
+      const token = rowLookupKeys(row)
+        .map((key) => existingMap.get(key))
+        .find(Boolean);
       return token ? { row, token } : null;
     })
     .filter(Boolean) as Array<{ row: ProductionSplitRow; token: string }>;

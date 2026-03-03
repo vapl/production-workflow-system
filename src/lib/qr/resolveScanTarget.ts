@@ -8,6 +8,7 @@ type ResolveOk = {
   orderId: string | null;
   rowIndex?: number | null;
   fieldId?: string | null;
+  sourceRowId?: string | null;
   rawValue: string;
 };
 
@@ -46,7 +47,7 @@ export async function resolveScanTarget(
 
   const { data, error } = await sb
     .from("production_qr_codes")
-    .select("token, order_id, row_index, field_id")
+    .select("token, order_id, row_index, field_id, source_row_id")
     .eq("token", parsed.token)
     .maybeSingle();
 
@@ -72,6 +73,7 @@ export async function resolveScanTarget(
     orderId,
     rowIndex: data.row_index ?? null,
     fieldId: data.field_id ?? null,
+    sourceRowId: data.source_row_id ?? null,
     targetRoute,
     rawValue,
   };

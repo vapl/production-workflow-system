@@ -98,6 +98,14 @@ function getProductionItemRowIndex(item: ProductionItemRow) {
   return null;
 }
 
+function getProductionItemRowKey(item: ProductionItemRow) {
+  if (!item.meta || typeof item.meta !== "object") {
+    return null;
+  }
+  const raw = (item.meta as Record<string, unknown>).rowKey;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
+}
+
 type BatchRunRow = {
   id: string;
   order_id: string;
@@ -318,6 +326,9 @@ export default function OperatorProductionPage() {
     null,
   );
   const [quickActionItemId, setQuickActionItemId] = useState<string | null>(
+    null,
+  );
+  const [quickActionRowKey, setQuickActionRowKey] = useState<string | null>(
     null,
   );
   const [quickActionRowIndex, setQuickActionRowIndex] = useState<number | null>(
@@ -1666,6 +1677,7 @@ export default function OperatorProductionPage() {
     setIsQuickActionOpen(false);
     setQuickActionOrderId(null);
     setQuickActionItemId(null);
+    setQuickActionRowKey(null);
     setQuickActionRowIndex(null);
   };
 
@@ -1719,13 +1731,22 @@ export default function OperatorProductionPage() {
   }, [quickActionOrderId, quickActionItem]);
 
   useEffect(() => {
-    if (!quickActionOrderId || quickActionRowIndex == null) {
+    if (!quickActionOrderId) {
       return;
     }
     const candidates = productionItems.filter(
-      (item) =>
-        item.order_id === quickActionOrderId &&
-        getProductionItemRowIndex(item) === quickActionRowIndex,
+      (item) => {
+        if (item.order_id !== quickActionOrderId) {
+          return false;
+        }
+        if (quickActionRowKey) {
+          return getProductionItemRowKey(item) === quickActionRowKey;
+        }
+        if (quickActionRowIndex != null) {
+          return getProductionItemRowIndex(item) === quickActionRowIndex;
+        }
+        return false;
+      },
     );
     if (candidates.length === 0) {
       return;
@@ -1736,7 +1757,7 @@ export default function OperatorProductionPage() {
       return bTs - aTs;
     })[0];
     setQuickActionItemId(target.id);
-  }, [quickActionOrderId, quickActionRowIndex, productionItems]);
+  }, [quickActionOrderId, quickActionRowIndex, quickActionRowKey, productionItems]);
 
   const handleScannerResolved = async (result: ResolveScanTargetResult) => {
     const sb = supabase;
@@ -1790,9 +1811,14 @@ export default function OperatorProductionPage() {
     if (currentUser.role === "Operator" && result.orderId) {
       const rowIndex =
         typeof result.rowIndex === "number" ? result.rowIndex : null;
+      const rowKey =
+        result.sourceRowId && result.fieldId
+          ? `${result.orderId}:${result.fieldId}:${result.sourceRowId}`
+          : null;
       setQuickActionOrderId(result.orderId);
+      setQuickActionRowKey(rowKey);
       setQuickActionRowIndex(rowIndex);
-      if (rowIndex == null) {
+      if (rowKey == null && rowIndex == null) {
         setQuickActionItemId(null);
       }
       setIsQuickActionOpen(true);
