@@ -192,7 +192,6 @@ create table if not exists public.order_items (
   order_id uuid not null references public.orders(id) on delete cascade,
   source_kind text not null default 'order_input_table'
     check (source_kind in ('order_input_table', 'manual', 'import', 'cad')),
-  source_field_id uuid references public.order_input_fields(id) on delete set null,
   source_row_id text not null,
   sort_order integer not null default 0,
   position text,
@@ -212,8 +211,6 @@ create index if not exists order_items_tenant_id_idx
   on public.order_items(tenant_id);
 create index if not exists order_items_order_id_idx
   on public.order_items(order_id);
-create index if not exists order_items_source_field_id_idx
-  on public.order_items(source_field_id);
 create index if not exists order_items_item_name_idx
   on public.order_items(item_name);
 
@@ -2254,4 +2251,3 @@ create policy "qr_scan_events_insert_by_tenant"
       where p.id = auth.uid() and p.tenant_id = qr_scan_events.tenant_id
     )
   );
-

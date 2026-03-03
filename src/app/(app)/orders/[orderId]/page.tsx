@@ -3750,7 +3750,6 @@ export default function OrderDetailPage() {
           const savedItems = (savedItemsResult.data ?? []).map(mapOrderItemRow);
           const desiredDocuments = primaryField
             ? buildOrderItemDocumentsFromTableField({
-                fieldId: primaryField.id,
                 rows: constructionRowsByFieldId[primaryField.id],
                 orderItems: savedItems,
               })

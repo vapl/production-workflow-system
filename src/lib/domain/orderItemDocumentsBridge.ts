@@ -42,20 +42,17 @@ export function attachOrderInputTableRowDocuments(
 }
 
 export function buildOrderItemDocumentsFromTableField(params: {
-  fieldId: string;
   rows: unknown;
   orderItems: OrderItem[];
   role?: OrderItemDocumentRole;
 }) {
-  const { fieldId, rows, orderItems, role = "source" } = params;
+  const { rows, orderItems, role = "source" } = params;
   if (!Array.isArray(rows) || rows.length === 0) {
     return [];
   }
 
   const itemMap = new Map(
-    orderItems
-      .filter((item) => item.sourceFieldId === fieldId)
-      .map((item) => [`${item.sourceFieldId}:${item.sourceRowId}`, item] as const),
+    orderItems.map((item) => [item.sourceRowId, item] as const),
   );
 
   return rows.flatMap((row) => {
@@ -63,7 +60,7 @@ export function buildOrderItemDocumentsFromTableField(params: {
     if (!sourceRowId) {
       return [];
     }
-    const item = itemMap.get(`${fieldId}:${sourceRowId}`);
+    const item = itemMap.get(sourceRowId);
     if (!item) {
       return [];
     }

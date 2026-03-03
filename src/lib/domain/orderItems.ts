@@ -176,7 +176,6 @@ export type OrderItemDbRow = {
   id: string;
   order_id: string;
   source_kind: OrderItemSourceKind;
-  source_field_id?: string | null;
   source_row_id: string;
   sort_order: number | null;
   position?: string | null;
@@ -195,7 +194,6 @@ export function mapOrderItemRow(row: OrderItemDbRow): OrderItem {
     id: row.id,
     orderId: row.order_id,
     sourceKind: row.source_kind,
-    sourceFieldId: row.source_field_id ?? null,
     sourceRowId: row.source_row_id,
     sortOrder: row.sort_order ?? 0,
     position: row.position ?? null,
@@ -235,7 +233,6 @@ export function buildOrderItemsFromConstructionField(params: {
       return {
         order_id: orderId,
         source_kind: ORDER_ITEM_TABLE_SOURCE_KIND,
-        source_field_id: null,
         source_row_id: rowId,
         sort_order: index,
         position: stringifyValue(resolveCoreValue(normalizedRow, columns, "position")),
@@ -253,7 +250,6 @@ export function buildOrderItemsFromConstructionField(params: {
       ): item is {
         order_id: string;
         source_kind: OrderItemSourceKind;
-        source_field_id: null;
         source_row_id: string;
         sort_order: number;
         position: string | null;
