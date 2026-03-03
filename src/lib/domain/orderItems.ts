@@ -8,6 +8,23 @@ import {
 
 const ORDER_ITEM_TABLE_SOURCE_KIND: OrderItemSourceKind = "order_input_table";
 
+const CORE_ITEM_SEMANTIC_KEYS = new Set([
+  "position",
+  "item_type",
+  "item_name",
+  "qty",
+  "dimensions",
+  "material",
+]);
+
+type CoreItemFieldKey =
+  | "position"
+  | "item_type"
+  | "item_name"
+  | "qty"
+  | "dimensions"
+  | "material";
+
 function normalizeToken(value: string) {
   return value
     .trim()
@@ -24,118 +41,107 @@ function getColumnTokens(column: OrderInputTableColumn) {
   ]);
 }
 
-function findColumnValue(
-  row: Record<string, unknown>,
-  columns: OrderInputTableColumn[],
-  matcher: (tokens: Set<string>) => boolean,
-) {
-  for (const column of columns) {
-    const tokens = getColumnTokens(column);
-    if (!matcher(tokens)) {
-      continue;
-    }
-    const value = row[column.key];
-    if (value === null || value === undefined || value === "") {
-      continue;
-    }
-    if (Array.isArray(value)) {
-      const joined = value.map((item) => String(item)).join(" / ").trim();
-      if (joined) {
-        return joined;
-      }
-      continue;
-    }
-    const text = String(value).trim();
-    if (text) {
-      return text;
-    }
+function getColumnCoreKey(column: OrderInputTableColumn): CoreItemFieldKey | null {
+  if (column.semanticKey && CORE_ITEM_SEMANTIC_KEYS.has(column.semanticKey)) {
+    return column.semanticKey as CoreItemFieldKey;
   }
+
+  const tokens = getColumnTokens(column);
+  if (tokens.has("position") || tokens.has("poz") || tokens.has("pozicija")) {
+    return "position";
+  }
+  if (
+    tokens.has("item_type") ||
+    tokens.has("construction") ||
+    tokens.has("konstrukcija") ||
+    tokens.has("type") ||
+    tokens.has("tips") ||
+    tokens.has("system") ||
+    tokens.has("sistema")
+  ) {
+    return "item_type";
+  }
+  if (
+    tokens.has("item_name") ||
+    tokens.has("name") ||
+    tokens.has("nosaukums") ||
+    tokens.has("description") ||
+    tokens.has("apraksts")
+  ) {
+    return "item_name";
+  }
+  if (
+    tokens.has("qty") ||
+    tokens.has("quantity") ||
+    tokens.has("skaits") ||
+    tokens.has("gab") ||
+    normalizeToken(column.unit ?? "") === "pcs" ||
+    normalizeToken(column.unit ?? "") === "gab"
+  ) {
+    return "qty";
+  }
+  if (
+    tokens.has("dimensions") ||
+    tokens.has("dimension") ||
+    tokens.has("izmers") ||
+    tokens.has("size")
+  ) {
+    return "dimensions";
+  }
+  if (
+    tokens.has("material") ||
+    tokens.has("materials") ||
+    tokens.has("finish")
+  ) {
+    return "material";
+  }
+
   return null;
 }
 
-function resolveQty(field: OrderInputField, row: Record<string, unknown>) {
-  const columns = field.columns ?? [];
-  for (const column of columns) {
-    const tokens = getColumnTokens(column);
-    const isQtyColumn =
-      tokens.has("qty") ||
-      tokens.has("quantity") ||
-      tokens.has("skaits") ||
-      tokens.has("gab") ||
-      normalizeToken(column.unit ?? "") === "pcs" ||
-      normalizeToken(column.unit ?? "") === "gab";
-    if (!isQtyColumn) {
-      continue;
-    }
-    const raw = row[column.key];
-    const parsed =
-      typeof raw === "number"
-        ? raw
-        : typeof raw === "string"
-          ? Number(raw.replace(",", "."))
-          : Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
+function stringifyValue(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    const joined = value.map((item) => String(item)).join(" / ").trim();
+    return joined || null;
+  }
+  const text = String(value).trim();
+  return text || null;
+}
+
+function parseQty(value: unknown) {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.replace(",", "."))
+        : Number(value);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
   }
   return 1;
 }
 
+function resolveCoreValue(
+  row: Record<string, unknown>,
+  columns: OrderInputTableColumn[],
+  key: CoreItemFieldKey,
+) {
+  const mappedColumn = columns.find((column) => getColumnCoreKey(column) === key);
+  if (mappedColumn) {
+    return row[mappedColumn.key];
+  }
+  return undefined;
+}
+
 function formatRowSummary(field: OrderInputField, row: Record<string, unknown>) {
   const columns = field.columns ?? [];
-  const parts = columns
-    .map((column) => {
-      const value = row[column.key];
-      if (value === null || value === undefined || value === "") {
-        return "";
-      }
-      if (Array.isArray(value)) {
-        return value.map((item) => String(item)).join(" / ");
-      }
-      return String(value);
-    })
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return parts.join(" | ");
-}
-
-function resolveItemName(field: OrderInputField, row: Record<string, unknown>) {
-  const columns = field.columns ?? [];
-  const preferred =
-    findColumnValue(
-      row,
-      columns,
-      (tokens) =>
-        tokens.has("name") ||
-        tokens.has("nosaukums") ||
-        tokens.has("description") ||
-        tokens.has("apraksts"),
-    ) ??
-    findColumnValue(
-      row,
-      columns,
-      (tokens) =>
-        tokens.has("construction") ||
-        tokens.has("konstrukcija") ||
-        tokens.has("system") ||
-        tokens.has("sistema"),
-    );
-
-  return preferred ?? formatRowSummary(field, row) ?? field.label;
-}
-
-function resolveItemType(columns: OrderInputTableColumn[], row: Record<string, unknown>) {
-  return findColumnValue(
-    row,
-    columns,
-    (tokens) =>
-      tokens.has("construction") ||
-      tokens.has("konstrukcija") ||
-      tokens.has("type") ||
-      tokens.has("tips") ||
-      tokens.has("system") ||
-      tokens.has("sistema"),
-  );
+  return columns
+    .map((column) => stringifyValue(row[column.key]))
+    .filter(Boolean)
+    .join(" | ");
 }
 
 function buildItemAttributes(
@@ -144,6 +150,9 @@ function buildItemAttributes(
 ) {
   const attributes: Record<string, unknown> = {};
   columns.forEach((column) => {
+    if (getColumnCoreKey(column)) {
+      return;
+    }
     const value = row[column.key];
     if (value !== undefined) {
       attributes[column.key] = value;
@@ -190,7 +199,7 @@ export function mapOrderItemRow(row: OrderItemDbRow): OrderItem {
   };
 }
 
-export function buildOrderItemsFromTableField(params: {
+export function buildOrderItemsFromConstructionField(params: {
   orderId: string;
   field: OrderInputField;
   value: unknown;
@@ -211,38 +220,19 @@ export function buildOrderItemsFromTableField(params: {
         return null;
       }
 
-      const position =
-        findColumnValue(normalizedRow, columns, (tokens) =>
-          tokens.has("position") || tokens.has("poz") || tokens.has("pozicija"),
-        ) ?? null;
-      const dimensions =
-        findColumnValue(normalizedRow, columns, (tokens) =>
-          tokens.has("dimensions") ||
-          tokens.has("dimension") ||
-          tokens.has("izmers") ||
-          tokens.has("size"),
-        ) ?? null;
-      const material =
-        findColumnValue(normalizedRow, columns, (tokens) =>
-          tokens.has("material") ||
-          tokens.has("materials") ||
-          tokens.has("finish") ||
-          tokens.has("color") ||
-          tokens.has("krasa"),
-        ) ?? null;
-
+      const resolvedName = stringifyValue(resolveCoreValue(normalizedRow, columns, "item_name"));
       return {
         order_id: orderId,
         source_kind: ORDER_ITEM_TABLE_SOURCE_KIND,
         source_field_id: field.id,
         source_row_id: rowId,
         sort_order: index,
-        position,
-        item_name: resolveItemName(field, normalizedRow),
-        item_type: resolveItemType(columns, normalizedRow),
-        qty: resolveQty(field, normalizedRow),
-        material,
-        dimensions,
+        position: stringifyValue(resolveCoreValue(normalizedRow, columns, "position")),
+        item_name: resolvedName ?? formatRowSummary(field, normalizedRow) ?? field.label,
+        item_type: stringifyValue(resolveCoreValue(normalizedRow, columns, "item_type")),
+        qty: parseQty(resolveCoreValue(normalizedRow, columns, "qty")),
+        material: stringifyValue(resolveCoreValue(normalizedRow, columns, "material")),
+        dimensions: stringifyValue(resolveCoreValue(normalizedRow, columns, "dimensions")),
         attributes: buildItemAttributes(normalizedRow, columns),
       };
     })
@@ -266,13 +256,15 @@ export function buildOrderItemsFromTableField(params: {
     );
 }
 
-export function buildTableRowsFromOrderItems(
+export function buildConstructionRowsFromOrderItems(
   field: OrderInputField,
   items: OrderItem[],
 ) {
   if (field.fieldType !== "table") {
     return [];
   }
+
+  const columns = field.columns ?? [];
 
   return items
     .filter(
@@ -286,6 +278,32 @@ export function buildTableRowsFromOrderItems(
         ...item.attributes,
         [ORDER_INPUT_TABLE_ROW_ID_KEY]: item.sourceRowId,
       });
+
+      columns.forEach((column) => {
+        const coreKey = getColumnCoreKey(column);
+        if (!coreKey) {
+          return;
+        }
+        if (coreKey === "position") {
+          row[column.key] = item.position ?? "";
+        }
+        if (coreKey === "item_type") {
+          row[column.key] = item.itemType ?? "";
+        }
+        if (coreKey === "item_name") {
+          row[column.key] = item.itemName ?? "";
+        }
+        if (coreKey === "qty") {
+          row[column.key] = item.qty ?? 1;
+        }
+        if (coreKey === "dimensions") {
+          row[column.key] = item.dimensions ?? "";
+        }
+        if (coreKey === "material") {
+          row[column.key] = item.material ?? "";
+        }
+      });
+
       return row;
     });
 }

@@ -104,11 +104,11 @@ import {
   isMissingOrderItemDocumentsSchema,
 } from "@/lib/domain/orderItemDocumentsBridge";
 import {
-  buildOrderItemsFromTableField,
-  buildTableRowsFromOrderItems,
+  buildOrderItemsFromConstructionField,
+  buildConstructionRowsFromOrderItems,
   isMissingOrderItemsSchema,
   mapOrderItemRow,
-} from "@/lib/domain/orderItemsBridge";
+} from "@/lib/domain/orderItems";
 import {
   getOrderFieldLabel,
   getOrderPriorityLabel,
@@ -1359,7 +1359,7 @@ export default function OrderDetailPage() {
           setOrderItemDocumentIdsByRowKey(documentMap);
           tableFields.forEach((field) => {
             delete nextValues[field.id];
-            const builtRows = buildTableRowsFromOrderItems(field, items).map(
+            const builtRows = buildConstructionRowsFromOrderItems(field, items).map(
               (row) =>
                 attachOrderInputTableRowDocuments(
                   row,
@@ -3447,7 +3447,7 @@ export default function OrderDetailPage() {
     );
     if (tableFields.length > 0) {
       const desiredItems = tableFields.flatMap((field) =>
-        buildOrderItemsFromTableField({
+        buildOrderItemsFromConstructionField({
           orderId: orderState.id,
           field,
           value: constructionRowsByFieldId[field.id],
