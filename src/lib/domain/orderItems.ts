@@ -158,6 +158,17 @@ function buildItemAttributes(
       attributes[column.key] = value;
     }
   });
+  const traceabilityKeys = [
+    "__import_source_file",
+    "__import_source_sheet",
+    "__import_source_row_ref",
+  ] as const;
+  traceabilityKeys.forEach((key) => {
+    const value = row[key];
+    if (value !== undefined && value !== null && value !== "") {
+      attributes[key] = value;
+    }
+  });
   return attributes;
 }
 
@@ -165,7 +176,6 @@ export type OrderItemDbRow = {
   id: string;
   order_id: string;
   source_kind: OrderItemSourceKind;
-  source_field_id?: string | null;
   source_row_id: string;
   sort_order: number | null;
   position?: string | null;
@@ -184,7 +194,6 @@ export function mapOrderItemRow(row: OrderItemDbRow): OrderItem {
     id: row.id,
     orderId: row.order_id,
     sourceKind: row.source_kind,
-    sourceFieldId: row.source_field_id ?? null,
     sourceRowId: row.source_row_id,
     sortOrder: row.sort_order ?? 0,
     position: row.position ?? null,
@@ -224,7 +233,6 @@ export function buildOrderItemsFromConstructionField(params: {
       return {
         order_id: orderId,
         source_kind: ORDER_ITEM_TABLE_SOURCE_KIND,
-        source_field_id: field.id,
         source_row_id: rowId,
         sort_order: index,
         position: stringifyValue(resolveCoreValue(normalizedRow, columns, "position")),
@@ -242,7 +250,6 @@ export function buildOrderItemsFromConstructionField(params: {
       ): item is {
         order_id: string;
         source_kind: OrderItemSourceKind;
-        source_field_id: string;
         source_row_id: string;
         sort_order: number;
         position: string | null;
@@ -267,11 +274,7 @@ export function buildConstructionRowsFromOrderItems(
   const columns = field.columns ?? [];
 
   return items
-    .filter(
-      (item) =>
-        item.sourceKind === ORDER_ITEM_TABLE_SOURCE_KIND &&
-        item.sourceFieldId === field.id,
-    )
+    .filter((item) => item.sourceKind === ORDER_ITEM_TABLE_SOURCE_KIND)
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((item) => {
       const row = ensureOrderInputTableRow({
