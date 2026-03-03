@@ -61,7 +61,7 @@ export async function prepareProductionQrRows(params: {
   }
 
   const rowLookupKeys = (row: ProductionSplitRow) => {
-    const sourceRowId = getOrderInputTableRowId(row.rawRow);
+    const sourceRowId = (row.sourceRowId ?? getOrderInputTableRowId(row.rawRow) ?? "").trim();
     const keys = [`${row.orderId}:${row.fieldId}:${row.rowIndex}`];
     if (sourceRowId) {
       keys.unshift(`${row.orderId}:${sourceRowId}`);
@@ -92,7 +92,7 @@ export async function prepareProductionQrRows(params: {
           order_id: row.orderId,
           field_id: row.fieldId,
           row_index: row.rowIndex,
-          source_row_id: getOrderInputTableRowId(row.rawRow),
+          source_row_id: row.sourceRowId ?? getOrderInputTableRowId(row.rawRow) ?? null,
           created_by: userId ?? null,
         })),
       )
