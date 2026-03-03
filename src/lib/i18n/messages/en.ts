@@ -153,7 +153,8 @@
     },
     messages: {
       signingIn: "Signing you in...",
-      accessCheckTimedOutContinue: "Access check timed out. Continuing sign in...",
+      accessCheckTimedOutContinue:
+        "Access check timed out. Continuing sign in...",
       accountCreatedCheckEmail: "Account created. Check your email to confirm.",
       signedInSuccessfully: "Signed in successfully.",
       completingSignIn: "Completing sign in...",
@@ -177,7 +178,8 @@
       enterNewPassword: "Enter a new password.",
       resetFailed: "Reset failed.",
       resetFailedTryAgain: "Reset failed. Try again.",
-      inviteSessionExpired: "Invite session expired. Open the invite link again.",
+      inviteSessionExpired:
+        "Invite session expired. Open the invite link again.",
       inviteMissingTenant: "Invite metadata missing tenant.",
       inviteFailed: "Invite failed.",
     },
@@ -298,7 +300,8 @@
     markRead: "Mark read",
     delete: "Delete",
     deleteNotificationTitle: "Delete notification?",
-    deleteNotificationDescription: "This will permanently remove the notification.",
+    deleteNotificationDescription:
+      "This will permanently remove the notification.",
     deleteReadTitle: "Delete read notifications?",
     deleteReadDescription: "This will delete {count} read notification(s).",
   },
@@ -501,7 +504,8 @@
       unknown: "Unknown",
       noStatusChanges: "No status changes yet.",
       sendBackTitle: "Send order back",
-      sendBackDescription: "Choose a reason and add a note. The order will return to",
+      sendBackDescription:
+        "Choose a reason and add a note. The order will return to",
       reason: "Reason",
       selectReason: "Select reason",
       comment: "Comment",
@@ -555,7 +559,8 @@
         title: "External Jobs",
         requestMode: "Request mode",
         manualEntry: "Manual entry",
-        manualEntryDescription: "Partner replies by email, data is entered manually.",
+        manualEntryDescription:
+          "Partner replies by email, data is entered manually.",
         partnerPortal: "Send via partner portal",
         partnerPortalDescription: "Secure link + structured response form.",
         availableOnPro: "Available on Pro.",
@@ -574,7 +579,8 @@
         partnerFiles: "Files for partner (optional)",
         noFilesSelected: "No files selected.",
         planIncludesSend: "includes Send to partner.",
-        planManualOnly: "supports manual entry only. Send to partner is available on Pro.",
+        planManualOnly:
+          "supports manual entry only. Send to partner is available on Pro.",
         createPortalRequest: "Create portal request",
         addExternalJob: "Add external job",
         empty: "No external jobs added yet.",
@@ -619,7 +625,8 @@
         returnToQueue: "Return to queue",
         preparationChecklist: "Preparation Checklist",
         noChecklistConfigured: "No checklist items configured.",
-        completeRequired: "Complete required attachments, comments, and checklist items",
+        completeRequired:
+          "Complete required attachments, comments, and checklist items",
         andRequiredOrderInputs: ", and required order inputs",
         beforeSendingToEngineering: "before sending to engineering.",
         beforeSendingToProduction: "before sending to production.",
@@ -697,27 +704,29 @@
         uploadFailed: "Upload failed.",
         uploadBlockedByMimeRules:
           "Upload blocked by bucket file type rules. Allow xlsx/xls/csv/pdf in Supabase Storage bucket settings.",
-        uploadFailedCheckBucket: "Upload failed. Check Supabase bucket settings.",
+        uploadFailedCheckBucket:
+          "Upload failed. Check Supabase bucket settings.",
         supabaseNotConfigured: "Supabase is not configured.",
         aiImportProOnly: "AI import is available on Pro plan.",
         signInAgain: "Please sign in again.",
         parsePdfFailed: "Failed to parse PDF.",
-        parsingTimedOut: "Parsing timed out. Try a smaller PDF or fewer columns.",
+        parsingTimedOut:
+          "Parsing timed out. Try a smaller PDF or fewer columns.",
         sendToPartnerProOnly: "Send to partner is available on Pro plan.",
         partnerRequired: "Partner is required.",
         selectValidPartner: "Select a valid partner.",
-        fieldRequired: "\"{field}\" is required.",
+        fieldRequired: '"{field}" is required.',
         uploadPartnerRequestFiles: "Failed to upload partner request files.",
         featureProOnly: "This feature is available on Pro plan.",
         sendToPartnerFailed: "Failed to send to partner.",
       },
       confirm: {
-        removeNamedFile: "Remove \"{name}\"?",
+        removeNamedFile: 'Remove "{name}"?',
         removeFile: "Remove file?",
         deleteAttachment: "Delete attachment?",
-        thisWillRemoveNamed: "This will remove \"{name}\".",
-        deleteAllFilesInCategory: "Delete all files in \"{category}\"?",
-        deleteSelectedFilesInCategory: "Delete selected files in \"{category}\"?",
+        thisWillRemoveNamed: 'This will remove "{name}".',
+        deleteAllFilesInCategory: 'Delete all files in "{category}"?',
+        deleteSelectedFilesInCategory: 'Delete selected files in "{category}"?',
         thisWillRemoveFiles: "This will remove {count} file(s).",
         deleteComment: "Delete comment?",
         removeCommentPermanently: "This will permanently remove the comment.",
@@ -726,11 +735,13 @@
         deleteSelectedRows: "Delete selected rows?",
         thisWillRemoveSelectedRows: "This will remove {count} selected row(s).",
         deleteExternalJob: "Delete external job?",
-        thisWillRemoveExternalJob: "This will remove the external job from the order.",
+        thisWillRemoveExternalJob:
+          "This will remove the external job from the order.",
       },
       notifications: {
         noFilesSelectedTitle: "No files selected",
-        noFilesSelectedDescription: "Select at least one file in this category.",
+        noFilesSelectedDescription:
+          "Select at least one file in this category.",
         someFilesNotDeleted: "Some files were not deleted",
         deletedOutOf: "Deleted {removed}/{total} files.",
         filesDeleted: "Files deleted",
@@ -752,12 +763,14 @@
           "Order is assigned to another engineer. You can view it, but cannot change workflow.",
         roleCannotTakeOrder:
           "Your role is not allowed to take this order. Contact Admin.",
-        couldNotTakeOrder: "Could not take order. Please refresh and try again.",
+        couldNotTakeOrder:
+          "Could not take order. Please refresh and try again.",
         downloadFailed: "Download failed",
         noFilesDownloadableInCategory:
           "No files in this category could be downloaded.",
         archiveDownloaded: "Archive downloaded",
-        downloadedWithSkipped: "{included} file(s) downloaded, {skipped} skipped.",
+        downloadedWithSkipped:
+          "{included} file(s) downloaded, {skipped} skipped.",
         downloadedFiles: "{count} file(s) downloaded.",
         couldNotCreateArchive: "Could not create archive for this category.",
       },
@@ -854,9 +867,11 @@
       attachFailedForFile: "Failed to attach {file}.",
       failedToSaveAiFields: "Failed to save AI extracted fields.",
       attachOrScanFirst: "Attach or scan a document first.",
-      enableAiFields: "Enable AI extract fields in Settings -> External job schema.",
+      enableAiFields:
+        "Enable AI extract fields in Settings -> External job schema.",
       noMatchingIdentifier: "No matching identifier extracted from document.",
-      noMatchingPartnerOrder: "No matching partner order found. Use manual search.",
+      noMatchingPartnerOrder:
+        "No matching partner order found. Use manual search.",
       multipleMatchesFound:
         "Multiple matches found. Refine using search and confirm manually.",
       matchedDocumentNo: "Matched invoice/document no: {value}",
@@ -918,7 +933,8 @@
       notesPlaceholder: "Special requirements or additional information...",
       levelRequired: "{level} is required.",
       searchOrEnterLevel: "Search or enter {level}",
-      createFailed: "Order could not be created. Check required data and try again.",
+      createFailed:
+        "Order could not be created. Check required data and try again.",
       priority: {
         low: "Low",
         normal: "Normal",
@@ -946,7 +962,8 @@
       accounting: {
         title: "Accounting import",
         loadFailed: "Failed to load accounting orders.",
-        searchPlaceholder: "Search order #, customer, contract, category, product...",
+        searchPlaceholder:
+          "Search order #, customer, contract, category, product...",
         rowsCount: "{count} rows",
         selectedCount: "{count} selected",
         refresh: "Refresh",
@@ -956,7 +973,8 @@
         empty: "No accounting orders found.",
         previewTitle: "Preview",
         previewEmpty: "Select one row to preview details.",
-        singlePreviewHint: "Single-row preview is shown when only one row is selected.",
+        singlePreviewHint:
+          "Single-row preview is shown when only one row is selected.",
         previewNew: "New: {count}",
         previewSkipped: "Skipped: {count}",
         previewImported: "Imported: {count}",
@@ -964,7 +982,8 @@
         useSelectedInForm: "Use selected in form",
         importing: "Importing...",
         importSelected: "Import selected to PWS",
-        importSummary: "Imported {imported}, skipped {skipped}, errors {error}.",
+        importSummary:
+          "Imported {imported}, skipped {skipped}, errors {error}.",
         status: {
           new: "new",
           skipped: "skipped",
@@ -985,7 +1004,8 @@
       invalidQuantity: "Invalid Quantity.",
       excelFailedTitle: "Excel import failed",
       largeWarningTitle: "Large import warning",
-      largeWarningDescription: "Confirm the warning before importing 1000+ rows.",
+      largeWarningDescription:
+        "Confirm the warning before importing 1000+ rows.",
       largeWarningRows:
         "You are importing {count} rows. This will update the database in bulk.",
       timeout: "Import timed out. Please try again.",
@@ -1024,7 +1044,8 @@
     main: {
       header: {
         title: "Production",
-        subtitle: "Plan work orders, batch similar items, and assign to stations.",
+        subtitle:
+          "Plan work orders, batch similar items, and assign to stations.",
       },
       tabs: {
         planning: "Planning",
@@ -1200,7 +1221,8 @@
         print: "Print QR",
         labelSize: "Label size",
         contentFields: "Content fields",
-        contentFieldsHint: "Drag to reorder. Checked fields appear on the label.",
+        contentFieldsHint:
+          "Drag to reorder. Checked fields appear on the label.",
         orientation: "Orientation",
         vertical: "Vertical",
         horizontal: "Horizontal",
@@ -1220,7 +1242,8 @@
         cannotClearSelectedStarted:
           "Cannot clear: selected items already started.",
         selectAtLeastOneConstruction: "Select at least one construction row.",
-        plannedDateRequired: "Planned date is required for selected constructions.",
+        plannedDateRequired:
+          "Planned date is required for selected constructions.",
         failedCreateProductionItems: "Failed to create production items.",
         failedCreateBatchRuns: "Failed to create batch runs.",
         failedCleanupEmptyRuns: "Failed to clean up empty source batch runs.",
@@ -1398,7 +1421,8 @@
       orderFields: "Define order field labels, visibility, and display order.",
       constructions:
         "Configure construction columns, additional attributes, and import fields.",
-      operations: "Configure production hours, stations, and operation defaults.",
+      operations:
+        "Configure production hours, stations, and operation defaults.",
       partners: "Manage external partners, groups, and field mappings.",
       users: "Control user access, roles, and account permissions.",
       workflow: "Set status flow rules, requirements, and automations.",
@@ -1413,7 +1437,7 @@
       title: "Order fields",
       description: "Define order field labels, visibility, and display order.",
       fieldLabel: "Field label",
-      fieldLabelPlaceholder: "e.g. Manager",
+      fieldLabelPlaceholder: "Add new order field",
       displayOrder: "Display order",
       showInTable: "Show in table",
       saveField: "Save field",
@@ -1433,14 +1457,16 @@
       workStationsTitle: "Work Stations",
       workStationsDescription: "Manage the list of production stations.",
       qrLabelTitle: "QR label settings",
-      qrLabelDescription: "Configure the default QR label layout for production.",
+      qrLabelDescription:
+        "Configure the default QR label layout for production.",
       notificationsTitle: "Notifications",
       notificationsDescription:
         "Choose who receives system notifications about blocked and resumed work.",
       workdays: "Workdays",
       shifts: "Shifts",
       addShift: "Add shift",
-      overnightShiftHint: "Overnight shift is supported, for example 22:00 to 06:00.",
+      overnightShiftHint:
+        "Overnight shift is supported, for example 22:00 to 06:00.",
       saveHours: "Save hours",
       stationName: "Station name",
       stationNamePlaceholder: "Cutting",
@@ -1451,7 +1477,7 @@
       addStation: "Add station",
       selectAll: "Select all",
       noDescription: "No description",
-      removeWorkstationConfirm: "Remove workstation \"{name}\"?",
+      removeWorkstationConfirm: 'Remove workstation "{name}"?',
       labelSizes: "Label sizes",
       defaultSize: "Default size",
       defaultPrintHint: "Used as the default print format in Production.",
@@ -1461,7 +1487,8 @@
       stationDependenciesTitle: "Station dependencies",
       stationDependenciesDescription:
         "Define which stations must finish before another can start.",
-      addStationsForDependencies: "Add work stations to configure dependencies.",
+      addStationsForDependencies:
+        "Add work stations to configure dependencies.",
       noOtherStations: "No other stations available.",
       operatorAssignmentsTitle: "Operator station assignments",
       operatorAssignmentsDescription:
@@ -1475,7 +1502,7 @@
       reasonPlaceholder: "Missing material",
       saveReason: "Save reason",
       addReason: "Add reason",
-      removeReasonConfirm: "Remove reason \"{label}\"?",
+      removeReasonConfirm: 'Remove reason "{label}"?',
       removeSelectedWorkstationsConfirm:
         "Remove {count} selected workstation(s)?",
       removeSelectedReasonsConfirm: "Remove {count} selected reason(s)?",
@@ -1500,7 +1527,7 @@
       addField: "Add field",
       inlineAddHint: "Add a new attribute",
       unitOptional: "Unit (optional)",
-      selectOptions: "Select options (comma, newline, or \"\\\\\" separated)",
+      selectOptions: 'Select options (comma, newline, or "\\\\" separated)',
       selectOptionsPlaceholder: "Dealer, Private, Partner",
       tableColumns: "Table columns",
       dragRows: "Drag rows to reorder columns",
@@ -1515,7 +1542,7 @@
       removeColumnConfirm: "Remove this column?",
       removeFieldConfirm: 'Remove "{label}"?',
       removeSelectedFieldsConfirm: "Remove {count} selected field(s)?",
-      options: "Options (comma, newline, or \"\\\\\" separated)",
+      options: 'Options (comma, newline, or "\\\\" separated)',
       optionsPlaceholder: "Type A, Type B",
       maxSelects: "Max selects (1-3)",
       primaryConstructionTable: "Primary construction table",
@@ -1528,8 +1555,10 @@
       addCategoryPlaceholder: "Add category",
       addCategory: "Add category",
       defaultCategoryByRole: "Default category by role",
-      newUploadsHint: "New uploads will default to the selected category for each role.",
-      aiParsingHint: "AI Order Input parsing uses categories marked as \"Use for AI parsing\".",
+      newUploadsHint:
+        "New uploads will default to the selected category for each role.",
+      aiParsingHint:
+        'AI Order Input parsing uses categories marked as "Use for AI parsing".',
       reset: "Reset",
       saveAttachmentCategories: "Save attachment categories",
       removeAttachmentCategoryConfirm: "Remove this attachment category?",
@@ -1541,15 +1570,16 @@
       requiredForProduction: "Required for production",
       engineeringShort: "Eng.",
       productionShort: "Prod.",
-      removeChecklistConfirm: "Remove checklist item \"{label}\"?",
+      removeChecklistConfirm: 'Remove checklist item "{label}"?',
       noChecklistItems: "No checklist items yet.",
       returnReasons: "Return reasons",
       addReasonPlaceholder: "Add reason",
       addReason: "Add reason",
-      removeReasonConfirm: "Remove reason \"{reason}\"?",
+      removeReasonConfirm: 'Remove reason "{reason}"?',
       noReturnReasons: "No return reasons yet.",
       rulesTitle: "Workflow Rules",
-      rulesDescription: "Define what must be complete before moving orders forward.",
+      rulesDescription:
+        "Define what must be complete before moving orders forward.",
       syncing: "Syncing workflow rules...",
       coreRules: "Core rules",
       minAttachmentsEngineering: "Min attachments for engineering",
@@ -1596,7 +1626,7 @@
       groupNamePlaceholder: "Glass",
       saveGroup: "Save group",
       addGroup: "Add group",
-      removeGroupConfirm: "Remove group \"{name}\"?",
+      removeGroupConfirm: 'Remove group "{name}"?',
       noPartnerGroups: "No partner groups yet.",
       partnerName: "Partner name",
       partnerNamePlaceholder: "Baltic Glass",
@@ -1606,13 +1636,16 @@
       noGroup: "No group",
       savePartner: "Save partner",
       addPartner: "Add partner",
-      removePartnerConfirm: "Remove partner \"{name}\"?",
+      removePartnerConfirm: 'Remove partner "{name}"?',
       noPartners: "No partners yet.",
       externalSchemaTitle: "External job schema",
-      externalSchemaDescription: "Configure the fields captured for outsourced jobs.",
-      noExternalFields: "No external job fields yet. Add your first field to start.",
+      externalSchemaDescription:
+        "Configure the fields captured for outsourced jobs.",
+      noExternalFields:
+        "No external job fields yet. Add your first field to start.",
       externalFieldsHint: "Add or edit the fields shown on external job forms.",
-      enablePriceReconciliation: "Enable price reconciliation (planned vs invoice)",
+      enablePriceReconciliation:
+        "Enable price reconciliation (planned vs invoice)",
       savePricing: "Save pricing",
       noExternalTableColumns: "No external table columns configured.",
       removeSelectedFieldsConfirm: "Remove {count} selected field(s)?",
@@ -1740,7 +1773,8 @@
       comingSoon: "Coming soon",
       comingSoonDescription:
         "Orders can sync from accounting tools to PWS - coming soon.",
-      expectedFlow: "Expected flow: accounting order to PWS to production stations.",
+      expectedFlow:
+        "Expected flow: accounting order to PWS to production stations.",
       requestIntegration: "Request integration",
     },
     security: {
@@ -1766,7 +1800,8 @@
       name: "Name",
       sendInvite: "Send invite",
       sending: "Sending...",
-      adminOwnerOnly: "Only Admin and Owner can update user roles or admin access.",
+      adminOwnerOnly:
+        "Only Admin and Owner can update user roles or admin access.",
       devOverride: "Dev override: allow changing your own role",
       loadingUsers: "Loading users...",
       loadingInvites: "Loading invites...",
@@ -1799,7 +1834,8 @@
       transferOwnershipDescription:
         "This will move Owner access to the selected user and remove Owner from the current one.",
       transferOwner: "Transfer owner",
-      cannotRemoveOwnAccount: "You cannot remove your own account from workspace.",
+      cannotRemoveOwnAccount:
+        "You cannot remove your own account from workspace.",
       ownerCannotBeRemoved: "Owner cannot be removed from workspace.",
       sessionExpired: "Session expired. Please sign in again.",
       failedRemoveUser: "Failed to remove user from workspace.",
@@ -1818,6 +1854,3 @@
 } as const;
 
 export default en;
-
-
-

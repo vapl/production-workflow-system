@@ -541,7 +541,8 @@
         detailTitle: "Konstrukcijas detaļas",
         detailDescription:
           "Atlasītās konstrukcijas atribūti, izcelsme un saistītie faili.",
-        detailEmpty: "Izvēlieties konstrukciju no saraksta, lai apskatītu detaļas.",
+        detailEmpty:
+          "Izvēlieties konstrukciju no saraksta, lai apskatītu detaļas.",
         detailAttributes: "Atribūti",
         detailDocuments: "Saistītie faili",
         detailNoDocuments: "Šai konstrukcijai vēl nav piesaistītu failu.",
@@ -1517,7 +1518,7 @@
       description:
         "Definējiet pasūtījuma lauku nosaukumus, redzamību un attēlošanas secību.",
       fieldLabel: "Lauka nosaukums",
-      fieldLabelPlaceholder: "Piemēram, Menedžeris",
+      fieldLabelPlaceholder: "Pievienot jaunu lauku",
       displayOrder: "Attēlošanas secība",
       showInTable: "Rādīt tabulā",
       saveField: "Saglabāt lauku",
@@ -1600,8 +1601,7 @@
       customFieldsTitle: "Šeit pievieno tikai papildus atribūtus",
       customFieldsDescription:
         "Piemēram: atvēruma tips, stikla pakete, furnitūras grupa, piezīmes, klasifikatori un citas uzņēmumam specifiskas kolonnas.",
-      empty:
-        "Papildlauki vēl nav konfigurēti. Pievienojiet noklusētos laukus.",
+      empty: "Papildlauki vēl nav konfigurēti. Pievienojiet noklusētos laukus.",
       addDefaultFields: "Pievienot noklusētos laukus",
       createConstructionTable: "Izveidot konstrukciju tabulu",
       coreColumnsTitle: "Core konstrukciju kolonnas",

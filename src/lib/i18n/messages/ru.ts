@@ -8,8 +8,10 @@
   },
   header: {
     badge: {
-      blocked: "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043e",
-      resumed: "\u0412\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e",
+      blocked:
+        "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043e",
+      resumed:
+        "\u0412\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e",
       done: "\u0413\u043e\u0442\u043e\u0432\u043e",
       info: "\u0418\u043d\u0444\u043e",
     },
@@ -19,23 +21,34 @@
       station: "\u0421\u0442\u0430\u043d\u0446\u0438\u044f",
       action: "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435",
     },
-    notificationDefaultTitle: "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435",
-    companyWorkspace: "\u0420\u0430\u0431\u043e\u0447\u0430\u044f \u043e\u0431\u043b\u0430\u0441\u0442\u044c \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438",
+    notificationDefaultTitle:
+      "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435",
+    companyWorkspace:
+      "\u0420\u0430\u0431\u043e\u0447\u0430\u044f \u043e\u0431\u043b\u0430\u0441\u0442\u044c \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438",
     appName: "Production Workflow System",
-    appTagline: "\u041e\u043f\u0435\u0440\u0430\u0446\u0438\u043e\u043d\u043d\u044b\u0439 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442 \u0434\u043b\u044f \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0430",
-    shiftDay: "\u0421\u043c\u0435\u043d\u0430: \u0414\u0435\u043d\u044c | {date}",
+    appTagline:
+      "\u041e\u043f\u0435\u0440\u0430\u0446\u0438\u043e\u043d\u043d\u044b\u0439 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442 \u0434\u043b\u044f \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0430",
+    shiftDay:
+      "\u0421\u043c\u0435\u043d\u0430: \u0414\u0435\u043d\u044c | {date}",
     search: "\u041f\u043e\u0438\u0441\u043a",
-    notifications: "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f",
-    notificationsTitle: "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f",
-    markAllRead: "\u041e\u0442\u043c\u0435\u0442\u0438\u0442\u044c \u0432\u0441\u0435 \u043a\u0430\u043a \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435",
-    noNotifications: "\u041f\u043e\u043a\u0430 \u043d\u0435\u0442 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439.",
-    viewAll: "\u0421\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0432\u0441\u0435",
+    notifications:
+      "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f",
+    notificationsTitle:
+      "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f",
+    markAllRead:
+      "\u041e\u0442\u043c\u0435\u0442\u0438\u0442\u044c \u0432\u0441\u0435 \u043a\u0430\u043a \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435",
+    noNotifications:
+      "\u041f\u043e\u043a\u0430 \u043d\u0435\u0442 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439.",
+    viewAll:
+      "\u0421\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0432\u0441\u0435",
     help: "\u041f\u043e\u043c\u043e\u0449\u044c",
-    loadingUser: "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f...",
+    loadingUser:
+      "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f...",
     owner: "\u0412\u043b\u0430\u0434\u0435\u043b\u0435\u0446",
     admin: "\u0410\u0434\u043c\u0438\u043d",
     profile: "\u041f\u0440\u043e\u0444\u0438\u043b\u044c",
-    companySettings: "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438",
+    companySettings:
+      "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438",
     signOut: "\u0412\u044b\u0439\u0442\u0438",
     signIn: "\u0412\u043e\u0439\u0442\u0438",
   },
@@ -52,7 +65,8 @@
   profile: {
     back: "\u041d\u0430\u0437\u0430\u0434",
     title: "\u041c\u043e\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c",
-    userFallback: "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c",
+    userFallback:
+      "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c",
     role: "\u0420\u043e\u043b\u044c",
     owner: "\u0412\u043b\u0430\u0434\u0435\u043b\u0435\u0446",
     admin: "\u0410\u0434\u043c\u0438\u043d",
@@ -61,40 +75,59 @@
     phone: "\u0422\u0435\u043b\u0435\u0444\u043e\u043d",
     language: "\u042f\u0437\u044b\u043a",
     saving: "\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435...",
-    saveProfile: "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u043f\u0440\u043e\u0444\u0438\u043b\u044c",
-    profileUpdated: "\u041f\u0440\u043e\u0444\u0438\u043b\u044c \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d.",
-    supabaseNotConfigured: "Supabase \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d.",
-    languageSaved: "\u042f\u0437\u044b\u043a \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d.",
-    languageSaveError: "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u044f\u0437\u044b\u043a.",
-    companyBillingTitle: "\u041a\u043e\u043c\u043f\u0430\u043d\u0438\u044f \u0438 \u043e\u043f\u043b\u0430\u0442\u0430",
+    saveProfile:
+      "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u043f\u0440\u043e\u0444\u0438\u043b\u044c",
+    profileUpdated:
+      "\u041f\u0440\u043e\u0444\u0438\u043b\u044c \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d.",
+    supabaseNotConfigured:
+      "Supabase \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d.",
+    languageSaved:
+      "\u042f\u0437\u044b\u043a \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d.",
+    languageSaveError:
+      "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u044f\u0437\u044b\u043a.",
+    companyBillingTitle:
+      "\u041a\u043e\u043c\u043f\u0430\u043d\u0438\u044f \u0438 \u043e\u043f\u043b\u0430\u0442\u0430",
     companyBillingDescription:
       "\u0423\u043f\u0440\u0430\u0432\u043b\u044f\u0439\u0442\u0435 \u044e\u0440\u0438\u0434\u0438\u0447\u0435\u0441\u043a\u0438\u043c\u0438 \u0434\u0430\u043d\u043d\u044b\u043c\u0438 \u0438 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430\u043c\u0438 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0438.",
-    openCompanySettings: "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438",
-    editAvatar: "\u0418\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u0430\u0432\u0430\u0442\u0430\u0440",
-    avatarUploaded: "\u0410\u0432\u0430\u0442\u0430\u0440 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d.",
-    avatarRemoved: "\u0410\u0432\u0430\u0442\u0430\u0440 \u0443\u0434\u0430\u043b\u0435\u043d.",
-    uploadFailed: "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043d\u0435 \u0443\u0434\u0430\u043b\u0430\u0441\u044c.",
-    avatarPreview: "\u041f\u0440\u0435\u0434\u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 \u0430\u0432\u0430\u0442\u0430\u0440\u0430",
+    openCompanySettings:
+      "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438",
+    editAvatar:
+      "\u0418\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u0430\u0432\u0430\u0442\u0430\u0440",
+    avatarUploaded:
+      "\u0410\u0432\u0430\u0442\u0430\u0440 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d.",
+    avatarRemoved:
+      "\u0410\u0432\u0430\u0442\u0430\u0440 \u0443\u0434\u0430\u043b\u0435\u043d.",
+    uploadFailed:
+      "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043d\u0435 \u0443\u0434\u0430\u043b\u0430\u0441\u044c.",
+    avatarPreview:
+      "\u041f\u0440\u0435\u0434\u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 \u0430\u0432\u0430\u0442\u0430\u0440\u0430",
     avatarPlaceholder: "\u0410\u0432\u0430\u0442\u0430\u0440",
-    chooseImage: "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0438\u0437\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u0435 \u0434\u043b\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438.",
+    chooseImage:
+      "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0438\u0437\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u0435 \u0434\u043b\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438.",
     imageHint: "PNG \u0438\u043b\u0438 JPG \u0434\u043e 2MB.",
-    selectFile: "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0444\u0430\u0439\u043b",
+    selectFile:
+      "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0444\u0430\u0439\u043b",
     close: "\u0417\u0430\u043a\u0440\u044b\u0442\u044c",
   },
   qrTokenPage: {
-    title: "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u044f QR",
+    title:
+      "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u044f QR",
     order: "\u0417\u0430\u043a\u0430\u0437",
     orderWithNumber: "\u0417\u0430\u043a\u0430\u0437 {orderNumber}",
-    openOrder: "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0437\u0430\u043a\u0430\u0437",
-    loading: "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0434\u0435\u0442\u0430\u043b\u0435\u0439 QR...",
+    openOrder:
+      "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0437\u0430\u043a\u0430\u0437",
+    loading:
+      "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0434\u0435\u0442\u0430\u043b\u0435\u0439 QR...",
     customer: "\u041a\u043b\u0438\u0435\u043d\u0442",
     due: "\u0421\u0440\u043e\u043a",
     priority: "\u041f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442",
     normal: "\u043e\u0431\u044b\u0447\u043d\u044b\u0439",
-    construction: "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u044f",
+    construction:
+      "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u044f",
     noConstructionDetails:
       "\u041d\u0435\u0442 \u0434\u0435\u0442\u0430\u043b\u0435\u0439 \u043a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u0438.",
-    productionFiles: "\u0424\u0430\u0439\u043b\u044b \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0430",
+    productionFiles:
+      "\u0424\u0430\u0439\u043b\u044b \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0430",
     noProductionFiles:
       "\u0424\u0430\u0439\u043b\u044b \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0430 \u043d\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u044b.",
     file: "\u0424\u0430\u0439\u043b",
@@ -109,15 +142,15 @@
     errors: {
       signInRequired:
         "\u0412\u043e\u0439\u0434\u0438\u0442\u0435, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u044d\u0442\u043e\u0442 QR-\u043a\u043e\u0434.",
-      notFound: "QR-\u043a\u043e\u0434 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.",
+      notFound:
+        "QR-\u043a\u043e\u0434 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.",
       loadFailed:
         "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0434\u0435\u0442\u0430\u043b\u0438 QR.",
     },
   },
   authPage: {
     title: "Production Workflow System",
-    subtitle:
-      "Войдите, чтобы управлять заказами, инженерией и производством.",
+    subtitle: "Войдите, чтобы управлять заказами, инженерией и производством.",
     resetPassword: "Сброс пароля",
     completeInvite: "Завершить приглашение",
     accessPws: "Доступ к PWS",
@@ -276,8 +309,10 @@
   },
   notifications: {
     badge: {
-      blocked: "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043e",
-      resumed: "\u0412\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e",
+      blocked:
+        "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043e",
+      resumed:
+        "\u0412\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e",
       done: "\u0413\u043e\u0442\u043e\u0432\u043e",
       info: "\u0418\u043d\u0444\u043e",
     },
@@ -287,33 +322,48 @@
       station: "\u0421\u0442\u0430\u043d\u0446\u0438\u044f",
       action: "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435",
     },
-    sheetAria: "\u0424\u0438\u043b\u044c\u0442\u0440\u044b \u0438 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439",
-    sheetTitle: "\u0424\u0438\u043b\u044c\u0442\u0440\u044b \u0438 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f",
+    sheetAria:
+      "\u0424\u0438\u043b\u044c\u0442\u0440\u044b \u0438 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439",
+    sheetTitle:
+      "\u0424\u0438\u043b\u044c\u0442\u0440\u044b \u0438 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f",
     back: "\u041d\u0430\u0437\u0430\u0434",
-    openActions: "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f \u0441 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f\u043c\u0438",
-    pageTitle: "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f",
+    openActions:
+      "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f \u0441 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f\u043c\u0438",
+    pageTitle:
+      "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f",
     pageSubtitle:
       "\u041f\u0440\u043e\u0441\u043c\u0430\u0442\u0440\u0438\u0432\u0430\u0439\u0442\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u044b, \u043d\u0435\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435 \u043e\u043f\u043e\u0432\u0435\u0449\u0435\u043d\u0438\u044f \u0438 \u0441\u043e\u0431\u044b\u0442\u0438\u044f.",
-    loading: "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439...",
-    empty: "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b.",
-    unreadOnly: "\u0422\u043e\u043b\u044c\u043a\u043e \u043d\u0435\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435",
+    loading:
+      "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439...",
+    empty:
+      "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b.",
+    unreadOnly:
+      "\u0422\u043e\u043b\u044c\u043a\u043e \u043d\u0435\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435",
     status: "\u0421\u0442\u0430\u0442\u0443\u0441",
     all: "\u0412\u0441\u0435",
-    blocked: "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043e",
-    resumed: "\u0412\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e",
+    blocked:
+      "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u043e",
+    resumed:
+      "\u0412\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e",
     done: "\u0413\u043e\u0442\u043e\u0432\u043e",
     info: "\u0418\u043d\u0444\u043e",
     from: "\u0421",
     to: "\u0414\u043e",
-    resetFilters: "\u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0444\u0438\u043b\u044c\u0442\u0440\u044b",
-    markAllRead: "\u041e\u0442\u043c\u0435\u0442\u0438\u0442\u044c \u0432\u0441\u0435 \u043a\u0430\u043a \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435",
-    deleteAllRead: "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u0441\u0435 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435",
-    markRead: "\u041e\u0442\u043c\u0435\u0442\u0438\u0442\u044c \u043a\u0430\u043a \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u043e\u0435",
+    resetFilters:
+      "\u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0444\u0438\u043b\u044c\u0442\u0440\u044b",
+    markAllRead:
+      "\u041e\u0442\u043c\u0435\u0442\u0438\u0442\u044c \u0432\u0441\u0435 \u043a\u0430\u043a \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435",
+    deleteAllRead:
+      "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u0441\u0435 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435",
+    markRead:
+      "\u041e\u0442\u043c\u0435\u0442\u0438\u0442\u044c \u043a\u0430\u043a \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u043e\u0435",
     delete: "\u0423\u0434\u0430\u043b\u0438\u0442\u044c",
-    deleteNotificationTitle: "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435?",
+    deleteNotificationTitle:
+      "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435?",
     deleteNotificationDescription:
       "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435 \u0431\u0443\u0434\u0435\u0442 \u0443\u0434\u0430\u043b\u0435\u043d\u043e \u0431\u0435\u0437\u0432\u043e\u0437\u0432\u0440\u0430\u0442\u043d\u043e.",
-    deleteReadTitle: "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f?",
+    deleteReadTitle:
+      "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f?",
     deleteReadDescription:
       "\u0411\u0443\u0434\u0435\u0442 \u0443\u0434\u0430\u043b\u0435\u043d\u043e {count} \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0445 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439.",
   },
@@ -486,7 +536,8 @@
       unknown: "Неизвестно",
       noStatusChanges: "Изменений статуса пока нет.",
       sendBackTitle: "Отправить заказ назад",
-      sendBackDescription: "Выберите причину и добавьте комментарий. Заказ вернётся в",
+      sendBackDescription:
+        "Выберите причину и добавьте комментарий. Заказ вернётся в",
       reason: "Причина",
       selectReason: "Выберите причину",
       comment: "Комментарий",
@@ -504,14 +555,16 @@
           "Настройте поля в Настройки -> Структура -> Поля заказа, затем вернитесь сюда.",
         productionScope: "Производственный объём",
         orderInfo: "Информация о заказе",
-        editPermissionHint: "Эти поля могут редактировать только Инженерия и Админ.",
+        editPermissionHint:
+          "Эти поля могут редактировать только Инженерия и Админ.",
         save: "Сохранить поля",
       },
       attachments: {
         title: "Вложения",
         item: "вложение",
         category: "Категория",
-        categoryDescription: "Выберите подходящую категорию перед загрузкой файлов.",
+        categoryDescription:
+          "Выберите подходящую категорию перед загрузкой файлов.",
         dragAndDrop: "Перетащите файлы сюда или нажмите для загрузки",
         maxPerFile: "Макс. {size}MB на файл",
         empty: "Вложения ещё не добавлены.",
@@ -540,9 +593,11 @@
         title: "Внешние работы",
         requestMode: "Режим запроса",
         manualEntry: "Ручной ввод",
-        manualEntryDescription: "Партнёр отвечает по email, данные вносятся вручную.",
+        manualEntryDescription:
+          "Партнёр отвечает по email, данные вносятся вручную.",
         partnerPortal: "Отправить через портал партнёра",
-        partnerPortalDescription: "Безопасная ссылка и структурированная форма ответа.",
+        partnerPortalDescription:
+          "Безопасная ссылка и структурированная форма ответа.",
         availableOnPro: "Доступно на Pro.",
         partnerGroup: "Группа партнёров",
         allGroups: "Все группы",
@@ -559,7 +614,8 @@
         partnerFiles: "Файлы для партнёра (необязательно)",
         noFilesSelected: "Файлы не выбраны.",
         planIncludesSend: "включает отправку партнёру.",
-        planManualOnly: "поддерживает только ручной ввод. Отправка партнёру доступна на Pro.",
+        planManualOnly:
+          "поддерживает только ручной ввод. Отправка партнёру доступна на Pro.",
         createPortalRequest: "Создать запрос в портале",
         addExternalJob: "Добавить внешнюю работу",
         empty: "Внешние работы ещё не добавлены.",
@@ -604,7 +660,8 @@
         returnToQueue: "Вернуть в очередь",
         preparationChecklist: "Чек-лист подготовки",
         noChecklistConfigured: "Пункты чек-листа не настроены.",
-        completeRequired: "Заполните обязательные вложения, комментарии и пункты чек-листа",
+        completeRequired:
+          "Заполните обязательные вложения, комментарии и пункты чек-листа",
         andRequiredOrderInputs: ", а также обязательные поля заказа",
         beforeSendingToEngineering: "перед отправкой в инженерию.",
         beforeSendingToProduction: "перед отправкой в производство.",
@@ -694,20 +751,20 @@
         sendToPartnerProOnly: "Отправка партнёру доступна на тарифе Pro.",
         partnerRequired: "Партнёр обязателен.",
         selectValidPartner: "Выберите корректного партнёра.",
-        fieldRequired: "\"{field}\" обязательно.",
+        fieldRequired: '"{field}" обязательно.',
         uploadPartnerRequestFiles:
           "Не удалось загрузить файлы запроса для партнёра.",
         featureProOnly: "Эта функция доступна на тарифе Pro.",
         sendToPartnerFailed: "Не удалось отправить партнёру.",
       },
       confirm: {
-        removeNamedFile: "Удалить \"{name}\"?",
+        removeNamedFile: 'Удалить "{name}"?',
         removeFile: "Удалить файл?",
         deleteAttachment: "Удалить вложение?",
-        thisWillRemoveNamed: "Это удалит \"{name}\".",
-        deleteAllFilesInCategory: "Удалить все файлы в категории \"{category}\"?",
+        thisWillRemoveNamed: 'Это удалит "{name}".',
+        deleteAllFilesInCategory: 'Удалить все файлы в категории "{category}"?',
         deleteSelectedFilesInCategory:
-          "Удалить выбранные файлы в категории \"{category}\"?",
+          'Удалить выбранные файлы в категории "{category}"?',
         thisWillRemoveFiles: "Это удалит {count} файл(ов).",
         deleteComment: "Удалить комментарий?",
         removeCommentPermanently: "Комментарий будет удалён безвозвратно.",
@@ -749,7 +806,8 @@
         noFilesDownloadableInCategory:
           "В этой категории нет файлов, доступных для скачивания.",
         archiveDownloaded: "Архив скачан",
-        downloadedWithSkipped: "Скачано {included} файлов, пропущено {skipped}.",
+        downloadedWithSkipped:
+          "Скачано {included} файлов, пропущено {skipped}.",
         downloadedFiles: "Скачано файлов: {count}.",
         couldNotCreateArchive: "Не удалось создать архив для этой категории.",
       },
@@ -851,8 +909,7 @@
       attachOrScanFirst: "Сначала прикрепите или отсканируйте документ.",
       enableAiFields:
         "Включите поля AI-извлечения в Настройки -> Схема внешних работ.",
-      noMatchingIdentifier:
-        "В документе не найден подходящий идентификатор.",
+      noMatchingIdentifier: "В документе не найден подходящий идентификатор.",
       noMatchingPartnerOrder:
         "Подходящий заказ партнёра не найден. Используйте ручной поиск.",
       multipleMatchesFound:
@@ -898,11 +955,9 @@
       errors: {
         missingTenantAssignment:
           "Для этого пользователя отсутствует привязка tenant.",
-        removeOwnCommentsOnly:
-          "Вы можете удалять только свои комментарии.",
+        removeOwnCommentsOnly: "Вы можете удалять только свои комментарии.",
         failedToAddExternalJob: "Не удалось добавить внешнюю работу.",
-        failedToUpdateExternalJob:
-          "Не удалось обновить внешнюю работу.",
+        failedToUpdateExternalJob: "Не удалось обновить внешнюю работу.",
         failedToAddAttachment: "Не удалось добавить вложение.",
       },
     },
@@ -920,7 +975,8 @@
       notesPlaceholder: "Особые требования или дополнительная информация...",
       levelRequired: "{level} обязательно.",
       searchOrEnterLevel: "Найдите или введите {level}",
-      createFailed: "Не удалось создать заказ. Проверьте данные и попробуйте снова.",
+      createFailed:
+        "Не удалось создать заказ. Проверьте данные и попробуйте снова.",
       priority: {
         low: "Низкий",
         normal: "Нормальный",
@@ -948,7 +1004,8 @@
       accounting: {
         title: "Импорт из учёта",
         loadFailed: "Не удалось загрузить заказы из учёта.",
-        searchPlaceholder: "Поиск по заказу #, клиенту, договору, категории, продукту...",
+        searchPlaceholder:
+          "Поиск по заказу #, клиенту, договору, категории, продукту...",
         rowsCount: "{count} строк",
         selectedCount: "{count} выбрано",
         refresh: "Обновить",
@@ -958,7 +1015,8 @@
         empty: "Заказы из учёта не найдены.",
         previewTitle: "Предпросмотр",
         previewEmpty: "Выберите одну строку для просмотра деталей.",
-        singlePreviewHint: "Предпросмотр одной строки показывается, когда выбрана только одна строка.",
+        singlePreviewHint:
+          "Предпросмотр одной строки показывается, когда выбрана только одна строка.",
         previewNew: "Новые: {count}",
         previewSkipped: "Пропущено: {count}",
         previewImported: "Импортировано: {count}",
@@ -966,7 +1024,8 @@
         useSelectedInForm: "Использовать выбранное в форме",
         importing: "Импорт...",
         importSelected: "Импортировать выбранные в PWS",
-        importSummary: "Импортировано {imported}, пропущено {skipped}, ошибок {error}.",
+        importSummary:
+          "Импортировано {imported}, пропущено {skipped}, ошибок {error}.",
         status: {
           new: "новый",
           skipped: "пропущен",
@@ -987,7 +1046,8 @@
       invalidQuantity: "Неверное количество.",
       excelFailedTitle: "Ошибка импорта Excel",
       largeWarningTitle: "Предупреждение о большом импорте",
-      largeWarningDescription: "Подтвердите предупреждение перед импортом 1000+ строк.",
+      largeWarningDescription:
+        "Подтвердите предупреждение перед импортом 1000+ строк.",
       largeWarningRows:
         "Вы импортируете {count} строк. Это массово обновит базу данных.",
       timeout: "Импорт превысил время ожидания. Попробуйте снова.",
@@ -1015,7 +1075,8 @@
       createOrderFieldOptions:
         "Создать значения полей заказа в настройках из импортированных значений",
       continue: "Продолжить",
-      errorsFound: "Найдено ошибок: {count}. Исправьте файл Excel и попробуйте снова.",
+      errorsFound:
+        "Найдено ошибок: {count}. Исправьте файл Excel и попробуйте снова.",
       rowLabel: "Строка {row}",
       downloadErrorList: "Скачать список ошибок",
       ackLargeImport: "Я понимаю и хочу продолжить",
@@ -1234,8 +1295,7 @@
         failedCreateProductionItems:
           "Не удалось создать элементы производства.",
         failedCreateBatchRuns: "Не удалось создать партии.",
-        failedCleanupEmptyRuns:
-          "Не удалось очистить пустые исходные партии.",
+        failedCleanupEmptyRuns: "Не удалось очистить пустые исходные партии.",
         failedPrepareQrCodes: "Не удалось подготовить QR-коды.",
         selectAtLeastOneForReplan:
           "Выберите хотя бы одну строку конструкции для перепланирования.",
@@ -1383,11 +1443,13 @@
   },
   settings: {
     common: {
-      required: "\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u043e",
+      required:
+        "\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u043e",
       active: "\u0410\u043a\u0442\u0438\u0432\u043d\u043e",
       cancel: "\u041e\u0442\u043c\u0435\u043d\u0430",
       actions: "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044f",
-      default: "\u041f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e",
+      default:
+        "\u041f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e",
       yes: "\u0414\u0430",
       no: "\u041d\u0435\u0442",
       hidden: "\u0421\u043a\u0440\u044b\u0442\u043e",
@@ -1397,14 +1459,20 @@
       selectedCount: "{count} \u0432\u044b\u0431\u0440\u0430\u043d\u043e",
     },
     section: {
-      structure: "\u041f\u043e\u043b\u044f \u0437\u0430\u043a\u0430\u0437\u0430",
-      orderFields: "\u041f\u043e\u043b\u044f \u0437\u0430\u043a\u0430\u0437\u0430",
-      constructions: "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u0438",
-      operations: "\u041f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u043e",
+      structure:
+        "\u041f\u043e\u043b\u044f \u0437\u0430\u043a\u0430\u0437\u0430",
+      orderFields:
+        "\u041f\u043e\u043b\u044f \u0437\u0430\u043a\u0430\u0437\u0430",
+      constructions:
+        "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u0438",
+      operations:
+        "\u041f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u043e",
       partners: "\u041f\u0430\u0440\u0442\u043d\u0435\u0440\u044b",
-      users: "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438",
+      users:
+        "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438",
       workflow: "\u041f\u043e\u0442\u043e\u043a",
-      integrations: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u0446\u0438\u0438",
+      integrations:
+        "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u0446\u0438\u0438",
     },
     sectionSubtitle: {
       structure:
@@ -1424,9 +1492,12 @@
       integrations:
         "\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0430\u0439\u0442\u0435 \u0431\u0443\u0445\u0433\u0430\u043b\u0442\u0435\u0440\u0438\u044e, email \u0438 \u0432\u043d\u0435\u0448\u043d\u0438\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b.",
     },
-    sections: "\u0420\u0430\u0437\u0434\u0435\u043b\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a",
-    openSections: "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0440\u0430\u0437\u0434\u0435\u043b\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a",
-    closeSections: "\u0417\u0430\u043a\u0440\u044b\u0442\u044c \u0440\u0430\u0437\u0434\u0435\u043b\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a",
+    sections:
+      "\u0420\u0430\u0437\u0434\u0435\u043b\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a",
+    openSections:
+      "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0440\u0430\u0437\u0434\u0435\u043b\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a",
+    closeSections:
+      "\u0417\u0430\u043a\u0440\u044b\u0442\u044c \u0440\u0430\u0437\u0434\u0435\u043b\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a",
     active: "\u0410\u043a\u0442\u0438\u0432\u043d\u043e",
     loadingOrderFields:
       "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a \u043f\u043e\u043b\u0435\u0439 \u0437\u0430\u043a\u0430\u0437\u0430...",
@@ -1434,12 +1505,17 @@
       title: "\u041f\u043e\u043b\u044f \u0437\u0430\u043a\u0430\u0437\u0430",
       description:
         "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u0442\u0435 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f \u043f\u043e\u043b\u0435\u0439 \u0437\u0430\u043a\u0430\u0437\u0430, \u0438\u0445 \u0432\u0438\u0434\u0438\u043c\u043e\u0441\u0442\u044c \u0438 \u043f\u043e\u0440\u044f\u0434\u043e\u043a \u043e\u0442\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u044f.",
-      fieldLabel: "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u043f\u043e\u043b\u044f",
-      fieldLabelPlaceholder: "\u041d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, \u041c\u0435\u043d\u0435\u0434\u0436\u0435\u0440",
-      displayOrder: "\u041f\u043e\u0440\u044f\u0434\u043e\u043a \u043e\u0442\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u044f",
-      showInTable: "\u041f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0442\u044c \u0432 \u0442\u0430\u0431\u043b\u0438\u0446\u0435",
-      saveField: "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u043f\u043e\u043b\u0435",
-      addField: "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043f\u043e\u043b\u0435",
+      fieldLabel:
+        "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u043f\u043e\u043b\u044f",
+      fieldLabelPlaceholder: "Добавить новое поле заказа",
+      displayOrder:
+        "\u041f\u043e\u0440\u044f\u0434\u043e\u043a \u043e\u0442\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u044f",
+      showInTable:
+        "\u041f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0442\u044c \u0432 \u0442\u0430\u0431\u043b\u0438\u0446\u0435",
+      saveField:
+        "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u043f\u043e\u043b\u0435",
+      addField:
+        "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043f\u043e\u043b\u0435",
       defaultMeaningHint:
         "Core \u043f\u043e\u043b\u044f \u0437\u0430\u043a\u0430\u0437\u0430 \u0444\u0438\u043a\u0441\u0438\u0440\u043e\u0432\u0430\u043d\u044b. \u0417\u0434\u0435\u0441\u044c \u043c\u0435\u043d\u044f\u0439\u0442\u0435 \u0442\u043e\u043b\u044c\u043a\u043e \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435, \u0430\u043a\u0442\u0438\u0432\u043d\u043e\u0441\u0442\u044c, \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u043e\u0441\u0442\u044c \u0438 \u043e\u0442\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u0435 \u0432 \u0442\u0430\u0431\u043b\u0438\u0446\u0435.",
       field: "\u041f\u043e\u043b\u0435",
@@ -1447,26 +1523,31 @@
       addFirstField:
         "\u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u043f\u0435\u0440\u0432\u043e\u0435 \u043f\u043e\u043b\u0435 \u0437\u0430\u043a\u0430\u0437\u0430.",
       removeFieldConfirm:
-        "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043e\u043b\u0435 \"{name}\"?",
+        '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043e\u043b\u0435 "{name}"?',
     },
     operations: {
       loading:
         "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0430...",
-      workingHoursTitle: "\u0420\u0430\u0431\u043e\u0447\u0438\u0435 \u0447\u0430\u0441\u044b",
+      workingHoursTitle:
+        "\u0420\u0430\u0431\u043e\u0447\u0438\u0435 \u0447\u0430\u0441\u044b",
       workingHoursDescription:
         "\u0417\u0430\u0434\u0430\u0439\u0442\u0435 \u0440\u0430\u0431\u043e\u0447\u0438\u0435 \u0434\u043d\u0438 \u0438 \u0441\u043c\u0435\u043d\u044b, \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u043c\u044b\u0435 \u0434\u043b\u044f \u0440\u0430\u0441\u0447\u0435\u0442\u043e\u0432 \u0432\u0440\u0435\u043c\u0435\u043d\u0438 \u0438 start/stop.",
-      workStationsTitle: "\u0420\u0430\u0431\u043e\u0447\u0438\u0435 \u0441\u0442\u0430\u043d\u0446\u0438\u0438",
+      workStationsTitle:
+        "\u0420\u0430\u0431\u043e\u0447\u0438\u0435 \u0441\u0442\u0430\u043d\u0446\u0438\u0438",
       workStationsDescription:
         "\u0423\u043f\u0440\u0430\u0432\u043b\u044f\u0439\u0442\u0435 \u0441\u043f\u0438\u0441\u043a\u043e\u043c \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0445 \u0441\u0442\u0430\u043d\u0446\u0438\u0439.",
-      qrLabelTitle: "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 QR-\u044d\u0442\u0438\u043a\u0435\u0442\u043e\u043a",
+      qrLabelTitle:
+        "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 QR-\u044d\u0442\u0438\u043a\u0435\u0442\u043e\u043a",
       qrLabelDescription:
         "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u0442\u0435 \u0431\u0430\u0437\u043e\u0432\u044b\u0439 \u043c\u0430\u043a\u0435\u0442 QR-\u044d\u0442\u0438\u043a\u0435\u0442\u043e\u043a \u0434\u043b\u044f \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0430.",
-      notificationsTitle: "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f",
+      notificationsTitle:
+        "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f",
       notificationsDescription:
         "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435, \u043a\u0442\u043e \u043f\u043e\u043b\u0443\u0447\u0430\u0435\u0442 \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u043e \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430\u0445 \u0438 \u0432\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0438 \u0440\u0430\u0431\u043e\u0442.",
       workdays: "\u0420\u0430\u0431\u043e\u0447\u0438\u0435 \u0434\u043d\u0438",
       shifts: "\u0421\u043c\u0435\u043d\u044b",
-      addShift: "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0441\u043c\u0435\u043d\u0443",
+      addShift:
+        "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0441\u043c\u0435\u043d\u0443",
       overnightShiftHint:
         "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f \u043d\u043e\u0447\u043d\u0430\u044f \u0441\u043c\u0435\u043d\u0430, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440 22:00\u201306:00.",
       saveHours:
@@ -1483,11 +1564,12 @@
         "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0441\u0442\u0430\u043d\u0446\u0438\u044e",
       addStation:
         "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0441\u0442\u0430\u043d\u0446\u0438\u044e",
-      selectAll: "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0432\u0441\u0435",
+      selectAll:
+        "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0432\u0441\u0435",
       noDescription:
         "\u0411\u0435\u0437 \u043e\u043f\u0438\u0441\u0430\u043d\u0438\u044f",
       removeWorkstationConfirm:
-        "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0442\u0430\u043d\u0446\u0438\u044e \"{name}\"?",
+        '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0442\u0430\u043d\u0446\u0438\u044e "{name}"?',
       labelSizes:
         "\u0420\u0430\u0437\u043c\u0435\u0440\u044b \u044d\u0442\u0438\u043a\u0435\u0442\u043e\u043a",
       defaultSize:
@@ -1528,14 +1610,15 @@
       addReason:
         "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043f\u0440\u0438\u0447\u0438\u043d\u0443",
       removeReasonConfirm:
-        "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u0438\u0447\u0438\u043d\u0443 \"{label}\"?",
+        '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u0438\u0447\u0438\u043d\u0443 "{label}"?',
       removeSelectedWorkstationsConfirm:
         "\u0423\u0434\u0430\u043b\u0438\u0442\u044c {count} \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0445 \u0441\u0442\u0430\u043d\u0446\u0438\u0439?",
       removeSelectedReasonsConfirm:
         "\u0423\u0434\u0430\u043b\u0438\u0442\u044c {count} \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0445 \u043f\u0440\u0438\u0447\u0438\u043d?",
     },
     orderInputs: {
-      title: "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u0438",
+      title:
+        "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u0438",
       description:
         "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u0442\u0435 \u043a\u043e\u043b\u043e\u043d\u043a\u0438 \u0441\u043f\u0438\u0441\u043a\u0430 \u043a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u0439, \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u0430\u0442\u0440\u0438\u0431\u0443\u0442\u044b \u0438 \u043f\u043e\u043b\u044f \u0438\u043c\u043f\u043e\u0440\u0442\u0430.",
       empty:
@@ -1564,7 +1647,7 @@
       unitOptional:
         "\u0415\u0434\u0438\u043d\u0438\u0446\u0430 (\u043d\u0435\u043e\u0431\u044f\u0437.)",
       selectOptions:
-        "\u041e\u043f\u0446\u0438\u0438 (\u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043f\u044f\u0442\u0443\u044e, \u043d\u043e\u0432\u0443\u044e \u0441\u0442\u0440\u043e\u043a\u0443 \u0438\u043b\u0438 \"\\\\\")",
+        '\u041e\u043f\u0446\u0438\u0438 (\u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043f\u044f\u0442\u0443\u044e, \u043d\u043e\u0432\u0443\u044e \u0441\u0442\u0440\u043e\u043a\u0443 \u0438\u043b\u0438 "\\\\")',
       selectOptionsPlaceholder:
         "\u0414\u0438\u043b\u0435\u0440, \u0427\u0430\u0441\u0442\u043d\u044b\u0439, \u041f\u0430\u0440\u0442\u043d\u0451\u0440",
       tableColumns:
@@ -1587,11 +1670,11 @@
       removeColumnConfirm:
         "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u044d\u0442\u0443 \u043a\u043e\u043b\u043e\u043d\u043a\u0443?",
       removeFieldConfirm:
-        "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \"{label}\"?",
+        '\u0423\u0434\u0430\u043b\u0438\u0442\u044c "{label}"?',
       removeSelectedFieldsConfirm:
         "\u0423\u0434\u0430\u043b\u0438\u0442\u044c {count} \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0445 \u043f\u043e\u043b\u0435\u0439?",
       options:
-        "\u041e\u043f\u0446\u0438\u0438 (\u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043f\u044f\u0442\u0443\u044e, \u043d\u043e\u0432\u0443\u044e \u0441\u0442\u0440\u043e\u043a\u0443 \u0438\u043b\u0438 \"\\\\\")",
+        '\u041e\u043f\u0446\u0438\u0438 (\u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043f\u044f\u0442\u0443\u044e, \u043d\u043e\u0432\u0443\u044e \u0441\u0442\u0440\u043e\u043a\u0443 \u0438\u043b\u0438 "\\\\")',
       optionsPlaceholder: "Type A, Type B",
       maxSelects:
         "\u041c\u0430\u043a\u0441. \u0432\u044b\u0431\u043e\u0440\u043e\u0432 (1-3)",
@@ -1609,8 +1692,10 @@
       addCategoryPlaceholder: "Добавить категорию",
       addCategory: "Добавить категорию",
       defaultCategoryByRole: "Категория по умолчанию по роли",
-      newUploadsHint: "Для новых загрузок будет использоваться выбранная категория для каждой роли.",
-      aiParsingHint: "AI-парсинг входных данных заказа использует категории с отметкой \"Использовать для AI-парсинга\".",
+      newUploadsHint:
+        "Для новых загрузок будет использоваться выбранная категория для каждой роли.",
+      aiParsingHint:
+        'AI-парсинг входных данных заказа использует категории с отметкой "Использовать для AI-парсинга".',
       reset: "Сброс",
       saveAttachmentCategories: "Сохранить категории вложений",
       removeAttachmentCategoryConfirm:
@@ -1623,14 +1708,15 @@
       requiredForProduction: "Обязательно для производства",
       engineeringShort: "Инж.",
       productionShort: "Прод.",
-      removeChecklistConfirm: "Удалить пункт чек-листа \"{label}\"?",
+      removeChecklistConfirm: 'Удалить пункт чек-листа "{label}"?',
       noChecklistItems: "Пунктов чек-листа пока нет.",
       returnReasons: "Причины возврата",
       addReasonPlaceholder: "Добавить причину",
       addReason: "Добавить причину",
-      removeReasonConfirm: "Удалить причину \"{reason}\"?",
+      removeReasonConfirm: 'Удалить причину "{reason}"?',
       noReturnReasons: "Причин возврата пока нет.",
-      rulesTitle: "\u041f\u0440\u0430\u0432\u0438\u043b\u0430 \u043f\u043e\u0442\u043e\u043a\u0430",
+      rulesTitle:
+        "\u041f\u0440\u0430\u0432\u0438\u043b\u0430 \u043f\u043e\u0442\u043e\u043a\u0430",
       rulesDescription:
         "\u041e\u043f\u0440\u0435\u0434\u0435\u043b\u0438\u0442\u0435, \u0447\u0442\u043e \u0434\u043e\u043b\u0436\u043d\u043e \u0431\u044b\u0442\u044c \u0433\u043e\u0442\u043e\u0432\u043e \u043f\u0435\u0440\u0435\u0434 \u043f\u0435\u0440\u0435\u0445\u043e\u0434\u043e\u043c.",
       syncing:
@@ -1711,7 +1797,7 @@
       addGroup:
         "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0433\u0440\u0443\u043f\u043f\u0443",
       removeGroupConfirm:
-        "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0433\u0440\u0443\u043f\u043f\u0443 \"{name}\"?",
+        '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0433\u0440\u0443\u043f\u043f\u0443 "{name}"?',
       noPartnerGroups:
         "\u0413\u0440\u0443\u043f\u043f \u043f\u0430\u0440\u0442\u043d\u0451\u0440\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.",
       partnerName:
@@ -1727,7 +1813,7 @@
       addPartner:
         "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043f\u0430\u0440\u0442\u043d\u0451\u0440\u0430",
       removePartnerConfirm:
-        "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0430\u0440\u0442\u043d\u0451\u0440\u0430 \"{name}\"?",
+        '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0430\u0440\u0442\u043d\u0451\u0440\u0430 "{name}"?',
       noPartners:
         "\u041f\u0430\u0440\u0442\u043d\u0451\u0440\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.",
       externalSchemaTitle:
@@ -1751,7 +1837,7 @@
       removeSelectedGroupsConfirm:
         "\u0423\u0434\u0430\u043b\u0438\u0442\u044c {count} \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0445 \u0433\u0440\u0443\u043f\u043f?",
       removeFieldConfirm:
-        "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \"{label}\"?",
+        '\u0423\u0434\u0430\u043b\u0438\u0442\u044c "{label}"?',
       externalFieldFallback: "\u041f\u043e\u043b\u0435",
     },
     options: {
@@ -1765,17 +1851,20 @@
         "0": "\u0412\u0441",
       },
       orderInputGroup: {
-        order_info: "\u0418\u043d\u0444\u043e \u0437\u0430\u043a\u0430\u0437\u0430",
+        order_info:
+          "\u0418\u043d\u0444\u043e \u0437\u0430\u043a\u0430\u0437\u0430",
         production_scope:
           "\u041e\u0431\u044a\u0451\u043c \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u0430",
       },
       orderInputFieldType: {
         text: "\u0422\u0435\u043a\u0441\u0442",
-        textarea: "\u041c\u043d\u043e\u0433\u043e\u0441\u0442\u0440\u043e\u0447\u043d\u044b\u0439 \u0442\u0435\u043a\u0441\u0442",
+        textarea:
+          "\u041c\u043d\u043e\u0433\u043e\u0441\u0442\u0440\u043e\u0447\u043d\u044b\u0439 \u0442\u0435\u043a\u0441\u0442",
         number: "\u0427\u0438\u0441\u043b\u043e",
         date: "\u0414\u0430\u0442\u0430",
         select: "\u0412\u044b\u0431\u043e\u0440",
-        toggle: "\u041f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c",
+        toggle:
+          "\u041f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c",
         toggle_number:
           "\u041f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c + \u0447\u0438\u0441\u043b\u043e",
         table:
@@ -1802,11 +1891,13 @@
         LABEL_105x148: "Label 105 x 148 mm",
       },
       qrContentField: {
-        order_number: "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u043a\u0430\u0437\u0430",
+        order_number:
+          "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u043a\u0430\u0437\u0430",
         customer_name:
           "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u043a\u043b\u0438\u0435\u043d\u0442\u0430",
         batch_code: "\u041a\u043e\u0434 \u043f\u0430\u0440\u0442\u0438\u0438",
-        item_name: "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u044f",
+        item_name:
+          "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u044f",
         qty: "\u041a\u043e\u043b-\u0432\u043e",
         material: "\u041c\u0430\u0442\u0435\u0440\u0438\u0430\u043b",
         field_label:
@@ -1815,11 +1906,13 @@
       },
       externalFieldType: {
         text: "\u0422\u0435\u043a\u0441\u0442",
-        textarea: "\u041c\u043d\u043e\u0433\u043e\u0441\u0442\u0440\u043e\u0447\u043d\u044b\u0439 \u0442\u0435\u043a\u0441\u0442",
+        textarea:
+          "\u041c\u043d\u043e\u0433\u043e\u0441\u0442\u0440\u043e\u0447\u043d\u044b\u0439 \u0442\u0435\u043a\u0441\u0442",
         number: "\u0427\u0438\u0441\u043b\u043e",
         date: "\u0414\u0430\u0442\u0430",
         select: "\u0412\u044b\u0431\u043e\u0440",
-        toggle: "\u041f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c",
+        toggle:
+          "\u041f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c",
       },
       externalFieldScope: {
         manual: "\u0412\u0440\u0443\u0447\u043d\u0443\u044e",
@@ -1837,7 +1930,8 @@
         draft: "\u0427\u0435\u0440\u043d\u043e\u0432\u0438\u043a",
         ready_for_engineering:
           "\u0413\u043e\u0442\u043e\u0432\u043e \u043a \u0438\u043d\u0436\u0435\u043d\u0435\u0440\u0438\u0438",
-        in_engineering: "\u0412 \u0438\u043d\u0436\u0435\u043d\u0435\u0440\u0438\u0438",
+        in_engineering:
+          "\u0412 \u0438\u043d\u0436\u0435\u043d\u0435\u0440\u0438\u0438",
         engineering_blocked:
           "\u0418\u043d\u0436\u0435\u043d\u0435\u0440\u0438\u044f \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u0430",
         ready_for_production:
@@ -1874,7 +1968,8 @@
       replyTo: "Reply-to по умолчанию",
       replyToPlaceholder: "engineering@your-company.com",
       senderMode: "Режим отправителя",
-      useEngineerSender: "Использовать email инженера как отправителя, если домен совпадает",
+      useEngineerSender:
+        "Использовать email инженера как отправителя, если домен совпадает",
       domainVerified: "Домен подтверждён в Resend",
       templateTitle: "Шаблон email для внешнего запроса",
       placeholders: "Доступные плейсхолдеры:",
@@ -1888,7 +1983,8 @@
       comingSoon: "Скоро",
       comingSoonDescription:
         "Скоро появится синхронизация заказов из бухгалтерских систем в PWS.",
-      expectedFlow: "Ожидаемый поток: заказ из бухгалтерии в PWS в производственные станции.",
+      expectedFlow:
+        "Ожидаемый поток: заказ из бухгалтерии в PWS в производственные станции.",
       requestIntegration: "Запросить интеграцию",
     },
     security: {
@@ -1902,28 +1998,34 @@
       confirm: "Подтвердить",
     },
     users: {
-      title: "\u0414\u043e\u0441\u0442\u0443\u043f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439",
+      title:
+        "\u0414\u043e\u0441\u0442\u0443\u043f \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439",
       description:
         "\u0423\u043f\u0440\u0430\u0432\u043b\u044f\u0439\u0442\u0435, \u043a\u0442\u043e \u043c\u043e\u0436\u0435\u0442 \u0432\u043e\u0439\u0442\u0438 \u0432 \u044d\u0442\u043e\u0442 workspace \u0438 \u0435\u0433\u043e \u0440\u043e\u043b\u044c.",
       loading:
         "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a \u0434\u043e\u0441\u0442\u0443\u043f\u0430...",
-      inviteUser: "\u041f\u0440\u0438\u0433\u043b\u0430\u0441\u0438\u0442\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f",
+      inviteUser:
+        "\u041f\u0440\u0438\u0433\u043b\u0430\u0441\u0438\u0442\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f",
       email: "Email",
       emailPlaceholder: "user@company.com",
       fullName: "\u041f\u043e\u043b\u043d\u043e\u0435 \u0438\u043c\u044f",
-      fullNamePlaceholder: "\u041f\u043e\u043b\u043d\u043e\u0435 \u0438\u043c\u044f",
+      fullNamePlaceholder:
+        "\u041f\u043e\u043b\u043d\u043e\u0435 \u0438\u043c\u044f",
       role: "\u0420\u043e\u043b\u044c",
       name: "\u0418\u043c\u044f",
-      sendInvite: "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u043f\u0440\u0438\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u0435",
+      sendInvite:
+        "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u043f\u0440\u0438\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u0435",
       sending: "\u041e\u0442\u043f\u0440\u0430\u0432\u043a\u0430...",
       adminOwnerOnly:
         "\u0422\u043e\u043b\u044c\u043a\u043e \u0410\u0434\u043c\u0438\u043d \u0438 \u0412\u043b\u0430\u0434\u0435\u043b\u0435\u0446 \u043c\u043e\u0433\u0443\u0442 \u043c\u0435\u043d\u044f\u0442\u044c \u0440\u043e\u043b\u0438 \u0438 admin \u0434\u043e\u0441\u0442\u0443\u043f.",
       devOverride:
         "Dev override: \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044c \u043c\u0435\u043d\u044f\u0442\u044c \u0441\u0432\u043e\u044e \u0440\u043e\u043b\u044c",
-      loadingUsers: "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439...",
+      loadingUsers:
+        "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439...",
       loadingInvites:
         "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043f\u0440\u0438\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u0439...",
-      noUsers: "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b.",
+      noUsers:
+        "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b.",
       noInvites:
         "\u041f\u0440\u0438\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.",
       accepted: "\u041f\u0440\u0438\u043d\u044f\u0442\u043e",
@@ -1938,20 +2040,19 @@
         "\u041f\u0440\u0430\u0432\u0430 \u0440\u043e\u043b\u0435\u0439",
       rolePermissionsHint:
         "RBAC \u043f\u0440\u0430\u0432\u0438\u043b\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b \u0432 \u0411\u0414 \u0438 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442\u0441\u044f \u0432 UI \u0438 \u043d\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0435.",
-      saveRbac:
-        "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c RBAC",
-      loadingRbac:
-        "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 RBAC...",
-      permission:
-        "\u041f\u0440\u0430\u0432\u043e",
+      saveRbac: "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c RBAC",
+      loadingRbac: "\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 RBAC...",
+      permission: "\u041f\u0440\u0430\u0432\u043e",
       adminLegacy: "\u0410\u0434\u043c\u0438\u043d (legacy)",
       owner: "\u0412\u043b\u0430\u0434\u0435\u043b\u0435\u0446",
       admin: "\u0410\u0434\u043c\u0438\u043d",
       saving: "\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435...",
       deactivateHint:
         "Deactivate \u0434\u0435\u043b\u0430\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f \u043d\u0435\u0430\u043a\u0442\u0438\u0432\u043d\u043e\u0439 \u0438 \u0443\u0431\u0438\u0440\u0430\u0435\u0442 \u0434\u043e\u0441\u0442\u0443\u043f.",
-      deactivate: "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u0442\u044c",
-      deactivating: "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0430\u0446\u0438\u044f...",
+      deactivate:
+        "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u0442\u044c",
+      deactivating:
+        "\u0414\u0435\u0430\u043a\u0442\u0438\u0432\u0430\u0446\u0438\u044f...",
       removeHint:
         "Remove \u043e\u0442\u0432\u044f\u0437\u044b\u0432\u0430\u0435\u0442 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f \u043e\u0442 workspace. \u0410\u043a\u043a\u0430\u0443\u043d\u0442 \u0432 auth \u0441\u0438\u0441\u0442\u0435\u043c\u0435 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f.",
       remove: "\u0423\u0434\u0430\u043b\u0438\u0442\u044c",
@@ -1992,4 +2093,3 @@
 } as const;
 
 export default ru;
-
