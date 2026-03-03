@@ -243,11 +243,23 @@ function formatDateInput(value: string) {
 }
 
 function rowKeyForProductionItem(item: ProductionItemRow) {
-  return typeof item.meta?.rowKey === "string"
-    ? item.meta.rowKey
-    : `${item.order_id}:fallback:${
-        typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
-      }`;
+  if (typeof item.meta?.rowKey === "string") {
+    return item.meta.rowKey;
+  }
+  const sourceRowId =
+    typeof item.meta?.sourceRowId === "string" && item.meta.sourceRowId.trim()
+      ? item.meta.sourceRowId.trim()
+      : null;
+  if (sourceRowId) {
+    const fieldId =
+      typeof item.meta?.fieldId === "string" && item.meta.fieldId.trim()
+        ? item.meta.fieldId
+        : "fallback";
+    return `${item.order_id}:${fieldId}:${sourceRowId}`;
+  }
+  return `${item.order_id}:fallback:${
+    typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
+  }`;
 }
 
 export default function ProductionPage() {
@@ -1018,6 +1030,10 @@ export default function ProductionPage() {
         itemName: item.item_name,
         qty: Number(item.qty ?? 1),
         material: item.material ?? "",
+        sourceRowId:
+          typeof item.meta?.sourceRowId === "string"
+            ? item.meta.sourceRowId
+            : null,
         rowIndex: normalizedIndex,
         rawRow:
           typeof item.meta?.row === "object" && item.meta?.row !== null
@@ -1551,8 +1567,12 @@ export default function ProductionPage() {
         }
         const parts = rowKey.split(":");
         const fieldId = parts[1] ?? "fallback";
-        const rowIndexRaw = Number(parts[2] ?? row.meta?.rowIndex ?? 0);
+        const rowIndexRaw = Number(row.meta?.rowIndex ?? 0);
         const rowIndex = Number.isFinite(rowIndexRaw) ? rowIndexRaw : 0;
+        const sourceRowId =
+          typeof row.meta?.sourceRowId === "string"
+            ? row.meta.sourceRowId
+            : null;
         return {
           id: rowKey,
           orderId: item.orderId,
@@ -1569,6 +1589,7 @@ export default function ProductionPage() {
           itemName: row.item_name,
           qty: Number(row.qty ?? 1),
           material: row.material ?? item.material ?? "",
+          sourceRowId,
           rowIndex,
           rawRow:
             typeof row.meta?.row === "object" && row.meta?.row !== null
@@ -1717,6 +1738,7 @@ export default function ProductionPage() {
             fieldId: row.fieldId,
             fieldLabel: row.fieldLabel,
             rowIndex: row.rowIndex,
+            sourceRowId: row.sourceRowId ?? null,
             rowKey: row.id,
             plannedDate: rowDate,
             row: row.rawRow,
