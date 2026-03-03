@@ -600,6 +600,18 @@ export default function OrderDetailPage() {
   const [isParsingTableFieldId, setIsParsingTableFieldId] = useState<
     string | null
   >(null);
+  const getConstructionRows = useCallback(
+    (fieldId: string) =>
+      ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
+    [constructionRowsByFieldId],
+  );
+  const getFieldCurrentValue = useCallback(
+    (field: OrderInputField) =>
+      field.fieldType === "table"
+        ? getConstructionRows(field.id)
+        : orderInputValues[field.id],
+    [getConstructionRows, orderInputValues],
+  );
   const [expandedExternalHistory, setExpandedExternalHistory] = useState<
     Record<string, boolean>
   >({});
@@ -2004,17 +2016,6 @@ export default function OrderDetailPage() {
       });
     return groups;
   }, [activeOrderInputFields]);
-  const getConstructionRows = useCallback(
-    (fieldId: string) => ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
-    [constructionRowsByFieldId],
-  );
-  const getFieldCurrentValue = useCallback(
-    (field: OrderInputField) =>
-      field.fieldType === "table"
-        ? getConstructionRows(field.id)
-        : orderInputValues[field.id],
-    [getConstructionRows, orderInputValues],
-  );
   const getConstructionRowKey = useCallback((fieldId: string, row: unknown) => {
     const rowId = getOrderInputTableRowId(row);
     return rowId ? `${fieldId}:${rowId}` : null;
