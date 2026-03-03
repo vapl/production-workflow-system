@@ -117,6 +117,9 @@ import {
 import { useAssignmentLabels } from "@/hooks/useAssignmentLabels";
 import { parseOrdersWorkbook } from "@/lib/excel/ordersExcel";
 import {
+  parseOrdersWorkbookDetailed,
+} from "@/lib/excel/ordersExcel";
+import {
   canEditOrderInlineField,
   canEditOrderInputs as canEditOrderInputsByRole,
 } from "@/lib/domain/orderPermissions";
@@ -129,6 +132,16 @@ const CONSTRUCTION_IMPORT_MAPPING_KEYS = [
   "dimensions",
   "material",
 ] as const;
+
+const REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS = ["item_name"] as const;
+
+function getFileExtension(fileName: string) {
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0) {
+    return "";
+  }
+  return fileName.slice(dotIndex + 1).toLowerCase();
+}
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -615,11 +628,14 @@ export default function OrderDetailPage() {
     string | null
   >(null);
   const [constructionImportFileName, setConstructionImportFileName] = useState("");
+  const [constructionImportSheetName, setConstructionImportSheetName] = useState("");
   const [constructionImportHeaders, setConstructionImportHeaders] = useState<string[]>([]);
   const [constructionImportRows, setConstructionImportRows] = useState<Record<string, unknown>[]>([]);
   const [constructionImportMapping, setConstructionImportMapping] = useState<Record<string, string>>({});
   const [constructionImportError, setConstructionImportError] = useState("");
   const [constructionImportBatchId, setConstructionImportBatchId] = useState<string | null>(null);
+  const [constructionImportAiBridgeFieldId, setConstructionImportAiBridgeFieldId] =
+    useState<string | null>(null);
   const getConstructionRows = useCallback(
     (fieldId: string) =>
       ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
@@ -2062,6 +2078,24 @@ export default function OrderDetailPage() {
     [constructionImportMapping, constructionImportRows],
   );
 
+  const constructionImportMissingMappingKeys = useMemo(
+    () =>
+      REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS.filter(
+        (key) => !constructionImportMapping[key],
+      ),
+    [constructionImportMapping],
+  );
+
+  const constructionImportInvalidRowCount = useMemo(() => {
+    if (!constructionImportMapping.item_name) {
+      return constructionImportRows.length;
+    }
+    return constructionImportRows.filter((row) => {
+      const value = row[constructionImportMapping.item_name];
+      return String(value ?? "").trim().length === 0;
+    }).length;
+  }, [constructionImportMapping.item_name, constructionImportRows]);
+
   const suggestConstructionImportMapping = useCallback((headers: string[]) => {
     const normalize = (value: string) =>
       value
@@ -2090,17 +2124,34 @@ export default function OrderDetailPage() {
         return;
       }
       try {
-        const parsedRows = await parseOrdersWorkbook(file);
-        if (parsedRows.length === 0) {
+        const extension = getFileExtension(file.name);
+        if (extension === "pdf") {
+          setConstructionImportFileName(file.name);
+          setConstructionImportSheetName("");
+          setConstructionImportRows([]);
+          setConstructionImportHeaders([]);
+          setConstructionImportError(
+            "PDF files should be imported with AI/OCR (Add with AI in the construction table above), not via CSV/Excel mapping.",
+          );
+          setConstructionImportAiBridgeFieldId(primaryConstructionField.id);
+          return;
+        }
+        if (!["csv", "xls", "xlsx"].includes(extension)) {
+          setConstructionImportError("Unsupported file type. Use CSV/XLS/XLSX, or AI/OCR for PDF.");
+          setConstructionImportAiBridgeFieldId(null);
+          return;
+        }
+
+        const parsedWorkbook = await parseOrdersWorkbookDetailed(file);
+        if (parsedWorkbook.rows.length === 0) {
           setConstructionImportError("No rows found in import file.");
           return;
         }
-        const headers = Array.from(
-          new Set(parsedRows.flatMap((row) => Object.keys(row).map((key) => key.trim()))),
-        );
+        const headers = parsedWorkbook.headers;
         const nextMapping = suggestConstructionImportMapping(headers);
         setConstructionImportFileName(file.name);
-        setConstructionImportRows(parsedRows);
+        setConstructionImportSheetName(parsedWorkbook.sheetName);
+        setConstructionImportRows(parsedWorkbook.rows);
         setConstructionImportHeaders(headers);
         setConstructionImportMapping(nextMapping);
 
@@ -2110,7 +2161,7 @@ export default function OrderDetailPage() {
             .insert({
               order_id: orderState.id,
               source_file_name: file.name,
-              source_sheet_name: "Sheet1",
+              source_sheet_name: parsedWorkbook.sheetName,
               mapping_profile: nextMapping,
               status: "preview",
             })
@@ -2120,7 +2171,7 @@ export default function OrderDetailPage() {
           if (!batchError && batchData) {
             const batchId = (batchData as OrderItemImportBatchRow).id;
             setConstructionImportBatchId(batchId);
-            const previewRows = parsedRows.map((row, index) => ({
+            const previewRows = parsedWorkbook.rows.map((row, index) => ({
               batch_id: batchId,
               source_row_ref: String(index + 2),
               raw_payload: row,
@@ -2134,8 +2185,10 @@ export default function OrderDetailPage() {
             }
           }
         }
+        setConstructionImportAiBridgeFieldId(null);
         setConstructionImportError("");
       } catch (error) {
+        setConstructionImportAiBridgeFieldId(null);
         setConstructionImportError(
           error instanceof Error ? error.message : "Failed to parse import file.",
         );
@@ -2147,6 +2200,12 @@ export default function OrderDetailPage() {
   const handleApplyConstructionImport = useCallback(async () => {
     if (!primaryConstructionField) {
       setConstructionImportError("Primary construction table is missing.");
+      return;
+    }
+    if (constructionImportMissingMappingKeys.length > 0) {
+      setConstructionImportError(
+        `Map required fields first: ${constructionImportMissingMappingKeys.join(", ")}.`,
+      );
       return;
     }
     const columns = primaryConstructionField.columns ?? [];
@@ -2170,7 +2229,7 @@ export default function OrderDetailPage() {
         mappedRow[columnKey] = row[header] ?? "";
       });
       mappedRow.__import_source_file = constructionImportFileName;
-      mappedRow.__import_source_sheet = "Sheet1";
+      mappedRow.__import_source_sheet = constructionImportSheetName || "Sheet1";
       mappedRow.__import_source_row_ref = String(index + 2);
       return ensureOrderInputTableRow(mappedRow);
     });
@@ -2227,9 +2286,27 @@ export default function OrderDetailPage() {
     constructionImportBatchId,
     constructionImportFileName,
     constructionImportMapping,
+    constructionImportMissingMappingKeys,
     constructionImportRows,
+    constructionImportSheetName,
     primaryConstructionField,
   ]);
+
+  const handleOpenConstructionAiImport = useCallback(() => {
+    if (!constructionImportAiBridgeFieldId) {
+      return;
+    }
+    const targetId = `construction-table-${constructionImportAiBridgeFieldId}`;
+    const element = document.getElementById(targetId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    setTableImportNotices((prev) => ({
+      ...prev,
+      [constructionImportAiBridgeFieldId]:
+        "PDF detected: choose the file from production documentation and click Add with AI.",
+    }));
+  }, [constructionImportAiBridgeFieldId]);
 
   const supplementalOrderInputGroups = useMemo(() => {
     const groups = new Map<string, OrderInputField[]>();
@@ -4249,6 +4326,7 @@ export default function OrderDetailPage() {
       return (
         <div
           key={field.id}
+          id={`construction-table-${field.id}`}
           className="min-w-0 max-w-full space-y-3 md:col-span-2"
         >
           <div className="flex min-w-0 max-w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -7133,6 +7211,9 @@ export default function OrderDetailPage() {
                           ) : null}
                           <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
                             <div className="mb-2 text-sm font-medium">Construction import (CSV/Excel)</div>
+                            <p className="mb-2 text-xs text-muted-foreground">
+                              Use this for structured CSV/Excel. For PDF drawings/specifications, use AI/OCR import (Add with AI) in the construction table above.
+                            </p>
                             <div className="grid gap-3 md:grid-cols-2">
                               {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((mappingKey) => (
                                 <Select
@@ -7173,13 +7254,36 @@ export default function OrderDetailPage() {
                               />
                             </div>
                             {constructionImportError ? (
-                              <div className="mt-2 text-xs text-destructive">{constructionImportError}</div>
+                              <div className="mt-2 space-y-2">
+                                <div className="text-xs text-destructive">{constructionImportError}</div>
+                                {constructionImportAiBridgeFieldId ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={handleOpenConstructionAiImport}
+                                  >
+                                    Open AI/OCR import for this construction table
+                                  </Button>
+                                ) : null}
+                              </div>
                             ) : null}
                             {constructionImportRows.length > 0 ? (
                               <div className="mt-3 space-y-2">
                                 <div className="text-xs text-muted-foreground">
-                                  {constructionImportFileName} · {constructionImportRows.length} rows
+                                  {constructionImportFileName}
+                                  {constructionImportSheetName ? ` · sheet: ${constructionImportSheetName}` : ""} · {constructionImportRows.length} rows
                                 </div>
+                                {constructionImportMissingMappingKeys.length > 0 ? (
+                                  <div className="text-xs text-amber-700">
+                                    Required mapping missing: {constructionImportMissingMappingKeys.join(", ")}
+                                  </div>
+                                ) : null}
+                                {constructionImportInvalidRowCount > 0 ? (
+                                  <div className="text-xs text-amber-700">
+                                    {constructionImportInvalidRowCount} rows have empty mapped item_name and should be fixed before apply.
+                                  </div>
+                                ) : null}
                                 <div className="max-h-44 overflow-auto rounded border border-border bg-background">
                                   <table className="min-w-full text-xs">
                                     <thead className="bg-muted/40">
@@ -7206,7 +7310,11 @@ export default function OrderDetailPage() {
                                   size="sm"
                                   variant="outline"
                                   onClick={handleApplyConstructionImport}
-                                  disabled={!canEditOrderInputs || constructionImportRows.length === 0}
+                                  disabled={
+                                    !canEditOrderInputs ||
+                                    constructionImportRows.length === 0 ||
+                                    constructionImportMissingMappingKeys.length > 0
+                                  }
                                 >
                                   Add imported rows to construction editor
                                 </Button>
