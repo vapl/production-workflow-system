@@ -115,6 +115,7 @@ import {
   getOrderStatusLabel,
 } from "@/lib/domain/orderFieldPresentation";
 import { useAssignmentLabels } from "@/hooks/useAssignmentLabels";
+import { parseOrdersWorkbook } from "@/lib/excel/ordersExcel";
 import {
   parseOrdersWorkbookDetailed,
 } from "@/lib/excel/ordersExcel";
