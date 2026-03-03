@@ -8,7 +8,6 @@ export interface OrderItem {
   id: string;
   orderId: string;
   sourceKind: OrderItemSourceKind;
-  sourceFieldId?: string | null;
   sourceRowId: string;
   sortOrder: number;
   position?: string | null;
