@@ -50,10 +50,10 @@ import {
   prepareProductionQrRows,
 } from "@/lib/domain/prepareProductionQrRows";
 import {
-  buildTableRowsFromOrderItems,
+  buildConstructionRowsFromOrderItems,
   isMissingOrderItemsSchema,
   mapOrderItemRow,
-} from "@/lib/domain/orderItemsBridge";
+} from "@/lib/domain/orderItems";
 import type { OrderInputField } from "@/types/orderInputs";
 import {
   CalendarIcon,
@@ -243,11 +243,23 @@ function formatDateInput(value: string) {
 }
 
 function rowKeyForProductionItem(item: ProductionItemRow) {
-  return typeof item.meta?.rowKey === "string"
-    ? item.meta.rowKey
-    : `${item.order_id}:fallback:${
-        typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
-      }`;
+  if (typeof item.meta?.rowKey === "string") {
+    return item.meta.rowKey;
+  }
+  const sourceRowId =
+    typeof item.meta?.sourceRowId === "string" && item.meta.sourceRowId.trim()
+      ? item.meta.sourceRowId.trim()
+      : null;
+  if (sourceRowId) {
+    const fieldId =
+      typeof item.meta?.fieldId === "string" && item.meta.fieldId.trim()
+        ? item.meta.fieldId
+        : "fallback";
+    return `${item.order_id}:${fieldId}:${sourceRowId}`;
+  }
+  return `${item.order_id}:fallback:${
+    typeof item.meta?.rowIndex === "number" ? item.meta.rowIndex : 0
+  }`;
 }
 
 export default function ProductionPage() {
@@ -592,14 +604,10 @@ export default function ProductionPage() {
           const orderItemsResult = await supabase
             .from("order_items")
             .select(
-              "id, order_id, source_kind, source_field_id, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
+              "id, order_id, source_kind, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
             )
             .in("order_id", orderIds)
             .eq("source_kind", "order_input_table")
-            .in(
-              "source_field_id",
-              tableFields.map((field) => field.id),
-            )
             .order("sort_order", { ascending: true })
             .order("created_at", { ascending: true });
 
@@ -612,25 +620,24 @@ export default function ProductionPage() {
             !isMissingOrderItemsSchema(orderItemsResult.error)
           ) {
             const items = orderItemsResult.data.map(mapOrderItemRow);
-            tableFields.forEach((field) => {
-              const rowsByOrder = new Map<string, ReturnType<typeof buildTableRowsFromOrderItems>>();
-              items
-                .filter((item) => item.sourceFieldId === field.id)
-                .forEach((item) => {
-                  const current = rowsByOrder.get(item.orderId) ?? [];
-                  current.push(
-                    ...buildTableRowsFromOrderItems(field, [item]),
-                  );
-                  rowsByOrder.set(item.orderId, current);
-                });
+            const primaryField = tableFields[0] ?? null;
+            if (primaryField) {
+              const rowsByOrder = new Map<string, ReturnType<typeof buildConstructionRowsFromOrderItems>>();
+              items.forEach((item) => {
+                const current = rowsByOrder.get(item.orderId) ?? [];
+                current.push(
+                  ...buildConstructionRowsFromOrderItems(primaryField, [item]),
+                );
+                rowsByOrder.set(item.orderId, current);
+              });
 
               rowsByOrder.forEach((rows, orderId) => {
                 if (!nextValues[orderId]) {
                   nextValues[orderId] = {};
                 }
-                nextValues[orderId][field.id] = rows;
+                nextValues[orderId][primaryField.id] = rows;
               });
-            });
+            }
           }
         }
 
@@ -1018,6 +1025,10 @@ export default function ProductionPage() {
         itemName: item.item_name,
         qty: Number(item.qty ?? 1),
         material: item.material ?? "",
+        sourceRowId:
+          typeof item.meta?.sourceRowId === "string"
+            ? item.meta.sourceRowId
+            : null,
         rowIndex: normalizedIndex,
         rawRow:
           typeof item.meta?.row === "object" && item.meta?.row !== null
@@ -1551,8 +1562,12 @@ export default function ProductionPage() {
         }
         const parts = rowKey.split(":");
         const fieldId = parts[1] ?? "fallback";
-        const rowIndexRaw = Number(parts[2] ?? row.meta?.rowIndex ?? 0);
+        const rowIndexRaw = Number(row.meta?.rowIndex ?? 0);
         const rowIndex = Number.isFinite(rowIndexRaw) ? rowIndexRaw : 0;
+        const sourceRowId =
+          typeof row.meta?.sourceRowId === "string"
+            ? row.meta.sourceRowId
+            : null;
         return {
           id: rowKey,
           orderId: item.orderId,
@@ -1569,6 +1584,7 @@ export default function ProductionPage() {
           itemName: row.item_name,
           qty: Number(row.qty ?? 1),
           material: row.material ?? item.material ?? "",
+          sourceRowId,
           rowIndex,
           rawRow:
             typeof row.meta?.row === "object" && row.meta?.row !== null
@@ -1717,6 +1733,7 @@ export default function ProductionPage() {
             fieldId: row.fieldId,
             fieldLabel: row.fieldLabel,
             rowIndex: row.rowIndex,
+            sourceRowId: row.sourceRowId ?? null,
             rowKey: row.id,
             plannedDate: rowDate,
             row: row.rawRow,
