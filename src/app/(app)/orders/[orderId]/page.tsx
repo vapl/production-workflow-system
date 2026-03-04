@@ -120,6 +120,9 @@ import {
   parseOrdersWorkbookDetailed,
 } from "@/lib/excel/ordersExcel";
 import {
+  parseOrdersWorkbookDetailed,
+} from "@/lib/excel/ordersExcel";
+import {
   canEditOrderInlineField,
   canEditOrderInputs as canEditOrderInputsByRole,
 } from "@/lib/domain/orderPermissions";
@@ -2308,6 +2311,27 @@ export default function OrderDetailPage() {
     }));
   }, [constructionImportAiBridgeFieldId]);
 
+  const handleAddConstructionManually = useCallback(() => {
+    if (!primaryConstructionField) {
+      return;
+    }
+    const tableId = `construction-table-${primaryConstructionField.id}`;
+    const addButtonId = `add-construction-row-${primaryConstructionField.id}`;
+    const table = document.getElementById(tableId);
+    if (table) {
+      table.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    window.setTimeout(() => {
+      const addButton = document.getElementById(addButtonId);
+      addButton?.click();
+    }, 120);
+  }, [primaryConstructionField]);
+
+  const handleOpenConstructionFileImport = useCallback(() => {
+    const card = document.getElementById("construction-import-card");
+    card?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   const supplementalOrderInputGroups = useMemo(() => {
     const groups = new Map<string, OrderInputField[]>();
     activeOrderInputFields
@@ -4439,6 +4463,7 @@ export default function OrderDetailPage() {
                 {t("orders.detail.aiImport.removeSelected")}
               </Button>
               <Button
+                id={`add-construction-row-${field.id}`}
                 size="sm"
                 variant="outline"
                 onClick={addRow}
@@ -7206,11 +7231,25 @@ export default function OrderDetailPage() {
                         </div>
                       ) : (
                         <div className="space-y-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button type="button" size="sm" onClick={handleAddConstructionManually}>
+                              Pievienot konstrukciju
+                            </Button>
+                            <Button type="button" size="sm" variant="outline" onClick={handleOpenConstructionFileImport}>
+                              Importēt no faila
+                            </Button>
+                            <Button type="button" size="sm" variant="outline" onClick={handleOpenConstructionAiImport}>
+                              Importēt ar AI
+                            </Button>
+                          </div>
                           {primaryConstructionField ? (
                             renderOrderInputField(primaryConstructionField)
                           ) : null}
-                          <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
+                          <div id="construction-import-card" className="rounded-lg border border-border/70 bg-muted/20 p-3">
                             <div className="mb-2 text-sm font-medium">Construction import (CSV/Excel)</div>
+                            <p className="mb-2 text-xs text-muted-foreground">
+                              Workflow: Upload → Detect structure → Preview items → Import. Mapping is shown only when auto-detection is not enough.
+                            </p>
                             <p className="mb-2 text-xs text-muted-foreground">
                               Use this for structured CSV/Excel. For PDF drawings/specifications, use AI/OCR import (Add with AI) in the construction table above.
                             </p>
