@@ -23,6 +23,41 @@ const MAPPING_KEYS: MappingKey[] = [
   "material",
 ];
 
+const HEADER_ALIASES: Record<MappingKey, string[]> = {
+  position: [
+    "position",
+    "poz",
+    "pozicija",
+    "artikuls",
+    "article",
+    "item code",
+    "component code",
+    "kods",
+  ],
+  item_type: ["item type", "type", "tips", "viras", "atvilktnes", "kategorija"],
+  item_name: [
+    "item name",
+    "name",
+    "nosaukums",
+    "furnitura",
+    "description",
+    "komponente",
+    "component",
+  ],
+  qty: ["qty", "quantity", "skaits", "daudzums", "q-ty"],
+  dimensions: ["dimensions", "dim", "izmeri", "izmers", "size", "garums"],
+  material: ["material", "materials", "materials / apdare", "apdare", "piegadatajs", "supplier"],
+};
+
+function normalizeToken(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function normalizeMapping(mapping: Record<string, unknown>, headers: string[]) {
   const headerSet = new Set(headers);
   const result: Record<MappingKey, string> = {
@@ -43,6 +78,101 @@ function normalizeMapping(mapping: Record<string, unknown>, headers: string[]) {
   });
 
   return result;
+}
+
+function extractTextFromResponse(payload: {
+  output_text?: string;
+  output?: Array<{ content?: Array<{ text?: string }> }>;
+}) {
+  if (payload.output_text && payload.output_text.trim().length > 0) {
+    return payload.output_text;
+  }
+
+  const fragments =
+    payload.output
+      ?.flatMap((entry) => entry.content ?? [])
+      .map((item) => item.text ?? "")
+      .filter((text) => text.trim().length > 0) ?? [];
+
+  return fragments.join("\n").trim();
+}
+
+function tryParseJsonObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const candidates = [trimmed];
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fencedMatch?.[1]) {
+    candidates.push(fencedMatch[1].trim());
+  }
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function fallbackMappingFromHeaders(headers: string[]) {
+  const byNormalized = new Map(headers.map((header) => [normalizeToken(header), header]));
+  const mapping: Record<MappingKey, string> = {
+    position: "",
+    item_type: "",
+    item_name: "",
+    qty: "",
+    dimensions: "",
+    material: "",
+  };
+
+  MAPPING_KEYS.forEach((key) => {
+    const aliases = HEADER_ALIASES[key] ?? [];
+    const match = aliases.find((alias) => byNormalized.has(normalizeToken(alias)));
+    if (match) {
+      mapping[key] = byNormalized.get(normalizeToken(match)) ?? "";
+      return;
+    }
+
+    const fuzzy = headers.find((header) => {
+      const normalizedHeader = normalizeToken(header);
+      return aliases.some((alias) => normalizedHeader.includes(normalizeToken(alias)));
+    });
+    if (fuzzy) {
+      mapping[key] = fuzzy;
+    }
+  });
+
+  return mapping;
+}
+
+function confidenceFromMapping(mapping: Record<MappingKey, string>, base = 0.75) {
+  return MAPPING_KEYS.reduce<Record<MappingKey, number>>(
+    (acc, key) => {
+      acc[key] = mapping[key] ? base : 0;
+      return acc;
+    },
+    {
+      position: 0,
+      item_type: 0,
+      item_name: 0,
+      qty: 0,
+      dimensions: 0,
+      material: 0,
+    },
+  );
 }
 
 export async function POST(request: Request) {
@@ -107,16 +237,18 @@ export async function POST(request: Request) {
   const headers = Array.isArray(body.headers)
     ? body.headers.map((v: unknown) => String(v ?? "").trim()).filter(Boolean)
     : [];
-  const sampleRows = Array.isArray(body.sampleRows)
-    ? body.sampleRows.slice(0, 30)
-    : [];
+  const sampleRows = Array.isArray(body.sampleRows) ? body.sampleRows.slice(0, 30) : [];
   const target = body.target === "bom" ? "bom" : "items";
 
   if (headers.length === 0) {
     return NextResponse.json({ error: "headers are required." }, { status: 400 });
   }
 
-  const prompt = `Tu esi ERP importa mapping asistents. Dots faila kolonnu saraksts un daži rindu piemēri.\n
+  const fallback = fallbackMappingFromHeaders(headers);
+  const fallbackConfidence = confidenceFromMapping(fallback, 0.6);
+
+  const prompt = `Tu esi ERP importa mapping asistents. Dots faila kolonnu saraksts un daži rindu piemēri.
+
 Atrodi labāko mappingu uz semantiskajiem laukiem:
 - position
 - item_type
@@ -150,10 +282,7 @@ Izmanto TIKAI header nosaukumus no saraksta. Ja nav pārliecības, liec tukšu s
         model: "gpt-4.1-mini",
         temperature: 0,
         input: [
-          {
-            role: "system",
-            content: "Return strict JSON only.",
-          },
+          { role: "system", content: "Return strict JSON only." },
           {
             role: "user",
             content: `${prompt}\n\nHeaders: ${JSON.stringify(headers)}\nSample rows: ${JSON.stringify(sampleRows)}`,
@@ -164,47 +293,91 @@ Izmanto TIKAI header nosaukumus no saraksta. Ja nav pārliecības, liec tukšu s
 
     const payload = (await response.json().catch(() => ({}))) as {
       output_text?: string;
+      output?: Array<{ content?: Array<{ text?: string }> }>;
       error?: { message?: string };
     };
 
     if (!response.ok) {
       return NextResponse.json(
-        { error: payload.error?.message ?? "AI bootstrap request failed." },
-        { status: 502 },
+        {
+          error: payload.error?.message ?? "AI bootstrap request failed.",
+          mapping: fallback,
+          confidenceByKey: fallbackConfidence,
+          notes: "AI nepieejams, piemērots heuristiskais fallback.",
+          model: "heuristic-fallback",
+        },
+        { status: 200 },
       );
     }
 
-    const text = payload.output_text ?? "{}";
-    const parsed = JSON.parse(text) as {
-      mapping?: Record<string, unknown>;
-      confidenceByKey?: Record<string, unknown>;
-      notes?: string;
-    };
+    const aiText = extractTextFromResponse(payload);
+    const aiJson = tryParseJsonObject(aiText);
+    const aiMapping = normalizeMapping((aiJson?.mapping as Record<string, unknown>) ?? {}, headers);
+    const aiConfidence = MAPPING_KEYS.reduce<Record<MappingKey, number>>(
+      (acc, key) => {
+        const raw = (aiJson?.confidenceByKey as Record<string, unknown> | undefined)?.[key];
+        const num = typeof raw === "number" ? raw : Number(raw ?? 0);
+        acc[key] = Number.isFinite(num) ? Math.min(1, Math.max(0, num)) : 0;
+        return acc;
+      },
+      {
+        position: 0,
+        item_type: 0,
+        item_name: 0,
+        qty: 0,
+        dimensions: 0,
+        material: 0,
+      },
+    );
 
-    const normalizedMapping = normalizeMapping(parsed.mapping ?? {}, headers);
-    const confidenceByKey = MAPPING_KEYS.reduce<Record<MappingKey, number>>((acc, key) => {
-      const raw = parsed.confidenceByKey?.[key];
-      const num = typeof raw === "number" ? raw : Number(raw ?? 0);
-      acc[key] = Number.isFinite(num) ? Math.min(1, Math.max(0, num)) : 0;
-      return acc;
-    }, {
-      position: 0,
-      item_type: 0,
-      item_name: 0,
-      qty: 0,
-      dimensions: 0,
-      material: 0,
+    const mergedMapping: Record<MappingKey, string> = { ...fallback };
+    MAPPING_KEYS.forEach((key) => {
+      if (aiMapping[key]) {
+        mergedMapping[key] = aiMapping[key];
+      }
     });
 
+    const mergedConfidence: Record<MappingKey, number> = { ...fallbackConfidence };
+    MAPPING_KEYS.forEach((key) => {
+      if (aiMapping[key]) {
+        mergedConfidence[key] = aiConfidence[key] > 0 ? aiConfidence[key] : 0.8;
+      }
+    });
+
+    const hasAny = MAPPING_KEYS.some((key) => mergedMapping[key]);
+    if (!hasAny) {
+      return NextResponse.json(
+        {
+          mapping: fallback,
+          confidenceByKey: fallbackConfidence,
+          notes: "Neizdevās uzticami iegūt AI mappingu; lietots fallback pēc header aliasiem.",
+          model: "heuristic-fallback",
+        },
+        { status: 200 },
+      );
+    }
+
     return NextResponse.json({
-      mapping: normalizedMapping,
-      confidenceByKey,
-      notes: typeof parsed.notes === "string" ? parsed.notes : "",
+      mapping: mergedMapping,
+      confidenceByKey: mergedConfidence,
+      notes:
+        typeof aiJson?.notes === "string" && aiJson.notes.trim().length > 0
+          ? aiJson.notes
+          : "AI + header alias fallback",
       model: "gpt-4.1-mini",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI bootstrap request failed.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: message,
+        mapping: fallback,
+        confidenceByKey: fallbackConfidence,
+        notes: "Kļūda AI izsaukumā; lietots fallback pēc header aliasiem.",
+        model: "heuristic-fallback",
+      },
+      { status: 200 },
+    );
   } finally {
     clearTimeout(timeout);
   }
