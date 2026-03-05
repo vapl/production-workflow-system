@@ -1245,6 +1245,9 @@ export default function OrderDetailPage() {
             showInProduction: column.showInProduction ?? true,
           })) as OrderInputTableColumn[] | undefined,
         showInTable: row.options?.showInTable ?? true,
+        isPrimaryConstructionTable:
+          row.options?.isPrimaryConstructionTable ?? false,
+        isBomImportTable: row.options?.isBomImportTable ?? false,
         isRequired: row.is_required ?? false,
         isActive: row.is_active ?? true,
         showInProduction: row.show_in_production ?? false,
@@ -2136,6 +2139,11 @@ export default function OrderDetailPage() {
       null,
     [constructionTableFields],
   );
+  const bomImportTableField = useMemo(
+    () =>
+      constructionTableFields.find((field) => field.isBomImportTable) ?? null,
+    [constructionTableFields],
+  );
   const constructionImportMissingMappingKeys = useMemo(
     () =>
       REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS.filter(
@@ -2161,6 +2169,10 @@ export default function OrderDetailPage() {
 
   const constructionImportTargetSchemaColumns = useMemo(() => {
     if (constructionImportTarget === "bom") {
+      const configuredBomColumns = bomImportTableField?.columns?.map((column) => column.key) ?? [];
+      if (configuredBomColumns.length > 0) {
+        return configuredBomColumns;
+      }
       return [
         "component_code",
         "component_name",
@@ -2172,7 +2184,11 @@ export default function OrderDetailPage() {
     }
     const columns = primaryConstructionField?.columns ?? [];
     return columns.map((column) => column.key);
-  }, [constructionImportTarget, primaryConstructionField?.columns]);
+  }, [
+    bomImportTableField?.columns,
+    constructionImportTarget,
+    primaryConstructionField?.columns,
+  ]);
 
   useEffect(() => {
     const loadSavedConstructionImportMapping = async () => {
@@ -7007,7 +7023,7 @@ export default function OrderDetailPage() {
             <div className="mt-1 text-muted-foreground">
               {constructionImportTarget === "items"
                 ? "Items imports raksta primārajā konstrukciju tabulā (no Settings konfigurētās kolonnas)."
-                : "BOM imports raksta uz order_item_bom_lines (atsevišķa tabula ar BOM kolonnām)."}
+                : "BOM imports raksta uz order_item_bom_lines (atsevišķa BOM tabula; Settings BOM kolonnas tiek izmantotas mapping vednī)."}
             </div>
             <div className="mt-2 text-muted-foreground">Kolonnas: {constructionImportTargetSchemaColumns.join(", ") || "-"}</div>
           </div>

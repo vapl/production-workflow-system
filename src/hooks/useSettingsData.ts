@@ -178,6 +178,7 @@ function mapOrderInputField(row: {
     columns?: OrderInputField["columns"];
     scope?: OrderInputFieldScope;
     isPrimaryConstructionTable?: boolean;
+    isBomImportTable?: boolean;
     showInTable?: boolean;
   } | null;
   is_required?: boolean | null;
@@ -212,6 +213,7 @@ function mapOrderInputField(row: {
     columns: normalizedColumns,
     isPrimaryConstructionTable:
       row.options?.isPrimaryConstructionTable ?? false,
+    isBomImportTable: row.options?.isBomImportTable ?? false,
     isRequired: row.is_required ?? false,
     isActive: row.is_active ?? true,
     showInTable: row.options?.showInTable ?? true,
@@ -225,6 +227,7 @@ function buildOrderInputOptionsPayload(payload: {
   columns?: OrderInputField["columns"];
   scope?: OrderInputFieldScope;
   isPrimaryConstructionTable?: boolean;
+  isBomImportTable?: boolean;
   showInTable?: boolean;
 }) {
   if (
@@ -232,6 +235,7 @@ function buildOrderInputOptionsPayload(payload: {
     !payload.columns &&
     !payload.scope &&
     !payload.isPrimaryConstructionTable &&
+    !payload.isBomImportTable &&
     payload.showInTable === undefined
   ) {
     return null;
@@ -241,6 +245,7 @@ function buildOrderInputOptionsPayload(payload: {
     columns: payload.columns,
     scope: payload.scope,
     isPrimaryConstructionTable: payload.isPrimaryConstructionTable ?? false,
+    isBomImportTable: payload.isBomImportTable ?? false,
     showInTable: payload.showInTable ?? true,
   };
 }
@@ -859,6 +864,7 @@ export function useSettingsData(): SettingsDataState {
           patch.columns !== undefined ||
           patch.scope !== undefined ||
           patch.isPrimaryConstructionTable !== undefined ||
+          patch.isBomImportTable !== undefined ||
           patch.showInTable !== undefined
         ) {
           const currentField = orderInputFields.find((field) => field.id === fieldId);
@@ -869,6 +875,8 @@ export function useSettingsData(): SettingsDataState {
             isPrimaryConstructionTable:
               patch.isPrimaryConstructionTable ??
               currentField?.isPrimaryConstructionTable,
+            isBomImportTable:
+              patch.isBomImportTable ?? currentField?.isBomImportTable,
             showInTable: patch.showInTable ?? currentField?.showInTable,
           });
         }
