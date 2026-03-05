@@ -2155,6 +2155,20 @@ export default function OrderDetailPage() {
   const isConstructionImportReviewReady =
     constructionImportDraftRows.length > 0 && constructionImportMissingMappingKeys.length === 0;
 
+  const constructionImportTargetSchemaColumns = useMemo(() => {
+    if (constructionImportTarget === "bom") {
+      return [
+        "component_code",
+        "component_name",
+        "qty",
+        "unit",
+        "length/width/height",
+        "attributes.material",
+      ];
+    }
+    const columns = primaryConstructionField?.columns ?? [];
+    return columns.map((column) => column.key);
+  }, [constructionImportTarget, primaryConstructionField?.columns]);
 
   useEffect(() => {
     const loadSavedConstructionImportMapping = async () => {
@@ -6890,6 +6904,16 @@ export default function OrderDetailPage() {
             </Select>
           </div>
 
+          <div className="rounded-lg border border-border/70 bg-muted/10 p-3 text-xs">
+            <div className="font-medium text-foreground">Mērķa tabula</div>
+            <div className="mt-1 text-muted-foreground">
+              {constructionImportTarget === "items"
+                ? "Items imports raksta primārajā konstrukciju tabulā (no Settings konfigurētās kolonnas)."
+                : "BOM imports raksta uz order_item_bom_lines (atsevišķa tabula ar BOM kolonnām)."}
+            </div>
+            <div className="mt-2 text-muted-foreground">Kolonnas: {constructionImportTargetSchemaColumns.join(", ") || "-"}</div>
+          </div>
+
           <FileField
             label="Importa fails"
             accept=".xlsx,.xls,.csv,.pdf"
@@ -7109,9 +7133,13 @@ export default function OrderDetailPage() {
                 onClick={() => void handleSaveConstructionImportProfile()}
                 disabled={isSavingConstructionImportProfile || constructionImportHeaders.length === 0}
               >
-                {isSavingConstructionImportProfile ? "Saglabā..." : "Saglabāt kā noklusēto profilu"}
+                {isSavingConstructionImportProfile ? "Saglabā..." : "Saglabāt kā noklusēto profilu (iemācīt parseri)"}
               </Button>
             </div>
+              <div className="text-xs text-muted-foreground">
+                Pirmreizējai uzstādīšanai: ielādē tipisku failu, saliec mappingu (vai AI importam PDF gadījumā), tad saglabā kā noklusēto profilu.
+                Tālāk parseris šo profilu izmantos automātiski šim mērķim (Items vai BOM).
+              </div>
               {constructionImportProfileNotice ? (
                 <div className="text-xs text-muted-foreground">{constructionImportProfileNotice}</div>
               ) : null}
