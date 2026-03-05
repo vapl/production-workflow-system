@@ -674,6 +674,8 @@ export default function OrderDetailPage() {
   const [constructionImportMapping, setConstructionImportMapping] = useState<Record<string, string>>({});
   const [savedConstructionImportMapping, setSavedConstructionImportMapping] =
     useState<Record<string, string> | null>(null);
+  const [defaultItemsImportProfileMapping, setDefaultItemsImportProfileMapping] =
+    useState<Record<string, string> | null>(null);
   const [constructionImportError, setConstructionImportError] = useState("");
   const [constructionImportBatchId, setConstructionImportBatchId] = useState<string | null>(null);
   const [constructionImportAiBridgeFieldId, setConstructionImportAiBridgeFieldId] =
@@ -2144,6 +2146,34 @@ export default function OrderDetailPage() {
     void loadSavedConstructionImportMapping();
   }, [tenantId]);
 
+  useEffect(() => {
+    const loadDefaultItemsImportProfileMapping = async () => {
+      if (!supabase || !tenantId) {
+        return;
+      }
+      const { data } = await supabase
+        .from("order_import_profiles")
+        .select("default_mapping")
+        .eq("tenant_id", tenantId)
+        .eq("target", "items")
+        .eq("is_default", true)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+      const mapping =
+        data &&
+        typeof data.default_mapping === "object" &&
+        data.default_mapping
+          ? (data.default_mapping as Record<string, string>)
+          : null;
+      if (mapping) {
+        setDefaultItemsImportProfileMapping(mapping);
+      }
+    };
+
+    void loadDefaultItemsImportProfileMapping();
+  }, [tenantId]);
+
   const suggestConstructionImportMapping = useCallback((headers: string[]) => {
     const normalize = (value: string) =>
       value
@@ -2197,20 +2227,30 @@ export default function OrderDetailPage() {
   const resolveConstructionImportMapping = useCallback(
     (headers: string[]) => {
       const suggested = suggestConstructionImportMapping(headers);
-      if (!savedConstructionImportMapping) {
-        return suggested;
-      }
       const normalizedHeaders = new Set(headers);
       const nextMapping = { ...suggested };
-      CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
-        const savedValue = savedConstructionImportMapping[key];
-        if (savedValue && normalizedHeaders.has(savedValue)) {
-          nextMapping[key] = savedValue;
+      const mappingCandidates = [
+        defaultItemsImportProfileMapping,
+        savedConstructionImportMapping,
+      ];
+      mappingCandidates.forEach((candidate) => {
+        if (!candidate) {
+          return;
         }
+        CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+          const savedValue = candidate[key];
+          if (savedValue && normalizedHeaders.has(savedValue)) {
+            nextMapping[key] = savedValue;
+          }
+        });
       });
       return nextMapping;
     },
-    [savedConstructionImportMapping, suggestConstructionImportMapping],
+    [
+      defaultItemsImportProfileMapping,
+      savedConstructionImportMapping,
+      suggestConstructionImportMapping,
+    ],
   );
 
   const handleConstructionImportFile = useCallback(
