@@ -643,6 +643,8 @@ export default function OrderDetailPage() {
   const [constructionImportHeaders, setConstructionImportHeaders] = useState<string[]>([]);
   const [constructionImportRows, setConstructionImportRows] = useState<Record<string, unknown>[]>([]);
   const [constructionImportMapping, setConstructionImportMapping] = useState<Record<string, string>>({});
+  const [savedConstructionImportMapping, setSavedConstructionImportMapping] =
+    useState<Record<string, string> | null>(null);
   const [constructionImportError, setConstructionImportError] = useState("");
   const [constructionImportBatchId, setConstructionImportBatchId] = useState<string | null>(null);
   const [constructionImportAiBridgeFieldId, setConstructionImportAiBridgeFieldId] =
@@ -1586,9 +1588,12 @@ export default function OrderDetailPage() {
           nameLower.endsWith(".pdf") ||
           nameLower.endsWith(".xlsx") ||
           nameLower.endsWith(".xls") ||
+          nameLower.endsWith(".csv") ||
           mimeLower.includes("application/pdf") ||
           mimeLower.includes("excel") ||
-          mimeLower.includes("spreadsheet");
+          mimeLower.includes("spreadsheet") ||
+          mimeLower.includes("csv") ||
+          mimeLower.includes("text/plain");
         return isProductionDocumentation && isSupported;
       }),
     [
@@ -2085,6 +2090,33 @@ export default function OrderDetailPage() {
     }).length;
   }, [constructionImportDraftRows]);
 
+  useEffect(() => {
+    const loadSavedConstructionImportMapping = async () => {
+      if (!supabase || !tenantId) {
+        return;
+      }
+      const { data } = await supabase
+        .from("order_item_import_batches")
+        .select("mapping_profile")
+        .eq("tenant_id", tenantId)
+        .eq("status", "applied")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const mapping =
+        data &&
+        typeof data.mapping_profile === "object" &&
+        data.mapping_profile
+          ? (data.mapping_profile as Record<string, string>)
+          : null;
+      if (mapping) {
+        setSavedConstructionImportMapping(mapping);
+      }
+    };
+
+    void loadSavedConstructionImportMapping();
+  }, [tenantId]);
+
   const suggestConstructionImportMapping = useCallback((headers: string[]) => {
     const normalize = (value: string) =>
       value
@@ -2124,6 +2156,36 @@ export default function OrderDetailPage() {
     [],
   );
 
+
+  const applyConstructionImportMapping = useCallback(
+    (mapping: Record<string, string>) => {
+      setConstructionImportMapping(mapping);
+      setConstructionImportDraftRows(
+        buildConstructionImportDraftRows(constructionImportRows, mapping),
+      );
+    },
+    [buildConstructionImportDraftRows, constructionImportRows],
+  );
+
+  const resolveConstructionImportMapping = useCallback(
+    (headers: string[]) => {
+      const suggested = suggestConstructionImportMapping(headers);
+      if (!savedConstructionImportMapping) {
+        return suggested;
+      }
+      const normalizedHeaders = new Set(headers);
+      const nextMapping = { ...suggested };
+      CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+        const savedValue = savedConstructionImportMapping[key];
+        if (savedValue && normalizedHeaders.has(savedValue)) {
+          nextMapping[key] = savedValue;
+        }
+      });
+      return nextMapping;
+    },
+    [savedConstructionImportMapping, suggestConstructionImportMapping],
+  );
+
   const handleConstructionImportFile = useCallback(
     async (file: File) => {
       if (!primaryConstructionField) {
@@ -2155,7 +2217,7 @@ export default function OrderDetailPage() {
           return;
         }
         const headers = parsedWorkbook.headers;
-        const nextMapping = suggestConstructionImportMapping(headers);
+        const nextMapping = resolveConstructionImportMapping(headers);
         const nextDraftRows = buildConstructionImportDraftRows(
           parsedWorkbook.rows,
           nextMapping,
@@ -2171,6 +2233,7 @@ export default function OrderDetailPage() {
           const { data: batchData, error: batchError } = await supabase
             .from("order_item_import_batches")
             .insert({
+              tenant_id: tenantId,
               order_id: orderState.id,
               source_file_name: file.name,
               source_sheet_name: parsedWorkbook.sheetName,
@@ -2211,7 +2274,8 @@ export default function OrderDetailPage() {
       buildConstructionImportDraftRows,
       orderState?.id,
       primaryConstructionField,
-      suggestConstructionImportMapping,
+      resolveConstructionImportMapping,
+      tenantId,
     ],
   );
 
@@ -2297,6 +2361,7 @@ export default function OrderDetailPage() {
         .eq("batch_id", constructionImportBatchId);
     }
 
+    setSavedConstructionImportMapping(constructionImportMapping);
     setConstructionImportError("");
     setIsConstructionImportModalOpen(false);
   }, [
@@ -2328,25 +2393,45 @@ export default function OrderDetailPage() {
     }));
   }, [constructionImportAiBridgeFieldId, primaryConstructionField?.id]);
 
-  const handleAddConstructionManually = useCallback(() => {
-    if (!primaryConstructionField) {
-      return;
-    }
-    const tableId = `construction-table-${primaryConstructionField.id}`;
-    const addButtonId = `add-construction-row-${primaryConstructionField.id}`;
-    const table = document.getElementById(tableId);
-    if (table) {
-      table.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-    window.setTimeout(() => {
-      const addButton = document.getElementById(addButtonId);
-      addButton?.click();
-    }, 120);
-  }, [primaryConstructionField]);
-
   const handleOpenConstructionFileImport = useCallback(() => {
     setIsConstructionImportModalOpen(true);
   }, []);
+  const handleImportConstructionFromAttachment = useCallback(
+    async (attachmentId: string) => {
+      const attachment = attachments.find((item) => item.id === attachmentId);
+      if (!attachment) {
+        setConstructionImportError("Selected file is no longer available.");
+        return;
+      }
+      const resolvedUrl =
+        attachment.url?.startsWith("http")
+          ? attachment.url
+          : signedAttachmentUrls[attachment.id];
+      if (!resolvedUrl) {
+        setConstructionImportError(
+          "Cannot access selected file yet. Please open Files tab once and try again.",
+        );
+        return;
+      }
+      try {
+        const response = await fetch(resolvedUrl);
+        if (!response.ok) {
+          throw new Error("Failed to download selected file.");
+        }
+        const blob = await response.blob();
+        const file = new File([blob], attachment.name, {
+          type: blob.type || attachment.mimeType || undefined,
+        });
+        await handleConstructionImportFile(file);
+      } catch (error) {
+        setConstructionImportError(
+          error instanceof Error ? error.message : "Failed to load selected file.",
+        );
+      }
+    },
+    [attachments, handleConstructionImportFile, signedAttachmentUrls],
+  );
+
 
   const supplementalOrderInputGroups = useMemo(() => {
     const groups = new Map<string, OrderInputField[]>();
@@ -4415,6 +4500,33 @@ export default function OrderDetailPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (!selectedAttachmentId) {
+                          setTableImportNotices((prev) => ({
+                            ...prev,
+                            [field.id]: "Vispirms izvēlies failu.",
+                          }));
+                          return;
+                        }
+                        const selectedFileExtension = getFileExtension(
+                          selectedAttachment?.name ?? "",
+                        );
+                        if (selectedFileExtension === "pdf") {
+                          void handleParseTableFieldWithAi(field);
+                          return;
+                        }
+                        void handleImportConstructionFromAttachment(
+                          selectedAttachmentId,
+                        );
+                      }}
+                      disabled={!canEditOrderInputs || isParsingThisField}
+                      className="w-full sm:w-auto"
+                    >
+                      Importēt izvēlēto failu
+                    </Button>
                     {canUseAiOrderInputImport ? (
                       <Button
                         size="sm"
@@ -6260,9 +6372,9 @@ export default function OrderDetailPage() {
         closeButtonLabel={t("profile.close")}
         showOnDesktop
         keyboardAware
-        panelClassName="md:left-1/2 md:w-[min(96vw,1100px)] md:-translate-x-1/2 md:rounded-xl md:border md:border-border md:shadow-2xl"
+        panelClassName="md:left-1/2 md:max-h-[92dvh] md:w-[min(96vw,1100px)] md:-translate-x-1/2 md:rounded-xl md:border md:border-border md:shadow-2xl"
       >
-        <div className="space-y-4 p-3 md:p-4">
+        <div className="max-h-[74dvh] space-y-4 overflow-y-auto p-3 md:max-h-[calc(92dvh-4.5rem)] md:p-4">
           <p className="text-xs text-muted-foreground">
             Augsuplade failu, pielago mappingu un izlabo rindas pirms pievienosanas konstrukciju sarakstam.
           </p>
@@ -6278,6 +6390,59 @@ export default function OrderDetailPage() {
               void handleConstructionImportFile(file);
             }}
           />
+
+          <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3">
+            <div className="text-xs text-muted-foreground">
+              Vai izvēlies failu no pievienotās ražošanas dokumentācijas (PDF/XLSX/XLS/CSV).
+            </div>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <Select
+                value={tableImportAttachmentIds[primaryConstructionField?.id ?? ""] || "__none__"}
+                onValueChange={(value) => {
+                  if (!primaryConstructionField) {
+                    return;
+                  }
+                  const nextId = value === "__none__" ? "" : value;
+                  setTableImportAttachmentIds((prev) => ({
+                    ...prev,
+                    [primaryConstructionField.id]: nextId,
+                  }));
+                }}
+                disabled={!primaryConstructionField}
+              >
+                <SelectTrigger className="h-9 w-full md:w-90">
+                  <SelectValue placeholder="Izvēlies pievienoto failu" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Izvēlies pievienoto failu</SelectItem>
+                  {productionDocumentationParseAttachments.map((attachment) => (
+                    <SelectItem key={`construction-modal-attachment-${attachment.id}`} value={attachment.id}>
+                      {attachment.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const fieldId = primaryConstructionField?.id;
+                  if (!fieldId) {
+                    return;
+                  }
+                  const attachmentId = tableImportAttachmentIds[fieldId];
+                  if (!attachmentId) {
+                    setConstructionImportError("Izvēlies pievienoto failu importam.");
+                    return;
+                  }
+                  void handleImportConstructionFromAttachment(attachmentId);
+                }}
+              >
+                Importēt no pievienotā faila
+              </Button>
+            </div>
+          </div>
 
           {constructionImportAiBridgeFieldId ? (
             <div className="rounded-lg border border-amber-300/60 bg-amber-50/60 p-3 text-xs text-amber-800">
@@ -6308,13 +6473,7 @@ export default function OrderDetailPage() {
                       ...constructionImportMapping,
                       [mappingKey]: value === "__none__" ? "" : value,
                     };
-                    setConstructionImportMapping(nextMapping);
-                    setConstructionImportDraftRows(
-                      buildConstructionImportDraftRows(
-                        constructionImportRows,
-                        nextMapping,
-                      ),
-                    );
+                    applyConstructionImportMapping(nextMapping);
                   }}
                 >
                   <SelectTrigger className="h-9 w-full">
@@ -7402,12 +7561,10 @@ export default function OrderDetailPage() {
                     <div className="space-y-3">
                       <div>
                         <div className="text-sm font-semibold">
-                          {t("orders.detail.orderInputs.constructionsSection")}
+                          Ražošanas vienības
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {t(
-                            "orders.detail.orderInputs.constructionsSectionDescription",
-                          )}
+                          Ražojamās vienības, to atribūti un saistītie importa dati.
                         </p>
                       </div>
                       {constructionTableFields.length === 0 ? (
@@ -7432,177 +7589,19 @@ export default function OrderDetailPage() {
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          <div className="hidden">
-                            <Button type="button" size="sm" onClick={handleAddConstructionManually}>
-                              Pievienot konstrukciju
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={handleOpenConstructionFileImport}
+                            >
+                              Importēt no CSV/Excel
                             </Button>
-                            <Button type="button" size="sm" variant="outline" onClick={handleOpenConstructionFileImport}>
-                              Importēt no faila
-                            </Button>
-                            <Button type="button" size="sm" variant="outline" onClick={handleOpenConstructionAiImport}>
-                              Importēt ar AI
-                            </Button>
-                          </div>
-                          <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium">Darbibas</div>
-                                <p className="text-xs text-muted-foreground">
-                                  Pievieno rindas manuali vai importe datus no CSV/Excel.
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={handleAddConstructionManually}
-                                >
-                                  Pievienot konstrukciju
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={handleOpenConstructionFileImport}
-                                >
-                                  Importet CSV/Excel
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={handleOpenConstructionAiImport}
-                                >
-                                  Atvert AI importu
-                                </Button>
-                              </div>
-                            </div>
                           </div>
                           {primaryConstructionField ? (
                             renderOrderInputField(primaryConstructionField)
                           ) : null}
-                          <div
-                            id="construction-import-card"
-                            className="hidden"
-                          >
-                            <div className="mb-2 text-sm font-medium">
-                              Imports no CSV/Excel
-                            </div>
-                            <p className="mb-2 text-xs text-muted-foreground">
-                              Workflow: Upload → Detect structure → Preview items → Import. Mapping is shown only when auto-detection is not enough.
-                            </p>
-                            <p className="mb-2 text-xs text-muted-foreground">
-                              Use this for structured CSV/Excel. For PDF drawings/specifications, use AI/OCR import (Add with AI) in the construction table above.
-                            </p>
-                            <div className="grid gap-3 md:grid-cols-2">
-                              {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((mappingKey) => (
-                                <Select
-                                  key={mappingKey}
-                                  value={constructionImportMapping[mappingKey] || "__none__"}
-                                  onValueChange={(value) =>
-                                    setConstructionImportMapping((prev) => ({
-                                      ...prev,
-                                      [mappingKey]: value === "__none__" ? "" : value,
-                                    }))
-                                  }
-                                >
-                                  <SelectTrigger className="h-9 w-full">
-                                    <SelectValue placeholder={mappingKey} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">
-                                      (nav piesaistits) - {mappingKey}
-                                    </SelectItem>
-                                    {constructionImportHeaders.map((header) => (
-                                      <SelectItem key={`${mappingKey}:${header}`} value={header}>
-                                        {header}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              ))}
-                            </div>
-                            <div className="mt-3">
-                              <FileField
-                                label="Importa fails"
-                                accept=".xlsx,.xls,.csv"
-                                onChange={(event) => {
-                                  const file = event.target.files?.[0] ?? null;
-                                  if (!file) {
-                                    return;
-                                  }
-                                  void handleConstructionImportFile(file);
-                                }}
-                              />
-                            </div>
-                            {constructionImportError ? (
-                              <div className="mt-2 space-y-2">
-                                <div className="text-xs text-destructive">{constructionImportError}</div>
-                                {constructionImportAiBridgeFieldId ? (
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={handleOpenConstructionAiImport}
-                                  >
-                                    Atvert AI/OCR importu sai tabulai
-                                  </Button>
-                                ) : null}
-                              </div>
-                            ) : null}
-                            {constructionImportRows.length > 0 ? (
-                              <div className="mt-3 space-y-2">
-                                <div className="text-xs text-muted-foreground">
-                                  {constructionImportFileName}
-                                  {constructionImportSheetName ? ` · sheet: ${constructionImportSheetName}` : ""} · {constructionImportRows.length} rows
-                                </div>
-                                {constructionImportMissingMappingKeys.length > 0 ? (
-                                  <div className="text-xs text-amber-700">
-                                    Required mapping missing: {constructionImportMissingMappingKeys.join(", ")}
-                                  </div>
-                                ) : null}
-                                {constructionImportInvalidRowCount > 0 ? (
-                                  <div className="text-xs text-amber-700">
-                                    {constructionImportInvalidRowCount} rows have empty mapped item_name and should be fixed before apply.
-                                  </div>
-                                ) : null}
-                                <div className="max-h-44 overflow-auto rounded border border-border bg-background">
-                                  <table className="min-w-full text-xs">
-                                    <thead className="bg-muted/40">
-                                      <tr>
-                                        <th className="px-2 py-1 text-left">item_name</th>
-                                        <th className="px-2 py-1 text-left">qty</th>
-                                        <th className="px-2 py-1 text-left">material</th>
-                                        <th className="px-2 py-1 text-left">source row</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {constructionImportPreview.map((row) => (
-                                        <tr key={`preview:${row.source_row_ref}`}>
-                                          <td className="px-2 py-1">{row.item_name || "-"}</td>
-                                          <td className="px-2 py-1">{row.qty || "1"}</td>
-                                          <td className="px-2 py-1">{row.material || "-"}</td>
-                                          <td className="px-2 py-1">{row.source_row_ref}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={handleApplyConstructionImport}
-                                  disabled={
-                                    !canEditOrderInputs ||
-                                    constructionImportRows.length === 0 ||
-                                    constructionImportMissingMappingKeys.length > 0
-                                  }
-                                >
-                                  Pievienot importetas rindas
-                                </Button>
-                              </div>
-                            ) : null}
-                          </div>
                         </div>
                       )}
                     </div>
