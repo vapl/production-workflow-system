@@ -219,6 +219,17 @@ type OrderItemImportBatchRow = {
   id: string;
 };
 
+type OrderImportProfileRow = {
+  id: string;
+  profile_name: string;
+  target: "items" | "bom";
+  file_extensions: string[] | null;
+  header_aliases: Record<string, unknown> | null;
+  default_mapping: Record<string, string> | null;
+  is_default: boolean;
+  is_active: boolean;
+};
+
 const DEFAULT_BOM_DRAFT: OrderItemBomLineDraft = {
   componentName: "",
   componentCode: "",
@@ -674,8 +685,17 @@ export default function OrderDetailPage() {
   const [constructionImportMapping, setConstructionImportMapping] = useState<Record<string, string>>({});
   const [savedConstructionImportMapping, setSavedConstructionImportMapping] =
     useState<Record<string, string> | null>(null);
-  const [defaultItemsImportProfileMapping, setDefaultItemsImportProfileMapping] =
-    useState<Record<string, string> | null>(null);
+  const [defaultImportProfileMappingByTarget, setDefaultImportProfileMappingByTarget] =
+    useState<Record<"items" | "bom", Record<string, string> | null>>({
+      items: null,
+      bom: null,
+    });
+  const [importProfilesByTarget, setImportProfilesByTarget] = useState<
+    Record<"items" | "bom", OrderImportProfileRow[]>
+  >({
+    items: [],
+    bom: [],
+  });
   const [constructionImportError, setConstructionImportError] = useState("");
   const [constructionImportBatchId, setConstructionImportBatchId] = useState<string | null>(null);
   const [constructionImportAiBridgeFieldId, setConstructionImportAiBridgeFieldId] =
@@ -2153,31 +2173,41 @@ export default function OrderDetailPage() {
   }, [tenantId]);
 
   useEffect(() => {
-    const loadDefaultItemsImportProfileMapping = async () => {
+    const loadImportProfiles = async () => {
       if (!supabase || !tenantId) {
         return;
       }
       const { data } = await supabase
         .from("order_import_profiles")
-        .select("default_mapping")
+        .select(
+          "id, profile_name, target, file_extensions, header_aliases, default_mapping, is_default, is_active",
+        )
         .eq("tenant_id", tenantId)
-        .eq("target", "items")
-        .eq("is_default", true)
-        .eq("is_active", true)
-        .limit(1)
-        .maybeSingle();
-      const mapping =
-        data &&
-        typeof data.default_mapping === "object" &&
-        data.default_mapping
-          ? (data.default_mapping as Record<string, string>)
-          : null;
-      if (mapping) {
-        setDefaultItemsImportProfileMapping(mapping);
-      }
+        .eq("is_active", true);
+
+      const rows = (data ?? []) as OrderImportProfileRow[];
+      const nextByTarget: Record<"items" | "bom", OrderImportProfileRow[]> = {
+        items: [],
+        bom: [],
+      };
+      const nextDefaults: Record<"items" | "bom", Record<string, string> | null> = {
+        items: null,
+        bom: null,
+      };
+
+      rows.forEach((row) => {
+        const target = row.target === "bom" ? "bom" : "items";
+        nextByTarget[target].push(row);
+        if (row.is_default && row.default_mapping && typeof row.default_mapping === "object") {
+          nextDefaults[target] = row.default_mapping;
+        }
+      });
+
+      setImportProfilesByTarget(nextByTarget);
+      setDefaultImportProfileMappingByTarget(nextDefaults);
     };
 
-    void loadDefaultItemsImportProfileMapping();
+    void loadImportProfiles();
   }, [tenantId]);
 
   useEffect(() => {
@@ -2242,21 +2272,90 @@ export default function OrderDetailPage() {
   );
 
   const resolveConstructionImportMapping = useCallback(
-    (headers: string[]) => {
+    (
+      headers: string[],
+      options?: {
+        extension?: string;
+        target?: "items" | "bom";
+      },
+    ) => {
+      const target = options?.target ?? constructionImportTarget;
+      const extension = options?.extension?.toLowerCase() ?? "";
       const suggested = suggestConstructionImportMapping(headers);
-      const normalizedHeaders = new Set(headers);
+      const headerSet = new Set(headers);
+      const normalize = (value: string) =>
+        value
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "");
+      const normalizedHeaderSet = new Set(headers.map((header) => normalize(header)));
+
+      const scoreProfile = (profile: OrderImportProfileRow) => {
+        let score = 0;
+        const mapping =
+          profile.default_mapping && typeof profile.default_mapping === "object"
+            ? (profile.default_mapping as Record<string, string>)
+            : {};
+        CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+          const mappedHeader = mapping[key];
+          if (mappedHeader && headerSet.has(mappedHeader)) {
+            score += 3;
+          }
+        });
+
+        const aliases =
+          profile.header_aliases && typeof profile.header_aliases === "object"
+            ? (profile.header_aliases as Record<string, unknown>)
+            : {};
+        CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+          const values = aliases[key];
+          if (!Array.isArray(values)) {
+            return;
+          }
+          if (values.some((value) => normalizedHeaderSet.has(normalize(String(value ?? ""))))) {
+            score += 1;
+          }
+        });
+
+        if (extension) {
+          const extensions = (profile.file_extensions ?? []).map((value) =>
+            String(value ?? "").toLowerCase(),
+          );
+          if (extensions.length === 0) {
+            score += 1;
+          } else if (extensions.includes(extension)) {
+            score += 2;
+          }
+        }
+
+        if (profile.is_default) {
+          score += 1;
+        }
+
+        return score;
+      };
+
+      const profiles = importProfilesByTarget[target] ?? [];
+      const bestProfile = profiles
+        .map((profile) => ({ profile, score: scoreProfile(profile) }))
+        .filter((entry) => entry.score > 0)
+        .sort((left, right) => right.score - left.score)[0]?.profile;
+
       const nextMapping = { ...suggested };
       const mappingCandidates = [
-        defaultItemsImportProfileMapping,
+        bestProfile?.default_mapping ?? null,
+        defaultImportProfileMappingByTarget[target],
         savedConstructionImportMapping,
       ];
+
       mappingCandidates.forEach((candidate) => {
-        if (!candidate) {
+        if (!candidate || typeof candidate !== "object") {
           return;
         }
         CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
           const savedValue = candidate[key];
-          if (savedValue && normalizedHeaders.has(savedValue)) {
+          if (savedValue && headerSet.has(savedValue)) {
             nextMapping[key] = savedValue;
           }
         });
@@ -2264,7 +2363,9 @@ export default function OrderDetailPage() {
       return nextMapping;
     },
     [
-      defaultItemsImportProfileMapping,
+      constructionImportTarget,
+      defaultImportProfileMappingByTarget,
+      importProfilesByTarget,
       savedConstructionImportMapping,
       suggestConstructionImportMapping,
     ],
@@ -2301,7 +2402,10 @@ export default function OrderDetailPage() {
           return;
         }
         const headers = parsedWorkbook.headers;
-        const nextMapping = resolveConstructionImportMapping(headers);
+        const nextMapping = resolveConstructionImportMapping(headers, {
+          extension,
+          target: constructionImportTarget,
+        });
         const nextDraftRows = buildConstructionImportDraftRows(
           parsedWorkbook.rows,
           nextMapping,
@@ -2357,6 +2461,7 @@ export default function OrderDetailPage() {
     },
     [
       buildConstructionImportDraftRows,
+      constructionImportTarget,
       orderState?.id,
       primaryConstructionField,
       resolveConstructionImportMapping,
@@ -2478,9 +2583,28 @@ export default function OrderDetailPage() {
     }
 
     setConstructionImportProfileNotice("Profils saglabāts. Turpmāk imports notiks automātiskāk.");
-    if (constructionImportTarget === "items") {
-      setDefaultItemsImportProfileMapping(constructionImportMapping);
-    }
+    setDefaultImportProfileMappingByTarget((prev) => ({
+      ...prev,
+      [constructionImportTarget]: constructionImportMapping,
+    }));
+    setImportProfilesByTarget((prev) => {
+      const current = prev[constructionImportTarget] ?? [];
+      const withoutDefault = current.filter((profile) => !profile.is_default);
+      const nextDefault: OrderImportProfileRow = {
+        id: String(profileId),
+        profile_name: trimmedName,
+        target: constructionImportTarget,
+        file_extensions: extension ? [extension] : [],
+        header_aliases: headerAliases,
+        default_mapping: constructionImportMapping,
+        is_default: true,
+        is_active: true,
+      };
+      return {
+        ...prev,
+        [constructionImportTarget]: [nextDefault, ...withoutDefault],
+      };
+    });
     setIsSavingConstructionImportProfile(false);
   }, [
     constructionImportFileName,
