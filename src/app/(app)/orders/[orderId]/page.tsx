@@ -716,6 +716,10 @@ export default function OrderDetailPage() {
     useState(false);
   const [constructionImportProfileNotice, setConstructionImportProfileNotice] =
     useState("");
+  const [constructionImportAiNotice, setConstructionImportAiNotice] =
+    useState("");
+  const [isApplyingConstructionAiBootstrap, setIsApplyingConstructionAiBootstrap] =
+    useState(false);
   const [constructionImportStep, setConstructionImportStep] = useState<
     (typeof CONSTRUCTION_IMPORT_STEPS)[number]
   >("source");
@@ -2476,6 +2480,7 @@ export default function OrderDetailPage() {
         setConstructionImportAiBridgeFieldId(null);
         setConstructionImportError("");
         setConstructionImportProfileNotice("");
+        setConstructionImportAiNotice("");
         setConstructionImportStep("mapping");
         setIsConstructionImportModalOpen(true);
       } catch (error) {
@@ -2494,6 +2499,99 @@ export default function OrderDetailPage() {
       tenantId,
     ],
   );
+
+  const handleAiBootstrapConstructionMapping = useCallback(async () => {
+    const sb = supabase;
+    if (!sb) {
+      setConstructionImportAiNotice(t("orders.detail.errors.supabaseNotConfigured"));
+      return;
+    }
+    if (!canUseAiOrderInputImport) {
+      setConstructionImportAiNotice(t("orders.detail.errors.aiImportProOnly"));
+      return;
+    }
+    if (constructionImportHeaders.length === 0) {
+      setConstructionImportAiNotice("Vispirms ielādē failu ar headeriem.");
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await sb.auth.getSession();
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      setConstructionImportAiNotice(t("orders.detail.errors.signInAgain"));
+      return;
+    }
+
+    setIsApplyingConstructionAiBootstrap(true);
+    setConstructionImportAiNotice("");
+
+    try {
+      const response = await fetch("/api/order-inputs/ai-mapping-bootstrap", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          target: constructionImportTarget,
+          fileName: constructionImportFileName,
+          headers: constructionImportHeaders,
+          sampleRows: constructionImportRows.slice(0, 30),
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        mapping?: Record<string, string>;
+        confidenceByKey?: Record<string, number>;
+        notes?: string;
+      };
+
+      if (!response.ok) {
+        const message =
+          payload.error === "feature_not_available"
+            ? t("orders.detail.errors.aiImportProOnly")
+            : (payload.error ?? "AI mapping bootstrap neizdevās.");
+        setConstructionImportAiNotice(message);
+        return;
+      }
+
+      const nextMapping = { ...constructionImportMapping };
+      CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+        const value = payload.mapping?.[key];
+        if (value) {
+          nextMapping[key] = value;
+        }
+      });
+
+      applyConstructionImportMapping(nextMapping);
+
+      const confidenceLabel = CONSTRUCTION_IMPORT_MAPPING_KEYS.map((key) => {
+        const confidence = payload.confidenceByKey?.[key] ?? 0;
+        return `${key}: ${Math.round(confidence * 100)}%`;
+      }).join(" · ");
+      setConstructionImportAiNotice(
+        `AI bootstrap pabeigts. ${confidenceLabel}${payload.notes ? ` · ${payload.notes}` : ""}`,
+      );
+    } catch (error) {
+      setConstructionImportAiNotice(
+        error instanceof Error ? error.message : "AI mapping bootstrap neizdevās.",
+      );
+    } finally {
+      setIsApplyingConstructionAiBootstrap(false);
+    }
+  }, [
+    applyConstructionImportMapping,
+    canUseAiOrderInputImport,
+    constructionImportFileName,
+    constructionImportHeaders,
+    constructionImportMapping,
+    constructionImportRows,
+    constructionImportTarget,
+    t,
+  ]);
 
   const handleSaveConstructionImportProfile = useCallback(async () => {
     if (!supabase || !tenantId) {
@@ -7000,6 +7098,19 @@ export default function OrderDetailPage() {
               <div className="text-xs text-muted-foreground">
                 Mapping izvēlnē redzami tie headeri, kas atrasti importa failā.
               </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleAiBootstrapConstructionMapping()}
+                  disabled={isApplyingConstructionAiBootstrap || constructionImportHeaders.length === 0}
+                >
+                  {isApplyingConstructionAiBootstrap ? "AI analizē..." : "AI Mapping Bootstrap"}
+                </Button>
+                <div className="text-xs text-muted-foreground">
+                  AI ieteiks mappingu no headeriem + piemēra rindām; pēc tam vari piekoriģēt manuāli.
+                </div>
+              </div>
               <div className="grid gap-3 md:grid-cols-2">
             {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((mappingKey) => (
               <div key={`modal-mapping-${mappingKey}`} className="space-y-1">
@@ -7037,6 +7148,12 @@ export default function OrderDetailPage() {
             ))}
               </div>
             </>
+          ) : null}
+
+          {constructionImportAiNotice ? (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              {constructionImportAiNotice}
+            </div>
           ) : null}
 
           {constructionImportError ? (
