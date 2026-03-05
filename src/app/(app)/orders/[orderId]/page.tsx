@@ -136,6 +136,8 @@ const REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS = ["item_name"] as const;
 
 const ORDER_DETAIL_TAB_VALUES = ["overview", "files", "details", "external", "history"] as const;
 
+const CONSTRUCTION_IMPORT_STEPS = ["source", "mapping", "review", "save"] as const;
+
 const CONSTRUCTION_IMPORT_LABELS: Record<
   (typeof CONSTRUCTION_IMPORT_MAPPING_KEYS)[number],
   string
@@ -714,6 +716,9 @@ export default function OrderDetailPage() {
     useState(false);
   const [constructionImportProfileNotice, setConstructionImportProfileNotice] =
     useState("");
+  const [constructionImportStep, setConstructionImportStep] = useState<
+    (typeof CONSTRUCTION_IMPORT_STEPS)[number]
+  >("source");
   const getConstructionRows = useCallback(
     (fieldId: string) =>
       ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
@@ -2145,6 +2150,12 @@ export default function OrderDetailPage() {
     }).length;
   }, [constructionImportDraftRows]);
 
+  const isConstructionImportMappingReady =
+    constructionImportHeaders.length > 0 && constructionImportRows.length > 0;
+  const isConstructionImportReviewReady =
+    constructionImportDraftRows.length > 0 && constructionImportMissingMappingKeys.length === 0;
+
+
   useEffect(() => {
     const loadSavedConstructionImportMapping = async () => {
       if (!supabase || !tenantId) {
@@ -2451,6 +2462,7 @@ export default function OrderDetailPage() {
         setConstructionImportAiBridgeFieldId(null);
         setConstructionImportError("");
         setConstructionImportProfileNotice("");
+        setConstructionImportStep("mapping");
         setIsConstructionImportModalOpen(true);
       } catch (error) {
         setConstructionImportAiBridgeFieldId(null);
@@ -2841,6 +2853,7 @@ export default function OrderDetailPage() {
   }, [constructionImportAiBridgeFieldId, primaryConstructionField?.id]);
 
   const handleOpenConstructionFileImport = useCallback(() => {
+    setConstructionImportStep("source");
     setIsConstructionImportModalOpen(true);
   }, []);
   const handleImportConstructionFromAttachment = useCallback(
@@ -4688,8 +4701,8 @@ export default function OrderDetailPage() {
                 {field.unit}
               </span>
             )}
+            </div>
           </div>
-        </div>
       );
     }
 
@@ -6813,7 +6826,10 @@ export default function OrderDetailPage() {
       <BottomSheet
         id="construction-import-modal"
         open={isConstructionImportModalOpen}
-        onClose={() => setIsConstructionImportModalOpen(false)}
+        onClose={() => {
+          setIsConstructionImportModalOpen(false);
+          setConstructionImportStep("source");
+        }}
         ariaLabel="CSV Excel import"
         title="CSV/Excel imports"
         closeButtonLabel={t("profile.close")}
@@ -6825,6 +6841,36 @@ export default function OrderDetailPage() {
           <p className="text-xs text-muted-foreground">
             Augsuplade failu, pielago mappingu un izlabo rindas pirms pievienosanas konstrukciju sarakstam.
           </p>
+
+          <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
+            <div className="mb-2 text-xs text-muted-foreground">Importa vednis</div>
+            <div className="grid gap-2 md:grid-cols-4">
+              {CONSTRUCTION_IMPORT_STEPS.map((step, index) => {
+                const isActive = constructionImportStep === step;
+                const isDone = CONSTRUCTION_IMPORT_STEPS.indexOf(constructionImportStep) > index;
+                const labels: Record<(typeof CONSTRUCTION_IMPORT_STEPS)[number], string> = {
+                  source: "1. Avots",
+                  mapping: "2. Mapping",
+                  review: "3. Priekšskatījums",
+                  save: "4. Saglabāšana",
+                };
+                return (
+                  <div
+                    key={`wizard-step-${step}`}
+                    className={`rounded-md border px-2 py-1 text-xs ${
+                      isActive
+                        ? "border-primary bg-primary/5 text-primary"
+                        : isDone
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          : "border-border bg-background text-muted-foreground"
+                    }`}
+                  >
+                    {labels[step]}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           <div className="grid gap-2 md:max-w-[340px]">
             <div className="text-xs text-muted-foreground">Ko pievienot no importa</div>
@@ -6925,10 +6971,12 @@ export default function OrderDetailPage() {
             </div>
           ) : null}
 
-          <div className="text-xs text-muted-foreground">
-            Mapping izvēlnē redzami tie headeri, kas atrasti importa failā.
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
+          {constructionImportStep !== "source" ? (
+            <>
+              <div className="text-xs text-muted-foreground">
+                Mapping izvēlnē redzami tie headeri, kas atrasti importa failā.
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
             {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((mappingKey) => (
               <div key={`modal-mapping-${mappingKey}`} className="space-y-1">
                 <div className="text-xs text-muted-foreground">
@@ -6963,7 +7011,9 @@ export default function OrderDetailPage() {
                 </Select>
               </div>
             ))}
-          </div>
+              </div>
+            </>
+          ) : null}
 
           {constructionImportError ? (
             <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -6971,7 +7021,7 @@ export default function OrderDetailPage() {
             </div>
           ) : null}
 
-          {constructionImportDraftRows.length > 0 ? (
+          {(constructionImportStep === "review" || constructionImportStep === "save") && constructionImportDraftRows.length > 0 ? (
             <div className="space-y-2">
               <div className="text-xs text-muted-foreground">
                 {constructionImportFileName}
@@ -7044,8 +7094,9 @@ export default function OrderDetailPage() {
             </div>
           ) : null}
 
-          <div className="space-y-2 border-t border-border pt-3">
-            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+          {constructionImportStep === "save" ? (
+            <div className="space-y-2 border-t border-border pt-3">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
               <Input
                 value={constructionImportProfileName}
                 onChange={(event) => setConstructionImportProfileName(event.target.value)}
@@ -7061,16 +7112,67 @@ export default function OrderDetailPage() {
                 {isSavingConstructionImportProfile ? "Saglabā..." : "Saglabāt kā noklusēto profilu"}
               </Button>
             </div>
-            {constructionImportProfileNotice ? (
-              <div className="text-xs text-muted-foreground">{constructionImportProfileNotice}</div>
-            ) : null}
-          </div>
+              {constructionImportProfileNotice ? (
+                <div className="text-xs text-muted-foreground">{constructionImportProfileNotice}</div>
+              ) : null}
+            </div>
+          ) : null}
 
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const stepIndex = CONSTRUCTION_IMPORT_STEPS.indexOf(constructionImportStep);
+                  if (stepIndex <= 0) {
+                    return;
+                  }
+                  setConstructionImportStep(CONSTRUCTION_IMPORT_STEPS[stepIndex - 1]);
+                }}
+                disabled={constructionImportStep === "source"}
+              >
+                Atpakaļ
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  if (constructionImportStep === "source") {
+                    if (!isConstructionImportMappingReady) {
+                      return;
+                    }
+                    setConstructionImportStep("mapping");
+                    return;
+                  }
+                  if (constructionImportStep === "mapping") {
+                    if (!isConstructionImportReviewReady) {
+                      return;
+                    }
+                    setConstructionImportStep("review");
+                    return;
+                  }
+                  if (constructionImportStep === "review") {
+                    setConstructionImportStep("save");
+                  }
+                }}
+                disabled={
+                  (constructionImportStep === "source" && !isConstructionImportMappingReady) ||
+                  (constructionImportStep === "mapping" && !isConstructionImportReviewReady) ||
+                  constructionImportStep === "save"
+                }
+              >
+                Tālāk
+              </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               variant="ghost"
-              onClick={() => setIsConstructionImportModalOpen(false)}
+              onClick={() => {
+                setIsConstructionImportModalOpen(false);
+                setConstructionImportStep("source");
+              }}
             >
               Aizvert
             </Button>
@@ -7086,6 +7188,7 @@ export default function OrderDetailPage() {
               {constructionImportTarget === "bom" ? "Pievienot BOM rindas" : "Pievienot importetas rindas"}
             </Button>
           </div>
+        </div>
         </div>
       </BottomSheet>
       <BottomSheet
