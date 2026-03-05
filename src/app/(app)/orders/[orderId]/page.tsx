@@ -2067,11 +2067,6 @@ export default function OrderDetailPage() {
       null,
     [constructionTableFields],
   );
-  const constructionImportPreview = useMemo(
-    () => constructionImportDraftRows.slice(0, 20),
-    [constructionImportDraftRows],
-  );
-
   const constructionImportMissingMappingKeys = useMemo(
     () =>
       REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS.filter(
@@ -6512,6 +6507,9 @@ export default function OrderDetailPage() {
                   : ""}{" "}
                 · {constructionImportDraftRows.length} rindas
               </div>
+              <div className="text-xs text-muted-foreground">
+                Priekšskatījumā redzamas visas atrastās rindas.
+              </div>
               {constructionImportMissingMappingKeys.length > 0 ? (
                 <div className="text-xs text-amber-700">
                   Trukst obligatais mappings:{" "}
@@ -6524,19 +6522,19 @@ export default function OrderDetailPage() {
                 </div>
               ) : null}
               <div className="max-h-[48vh] overflow-auto rounded-lg border border-border bg-background">
-                <table className="min-w-full text-xs">
+                <table className="min-w-full table-fixed text-xs">
                   <thead className="sticky top-0 bg-muted/40">
                     <tr>
-                      <th className="px-2 py-1 text-left">#</th>
+                      <th className="w-12 px-2 py-1 text-left">#</th>
                       {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((key) => (
-                        <th key={`head-${key}`} className="px-2 py-1 text-left">
+                        <th key={`head-${key}`} className="min-w-40 px-2 py-1 text-left">
                           {CONSTRUCTION_IMPORT_LABELS[key]}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {constructionImportPreview.map((row, rowIndex) => (
+                    {constructionImportDraftRows.map((row, rowIndex) => (
                       <tr key={`modal-preview-${row.source_row_ref}`}>
                         <td className="px-2 py-1 text-muted-foreground">
                           {row.source_row_ref}
@@ -6544,7 +6542,7 @@ export default function OrderDetailPage() {
                         {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((key) => (
                           <td
                             key={`cell-${row.source_row_ref}-${key}`}
-                            className="px-2 py-1"
+                            className="min-w-40 px-2 py-1 align-top"
                           >
                             <Input
                               value={String(row[key] ?? "")}
@@ -6561,7 +6559,7 @@ export default function OrderDetailPage() {
                                   return next;
                                 })
                               }
-                              className="h-8"
+                              className="h-8 min-w-[140px]"
                             />
                           </td>
                         ))}
