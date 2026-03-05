@@ -48,6 +48,7 @@ function normalizeCellValue(value: unknown): string {
 
 type HeaderMatch = {
   rowIndex: number;
+  row: string[];
   columnByKey: Partial<Record<"position" | "item_name" | "material" | "qty" | "fl" | "fw" | "thk", number>>;
 };
 
@@ -90,21 +91,24 @@ function detectHeaderRows(matrix: string[][]): HeaderMatch[] {
       .filter((value) => value !== undefined).length;
 
     if (confidence >= 2) {
-      matches.push({ rowIndex, columnByKey });
+      matches.push({ rowIndex, row, columnByKey });
     }
   });
 
   return matches;
 }
 
-function parseBlockStructuredRows(matrix: string[][]): ParsedOrdersWorkbook["rows"] {
+function parseBlockStructuredRows(
+  matrix: string[][],
+): { headers: string[]; rows: ParsedOrdersWorkbook["rows"] } {
   const headerRows = detectHeaderRows(matrix);
   if (headerRows.length === 0) {
-    return [];
+    return { headers: [], rows: [] };
   }
 
   const rows: ParsedOrdersWorkbook["rows"] = [];
   let activePosition = "";
+  const semanticToHeader = new Map<string, string>();
 
   for (let rowIndex = 0; rowIndex < matrix.length; rowIndex += 1) {
     const currentRow = matrix[rowIndex];
@@ -117,6 +121,31 @@ function parseBlockStructuredRows(matrix: string[][]): ParsedOrdersWorkbook["row
     if (!header) {
       continue;
     }
+
+    const positionHeader =
+      header.columnByKey.position !== undefined
+        ? normalizeCellValue(header.row[header.columnByKey.position]) || "position"
+        : "position";
+    const itemTypeHeader = "item_type";
+    const itemNameHeader =
+      header.columnByKey.item_name !== undefined
+        ? normalizeCellValue(header.row[header.columnByKey.item_name]) || "item_name"
+        : "item_name";
+    const qtyHeader =
+      header.columnByKey.qty !== undefined
+        ? normalizeCellValue(header.row[header.columnByKey.qty]) || "qty"
+        : "qty";
+    const materialHeader =
+      header.columnByKey.material !== undefined
+        ? normalizeCellValue(header.row[header.columnByKey.material]) || "material"
+        : "material";
+
+    semanticToHeader.set("position", positionHeader);
+    semanticToHeader.set("item_type", itemTypeHeader);
+    semanticToHeader.set("item_name", itemNameHeader);
+    semanticToHeader.set("qty", qtyHeader);
+    semanticToHeader.set("material", materialHeader);
+    semanticToHeader.set("dimensions", "dimensions");
 
     const nextHeaderIndex =
       headerRows.find((item) => item.rowIndex > rowIndex)?.rowIndex ?? matrix.length;
@@ -165,17 +194,28 @@ function parseBlockStructuredRows(matrix: string[][]): ParsedOrdersWorkbook["row
       const dimensions = dimensionParts.length > 0 ? dimensionParts.join("x") : "";
 
       rows.push({
-        position: explicitPosition || activePosition,
-        item_type: "",
-        item_name: itemName,
-        qty,
+        [positionHeader]: explicitPosition || activePosition,
+        [itemTypeHeader]: "",
+        [itemNameHeader]: itemName,
+        [qtyHeader]: qty,
         dimensions,
-        material,
+        [materialHeader]: material,
       });
     }
   }
 
-  return rows;
+  const headers = Array.from(
+    new Set([
+      semanticToHeader.get("position") ?? "position",
+      semanticToHeader.get("item_type") ?? "item_type",
+      semanticToHeader.get("item_name") ?? "item_name",
+      semanticToHeader.get("qty") ?? "qty",
+      semanticToHeader.get("dimensions") ?? "dimensions",
+      semanticToHeader.get("material") ?? "material",
+    ]),
+  );
+
+  return { headers, rows };
 }
 
 export async function parseOrdersWorkbookDetailed(
@@ -199,12 +239,12 @@ export async function parseOrdersWorkbookDetailed(
     blankrows: false,
   }).map((row) => row.map((cell) => normalizeCellValue(cell)));
 
-  const structuredRows = parseBlockStructuredRows(matrix);
-  if (structuredRows.length > 0) {
+  const structuredParse = parseBlockStructuredRows(matrix);
+  if (structuredParse.rows.length > 0) {
     return {
       sheetName,
-      headers: ["position", "item_type", "item_name", "qty", "dimensions", "material"],
-      rows: structuredRows,
+      headers: structuredParse.headers,
+      rows: structuredParse.rows,
     };
   }
 

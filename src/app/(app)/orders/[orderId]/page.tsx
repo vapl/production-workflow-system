@@ -134,6 +134,8 @@ const CONSTRUCTION_IMPORT_MAPPING_KEYS = [
 
 const REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS = ["item_name"] as const;
 
+const ORDER_DETAIL_TAB_VALUES = ["overview", "files", "details", "external", "history"] as const;
+
 const CONSTRUCTION_IMPORT_LABELS: Record<
   (typeof CONSTRUCTION_IMPORT_MAPPING_KEYS)[number],
   string
@@ -548,6 +550,33 @@ export default function OrderDetailPage() {
   const [isAttachmentCategoryManual, setIsAttachmentCategoryManual] =
     useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const orderTabStorageKey = useMemo(
+    () => `order-detail-active-tab:${decodedOrderId || "unknown"}`,
+    [decodedOrderId],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const saved = window.localStorage.getItem(orderTabStorageKey);
+    if (
+      saved &&
+      (ORDER_DETAIL_TAB_VALUES as readonly string[]).includes(saved)
+    ) {
+      setActiveTab(saved);
+    }
+  }, [orderTabStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!(ORDER_DETAIL_TAB_VALUES as readonly string[]).includes(activeTab)) {
+      return;
+    }
+    window.localStorage.setItem(orderTabStorageKey, activeTab);
+  }, [activeTab, orderTabStorageKey]);
   const [commentMessage, setCommentMessage] = useState("");
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
   const [showNotFound, setShowNotFound] = useState(false);
@@ -654,6 +683,9 @@ export default function OrderDetailPage() {
   const [constructionImportDraftRows, setConstructionImportDraftRows] = useState<
     Array<Record<string, string>>
   >([]);
+  const [constructionImportTarget, setConstructionImportTarget] = useState<
+    "items" | "bom"
+  >("items");
   const getConstructionRows = useCallback(
     (fieldId: string) =>
       ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
@@ -2274,6 +2306,24 @@ export default function OrderDetailPage() {
     ],
   );
 
+  const parseDimensionToken = useCallback((value: string | undefined) => {
+    const normalized = String(value ?? "")
+      .replace(/,/g, ".")
+      .trim();
+    if (!normalized) {
+      return { length: null, width: null, height: null };
+    }
+    const parts = normalized
+      .split(/x|\*|×|\//i)
+      .map((part) => Number(part.trim()))
+      .filter((part) => Number.isFinite(part));
+    return {
+      length: parts[0] ?? null,
+      width: parts[1] ?? null,
+      height: parts[2] ?? null,
+    };
+  }, []);
+
   const handleApplyConstructionImport = useCallback(async () => {
     if (!primaryConstructionField) {
       setConstructionImportError("Primary construction table is missing.");
@@ -2287,6 +2337,84 @@ export default function OrderDetailPage() {
       setConstructionImportError("Fix rows with empty item_name before import.");
       return;
     }
+
+    if (constructionImportTarget === "bom") {
+      const orderItemId = activeConstructionDetailData?.orderItem?.id ?? null;
+      if (!orderItemId) {
+        setConstructionImportError(
+          "BOM importam vispirms atver konkrētu vienību un izvēlies to no konstrukciju tabulas.",
+        );
+        return;
+      }
+      if (!supabase) {
+        setConstructionImportError(t("orders.detail.errors.supabaseNotConfigured"));
+        return;
+      }
+
+      const existingBomLines = bomLinesByOrderItemId[orderItemId] ?? [];
+      const bomInsertPayload = constructionImportDraftRows
+        .filter((row) => String(row.item_name ?? "").trim().length > 0)
+        .map((row, index) => {
+          const parsedQty = Number(String(row.qty ?? "1").replace(/,/g, "."));
+          const qty = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
+          const dims = parseDimensionToken(row.dimensions);
+          return {
+            order_item_id: orderItemId,
+            line_no: existingBomLines.length + index,
+            component_code: String(row.position ?? "").trim() || null,
+            component_name: String(row.item_name ?? "").trim(),
+            component_type: "other" as const,
+            qty,
+            unit: "pcs",
+            length: dims.length,
+            width: dims.width,
+            height: dims.height,
+            attributes: {
+              material: String(row.material ?? "").trim() || null,
+              source_item_type: String(row.item_type ?? "").trim() || null,
+              import_source_file: constructionImportFileName,
+            },
+            source_kind: "import" as const,
+            sort_order: existingBomLines.length + index,
+          };
+        });
+
+      if (bomInsertPayload.length === 0) {
+        setConstructionImportError("BOM importam nav derīgu rindu ar nosaukumu.");
+        return;
+      }
+
+      const { data: insertedBomRows, error: bomInsertError } = await supabase
+        .from("order_item_bom_lines")
+        .insert(bomInsertPayload)
+        .select(
+          "id, order_item_id, line_no, component_code, component_name, component_type, qty, unit, length, width, height, attributes, source_kind, sort_order, created_at, updated_at",
+        );
+
+      if (bomInsertError) {
+        setConstructionImportError(bomInsertError.message);
+        return;
+      }
+
+      if (insertedBomRows && insertedBomRows.length > 0) {
+        setBomLinesByOrderItemId((prev) => ({
+          ...prev,
+          [orderItemId]: [
+            ...(prev[orderItemId] ?? []),
+            ...insertedBomRows.map((row) => mapOrderItemBomLineRow(row as OrderItemBomLineRow)),
+          ].sort((a, b) => a.sortOrder - b.sortOrder || a.lineNo - b.lineNo),
+        }));
+      }
+
+      setConstructionImportError("");
+      setIsConstructionImportModalOpen(false);
+      notify({
+        title: t("header.notificationDefaultTitle"),
+        description: `Pievienotas ${bomInsertPayload.length} BOM rindas.`,
+      });
+      return;
+    }
+
     const columns = primaryConstructionField.columns ?? [];
     const columnKeyBySemantic = new Map(
       columns
@@ -2360,13 +2488,19 @@ export default function OrderDetailPage() {
     setConstructionImportError("");
     setIsConstructionImportModalOpen(false);
   }, [
+    activeConstructionDetailData?.orderItem?.id,
+    bomLinesByOrderItemId,
     constructionImportBatchId,
     constructionImportDraftRows,
     constructionImportFileName,
-    constructionImportMapping,
     constructionImportInvalidRowCount,
+    constructionImportMapping,
     constructionImportSheetName,
+    constructionImportTarget,
+    notify,
+    parseDimensionToken,
     primaryConstructionField,
+    t,
   ]);
 
   const handleOpenConstructionAiImport = useCallback(() => {
@@ -6374,6 +6508,24 @@ export default function OrderDetailPage() {
             Augsuplade failu, pielago mappingu un izlabo rindas pirms pievienosanas konstrukciju sarakstam.
           </p>
 
+          <div className="grid gap-2 md:max-w-[340px]">
+            <div className="text-xs text-muted-foreground">Ko pievienot no importa</div>
+            <Select
+              value={constructionImportTarget}
+              onValueChange={(value) =>
+                setConstructionImportTarget(value === "bom" ? "bom" : "items")
+              }
+            >
+              <SelectTrigger className="h-9 w-full">
+                <SelectValue placeholder="Izvēlies mērķi" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="items">Vienības (Item/Konstrukcija)</SelectItem>
+                <SelectItem value="bom">BOM (komponentes izvēlētai vienībai)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <FileField
             label="Importa fails"
             accept=".xlsx,.xls,.csv,.pdf"
@@ -6455,6 +6607,9 @@ export default function OrderDetailPage() {
             </div>
           ) : null}
 
+          <div className="text-xs text-muted-foreground">
+            Mapping izvēlnē redzami tie headeri, kas atrasti importa failā.
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((mappingKey) => (
               <div key={`modal-mapping-${mappingKey}`} className="space-y-1">
@@ -6476,7 +6631,7 @@ export default function OrderDetailPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">
-                      (nav piesaistits) - {mappingKey}
+                      (nav piesaistīts) - {mappingKey}
                     </SelectItem>
                     {constructionImportHeaders.map((header) => (
                       <SelectItem
@@ -6588,7 +6743,7 @@ export default function OrderDetailPage() {
                 constructionImportInvalidRowCount > 0
               }
             >
-              Pievienot importetas rindas
+              {constructionImportTarget === "bom" ? "Pievienot BOM rindas" : "Pievienot importetas rindas"}
             </Button>
           </div>
         </div>
