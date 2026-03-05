@@ -3646,9 +3646,6 @@ export default function SettingsPage() {
                           {t("settings.common.required")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
-                          {t("settings.orderFields.inTable")}
-                        </th>
-                        <th className="px-4 py-2 text-left font-medium">
                           {t("settings.common.active")}
                         </th>
                         <th className="px-4 py-2 text-left font-medium">
