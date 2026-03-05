@@ -136,6 +136,8 @@ const REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS = ["item_name"] as const;
 
 const ORDER_DETAIL_TAB_VALUES = ["overview", "files", "details", "external", "history"] as const;
 
+const CONSTRUCTION_IMPORT_STEPS = ["source", "mapping", "review", "save"] as const;
+
 const CONSTRUCTION_IMPORT_LABELS: Record<
   (typeof CONSTRUCTION_IMPORT_MAPPING_KEYS)[number],
   string
@@ -217,6 +219,17 @@ type OrderItemBomLineRow = {
 
 type OrderItemImportBatchRow = {
   id: string;
+};
+
+type OrderImportProfileRow = {
+  id: string;
+  profile_name: string;
+  target: "items" | "bom";
+  file_extensions: string[] | null;
+  header_aliases: Record<string, unknown> | null;
+  default_mapping: Record<string, string> | null;
+  is_default: boolean;
+  is_active: boolean;
 };
 
 const DEFAULT_BOM_DRAFT: OrderItemBomLineDraft = {
@@ -674,6 +687,17 @@ export default function OrderDetailPage() {
   const [constructionImportMapping, setConstructionImportMapping] = useState<Record<string, string>>({});
   const [savedConstructionImportMapping, setSavedConstructionImportMapping] =
     useState<Record<string, string> | null>(null);
+  const [defaultImportProfileMappingByTarget, setDefaultImportProfileMappingByTarget] =
+    useState<Record<"items" | "bom", Record<string, string> | null>>({
+      items: null,
+      bom: null,
+    });
+  const [importProfilesByTarget, setImportProfilesByTarget] = useState<
+    Record<"items" | "bom", OrderImportProfileRow[]>
+  >({
+    items: [],
+    bom: [],
+  });
   const [constructionImportError, setConstructionImportError] = useState("");
   const [constructionImportBatchId, setConstructionImportBatchId] = useState<string | null>(null);
   const [constructionImportAiBridgeFieldId, setConstructionImportAiBridgeFieldId] =
@@ -686,6 +710,19 @@ export default function OrderDetailPage() {
   const [constructionImportTarget, setConstructionImportTarget] = useState<
     "items" | "bom"
   >("items");
+  const [constructionImportProfileName, setConstructionImportProfileName] =
+    useState("");
+  const [isSavingConstructionImportProfile, setIsSavingConstructionImportProfile] =
+    useState(false);
+  const [constructionImportProfileNotice, setConstructionImportProfileNotice] =
+    useState("");
+  const [constructionImportAiNotice, setConstructionImportAiNotice] =
+    useState("");
+  const [isApplyingConstructionAiBootstrap, setIsApplyingConstructionAiBootstrap] =
+    useState(false);
+  const [constructionImportStep, setConstructionImportStep] = useState<
+    (typeof CONSTRUCTION_IMPORT_STEPS)[number]
+  >("source");
   const getConstructionRows = useCallback(
     (fieldId: string) =>
       ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
@@ -1208,6 +1245,9 @@ export default function OrderDetailPage() {
             showInProduction: column.showInProduction ?? true,
           })) as OrderInputTableColumn[] | undefined,
         showInTable: row.options?.showInTable ?? true,
+        isPrimaryConstructionTable:
+          row.options?.isPrimaryConstructionTable ?? false,
+        isBomImportTable: row.options?.isBomImportTable ?? false,
         isRequired: row.is_required ?? false,
         isActive: row.is_active ?? true,
         showInProduction: row.show_in_production ?? false,
@@ -2099,6 +2139,11 @@ export default function OrderDetailPage() {
       null,
     [constructionTableFields],
   );
+  const bomImportTableField = useMemo(
+    () =>
+      constructionTableFields.find((field) => field.isBomImportTable) ?? null,
+    [constructionTableFields],
+  );
   const constructionImportMissingMappingKeys = useMemo(
     () =>
       REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS.filter(
@@ -2116,6 +2161,34 @@ export default function OrderDetailPage() {
       return String(value ?? "").trim().length === 0;
     }).length;
   }, [constructionImportDraftRows]);
+
+  const isConstructionImportMappingReady =
+    constructionImportHeaders.length > 0 && constructionImportRows.length > 0;
+  const isConstructionImportReviewReady =
+    constructionImportDraftRows.length > 0 && constructionImportMissingMappingKeys.length === 0;
+
+  const constructionImportTargetSchemaColumns = useMemo(() => {
+    if (constructionImportTarget === "bom") {
+      const configuredBomColumns = bomImportTableField?.columns?.map((column) => column.key) ?? [];
+      if (configuredBomColumns.length > 0) {
+        return configuredBomColumns;
+      }
+      return [
+        "component_code",
+        "component_name",
+        "qty",
+        "unit",
+        "length/width/height",
+        "attributes.material",
+      ];
+    }
+    const columns = primaryConstructionField?.columns ?? [];
+    return columns.map((column) => column.key);
+  }, [
+    bomImportTableField?.columns,
+    constructionImportTarget,
+    primaryConstructionField?.columns,
+  ]);
 
   useEffect(() => {
     const loadSavedConstructionImportMapping = async () => {
@@ -2143,6 +2216,55 @@ export default function OrderDetailPage() {
 
     void loadSavedConstructionImportMapping();
   }, [tenantId]);
+
+  useEffect(() => {
+    const loadImportProfiles = async () => {
+      if (!supabase || !tenantId) {
+        return;
+      }
+      const { data } = await supabase
+        .from("order_import_profiles")
+        .select(
+          "id, profile_name, target, file_extensions, header_aliases, default_mapping, is_default, is_active",
+        )
+        .eq("tenant_id", tenantId)
+        .eq("is_active", true);
+
+      const rows = (data ?? []) as OrderImportProfileRow[];
+      const nextByTarget: Record<"items" | "bom", OrderImportProfileRow[]> = {
+        items: [],
+        bom: [],
+      };
+      const nextDefaults: Record<"items" | "bom", Record<string, string> | null> = {
+        items: null,
+        bom: null,
+      };
+
+      rows.forEach((row) => {
+        const target = row.target === "bom" ? "bom" : "items";
+        nextByTarget[target].push(row);
+        if (row.is_default && row.default_mapping && typeof row.default_mapping === "object") {
+          nextDefaults[target] = row.default_mapping;
+        }
+      });
+
+      setImportProfilesByTarget(nextByTarget);
+      setDefaultImportProfileMappingByTarget(nextDefaults);
+    };
+
+    void loadImportProfiles();
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (constructionImportProfileName.trim().length > 0) {
+      return;
+    }
+    setConstructionImportProfileName(
+      constructionImportTarget === "bom"
+        ? "BOM importa profils"
+        : "Vienību importa profils",
+    );
+  }, [constructionImportProfileName, constructionImportTarget]);
 
   const suggestConstructionImportMapping = useCallback((headers: string[]) => {
     const normalize = (value: string) =>
@@ -2195,22 +2317,103 @@ export default function OrderDetailPage() {
   );
 
   const resolveConstructionImportMapping = useCallback(
-    (headers: string[]) => {
+    (
+      headers: string[],
+      options?: {
+        extension?: string;
+        target?: "items" | "bom";
+      },
+    ) => {
+      const target = options?.target ?? constructionImportTarget;
+      const extension = options?.extension?.toLowerCase() ?? "";
       const suggested = suggestConstructionImportMapping(headers);
-      if (!savedConstructionImportMapping) {
-        return suggested;
-      }
-      const normalizedHeaders = new Set(headers);
-      const nextMapping = { ...suggested };
-      CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
-        const savedValue = savedConstructionImportMapping[key];
-        if (savedValue && normalizedHeaders.has(savedValue)) {
-          nextMapping[key] = savedValue;
+      const headerSet = new Set(headers);
+      const normalize = (value: string) =>
+        value
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "");
+      const normalizedHeaderSet = new Set(headers.map((header) => normalize(header)));
+
+      const scoreProfile = (profile: OrderImportProfileRow) => {
+        let score = 0;
+        const mapping =
+          profile.default_mapping && typeof profile.default_mapping === "object"
+            ? (profile.default_mapping as Record<string, string>)
+            : {};
+        CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+          const mappedHeader = mapping[key];
+          if (mappedHeader && headerSet.has(mappedHeader)) {
+            score += 3;
+          }
+        });
+
+        const aliases =
+          profile.header_aliases && typeof profile.header_aliases === "object"
+            ? (profile.header_aliases as Record<string, unknown>)
+            : {};
+        CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+          const values = aliases[key];
+          if (!Array.isArray(values)) {
+            return;
+          }
+          if (values.some((value) => normalizedHeaderSet.has(normalize(String(value ?? ""))))) {
+            score += 1;
+          }
+        });
+
+        if (extension) {
+          const extensions = (profile.file_extensions ?? []).map((value) =>
+            String(value ?? "").toLowerCase(),
+          );
+          if (extensions.length === 0) {
+            score += 1;
+          } else if (extensions.includes(extension)) {
+            score += 2;
+          }
         }
+
+        if (profile.is_default) {
+          score += 1;
+        }
+
+        return score;
+      };
+
+      const profiles = importProfilesByTarget[target] ?? [];
+      const bestProfile = profiles
+        .map((profile) => ({ profile, score: scoreProfile(profile) }))
+        .filter((entry) => entry.score > 0)
+        .sort((left, right) => right.score - left.score)[0]?.profile;
+
+      const nextMapping = { ...suggested };
+      const mappingCandidates = [
+        bestProfile?.default_mapping ?? null,
+        defaultImportProfileMappingByTarget[target],
+        savedConstructionImportMapping,
+      ];
+
+      mappingCandidates.forEach((candidate) => {
+        if (!candidate || typeof candidate !== "object") {
+          return;
+        }
+        CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+          const savedValue = candidate[key];
+          if (savedValue && headerSet.has(savedValue)) {
+            nextMapping[key] = savedValue;
+          }
+        });
       });
       return nextMapping;
     },
-    [savedConstructionImportMapping, suggestConstructionImportMapping],
+    [
+      constructionImportTarget,
+      defaultImportProfileMappingByTarget,
+      importProfilesByTarget,
+      savedConstructionImportMapping,
+      suggestConstructionImportMapping,
+    ],
   );
 
   const handleConstructionImportFile = useCallback(
@@ -2244,7 +2447,10 @@ export default function OrderDetailPage() {
           return;
         }
         const headers = parsedWorkbook.headers;
-        const nextMapping = resolveConstructionImportMapping(headers);
+        const nextMapping = resolveConstructionImportMapping(headers, {
+          extension,
+          target: constructionImportTarget,
+        });
         const nextDraftRows = buildConstructionImportDraftRows(
           parsedWorkbook.rows,
           nextMapping,
@@ -2289,6 +2495,9 @@ export default function OrderDetailPage() {
         }
         setConstructionImportAiBridgeFieldId(null);
         setConstructionImportError("");
+        setConstructionImportProfileNotice("");
+        setConstructionImportAiNotice("");
+        setConstructionImportStep("mapping");
         setIsConstructionImportModalOpen(true);
       } catch (error) {
         setConstructionImportAiBridgeFieldId(null);
@@ -2299,12 +2508,254 @@ export default function OrderDetailPage() {
     },
     [
       buildConstructionImportDraftRows,
+      constructionImportTarget,
       orderState?.id,
       primaryConstructionField,
       resolveConstructionImportMapping,
       tenantId,
     ],
   );
+
+  const handleAiBootstrapConstructionMapping = useCallback(async () => {
+    const sb = supabase;
+    if (!sb) {
+      setConstructionImportAiNotice(t("orders.detail.errors.supabaseNotConfigured"));
+      return;
+    }
+    if (!canUseAiOrderInputImport) {
+      setConstructionImportAiNotice(t("orders.detail.errors.aiImportProOnly"));
+      return;
+    }
+    if (constructionImportHeaders.length === 0) {
+      setConstructionImportAiNotice("Vispirms ielādē failu ar headeriem.");
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await sb.auth.getSession();
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      setConstructionImportAiNotice(t("orders.detail.errors.signInAgain"));
+      return;
+    }
+
+    setIsApplyingConstructionAiBootstrap(true);
+    setConstructionImportAiNotice("");
+
+    try {
+      const response = await fetch("/api/order-inputs/ai-mapping-bootstrap", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          target: constructionImportTarget,
+          fileName: constructionImportFileName,
+          headers: constructionImportHeaders,
+          sampleRows: constructionImportRows.slice(0, 30),
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        mapping?: Record<string, string>;
+        confidenceByKey?: Record<string, number>;
+        notes?: string;
+      };
+
+      if (!response.ok) {
+        const message =
+          payload.error === "feature_not_available"
+            ? t("orders.detail.errors.aiImportProOnly")
+            : (payload.error ?? "AI mapping bootstrap neizdevās.");
+        setConstructionImportAiNotice(message);
+        return;
+      }
+
+      const nextMapping = { ...constructionImportMapping };
+      CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+        const value = payload.mapping?.[key];
+        if (value) {
+          nextMapping[key] = value;
+        }
+      });
+
+      applyConstructionImportMapping(nextMapping);
+
+      const confidenceLabel = CONSTRUCTION_IMPORT_MAPPING_KEYS.map((key) => {
+        const confidence = payload.confidenceByKey?.[key] ?? 0;
+        return `${key}: ${Math.round(confidence * 100)}%`;
+      }).join(" · ");
+      setConstructionImportAiNotice(
+        `AI bootstrap pabeigts. ${confidenceLabel}${payload.notes ? ` · ${payload.notes}` : ""}`,
+      );
+    } catch (error) {
+      setConstructionImportAiNotice(
+        error instanceof Error ? error.message : "AI mapping bootstrap neizdevās.",
+      );
+    } finally {
+      setIsApplyingConstructionAiBootstrap(false);
+    }
+  }, [
+    applyConstructionImportMapping,
+    canUseAiOrderInputImport,
+    constructionImportFileName,
+    constructionImportHeaders,
+    constructionImportMapping,
+    constructionImportRows,
+    constructionImportTarget,
+    t,
+  ]);
+
+  const handleSaveConstructionImportProfile = useCallback(async () => {
+    if (!supabase || !tenantId) {
+      setConstructionImportProfileNotice(
+        t("orders.detail.errors.supabaseNotConfigured"),
+      );
+      return;
+    }
+    const trimmedName = constructionImportProfileName.trim();
+    if (!trimmedName) {
+      setConstructionImportProfileNotice("Norādi profila nosaukumu.");
+      return;
+    }
+    if (constructionImportHeaders.length === 0) {
+      setConstructionImportProfileNotice("Vispirms ielādē importa failu.");
+      return;
+    }
+
+    setIsSavingConstructionImportProfile(true);
+    setConstructionImportProfileNotice("");
+
+    const extension = getFileExtension(constructionImportFileName);
+    const headerAliases = CONSTRUCTION_IMPORT_MAPPING_KEYS.reduce<
+      Record<string, string[]>
+    >((acc, key) => {
+      const selected = constructionImportMapping[key];
+      if (!selected) {
+        return acc;
+      }
+      acc[key] = [selected];
+      return acc;
+    }, {});
+
+    const { data: existingProfile } = await supabase
+      .from("order_import_profiles")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("target", constructionImportTarget)
+      .eq("is_default", true)
+      .limit(1)
+      .maybeSingle();
+
+    let profileId = existingProfile?.id ?? null;
+
+    if (profileId) {
+      const { error: profileUpdateError } = await supabase
+        .from("order_import_profiles")
+        .update({
+          profile_name: trimmedName,
+          file_extensions: extension ? [extension] : [],
+          header_aliases: headerAliases,
+          default_mapping: constructionImportMapping,
+          is_active: true,
+        })
+        .eq("id", profileId);
+      if (profileUpdateError) {
+        setConstructionImportProfileNotice(profileUpdateError.message);
+        setIsSavingConstructionImportProfile(false);
+        return;
+      }
+    } else {
+      const { data: profileInsertData, error: profileInsertError } = await supabase
+        .from("order_import_profiles")
+        .insert({
+          tenant_id: tenantId,
+          profile_name: trimmedName,
+          target: constructionImportTarget,
+          document_type: "production_documentation",
+          file_extensions: extension ? [extension] : [],
+          header_aliases: headerAliases,
+          default_mapping: constructionImportMapping,
+          is_default: true,
+          is_active: true,
+          created_by: userId || null,
+        })
+        .select("id")
+        .single();
+      if (profileInsertError || !profileInsertData) {
+        setConstructionImportProfileNotice(
+          profileInsertError?.message ?? "Neizdevās izveidot profilu.",
+        );
+        setIsSavingConstructionImportProfile(false);
+        return;
+      }
+      profileId = profileInsertData.id as string;
+    }
+
+    const { data: latestVersion } = await supabase
+      .from("order_import_profile_versions")
+      .select("version_no")
+      .eq("profile_id", profileId)
+      .order("version_no", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextVersionNo = Number(latestVersion?.version_no ?? 0) + 1;
+
+    const { error: versionInsertError } = await supabase
+      .from("order_import_profile_versions")
+      .insert({
+        profile_id: profileId,
+        tenant_id: tenantId,
+        version_no: nextVersionNo,
+        change_note: "Saved from order import modal",
+        header_aliases: headerAliases,
+        default_mapping: constructionImportMapping,
+        created_by: userId || null,
+      });
+
+    if (versionInsertError) {
+      setConstructionImportProfileNotice(versionInsertError.message);
+      setIsSavingConstructionImportProfile(false);
+      return;
+    }
+
+    setConstructionImportProfileNotice("Profils saglabāts. Turpmāk imports notiks automātiskāk.");
+    setDefaultImportProfileMappingByTarget((prev) => ({
+      ...prev,
+      [constructionImportTarget]: constructionImportMapping,
+    }));
+    setImportProfilesByTarget((prev) => {
+      const current = prev[constructionImportTarget] ?? [];
+      const withoutDefault = current.filter((profile) => !profile.is_default);
+      const nextDefault: OrderImportProfileRow = {
+        id: String(profileId),
+        profile_name: trimmedName,
+        target: constructionImportTarget,
+        file_extensions: extension ? [extension] : [],
+        header_aliases: headerAliases,
+        default_mapping: constructionImportMapping,
+        is_default: true,
+        is_active: true,
+      };
+      return {
+        ...prev,
+        [constructionImportTarget]: [nextDefault, ...withoutDefault],
+      };
+    });
+    setIsSavingConstructionImportProfile(false);
+  }, [
+    constructionImportFileName,
+    constructionImportHeaders.length,
+    constructionImportMapping,
+    constructionImportProfileName,
+    constructionImportTarget,
+    t,
+    tenantId,
+    userId,
+  ]);
 
   const parseDimensionToken = useCallback((value: string | undefined) => {
     const normalized = String(value ?? "")
@@ -2324,6 +2775,13 @@ export default function OrderDetailPage() {
     };
   }, []);
 
+  const activeConstructionOrderItemIdForBomImport = useMemo(() => {
+    if (!activeConstructionDetail) {
+      return null;
+    }
+    return orderItemsByRowKey[activeConstructionDetail.rowId]?.id ?? null;
+  }, [activeConstructionDetail, orderItemsByRowKey]);
+
   const handleApplyConstructionImport = useCallback(async () => {
     if (!primaryConstructionField) {
       setConstructionImportError("Primary construction table is missing.");
@@ -2339,7 +2797,7 @@ export default function OrderDetailPage() {
     }
 
     if (constructionImportTarget === "bom") {
-      const orderItemId = activeConstructionDetailData?.orderItem?.id ?? null;
+      const orderItemId = activeConstructionOrderItemIdForBomImport;
       if (!orderItemId) {
         setConstructionImportError(
           "BOM importam vispirms atver konkrētu vienību un izvēlies to no konstrukciju tabulas.",
@@ -2488,7 +2946,7 @@ export default function OrderDetailPage() {
     setConstructionImportError("");
     setIsConstructionImportModalOpen(false);
   }, [
-    activeConstructionDetailData?.orderItem?.id,
+    activeConstructionOrderItemIdForBomImport,
     bomLinesByOrderItemId,
     constructionImportBatchId,
     constructionImportDraftRows,
@@ -2523,6 +2981,7 @@ export default function OrderDetailPage() {
   }, [constructionImportAiBridgeFieldId, primaryConstructionField?.id]);
 
   const handleOpenConstructionFileImport = useCallback(() => {
+    setConstructionImportStep("source");
     setIsConstructionImportModalOpen(true);
   }, []);
   const handleImportConstructionFromAttachment = useCallback(
@@ -4370,8 +4829,8 @@ export default function OrderDetailPage() {
                 {field.unit}
               </span>
             )}
+            </div>
           </div>
-        </div>
       );
     }
 
@@ -6495,7 +6954,10 @@ export default function OrderDetailPage() {
       <BottomSheet
         id="construction-import-modal"
         open={isConstructionImportModalOpen}
-        onClose={() => setIsConstructionImportModalOpen(false)}
+        onClose={() => {
+          setIsConstructionImportModalOpen(false);
+          setConstructionImportStep("source");
+        }}
         ariaLabel="CSV Excel import"
         title="CSV/Excel imports"
         closeButtonLabel={t("profile.close")}
@@ -6507,6 +6969,36 @@ export default function OrderDetailPage() {
           <p className="text-xs text-muted-foreground">
             Augsuplade failu, pielago mappingu un izlabo rindas pirms pievienosanas konstrukciju sarakstam.
           </p>
+
+          <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
+            <div className="mb-2 text-xs text-muted-foreground">Importa vednis</div>
+            <div className="grid gap-2 md:grid-cols-4">
+              {CONSTRUCTION_IMPORT_STEPS.map((step, index) => {
+                const isActive = constructionImportStep === step;
+                const isDone = CONSTRUCTION_IMPORT_STEPS.indexOf(constructionImportStep) > index;
+                const labels: Record<(typeof CONSTRUCTION_IMPORT_STEPS)[number], string> = {
+                  source: "1. Avots",
+                  mapping: "2. Mapping",
+                  review: "3. Priekšskatījums",
+                  save: "4. Saglabāšana",
+                };
+                return (
+                  <div
+                    key={`wizard-step-${step}`}
+                    className={`rounded-md border px-2 py-1 text-xs ${
+                      isActive
+                        ? "border-primary bg-primary/5 text-primary"
+                        : isDone
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          : "border-border bg-background text-muted-foreground"
+                    }`}
+                  >
+                    {labels[step]}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           <div className="grid gap-2 md:max-w-[340px]">
             <div className="text-xs text-muted-foreground">Ko pievienot no importa</div>
@@ -6524,6 +7016,16 @@ export default function OrderDetailPage() {
                 <SelectItem value="bom">BOM (komponentes izvēlētai vienībai)</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="rounded-lg border border-border/70 bg-muted/10 p-3 text-xs">
+            <div className="font-medium text-foreground">Mērķa tabula</div>
+            <div className="mt-1 text-muted-foreground">
+              {constructionImportTarget === "items"
+                ? "Items imports raksta primārajā konstrukciju tabulā (no Settings konfigurētās kolonnas)."
+                : "BOM imports raksta uz order_item_bom_lines (atsevišķa BOM tabula; Settings BOM kolonnas tiek izmantotas mapping vednī)."}
+            </div>
+            <div className="mt-2 text-muted-foreground">Kolonnas: {constructionImportTargetSchemaColumns.join(", ") || "-"}</div>
           </div>
 
           <FileField
@@ -6607,10 +7109,25 @@ export default function OrderDetailPage() {
             </div>
           ) : null}
 
-          <div className="text-xs text-muted-foreground">
-            Mapping izvēlnē redzami tie headeri, kas atrasti importa failā.
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
+          {constructionImportStep !== "source" ? (
+            <>
+              <div className="text-xs text-muted-foreground">
+                Mapping izvēlnē redzami tie headeri, kas atrasti importa failā.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleAiBootstrapConstructionMapping()}
+                  disabled={isApplyingConstructionAiBootstrap || constructionImportHeaders.length === 0}
+                >
+                  {isApplyingConstructionAiBootstrap ? "AI analizē..." : "AI Mapping Bootstrap"}
+                </Button>
+                <div className="text-xs text-muted-foreground">
+                  AI ieteiks mappingu no headeriem + piemēra rindām; pēc tam vari piekoriģēt manuāli.
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
             {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((mappingKey) => (
               <div key={`modal-mapping-${mappingKey}`} className="space-y-1">
                 <div className="text-xs text-muted-foreground">
@@ -6645,7 +7162,15 @@ export default function OrderDetailPage() {
                 </Select>
               </div>
             ))}
-          </div>
+              </div>
+            </>
+          ) : null}
+
+          {constructionImportAiNotice ? (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              {constructionImportAiNotice}
+            </div>
+          ) : null}
 
           {constructionImportError ? (
             <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -6653,7 +7178,7 @@ export default function OrderDetailPage() {
             </div>
           ) : null}
 
-          {constructionImportDraftRows.length > 0 ? (
+          {(constructionImportStep === "review" || constructionImportStep === "save") && constructionImportDraftRows.length > 0 ? (
             <div className="space-y-2">
               <div className="text-xs text-muted-foreground">
                 {constructionImportFileName}
@@ -6726,11 +7251,89 @@ export default function OrderDetailPage() {
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
+          {constructionImportStep === "save" ? (
+            <div className="space-y-2 border-t border-border pt-3">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <Input
+                value={constructionImportProfileName}
+                onChange={(event) => setConstructionImportProfileName(event.target.value)}
+                placeholder="Profila nosaukums"
+                className="h-9"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleSaveConstructionImportProfile()}
+                disabled={isSavingConstructionImportProfile || constructionImportHeaders.length === 0}
+              >
+                {isSavingConstructionImportProfile ? "Saglabā..." : "Saglabāt kā noklusēto profilu (iemācīt parseri)"}
+              </Button>
+            </div>
+              <div className="text-xs text-muted-foreground">
+                Pirmreizējai uzstādīšanai: ielādē tipisku failu, saliec mappingu (vai AI importam PDF gadījumā), tad saglabā kā noklusēto profilu.
+                Tālāk parseris šo profilu izmantos automātiski šim mērķim (Items vai BOM).
+              </div>
+              {constructionImportProfileNotice ? (
+                <div className="text-xs text-muted-foreground">{constructionImportProfileNotice}</div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const stepIndex = CONSTRUCTION_IMPORT_STEPS.indexOf(constructionImportStep);
+                  if (stepIndex <= 0) {
+                    return;
+                  }
+                  setConstructionImportStep(CONSTRUCTION_IMPORT_STEPS[stepIndex - 1]);
+                }}
+                disabled={constructionImportStep === "source"}
+              >
+                Atpakaļ
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  if (constructionImportStep === "source") {
+                    if (!isConstructionImportMappingReady) {
+                      return;
+                    }
+                    setConstructionImportStep("mapping");
+                    return;
+                  }
+                  if (constructionImportStep === "mapping") {
+                    if (!isConstructionImportReviewReady) {
+                      return;
+                    }
+                    setConstructionImportStep("review");
+                    return;
+                  }
+                  if (constructionImportStep === "review") {
+                    setConstructionImportStep("save");
+                  }
+                }}
+                disabled={
+                  (constructionImportStep === "source" && !isConstructionImportMappingReady) ||
+                  (constructionImportStep === "mapping" && !isConstructionImportReviewReady) ||
+                  constructionImportStep === "save"
+                }
+              >
+                Tālāk
+              </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               variant="ghost"
-              onClick={() => setIsConstructionImportModalOpen(false)}
+              onClick={() => {
+                setIsConstructionImportModalOpen(false);
+                setConstructionImportStep("source");
+              }}
             >
               Aizvert
             </Button>
@@ -6746,6 +7349,7 @@ export default function OrderDetailPage() {
               {constructionImportTarget === "bom" ? "Pievienot BOM rindas" : "Pievienot importetas rindas"}
             </Button>
           </div>
+        </div>
         </div>
       </BottomSheet>
       <BottomSheet

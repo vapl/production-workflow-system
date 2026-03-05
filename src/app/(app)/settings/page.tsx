@@ -361,6 +361,63 @@ const defaultConstructionTableColumns: OrderInputTableColumn[] = [
   },
 ];
 
+const defaultBomTableColumns: OrderInputTableColumn[] = [
+  {
+    key: "component_code",
+    label: "Artikuls",
+    semanticKey: "position",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "component_name",
+    label: "Komponente",
+    semanticKey: "item_name",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "component_group",
+    label: "Grupa",
+    semanticKey: "item_type",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "qty",
+    label: "Daudzums",
+    semanticKey: "qty",
+    fieldType: "number",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "dimensions",
+    label: "Izmēri",
+    semanticKey: "dimensions",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+  {
+    key: "material",
+    label: "Materiāls / piegādātājs",
+    semanticKey: "material",
+    fieldType: "text",
+    isActive: true,
+    showInTable: true,
+    showInProduction: true,
+  },
+];
+
 const recommendedConstructionLabels: Partial<
   Record<ConstructionColumnSemanticKey, string>
 > = Object.fromEntries(
@@ -598,6 +655,14 @@ export default function SettingsPage() {
       ) ??
       null,
     [constructionConfigFields],
+  );
+  const constructionTableFields = useMemo(
+    () => constructionConfigFields.filter((field) => field.fieldType === "table"),
+    [constructionConfigFields],
+  );
+  const bomImportTableField = useMemo(
+    () => constructionTableFields.find((field) => field.isBomImportTable) ?? null,
+    [constructionTableFields],
   );
   const constructionAttributeFields = useMemo(
     () =>
@@ -2929,17 +2994,58 @@ export default function SettingsPage() {
     }
     await addOrderInputField({
       key: "constructions",
-      label: "Konstrukcijas",
+      label: "Produkti / artikuli",
       groupKey: "production_scope",
       scope: "construction_table",
       fieldType: "table",
       columns: defaultConstructionTableColumns,
       isPrimaryConstructionTable: true,
+      isBomImportTable: false,
       isRequired: false,
       isActive: true,
       showInProduction: true,
       sortOrder: 0,
     });
+  }
+
+  async function handleCreateBomTable() {
+    if (bomImportTableField) {
+      return;
+    }
+    await addOrderInputField({
+      key: "bom_table",
+      label: "BOM",
+      groupKey: "production_scope",
+      scope: "construction_table",
+      fieldType: "table",
+      columns: defaultBomTableColumns,
+      isPrimaryConstructionTable: false,
+      isBomImportTable: true,
+      isRequired: false,
+      isActive: true,
+      showInProduction: true,
+      sortOrder: 1,
+    });
+  }
+
+  async function handleSetConstructionPrimaryTable(fieldId: string) {
+    await Promise.all(
+      constructionTableFields.map((field) =>
+        updateOrderInputField(field.id, {
+          isPrimaryConstructionTable: field.id === fieldId,
+        }),
+      ),
+    );
+  }
+
+  async function handleSetBomImportTable(fieldId: string) {
+    await Promise.all(
+      constructionTableFields.map((field) =>
+        updateOrderInputField(field.id, {
+          isBomImportTable: field.id === fieldId,
+        }),
+      ),
+    );
   }
 
   async function handleSaveConstructionAttribute() {
@@ -2966,6 +3072,7 @@ export default function SettingsPage() {
       options,
       columns: undefined,
       isPrimaryConstructionTable: false,
+      isBomImportTable: false,
       isRequired: orderFieldRequired,
       isActive: orderFieldActive,
       showInTable: orderFieldShowInTable,
@@ -3933,6 +4040,70 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="rounded-lg border border-border/70 bg-muted/10 p-3 text-sm">
+                  <div className="font-medium">Core struktūra importam</div>
+                  <div className="mt-1 text-muted-foreground">
+                    1) Produkti / artikuli (item līmenis) · 2) BOM (furnitūra/materiāli un grupas).
+                    Mapping wizard mērķis (Items/BOM) izmantos atbilstošo tabulu.
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">Produktu tabula (primary)</div>
+                      <Select
+                        value={primaryConstructionTableField?.id ?? "__none__"}
+                        onValueChange={(value) => {
+                          if (value === "__none__") return;
+                          void handleSetConstructionPrimaryTable(value);
+                        }}
+                        disabled={constructionTableFields.length === 0}
+                      >
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="Izvēlies tabulu" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Nav izvēlēta</SelectItem>
+                          {constructionTableFields.map((field) => (
+                            <SelectItem key={`construction-primary-${field.id}`} value={field.id}>
+                              {field.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">BOM tabula importam</div>
+                      <Select
+                        value={bomImportTableField?.id ?? "__none__"}
+                        onValueChange={(value) => {
+                          if (value === "__none__") return;
+                          void handleSetBomImportTable(value);
+                        }}
+                        disabled={constructionTableFields.length === 0}
+                      >
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="Izvēlies BOM tabulu" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Nav izvēlēta</SelectItem>
+                          {constructionTableFields.map((field) => (
+                            <SelectItem key={`construction-bom-${field.id}`} value={field.id}>
+                              {field.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={handleCreateConstructionTable}>
+                      Izveidot produktu tabulu
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleCreateBomTable}>
+                      Izveidot BOM tabulu
+                    </Button>
+                  </div>
+                </div>
+
                 {primaryConstructionTableField === null && (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
                     {t("settings.orderInputs.empty")}

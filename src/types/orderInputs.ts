@@ -55,6 +55,7 @@ export interface OrderInputField {
   options?: string[];
   columns?: OrderInputTableColumn[];
   isPrimaryConstructionTable?: boolean;
+  isBomImportTable?: boolean;
   isRequired: boolean;
   isActive: boolean;
   showInTable?: boolean;
