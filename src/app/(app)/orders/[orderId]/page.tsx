@@ -688,6 +688,12 @@ export default function OrderDetailPage() {
   const [constructionImportTarget, setConstructionImportTarget] = useState<
     "items" | "bom"
   >("items");
+  const [constructionImportProfileName, setConstructionImportProfileName] =
+    useState("");
+  const [isSavingConstructionImportProfile, setIsSavingConstructionImportProfile] =
+    useState(false);
+  const [constructionImportProfileNotice, setConstructionImportProfileNotice] =
+    useState("");
   const getConstructionRows = useCallback(
     (fieldId: string) =>
       ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
@@ -2174,6 +2180,17 @@ export default function OrderDetailPage() {
     void loadDefaultItemsImportProfileMapping();
   }, [tenantId]);
 
+  useEffect(() => {
+    if (constructionImportProfileName.trim().length > 0) {
+      return;
+    }
+    setConstructionImportProfileName(
+      constructionImportTarget === "bom"
+        ? "BOM importa profils"
+        : "Vienību importa profils",
+    );
+  }, [constructionImportProfileName, constructionImportTarget]);
+
   const suggestConstructionImportMapping = useCallback((headers: string[]) => {
     const normalize = (value: string) =>
       value
@@ -2329,6 +2346,7 @@ export default function OrderDetailPage() {
         }
         setConstructionImportAiBridgeFieldId(null);
         setConstructionImportError("");
+        setConstructionImportProfileNotice("");
         setIsConstructionImportModalOpen(true);
       } catch (error) {
         setConstructionImportAiBridgeFieldId(null);
@@ -2345,6 +2363,135 @@ export default function OrderDetailPage() {
       tenantId,
     ],
   );
+
+  const handleSaveConstructionImportProfile = useCallback(async () => {
+    if (!supabase || !tenantId) {
+      setConstructionImportProfileNotice(
+        t("orders.detail.errors.supabaseNotConfigured"),
+      );
+      return;
+    }
+    const trimmedName = constructionImportProfileName.trim();
+    if (!trimmedName) {
+      setConstructionImportProfileNotice("Norādi profila nosaukumu.");
+      return;
+    }
+    if (constructionImportHeaders.length === 0) {
+      setConstructionImportProfileNotice("Vispirms ielādē importa failu.");
+      return;
+    }
+
+    setIsSavingConstructionImportProfile(true);
+    setConstructionImportProfileNotice("");
+
+    const extension = getFileExtension(constructionImportFileName);
+    const headerAliases = CONSTRUCTION_IMPORT_MAPPING_KEYS.reduce<
+      Record<string, string[]>
+    >((acc, key) => {
+      const selected = constructionImportMapping[key];
+      if (!selected) {
+        return acc;
+      }
+      acc[key] = [selected];
+      return acc;
+    }, {});
+
+    const { data: existingProfile } = await supabase
+      .from("order_import_profiles")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("target", constructionImportTarget)
+      .eq("is_default", true)
+      .limit(1)
+      .maybeSingle();
+
+    let profileId = existingProfile?.id ?? null;
+
+    if (profileId) {
+      const { error: profileUpdateError } = await supabase
+        .from("order_import_profiles")
+        .update({
+          profile_name: trimmedName,
+          file_extensions: extension ? [extension] : [],
+          header_aliases: headerAliases,
+          default_mapping: constructionImportMapping,
+          is_active: true,
+        })
+        .eq("id", profileId);
+      if (profileUpdateError) {
+        setConstructionImportProfileNotice(profileUpdateError.message);
+        setIsSavingConstructionImportProfile(false);
+        return;
+      }
+    } else {
+      const { data: profileInsertData, error: profileInsertError } = await supabase
+        .from("order_import_profiles")
+        .insert({
+          tenant_id: tenantId,
+          profile_name: trimmedName,
+          target: constructionImportTarget,
+          document_type: "production_documentation",
+          file_extensions: extension ? [extension] : [],
+          header_aliases: headerAliases,
+          default_mapping: constructionImportMapping,
+          is_default: true,
+          is_active: true,
+          created_by: userId || null,
+        })
+        .select("id")
+        .single();
+      if (profileInsertError || !profileInsertData) {
+        setConstructionImportProfileNotice(
+          profileInsertError?.message ?? "Neizdevās izveidot profilu.",
+        );
+        setIsSavingConstructionImportProfile(false);
+        return;
+      }
+      profileId = profileInsertData.id as string;
+    }
+
+    const { data: latestVersion } = await supabase
+      .from("order_import_profile_versions")
+      .select("version_no")
+      .eq("profile_id", profileId)
+      .order("version_no", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextVersionNo = Number(latestVersion?.version_no ?? 0) + 1;
+
+    const { error: versionInsertError } = await supabase
+      .from("order_import_profile_versions")
+      .insert({
+        profile_id: profileId,
+        tenant_id: tenantId,
+        version_no: nextVersionNo,
+        change_note: "Saved from order import modal",
+        header_aliases: headerAliases,
+        default_mapping: constructionImportMapping,
+        created_by: userId || null,
+      });
+
+    if (versionInsertError) {
+      setConstructionImportProfileNotice(versionInsertError.message);
+      setIsSavingConstructionImportProfile(false);
+      return;
+    }
+
+    setConstructionImportProfileNotice("Profils saglabāts. Turpmāk imports notiks automātiskāk.");
+    if (constructionImportTarget === "items") {
+      setDefaultItemsImportProfileMapping(constructionImportMapping);
+    }
+    setIsSavingConstructionImportProfile(false);
+  }, [
+    constructionImportFileName,
+    constructionImportHeaders.length,
+    constructionImportMapping,
+    constructionImportProfileName,
+    constructionImportTarget,
+    t,
+    tenantId,
+    userId,
+  ]);
 
   const parseDimensionToken = useCallback((value: string | undefined) => {
     const normalized = String(value ?? "")
@@ -6772,6 +6919,28 @@ export default function OrderDetailPage() {
               </div>
             </div>
           ) : null}
+
+          <div className="space-y-2 border-t border-border pt-3">
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <Input
+                value={constructionImportProfileName}
+                onChange={(event) => setConstructionImportProfileName(event.target.value)}
+                placeholder="Profila nosaukums"
+                className="h-9"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleSaveConstructionImportProfile()}
+                disabled={isSavingConstructionImportProfile || constructionImportHeaders.length === 0}
+              >
+                {isSavingConstructionImportProfile ? "Saglabā..." : "Saglabāt kā noklusēto profilu"}
+              </Button>
+            </div>
+            {constructionImportProfileNotice ? (
+              <div className="text-xs text-muted-foreground">{constructionImportProfileNotice}</div>
+            ) : null}
+          </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
             <Button
