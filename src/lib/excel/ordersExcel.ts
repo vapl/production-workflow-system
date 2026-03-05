@@ -68,6 +68,12 @@ function parsePositionFromRow(cells: string[]): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
+function parseArticleFromRow(cells: string[]): string | null {
+  const joined = cells.join(" ");
+  const match = joined.match(/artikuls?\s*:\s*([^(]+?)(?=\s+poz[īi]cija\s*:|$)/i);
+  return match?.[1]?.trim() ?? null;
+}
+
 function detectHeaderRows(matrix: string[][]): HeaderMatch[] {
   const matches: HeaderMatch[] = [];
   matrix.forEach((row, rowIndex) => {
@@ -108,6 +114,7 @@ function parseBlockStructuredRows(
 
   const rows: ParsedOrdersWorkbook["rows"] = [];
   let activePosition = "";
+  let activeArticle = "";
   const semanticToHeader = new Map<string, string>();
 
   for (let rowIndex = 0; rowIndex < matrix.length; rowIndex += 1) {
@@ -115,6 +122,10 @@ function parseBlockStructuredRows(
     const parsedPosition = parsePositionFromRow(currentRow);
     if (parsedPosition) {
       activePosition = parsedPosition;
+    }
+    const parsedArticle = parseArticleFromRow(currentRow);
+    if (parsedArticle) {
+      activeArticle = parsedArticle;
     }
 
     const header = headerRows.find((item) => item.rowIndex === rowIndex);
@@ -195,7 +206,7 @@ function parseBlockStructuredRows(
 
       rows.push({
         [positionHeader]: explicitPosition || activePosition,
-        [itemTypeHeader]: "",
+        [itemTypeHeader]: activeArticle,
         [itemNameHeader]: itemName,
         [qtyHeader]: qty,
         dimensions,
