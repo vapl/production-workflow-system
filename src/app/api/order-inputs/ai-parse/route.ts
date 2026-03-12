@@ -1,6 +1,10 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import {
+  readConstructionImportParserProfile,
+  type ConstructionImportParserProfile,
+} from "@/app/(app)/orders/[orderId]/constructionImportConfig";
 import {
   getBearerToken,
   requirePermissionForRequest,
@@ -430,7 +434,7 @@ function inferValueWithSource(
 function heuristicRowsFromOcrText(text: string, columns: ParseColumn[]) {
   if (!text.trim()) return [];
 
-  // Stabils Pos regex – bez word boundary
+  // Stabils Pos regex ā€“ bez word boundary
   const posRegex = /Pos\.?\s*[A-Za-z0-9-]+/gi;
   const matches = Array.from(text.matchAll(posRegex));
 
@@ -447,7 +451,7 @@ function heuristicRowsFromOcrText(text: string, columns: ParseColumn[]) {
       blocks.push(text.slice(start, end).trim());
     });
   } else {
-    // ja nav Pos – treat whole doc kā vienu bloku
+    // ja nav Pos ā€“ treat whole doc kÄ vienu bloku
     blocks.push(text.trim());
   }
 
@@ -465,7 +469,7 @@ function heuristicRowsFromOcrText(text: string, columns: ParseColumn[]) {
     return row;
   });
 
-  // FILTRĒJAM TIKAI PĒC REĀLĀM KOLONNĀM
+  // FILTRÄ’JAM TIKAI PÄ’C REÄ€LÄ€M KOLONNÄ€M
   const rowsWithValues = rows.filter((row) =>
     columns.some((column) => {
       const value = row[column.key];
@@ -677,37 +681,199 @@ function parseSpreadsheetRows(bytes: Buffer, columns: ParseColumn[]) {
 type KnownConstructionRow = {
   position: string;
   system: string;
+  itemName: string;
+  dimensions: string;
   quantity: string;
   color: string;
   sourceKeys: Record<string, string>;
 };
 
-function parseConstructionRowsFromPdfText(text: string): KnownConstructionRow[] {
-  const lines = text
+function detectPositionValuePatterns(
+  rows: Record<string, unknown>[],
+): string[] {
+  const values = rows
+    .map((row) => String(row.position ?? "").trim())
+    .filter(Boolean);
+  if (values.length === 0) {
+    return [];
+  }
+
+  const patterns = new Set<string>();
+  if (values.every((value) => /^[A-Z]{1,3}\d{1,3}$/i.test(value))) {
+    patterns.add("alpha_numeric_mark");
+  }
+  if (values.some((value) => /^Pos\.?/i.test(value))) {
+    patterns.add("pos_prefix");
+  }
+  return Array.from(patterns);
+}
+
+function detectDimensionMarkers(rows: Record<string, unknown>[]): string[] {
+  const values = rows
+    .map((row) => String(row.dimensions ?? "").trim())
+    .filter(Boolean);
+  if (values.length === 0) {
+    return [];
+  }
+
+  const markers = new Set<string>();
+  if (values.some((value) => /\bB\s*=|\bH\s*=|\bW\s*=|\bD\s*=/i.test(value))) {
+    markers.add("named_axes");
+  }
+  if (values.some((value) => /x|Ć—/i.test(value))) {
+    markers.add("multiply_separator");
+  }
+  return Array.from(markers);
+}
+
+function extractDimensionsValue(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const namedAxes = normalized.match(
+    /\b(?:B|W|A)\s*=?\s*\d[\d\s.,]*.*?\b(?:H|P|D)\s*=?\s*\d[\d\s.,]*/i,
+  );
+  if (namedAxes?.[0]) {
+    return { value: namedAxes[0].trim(), sourceKey: "dimension-markers" };
+  }
+
+  const simple = normalized.match(
+    /\b\d[\d\s.,]*\s*(?:x|Ć—)\s*\d[\d\s.,]*(?:\s*(?:x|Ć—)\s*\d[\d\s.,]*)?/i,
+  );
+  if (simple?.[0]) {
+    return { value: simple[0].trim(), sourceKey: "dimension-values" };
+  }
+
+  return { value: "", sourceKey: "" };
+}
+
+function extractTypeOrNameFromBlock(
+  block: string,
+  parserProfile?: ConstructionImportParserProfile | null,
+) {
+  const lines = block
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstCandidate = lines.find(
+    (line) =>
+      line.length > 4 &&
+      !/^(quantity|skaits|qty|on|profiles?\s+colou?r|paint\s+colou?r|color|colour|kvm|kvm kopÄ)/i.test(
+        line,
+      ),
+  );
+  if (!firstCandidate) {
+    return { value: "", sourceKey: "" };
+  }
+
+  let value = firstCandidate
+    .replace(/^(?:Pos\.?\s*[A-Za-z0-9-]+\s*)/i, "")
+    .replace(/^[A-Z]{1,3}\d{1,3}\s*[-: ]\s*/i, "")
+    .replace(/\b(?:B|W|A)\s*=?\s*\d[\d\s.,]*.*$/i, "")
+    .replace(/\b\d[\d\s.,]*\s*(?:x|Ć—)\s*\d[\d\s.,]*(?:\s*(?:x|Ć—)\s*\d[\d\s.,]*)?/i, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const preferredNameSources =
+    parserProfile?.documentHints?.preferredSourceByColumn?.item_name ?? [];
+  if (!value && preferredNameSources.some((source) => /item_type|system/i.test(source))) {
+    value = extractSystemValue(block).value;
+  }
+
+  return { value, sourceKey: value ? "block-line" : "" };
+}
+
+function buildPdfBlocks(
+  text: string,
+  parserProfile?: ConstructionImportParserProfile | null,
+) {
+  const rawLines = text
     .replace(/\r/g, "")
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-  if (lines.length === 0) {
-    return [];
+  if (rawLines.length === 0) {
+    return [] as string[];
   }
 
   const posIndexes: number[] = [];
-  lines.forEach((line, index) => {
+  rawLines.forEach((line, index) => {
     if (/^Pos\.?/i.test(line)) {
       posIndexes.push(index);
     }
   });
-  if (posIndexes.length === 0) {
+  if (posIndexes.length > 0) {
+    return posIndexes.map((startIndex, idx) => {
+      const endIndex =
+        idx + 1 < posIndexes.length ? posIndexes[idx + 1] : rawLines.length;
+      return rawLines.slice(startIndex, endIndex).join("\n").trim();
+    });
+  }
+
+  const positionPatterns =
+    parserProfile?.documentHints?.positionValuePatterns ?? [];
+  const dimensionMarkers =
+    parserProfile?.documentHints?.dimensionMarkers ?? [];
+  const useAlphaMarks =
+    positionPatterns.includes("alpha_numeric_mark") ||
+    dimensionMarkers.includes("named_axes") ||
+    dimensionMarkers.includes("multiply_separator");
+
+  if (!useAlphaMarks) {
+    return [rawLines.join("\n").trim()];
+  }
+
+  const hasDimensionsInWindow = (startIndex: number) => {
+    const windowLines = rawLines.slice(startIndex, startIndex + 5);
+    return windowLines.some(
+      (candidate) =>
+        /\b(?:B|W|A)\s*=?\s*\d/i.test(candidate) ||
+        /\b(?:H|P|D)\s*=?\s*\d/i.test(candidate) ||
+        /\d\s*(?:x|×)\s*\d/i.test(candidate),
+    );
+  };
+
+  const startIndexes: number[] = [];
+  const markOnlyIndexes: number[] = [];
+  rawLines.forEach((line, index) => {
+    const lineHasMark = /^[A-Z]{1,3}\d{1,3}(?:\b|[-: ])/i.test(line);
+    if (!lineHasMark) {
+      return;
+    }
+    markOnlyIndexes.push(index);
+    if (hasDimensionsInWindow(index)) {
+      startIndexes.push(index);
+    }
+  });
+
+  const splitIndexes = startIndexes.length > 0 ? startIndexes : markOnlyIndexes;
+  if (splitIndexes.length >= 2) {
+    return splitIndexes.map((startIndex, idx) => {
+      const endIndex =
+        idx + 1 < splitIndexes.length ? splitIndexes[idx + 1] : rawLines.length;
+      return rawLines.slice(startIndex, endIndex).join("\n").trim();
+    });
+  }
+
+  return [rawLines.join("\n").trim()];
+}
+
+function parseConstructionRowsFromPdfText(
+  text: string,
+  parserProfile?: ConstructionImportParserProfile | null,
+): KnownConstructionRow[] {
+  const blocks = buildPdfBlocks(text, parserProfile);
+  if (blocks.length === 0) {
     return [];
   }
 
   const rows: KnownConstructionRow[] = [];
-  posIndexes.forEach((startIndex, idx) => {
-    const endIndex = idx + 1 < posIndexes.length ? posIndexes[idx + 1] : lines.length;
-    const block = lines.slice(startIndex, endIndex);
+  blocks.forEach((blockText) => {
+    const block = blockText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
     const posLine = block[0] ?? "";
     const positionMatch = posLine.match(/^Pos\.?\s*([A-Za-z0-9-]+)/i);
+    const alphaNumericPositionMatch = posLine.match(/^([A-Z]{1,3}\d{1,3})\b/i);
     const systemMatch = posLine.match(
       /^Pos\.?\s*[A-Za-z0-9-]+\s+(.+?)(?:\s*-\s*|\s*\(|\s*,|$)/i,
     );
@@ -746,14 +912,26 @@ function parseConstructionRowsFromPdfText(text: string): KnownConstructionRow[] 
       }
     }
 
+    const dimensions = extractDimensionsValue(blockText);
+    const typeOrName = extractTypeOrNameFromBlock(blockText, parserProfile);
+    const system = systemMatch?.[1]?.trim() ?? typeOrName.value;
+    const itemName = typeOrName.value || system;
+
     rows.push({
-      position: positionMatch?.[1]?.trim() ?? "",
-      system: systemMatch?.[1]?.trim() ?? "",
+      position:
+        positionMatch?.[1]?.trim() ??
+        alphaNumericPositionMatch?.[1]?.trim() ??
+        "",
+      system,
+      itemName,
+      dimensions: dimensions.value,
       quantity,
       color,
       sourceKeys: {
-        position: positionMatch ? "Pos." : "",
-        system: systemMatch ? "Pos. line" : "",
+        position: positionMatch ? "Pos." : alphaNumericPositionMatch ? "mark" : "",
+        system: systemMatch ? "Pos. line" : typeOrName.sourceKey,
+        itemName: typeOrName.sourceKey,
+        dimensions: dimensions.sourceKey,
         quantity: quantity ? "Quantity/On" : "",
         color: color ? "Profiles colour" : "",
       },
@@ -764,6 +942,8 @@ function parseConstructionRowsFromPdfText(text: string): KnownConstructionRow[] 
     (row) =>
       row.position.trim().length > 0 ||
       row.system.trim().length > 0 ||
+      row.itemName.trim().length > 0 ||
+      row.dimensions.trim().length > 0 ||
       row.quantity.trim().length > 0 ||
       row.color.trim().length > 0,
   );
@@ -805,6 +985,17 @@ function mapKnownConstructionRowsToColumns(
         label.includes("colour") ||
         aiKey.includes("color") ||
         aiKey.includes("colour");
+      const isItemName =
+        key.includes("name") ||
+        label.includes("name") ||
+        aiKey.includes("name");
+      const isDimensions =
+        key.includes("dimension") ||
+        key.includes("size") ||
+        label.includes("dimension") ||
+        label.includes("size") ||
+        aiKey.includes("dimension") ||
+        aiKey.includes("size");
 
       if (isPosition) {
         next[column.key] = source.position;
@@ -834,6 +1025,16 @@ function mapKnownConstructionRowsToColumns(
       if (isColor) {
         next[column.key] = source.color;
         sourceKeys[column.key] = source.sourceKeys.color;
+        return;
+      }
+      if (isItemName) {
+        next[column.key] = source.itemName;
+        sourceKeys[column.key] = source.sourceKeys.itemName;
+        return;
+      }
+      if (isDimensions) {
+        next[column.key] = source.dimensions;
+        sourceKeys[column.key] = source.sourceKeys.dimensions;
         return;
       }
       next[column.key] = "";
@@ -929,13 +1130,17 @@ function tryParseRowsJsonFromText(text: string, columns: ParseColumn[]) {
   return [] as Array<Record<string, unknown>>;
 }
 
-function parseRowsFromAnyConstructionText(text: string, columns: ParseColumn[]) {
+function parseRowsFromAnyConstructionText(
+  text: string,
+  columns: ParseColumn[],
+  parserProfile?: ConstructionImportParserProfile | null,
+) {
   const jsonRows = tryParseRowsJsonFromText(text, columns);
   if (jsonRows.length > 0) {
     return jsonRows;
   }
   const structured = mapKnownConstructionRowsToColumns(
-    parseConstructionRowsFromPdfText(text),
+    parseConstructionRowsFromPdfText(text, parserProfile),
     columns,
   );
   if (structured.length > 0) {
@@ -1129,10 +1334,147 @@ function normalizeRows(rows: unknown[], columns: ParseColumn[]) {
   return { rows: normalizedRows, mapping };
 }
 
+function buildSuggestedProfileDraftFromRows(args: {
+  fileName: string;
+  mimeType: string;
+  rows: Record<string, unknown>[];
+  mapping: Array<{ columnKey?: string; sourceKey: string }>;
+  rawText?: string;
+}) {
+  const fileNameTokens = String(args.fileName ?? "")
+    .toLowerCase()
+    .replace(/\.[a-z0-9]+$/i, "")
+    .split(/[^a-z0-9]+/i)
+    .map((value) => value.trim())
+    .filter((value) => value.length >= 3);
+
+  const sourceFieldKeys = Array.from(
+    new Set([
+      ...args.mapping.map((item) => String(item.sourceKey ?? "").trim()),
+      ...args.rows.flatMap((row) => Object.keys(row ?? {})),
+    ]),
+  ).filter(Boolean);
+
+  const sourceFieldLabels = sourceFieldKeys;
+
+  const preferredSourceByColumn = args.mapping.reduce<
+    Partial<Record<string, string[]>>
+  >((acc, item) => {
+    const columnKey = String(item.columnKey ?? "").trim();
+    const sourceKey = String(item.sourceKey ?? "").trim();
+    if (!columnKey || !sourceKey) {
+      return acc;
+    }
+    const next = new Set(acc[columnKey] ?? []);
+    next.add(sourceKey);
+    acc[columnKey] = Array.from(next);
+    return acc;
+  }, {});
+
+  const requiredValueKeys = Array.from(
+    new Set(
+      ["position", "item_name", "qty", "dimensions", "color"].filter((key) =>
+        args.rows.some((row) => String(row[key] ?? "").trim().length > 0),
+      ),
+    ),
+  );
+
+  const hasPositionLikeRows = args.rows.some((row) =>
+    /\bpos\b|poz/i.test(
+      Object.keys(row ?? {})
+        .concat(Object.values(row ?? {}).map((value) => String(value ?? "")))
+        .join(" "),
+    ),
+  );
+
+  const normalizedRawText = String(args.rawText ?? "").toLowerCase();
+  const layoutMarkers = [
+    args.mimeType.toLowerCase().includes("pdf") ? "pdf" : "spreadsheet",
+    hasPositionLikeRows ? "position_like_rows" : "plain_rows",
+    normalizedRawText.includes("artikuls") ? "article_label" : "",
+    normalizedRawText.includes("kvm") ? "kvm_label" : "",
+    /\bpos\.?\b/i.test(normalizedRawText) ? "position_label" : "",
+    normalizedRawText.includes("profiles colour") ||
+    normalizedRawText.includes("profiles color")
+      ? "profiles_colour_label"
+      : "",
+  ].filter(Boolean);
+
+  return {
+    layout: "flat_table" as const,
+    documentHints: {
+      fileNameTokens,
+      sourceFieldKeys,
+      sourceFieldLabels,
+      layoutMarkers,
+      requiredValueKeys,
+      positionValuePatterns: detectPositionValuePatterns(args.rows),
+      dimensionMarkers: detectDimensionMarkers(args.rows),
+      preferredSourceByColumn,
+    },
+  };
+}
+
+function applyPdfTemplateProfileHints(
+  rows: Record<string, unknown>[],
+  parserProfile: ConstructionImportParserProfile | null,
+) {
+  if (!parserProfile || rows.length === 0) {
+    return rows;
+  }
+
+  const isUnitLike =
+    parserProfile.pdfRules?.rowSelection !== "component_like_only";
+
+  const everyNameMissing = rows.every(
+    (row) => String(row.item_name ?? "").trim().length === 0,
+  );
+  const enoughTypeValues =
+    rows.filter((row) => String(row.item_type ?? "").trim().length > 0).length >=
+    Math.max(1, Math.ceil(rows.length * 0.6));
+  const enoughSkuValues =
+    rows.filter((row) => String(row.sku ?? "").trim().length > 0).length >=
+    Math.max(1, Math.ceil(rows.length * 0.6));
+
+  return rows.map((row) => {
+    const next = { ...row };
+    const preferredNameSources =
+      parserProfile.documentHints?.preferredSourceByColumn?.item_name ?? [];
+    const namePrefersType = preferredNameSources.some((value) =>
+      /item_type|system/i.test(String(value)),
+    );
+    const namePrefersSku = preferredNameSources.some((value) =>
+      /sku|artikul/i.test(String(value)),
+    );
+
+    if (
+      isUnitLike &&
+      String(next.item_name ?? "").trim().length === 0 &&
+      everyNameMissing
+    ) {
+      if (
+        (namePrefersType || enoughTypeValues) &&
+        String(next.item_type ?? "").trim().length > 0
+      ) {
+        next.item_name = String(next.item_type ?? "").trim();
+      } else if (
+        (namePrefersSku || enoughSkuValues) &&
+        String(next.sku ?? "").trim().length > 0
+      ) {
+        next.item_name = String(next.sku ?? "").trim();
+      }
+    }
+
+    return next;
+  });
+}
+
 async function runOpenAiParse(
   file: ParsedDocumentInput,
   columns: ParseColumn[],
   extractedPdfText: string,
+  target: "items" | "bom",
+  parserProfile?: ConstructionImportParserProfile | null,
 ) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -1177,6 +1519,10 @@ async function runOpenAiParse(
   );
   const rowSchemaRequired = columns.map((column) => column.key);
   const extractedTextSnippet = extractedPdfText.slice(0, 50000);
+  const targetInstruction =
+    target === "bom"
+      ? "Extract only component/material rows for the selected manufacturing unit. Exclude parent unit rows, document summaries, headers, notes, and unrelated metadata."
+      : "Extract only manufacturing unit rows. Exclude component/material rows, child part rows, document summaries, headers, notes, and unrelated metadata.";
 
   let openAiFileId = "";
   try {
@@ -1272,7 +1618,10 @@ async function runOpenAiParse(
             content: [
               {
                 type: "input_text",
-                text: "You extract manufacturing row data from technical drawing PDFs. Use OCR/vision reading for labels, dimensions and the left-side specification blocks. Return only structured rows.",
+                text:
+                  "You extract manufacturing row data from technical drawing PDFs. " +
+                  targetInstruction +
+                  " Use OCR/vision reading for labels, dimensions and specification blocks. Return only structured rows.",
               },
             ],
           },
@@ -1284,6 +1633,7 @@ async function runOpenAiParse(
                 text:
                   `Map the PDF content to table rows with these target columns: ${JSON.stringify(promptColumns)}. ` +
                   "Use source cues like position (Pos), system/model names, quantity/skaits/qty and color/colour fields. " +
+                  `${targetInstruction} ` +
                   "If a value is missing, return empty string for that column. Return rows only if they are grounded in document content.\n\n" +
                   (extractedTextSnippet
                     ? `Extracted PDF text:\n${extractedTextSnippet}`
@@ -1354,10 +1704,15 @@ async function runOpenAiParse(
       const parsedFromPdfText = parseRowsFromAnyConstructionText(
         extractedPdfText,
         columns,
+        parserProfile,
       );
-      if (parsedFromPdfText.length > 0) {
+      const filteredParsedFromPdfText = filterPdfRowsForTarget(
+        parsedFromPdfText,
+        target,
+      );
+      if (filteredParsedFromPdfText.length > 0) {
         return {
-          rows: parsedFromPdfText,
+          rows: filteredParsedFromPdfText,
           model: "local-pdf-text-heuristic",
           rawText: extractedPdfText,
         };
@@ -1379,18 +1734,29 @@ async function runOpenAiParse(
         const parsedFromModelText = parseRowsFromAnyConstructionText(
           result.rawText,
           columns,
+          parserProfile,
         );
-        if (parsedFromModelText.length > 0) {
+        const filteredParsedFromModelText = filterPdfRowsForTarget(
+          parsedFromModelText,
+          target,
+        );
+        if (filteredParsedFromModelText.length > 0) {
           return {
-            rows: parsedFromModelText,
+            rows: filteredParsedFromModelText,
             model: `${model} response-text heuristic (${triedModels.join(" -> ")})`,
             rawText: result.rawText,
           };
         }
       }
-      if (result.rows.length > 0) {
+      const candidateAiRows = (result.rows ?? []).filter(
+        (row): row is Record<string, unknown> =>
+          Boolean(row) && typeof row === "object" && !Array.isArray(row),
+      );
+      const filteredAiRows = filterPdfRowsForTarget(candidateAiRows, target);
+      if (filteredAiRows.length > 0) {
         return {
           ...result,
+          rows: filteredAiRows,
           model: `${result.model} (${triedModels.join(" -> ")})`,
         };
       }
@@ -1402,10 +1768,15 @@ async function runOpenAiParse(
         const parsedFromOcrText = parseRowsFromAnyConstructionText(
           ocr.text,
           columns,
+          parserProfile,
         );
-        if (parsedFromOcrText.length > 0) {
+        const filteredParsedFromOcrText = filterPdfRowsForTarget(
+          parsedFromOcrText,
+          target,
+        );
+        if (filteredParsedFromOcrText.length > 0) {
           return {
-            rows: parsedFromOcrText,
+            rows: filteredParsedFromOcrText,
             model: `${model} heuristic (${triedModels.join(" -> ")})`,
             rawText: ocr.text,
           };
@@ -1422,6 +1793,41 @@ async function runOpenAiParse(
       await deleteOpenAiFile(apiKey, openAiFileId);
     }
   }
+}
+
+function filterPdfRowsForTarget(
+  rows: Record<string, unknown>[],
+  target: "items" | "bom",
+) {
+  if (rows.length === 0) {
+    return rows;
+  }
+
+  const hasValue = (value: unknown) => String(value ?? "").trim().length > 0;
+  const itemLikeRows = rows.filter((row) => {
+    const hasPosition = hasValue(row.position);
+    const hasSku = hasValue(row.sku);
+    const hasItemType = hasValue(row.item_type);
+    const hasItemName = hasValue(row.item_name);
+    const hasDimensions = hasValue(row.dimensions);
+    const hasMaterial = hasValue(row.material);
+    return (
+      (hasPosition || hasSku || hasItemType || hasItemName) &&
+      (hasDimensions || !hasMaterial)
+    );
+  });
+  const componentLikeRows = rows.filter((row) => {
+    const hasParent = hasValue(row.parent_article);
+    const hasMaterial = hasValue(row.material);
+    const hasName = hasValue(row.item_name);
+    const hasDimensions = hasValue(row.dimensions);
+    return hasParent || (hasName && hasMaterial) || (hasMaterial && hasDimensions);
+  });
+
+  if (target === "bom") {
+    return componentLikeRows.length > 0 ? componentLikeRows : rows;
+  }
+  return itemLikeRows.length > 0 ? itemLikeRows : rows;
 }
 
 function isPdfLike(name: string, mimeType?: string | null) {
@@ -1508,13 +1914,30 @@ export async function POST(request: Request) {
   const attachmentId =
     typeof body.attachmentId === "string" ? body.attachmentId.trim() : "";
   const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  const document =
+    body.document && typeof body.document === "object"
+      ? (body.document as {
+          name?: unknown;
+          mimeType?: unknown;
+          base64?: unknown;
+        })
+      : null;
   const columns = Array.isArray(body.columns)
     ? (body.columns as ParseColumn[])
     : [];
+  const parserProfile =
+    body.parserProfile && typeof body.parserProfile === "object"
+      ? readConstructionImportParserProfile(body.parserProfile) ??
+        readConstructionImportParserProfile({
+          parser_profile: body.parserProfile,
+        })
+      : null;
+  const target = body.target === "bom" ? "bom" : "items";
+  const skipAi = body.skipAi === true;
 
-  if (!attachmentId) {
+  if (!attachmentId && !document) {
     return NextResponse.json(
-      { error: "attachmentId is required." },
+      { error: "attachmentId or document is required." },
       { status: 400 },
     );
   }
@@ -1538,65 +1961,117 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: attachment } = await admin
-    .from("order_attachments")
-    .select("id, order_id, tenant_id, name, url, mime_type, size")
-    .eq("id", attachmentId)
-    .eq("order_id", orderId)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-  if (!attachment?.url) {
-    return NextResponse.json(
-      { error: "Attachment not found." },
-      { status: 404 },
-    );
-  }
-  const isPdfAttachment = isPdfLike(
-    attachment.name ?? "",
-    attachment.mime_type,
-  );
-  const isSpreadsheetAttachment = isSpreadsheetLike(
-    attachment.name ?? "",
-    attachment.mime_type,
-  );
-  if (!isPdfAttachment && !isSpreadsheetAttachment) {
-    return NextResponse.json(
-      { error: "Selected attachment must be PDF, XLSX, or XLS." },
-      { status: 400 },
-    );
-  }
   const maxFileSizeBytes = 20 * 1024 * 1024;
-  if ((attachment.size ?? 0) > maxFileSizeBytes) {
+  let fileName = "";
+  let mimeType = "";
+  let bytes: Buffer | null = null;
+  let isPdfAttachment = false;
+  let isSpreadsheetAttachment = false;
+
+  if (attachmentId) {
+    const { data: attachment } = await admin
+      .from("order_attachments")
+      .select("id, order_id, tenant_id, name, url, mime_type, size")
+      .eq("id", attachmentId)
+      .eq("order_id", orderId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (!attachment?.url) {
+      return NextResponse.json(
+        { error: "Attachment not found." },
+        { status: 404 },
+      );
+    }
+    isPdfAttachment = isPdfLike(attachment.name ?? "", attachment.mime_type);
+    isSpreadsheetAttachment = isSpreadsheetLike(
+      attachment.name ?? "",
+      attachment.mime_type,
+    );
+    if (!isPdfAttachment && !isSpreadsheetAttachment) {
+      return NextResponse.json(
+        { error: "Selected attachment must be PDF, XLSX, or XLS." },
+        { status: 400 },
+      );
+    }
+    if ((attachment.size ?? 0) > maxFileSizeBytes) {
+      return NextResponse.json(
+        { error: "PDF exceeds 20MB limit." },
+        { status: 400 },
+      );
+    }
+
+    const bucket =
+      process.env.NEXT_PUBLIC_SUPABASE_BUCKET || "order-attachments";
+    const { data: download, error: downloadError } = await admin.storage
+      .from(bucket)
+      .download(attachment.url);
+    if (downloadError || !download) {
+      return NextResponse.json(
+        { error: downloadError?.message ?? "Failed to load attachment." },
+        { status: 500 },
+      );
+    }
+    if (download.size > maxFileSizeBytes) {
+      return NextResponse.json(
+        { error: "PDF exceeds 20MB limit." },
+        { status: 400 },
+      );
+    }
+
+    fileName = attachment.name ?? "document.pdf";
+    mimeType = attachment.mime_type ?? "application/pdf";
+    bytes = Buffer.from(await download.arrayBuffer());
+  } else if (document) {
+    const base64 =
+      typeof document.base64 === "string" ? document.base64.trim() : "";
+    fileName = typeof document.name === "string" ? document.name : "document.pdf";
+    mimeType =
+      typeof document.mimeType === "string"
+        ? document.mimeType
+        : "application/pdf";
+    if (!base64) {
+      return NextResponse.json(
+        { error: "document.base64 is required." },
+        { status: 400 },
+      );
+    }
+    bytes = Buffer.from(base64, "base64");
+    if (bytes.length > maxFileSizeBytes) {
+      return NextResponse.json(
+        { error: "PDF exceeds 20MB limit." },
+        { status: 400 },
+      );
+    }
+    isPdfAttachment = isPdfLike(fileName, mimeType);
+    isSpreadsheetAttachment = isSpreadsheetLike(fileName, mimeType);
+    if (!isPdfAttachment && !isSpreadsheetAttachment) {
+      return NextResponse.json(
+        { error: "Selected document must be PDF, XLSX, or XLS." },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (!bytes) {
     return NextResponse.json(
-      { error: "PDF exceeds 20MB limit." },
+      { error: "Failed to load document bytes." },
       { status: 400 },
     );
   }
 
-  const bucket = process.env.NEXT_PUBLIC_SUPABASE_BUCKET || "order-attachments";
-  const { data: download, error: downloadError } = await admin.storage
-    .from(bucket)
-    .download(attachment.url);
-  if (downloadError || !download) {
-    return NextResponse.json(
-      { error: downloadError?.message ?? "Failed to load attachment." },
-      { status: 500 },
-    );
-  }
-  if (download.size > maxFileSizeBytes) {
-    return NextResponse.json(
-      { error: "PDF exceeds 20MB limit." },
-      { status: 400 },
-    );
-  }
-
-  const bytes = Buffer.from(await download.arrayBuffer());
   if (isSpreadsheetAttachment) {
     const spreadsheet = parseSpreadsheetRows(bytes, validColumns);
     const normalizedSpreadsheet = normalizeRows(spreadsheet.rows, validColumns);
-    return NextResponse.json({
-      rows: normalizedSpreadsheet.rows,
-      mapping: normalizedSpreadsheet.mapping,
+      return NextResponse.json({
+        rows: normalizedSpreadsheet.rows,
+        mapping: normalizedSpreadsheet.mapping,
+        parserProfileDraft: buildSuggestedProfileDraftFromRows({
+          fileName,
+          mimeType,
+          rows: normalizedSpreadsheet.rows,
+          mapping: normalizedSpreadsheet.mapping,
+          rawText: "",
+        }),
       detectedRows: normalizedSpreadsheet.rows.length,
       parserModel: spreadsheet.model,
       parserRawTextPreview: "",
@@ -1604,29 +2079,86 @@ export async function POST(request: Request) {
   }
   const extractedPdfText = await extractPdfText(bytes);
   const structuredRows = mapKnownConstructionRowsToColumns(
-    parseConstructionRowsFromPdfText(extractedPdfText),
+    parseConstructionRowsFromPdfText(extractedPdfText, parserProfile),
     validColumns,
   );
   if (structuredRows.length > 0) {
     const normalizedStructured = normalizeRows(structuredRows, validColumns);
-    if (normalizedStructured.rows.length > 0) {
+    const structuredRowsForTarget = filterPdfRowsForTarget(
+      applyPdfTemplateProfileHints(normalizedStructured.rows, parserProfile),
+      target,
+    );
+    if (structuredRowsForTarget.length > 0) {
       return NextResponse.json({
-        rows: normalizedStructured.rows,
+        rows: structuredRowsForTarget,
         mapping: normalizedStructured.mapping,
-        detectedRows: normalizedStructured.rows.length,
+        parserProfileDraft: buildSuggestedProfileDraftFromRows({
+          fileName,
+          mimeType,
+          rows: structuredRowsForTarget,
+          mapping: normalizedStructured.mapping,
+          rawText: extractedPdfText,
+        }),
+        detectedRows: structuredRowsForTarget.length,
         parserModel: "pdf-structured-parser",
         parserRawTextPreview: extractedPdfText.slice(0, 300),
       });
     }
   }
+  const localRows = parseRowsFromAnyConstructionText(
+    extractedPdfText,
+    validColumns,
+    parserProfile,
+  );
+  if (localRows.length > 0) {
+    const localNormalized = normalizeRows(localRows, validColumns);
+    const localRowsForTarget = filterPdfRowsForTarget(
+      applyPdfTemplateProfileHints(localNormalized.rows, parserProfile),
+      target,
+    );
+    if (localRowsForTarget.length > 0) {
+      return NextResponse.json({
+        rows: localRowsForTarget,
+        mapping: localNormalized.mapping,
+        parserProfileDraft: buildSuggestedProfileDraftFromRows({
+          fileName,
+          mimeType,
+          rows: localRowsForTarget,
+          mapping: localNormalized.mapping,
+          rawText: extractedPdfText,
+        }),
+        detectedRows: localRowsForTarget.length,
+        parserModel: skipAi ? "pdf-template-parser" : "local-pdf-text-heuristic",
+        parserRawTextPreview: extractedPdfText.slice(0, 300),
+      });
+    }
+  }
+  if (skipAi) {
+    return NextResponse.json({
+      rows: [],
+      mapping: [],
+      parserProfileDraft: buildSuggestedProfileDraftFromRows({
+        fileName,
+        mimeType,
+        rows: [],
+        mapping: [],
+        rawText: extractedPdfText,
+      }),
+      detectedRows: 0,
+      parserModel: "pdf-template-parser-empty",
+      parserRawTextPreview: extractedPdfText.slice(0, 300),
+    });
+  }
   const parsed = await runOpenAiParse(
     {
-      name: attachment.name ?? "document.pdf",
-      mimeType: attachment.mime_type ?? "application/pdf",
+      name: fileName || "document.pdf",
+      mimeType: mimeType || "application/pdf",
       bytes,
     },
     validColumns,
     extractedPdfText,
+    target,
+    parserProfile,
   );
   if ("error" in parsed) {
     return NextResponse.json(
@@ -1647,7 +2179,11 @@ export async function POST(request: Request) {
       : extractedPdfText,
   );
   const normalized = normalizeRows(sanitizedRows, validColumns);
-  if (normalized.rows.length === 0) {
+  const normalizedRowsWithTemplateHints = filterPdfRowsForTarget(
+    applyPdfTemplateProfileHints(normalized.rows, parserProfile),
+    target,
+  );
+  if (normalizedRowsWithTemplateHints.length === 0) {
     const sourceText =
       parsed.rawText && parsed.rawText.trim().length > 0
         ? parsed.rawText
@@ -1657,11 +2193,22 @@ export async function POST(request: Request) {
 
     if (heuristicRows.length > 0) {
       const heuristicNormalized = normalizeRows(heuristicRows, validColumns);
+      const heuristicRowsForTarget = filterPdfRowsForTarget(
+        applyPdfTemplateProfileHints(heuristicNormalized.rows, parserProfile),
+        target,
+      );
 
       return NextResponse.json({
-        rows: heuristicNormalized.rows,
+        rows: heuristicRowsForTarget,
         mapping: heuristicNormalized.mapping,
-        detectedRows: heuristicNormalized.rows.length,
+        parserProfileDraft: buildSuggestedProfileDraftFromRows({
+          fileName,
+          mimeType,
+          rows: heuristicRowsForTarget,
+          mapping: heuristicNormalized.mapping,
+          rawText: sourceText,
+        }),
+        detectedRows: heuristicRowsForTarget.length,
         parserModel: `${parsed.model} -> heuristic-final`,
         parserRawTextPreview: sourceText.slice(0, 300),
       });
@@ -1669,10 +2216,18 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({
-    rows: normalized.rows,
+    rows: normalizedRowsWithTemplateHints,
     mapping: normalized.mapping,
-    detectedRows: normalized.rows.length,
+    parserProfileDraft: buildSuggestedProfileDraftFromRows({
+      fileName,
+      mimeType,
+      rows: normalizedRowsWithTemplateHints,
+      mapping: normalized.mapping,
+      rawText: parsed.rawText && parsed.rawText.trim().length > 0 ? parsed.rawText : extractedPdfText,
+    }),
+    detectedRows: normalizedRowsWithTemplateHints.length,
     parserModel: parsed.model,
     parserRawTextPreview: parsed.rawText.slice(0, 300),
   });
 }
+

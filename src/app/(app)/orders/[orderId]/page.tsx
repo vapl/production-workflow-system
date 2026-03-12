@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -110,45 +110,48 @@ import {
   mapOrderItemRow,
 } from "@/lib/domain/orderItems";
 import {
+  getConstructionColumnPresentationKey,
+  getLocalizedConstructionColumnDisplayLabel,
+  localizeConstructionColumnLabel,
+} from "@/lib/domain/constructionSchema";
+import {
   getOrderFieldLabel,
   getOrderPriorityLabel,
   getOrderStatusLabel,
 } from "@/lib/domain/orderFieldPresentation";
 import { useAssignmentLabels } from "@/hooks/useAssignmentLabels";
+import { parseOrdersWorkbookDetailed } from "@/lib/excel/ordersExcel";
+import { ConstructionImportModal } from "./components/ConstructionImportModal";
 import {
-  parseOrdersWorkbookDetailed,
-} from "@/lib/excel/ordersExcel";
+  buildConstructionImportParserProfile,
+  CONSTRUCTION_IMPORT_MAPPING_KEYS,
+  CORE_CONSTRUCTION_IMPORT_MAPPING_KEYS,
+  CONSTRUCTION_IMPORT_STEPS,
+  DEFAULT_CONSTRUCTION_IMPORT_BLOCK_RULES,
+  mergeConstructionImportParserProfileDraft,
+  readConstructionImportParserProfile,
+  readConstructionImportRowTypeHints,
+  REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS,
+  type ConstructionImportBlockRules,
+  type ConstructionImportLayout,
+  type ConstructionImportParserProfileDraft,
+  type ConstructionImportParserProfile,
+  type ConstructionImportPdfRules,
+  type ConstructionImportRowTypeHints,
+  type ConstructionImportTarget,
+} from "./constructionImportConfig";
 import {
   canEditOrderInlineField,
   canEditOrderInputs as canEditOrderInputsByRole,
 } from "@/lib/domain/orderPermissions";
 
-const CONSTRUCTION_IMPORT_MAPPING_KEYS = [
-  "position",
-  "item_type",
-  "item_name",
-  "qty",
-  "dimensions",
-  "material",
+const ORDER_DETAIL_TAB_VALUES = [
+  "overview",
+  "files",
+  "details",
+  "external",
+  "history",
 ] as const;
-
-const REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS = ["item_name"] as const;
-
-const ORDER_DETAIL_TAB_VALUES = ["overview", "files", "details", "external", "history"] as const;
-
-const CONSTRUCTION_IMPORT_STEPS = ["source", "mapping", "review", "save"] as const;
-
-const CONSTRUCTION_IMPORT_LABELS: Record<
-  (typeof CONSTRUCTION_IMPORT_MAPPING_KEYS)[number],
-  string
-> = {
-  position: "Pozicija",
-  item_type: "Tips",
-  item_name: "Nosaukums",
-  qty: "Daudzums",
-  dimensions: "Izmeri",
-  material: "Materials / apdare",
-};
 
 function getFileExtension(fileName: string) {
   const dotIndex = fileName.lastIndexOf(".");
@@ -160,6 +163,44 @@ function getFileExtension(fileName: string) {
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+function hasConstructionImportDraftValue(
+  row: Record<string, string>,
+  key: string,
+) {
+  return String(row[key] ?? "").trim().length > 0;
+}
+
+function isUnitLikeConstructionImportDraftRow(row: Record<string, string>) {
+  const hasPosition = hasConstructionImportDraftValue(row, "position");
+  const hasSku = hasConstructionImportDraftValue(row, "sku");
+  const hasItemType = hasConstructionImportDraftValue(row, "item_type");
+  const hasParentArticle = hasConstructionImportDraftValue(
+    row,
+    "parent_article",
+  );
+
+  return !hasParentArticle && (hasPosition || hasSku || hasItemType);
+}
+
+function isComponentLikeConstructionImportDraftRow(
+  row: Record<string, string>,
+) {
+  const hasParentArticle = hasConstructionImportDraftValue(
+    row,
+    "parent_article",
+  );
+  const hasItemType = hasConstructionImportDraftValue(row, "item_type");
+  const hasMaterial = hasConstructionImportDraftValue(row, "material");
+  const hasItemName = hasConstructionImportDraftValue(row, "item_name");
+  const hasQty = hasConstructionImportDraftValue(row, "qty");
+
+  if (hasParentArticle) {
+    return true;
+  }
+
+  return !hasItemType && hasItemName && hasQty && hasMaterial;
+}
 
 function formatFileSize(bytes?: number | null) {
   if (!bytes || bytes <= 0) {
@@ -224,9 +265,10 @@ type OrderItemImportBatchRow = {
 type OrderImportProfileRow = {
   id: string;
   profile_name: string;
-  target: "items" | "bom";
+  target: ConstructionImportTarget;
   file_extensions: string[] | null;
   header_aliases: Record<string, unknown> | null;
+  block_rules?: Record<string, unknown> | null;
   default_mapping: Record<string, string> | null;
   is_default: boolean;
   is_active: boolean;
@@ -680,49 +722,89 @@ export default function OrderDetailPage() {
   const [isParsingTableFieldId, setIsParsingTableFieldId] = useState<
     string | null
   >(null);
-  const [constructionImportFileName, setConstructionImportFileName] = useState("");
-  const [constructionImportSheetName, setConstructionImportSheetName] = useState("");
-  const [constructionImportHeaders, setConstructionImportHeaders] = useState<string[]>([]);
-  const [constructionImportRows, setConstructionImportRows] = useState<Record<string, unknown>[]>([]);
-  const [constructionImportMapping, setConstructionImportMapping] = useState<Record<string, string>>({});
+  const [constructionImportFileName, setConstructionImportFileName] =
+    useState("");
+  const [constructionImportSheetName, setConstructionImportSheetName] =
+    useState("");
+  const [constructionImportHeaders, setConstructionImportHeaders] = useState<
+    string[]
+  >([]);
+  const [constructionImportRows, setConstructionImportRows] = useState<
+    Record<string, unknown>[]
+  >([]);
+  const [constructionImportMapping, setConstructionImportMapping] = useState<
+    Record<string, string>
+  >({});
   const [savedConstructionImportMapping, setSavedConstructionImportMapping] =
     useState<Record<string, string> | null>(null);
-  const [defaultImportProfileMappingByTarget, setDefaultImportProfileMappingByTarget] =
-    useState<Record<"items" | "bom", Record<string, string> | null>>({
+  const [
+    defaultImportProfileMappingByTarget,
+    setDefaultImportProfileMappingByTarget,
+  ] = useState<Record<ConstructionImportTarget, Record<string, string> | null>>(
+    {
       items: null,
       bom: null,
-    });
+    },
+  );
   const [importProfilesByTarget, setImportProfilesByTarget] = useState<
-    Record<"items" | "bom", OrderImportProfileRow[]>
+    Record<ConstructionImportTarget, OrderImportProfileRow[]>
   >({
     items: [],
     bom: [],
   });
   const [constructionImportError, setConstructionImportError] = useState("");
-  const [constructionImportBatchId, setConstructionImportBatchId] = useState<string | null>(null);
-  const [constructionImportAiBridgeFieldId, setConstructionImportAiBridgeFieldId] =
-    useState<string | null>(null);
+  const [constructionImportBatchId, setConstructionImportBatchId] = useState<
+    string | null
+  >(null);
   const [isConstructionImportModalOpen, setIsConstructionImportModalOpen] =
     useState(false);
-  const [constructionImportDraftRows, setConstructionImportDraftRows] = useState<
-    Array<Record<string, string>>
-  >([]);
-  const [constructionImportTarget, setConstructionImportTarget] = useState<
-    "items" | "bom"
-  >("items");
+  const [constructionImportDraftRows, setConstructionImportDraftRows] =
+    useState<Array<Record<string, string>>>([]);
+  const [constructionImportTarget, setConstructionImportTarget] =
+    useState<ConstructionImportTarget>("items");
   const [constructionImportProfileName, setConstructionImportProfileName] =
     useState("");
-  const [isSavingConstructionImportProfile, setIsSavingConstructionImportProfile] =
-    useState(false);
+  const [
+    isSavingConstructionImportProfile,
+    setIsSavingConstructionImportProfile,
+  ] = useState(false);
   const [constructionImportProfileNotice, setConstructionImportProfileNotice] =
     useState("");
+  const [constructionImportMatchedProfileName, setConstructionImportMatchedProfileName] =
+    useState<string | null>(null);
+  const [constructionImportTemplateActionId, setConstructionImportTemplateActionId] =
+    useState<string | null>(null);
   const [constructionImportAiNotice, setConstructionImportAiNotice] =
     useState("");
-  const [isApplyingConstructionAiBootstrap, setIsApplyingConstructionAiBootstrap] =
+  const [constructionImportParseSource, setConstructionImportParseSource] =
+    useState<"template" | "template_fallback_ai" | "automatic" | null>(null);
+  const [constructionImportParserModel, setConstructionImportParserModel] =
+    useState<string | null>(null);
+  const [
+    constructionImportAiRowTypeHints,
+    setConstructionImportAiRowTypeHints,
+  ] = useState<{
+    productLikeRows?: number;
+    componentLikeRows?: number;
+    unknownRows?: number;
+    suggestedTarget?: ConstructionImportTarget;
+  } | null>(null);
+  const [
+    constructionImportAiParserProfileDraft,
+    setConstructionImportAiParserProfileDraft,
+  ] = useState<ConstructionImportParserProfileDraft | null>(null);
+  const [constructionImportParseMode, setConstructionImportParseMode] =
+    useState<ConstructionImportLayout>("flat_table");
+  const [
+    isApplyingConstructionAiBootstrap,
+    setIsApplyingConstructionAiBootstrap,
+  ] = useState(false);
+  const [isApplyingConstructionImport, setIsApplyingConstructionImport] =
     useState(false);
-  const [constructionImportStep, setConstructionImportStep] = useState<
-    (typeof CONSTRUCTION_IMPORT_STEPS)[number]
-  >("source");
+  const [constructionImportStep, setConstructionImportStep] =
+    useState<(typeof CONSTRUCTION_IMPORT_STEPS)[number]>("source");
+  const constructionImportParsedTargetRef =
+    useRef<ConstructionImportTarget | null>(null);
   const getConstructionRows = useCallback(
     (fieldId: string) =>
       ensureOrderInputTableRows(constructionRowsByFieldId[fieldId]),
@@ -756,6 +838,7 @@ export default function OrderDetailPage() {
   const [showDesktopStickyShadow, setShowDesktopStickyShadow] = useState(false);
   const [hideMobileFloatingControls, setHideMobileFloatingControls] =
     useState(false);
+  const constructionImportSourceFileRef = useRef<File | null>(null);
   const [isMobileSectionsOpen, setIsMobileSectionsOpen] = useState(false);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
   const lastScrollYRef = useRef(0);
@@ -906,7 +989,11 @@ export default function OrderDetailPage() {
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-  }, [orderState?.statusHistory, orderState?.comments, orderState?.attachments]);
+  }, [
+    orderState?.statusHistory,
+    orderState?.comments,
+    orderState?.attachments,
+  ]);
   const visibleHistoryEvents = useMemo(() => {
     const filtered =
       historyFilter === "all"
@@ -1235,15 +1322,14 @@ export default function OrderDetailPage() {
         fieldType: row.field_type as OrderInputField["fieldType"],
         unit: row.unit ?? undefined,
         options: row.options?.options ?? undefined,
-        columns:
-          (
-            row.options?.columns as Partial<OrderInputTableColumn>[] | undefined
-          )?.map((column) => ({
-            ...column,
-            isActive: column.isActive ?? true,
-            showInTable: column.showInTable ?? true,
-            showInProduction: column.showInProduction ?? true,
-          })) as OrderInputTableColumn[] | undefined,
+        columns: (
+          row.options?.columns as Partial<OrderInputTableColumn>[] | undefined
+        )?.map((column) => ({
+          ...column,
+          isActive: column.isActive ?? true,
+          showInTable: column.showInTable ?? true,
+          showInProduction: column.showInProduction ?? true,
+        })) as OrderInputTableColumn[] | undefined,
         showInTable: row.options?.showInTable ?? true,
         isPrimaryConstructionTable:
           row.options?.isPrimaryConstructionTable ?? false,
@@ -1388,8 +1474,10 @@ export default function OrderDetailPage() {
       }
       setOrderInputError("");
       const nextValues: Record<string, unknown> = {};
-      const nextConstructionValues: Record<string, Array<Record<string, unknown>>> =
-        {};
+      const nextConstructionValues: Record<
+        string,
+        Array<Record<string, unknown>>
+      > = {};
       (data ?? []).forEach((row) => {
         nextValues[row.field_id] = row.value ?? undefined;
       });
@@ -1465,7 +1553,9 @@ export default function OrderDetailPage() {
             if (isMounted && bomLinesResult.data) {
               const bomMap: Record<string, OrderItemBomLine[]> = {};
               bomLinesResult.data
-                .map((row) => mapOrderItemBomLineRow(row as OrderItemBomLineRow))
+                .map((row) =>
+                  mapOrderItemBomLineRow(row as OrderItemBomLineRow),
+                )
                 .forEach((line) => {
                   bomMap[line.orderItemId] = [
                     ...(bomMap[line.orderItemId] ?? []),
@@ -1485,12 +1575,17 @@ export default function OrderDetailPage() {
             tableFields[0] ??
             null;
           if (primaryField) {
-            const builtRows = buildConstructionRowsFromOrderItems(primaryField, items).map(
-              (row) =>
-                attachOrderInputTableRowDocuments(
-                  row,
-                  documentMap[getOrderInputTableRowId(row) ?? ""] ?? [],
-                ),
+            const builtRows = buildConstructionRowsFromOrderItems(
+              {
+                ...primaryField,
+                columns: primaryUnitConfiguredColumns,
+              },
+              items,
+            ).map((row) =>
+              attachOrderInputTableRowDocuments(
+                row,
+                documentMap[getOrderInputTableRowId(row) ?? ""] ?? [],
+              ),
             );
             nextConstructionValues[primaryField.id] = builtRows;
           }
@@ -2134,7 +2229,9 @@ export default function OrderDetailPage() {
   }, [activeOrderInputFields]);
   const primaryConstructionField = useMemo(
     () =>
-      constructionTableFields.find((field) => field.isPrimaryConstructionTable) ??
+      constructionTableFields.find(
+        (field) => field.isPrimaryConstructionTable,
+      ) ??
       constructionTableFields[0] ??
       null,
     [constructionTableFields],
@@ -2144,12 +2241,65 @@ export default function OrderDetailPage() {
       constructionTableFields.find((field) => field.isBomImportTable) ?? null,
     [constructionTableFields],
   );
+  const unitAttributeFields = useMemo(
+    () =>
+      activeOrderInputFields.filter(
+        (field) =>
+          (field.scope === "construction_attribute" ||
+            (!field.scope && field.groupKey === "production_scope")) &&
+          field.fieldType !== "table" &&
+          field.isActive,
+      ),
+    [activeOrderInputFields],
+  );
+  const primaryUnitConfiguredColumns = useMemo(() => {
+    const tableColumns = primaryConstructionField?.columns ?? [];
+    const customColumns: OrderInputTableColumn[] = unitAttributeFields.map((field) => ({
+      key: field.key,
+      label: field.label,
+      fieldType:
+        field.fieldType === "select"
+          ? "select"
+          : field.fieldType === "number"
+            ? "number"
+            : "text",
+      unit: field.unit ?? undefined,
+      options: field.options ?? [],
+      maxSelect: field.fieldType === "select" ? 1 : undefined,
+      isActive: field.isActive,
+      showInTable: field.showInTable,
+      showInProduction: field.showInProduction,
+      useInBomTable: false,
+      semanticKey: "custom" as const,
+    }));
+    return [...tableColumns, ...customColumns];
+  }, [primaryConstructionField?.columns, unitAttributeFields]);
+  const getUnitImportDraftKey = useCallback(
+    (column: { key: string; semanticKey?: string | null }) =>
+      (
+        {
+          position: "position",
+          sku: "sku",
+          item_type: "item_type",
+          item_name: "item_name",
+          qty: "qty",
+          dimensions: "dimensions",
+          color: "color",
+          material: "material",
+        } as Record<string, string>
+      )[column.semanticKey ?? column.key] ?? column.key,
+    [],
+  );
   const constructionImportMissingMappingKeys = useMemo(
     () =>
       REQUIRED_CONSTRUCTION_IMPORT_MAPPING_KEYS.filter(
-        (key) => !constructionImportMapping[key],
+        (key) =>
+          !constructionImportMapping[key] &&
+          !constructionImportDraftRows.some((row) =>
+            hasConstructionImportDraftValue(row, key),
+          ),
       ),
-    [constructionImportMapping],
+    [constructionImportDraftRows, constructionImportMapping],
   );
 
   const constructionImportInvalidRowCount = useMemo(() => {
@@ -2162,16 +2312,29 @@ export default function OrderDetailPage() {
     }).length;
   }, [constructionImportDraftRows]);
 
+  const isConstructionImportPdfFlow =
+    constructionImportFileName.toLowerCase().endsWith(".pdf");
+
   const isConstructionImportMappingReady =
     constructionImportHeaders.length > 0 && constructionImportRows.length > 0;
   const isConstructionImportReviewReady =
-    constructionImportDraftRows.length > 0 && constructionImportMissingMappingKeys.length === 0;
+    constructionImportDraftRows.length > 0 &&
+    (isConstructionImportPdfFlow ||
+      constructionImportMissingMappingKeys.length === 0);
 
   const constructionImportTargetSchemaColumns = useMemo(() => {
     if (constructionImportTarget === "bom") {
-      const configuredBomColumns = bomImportTableField?.columns?.map((column) => column.key) ?? [];
+      const configuredBomColumns =
+        bomImportTableField?.columns?.map((column) => column.key) ?? [];
       if (configuredBomColumns.length > 0) {
         return configuredBomColumns;
+      }
+      const configuredProductBomColumns =
+        primaryConstructionField?.columns
+          ?.filter((column) => column.useInBomTable ?? false)
+          .map((column) => column.key) ?? [];
+      if (configuredProductBomColumns.length > 0) {
+        return configuredProductBomColumns;
       }
       return [
         "component_code",
@@ -2182,12 +2345,162 @@ export default function OrderDetailPage() {
         "attributes.material",
       ];
     }
-    const columns = primaryConstructionField?.columns ?? [];
+    const columns = primaryUnitConfiguredColumns;
     return columns.map((column) => column.key);
   }, [
     bomImportTableField?.columns,
     constructionImportTarget,
-    primaryConstructionField?.columns,
+    primaryUnitConfiguredColumns,
+  ]);
+
+  const constructionImportPreviewColumns = useMemo(() => {
+    const itemsSemanticToDraftKey: Record<string, string> = {
+      position: "position",
+      sku: "sku",
+      item_type: "item_type",
+      item_name: "item_name",
+      qty: "qty",
+      dimensions: "dimensions",
+      color: "color",
+      material: "material",
+    };
+
+    const bomKeyToDraftKey: Record<string, string> = {
+      component_code: "position",
+      component_name: "item_name",
+      qty: "qty",
+      dimensions: "dimensions",
+      material: "material",
+    };
+
+    const localizePreviewLabel = (column: {
+      key: string;
+      semanticKey?: string | null;
+      label: string;
+    }) => getLocalizedConstructionColumnDisplayLabel(column, locale);
+
+    const hasDraftValue = (draftKey: string) =>
+      constructionImportDraftRows.some((row) => {
+        const value = row[draftKey];
+        if (value === null || value === undefined) {
+          return false;
+        }
+        return String(value).trim().length > 0;
+      });
+    const mappedDraftKeys = new Set(
+      Object.entries(constructionImportMapping)
+        .filter(([, value]) => String(value ?? "").trim().length > 0)
+        .map(([key]) => key),
+    );
+
+    const alwaysVisibleDraftKeys =
+      constructionImportTarget === "bom"
+        ? new Set<string>([
+            "parent_article",
+            "item_name",
+            "qty",
+            "dimensions",
+          ])
+        : new Set<string>([
+            "position",
+            "sku",
+            "item_name",
+            "qty",
+            "dimensions",
+          ]);
+
+    if (constructionImportTarget === "bom") {
+      const configuredBomColumns =
+        bomImportTableField?.columns?.filter(
+          (column) => column.isActive !== false,
+        ) ?? [];
+      const fallbackBomColumns =
+        configuredBomColumns.length > 0
+          ? configuredBomColumns
+          : (primaryConstructionField?.columns ?? []).filter(
+              (column) =>
+                column.isActive !== false && (column.useInBomTable ?? false),
+            );
+
+      const previewColumns = fallbackBomColumns
+        .map((column) => {
+          const draftKey =
+            bomKeyToDraftKey[column.key] ??
+            itemsSemanticToDraftKey[column.semanticKey ?? column.key];
+          if (!draftKey) {
+            return null;
+          }
+          return {
+            id: column.key,
+            label: localizePreviewLabel(column),
+            draftKey,
+            editable: true,
+          };
+        })
+        .filter(
+          (
+            column,
+          ): column is {
+            id: string;
+            label: string;
+            draftKey: string;
+            editable: boolean;
+          } => column !== null,
+        );
+
+      return [
+        {
+          id: "parent_article",
+          label: t("settings.orderInputs.columnLabels.sku"),
+          draftKey: "parent_article",
+          editable: false,
+        },
+        ...previewColumns,
+      ]
+        .filter(
+          (column) =>
+            alwaysVisibleDraftKeys.has(column.draftKey) ||
+            mappedDraftKeys.has(column.draftKey) ||
+            hasDraftValue(column.draftKey),
+        );
+    }
+
+    return primaryUnitConfiguredColumns
+      .filter((column) => column.isActive !== false)
+      .map((column) => {
+        const draftKey = getUnitImportDraftKey(column);
+        return {
+          id: column.key,
+          label: localizePreviewLabel(column),
+          draftKey,
+          editable: true,
+        };
+      })
+      .filter(
+        (
+          column,
+        ): column is {
+          id: string;
+          label: string;
+          draftKey: string;
+          editable: boolean;
+        } => column !== null,
+      )
+      .filter(
+        (column) =>
+          alwaysVisibleDraftKeys.has(column.draftKey) ||
+          mappedDraftKeys.has(column.draftKey) ||
+          hasDraftValue(column.draftKey),
+      );
+  }, [
+    bomImportTableField?.columns,
+    constructionImportDraftRows,
+    constructionImportMapping,
+    constructionImportTarget,
+    getUnitImportDraftKey,
+    locale,
+    primaryUnitConfiguredColumns,
+    t,
   ]);
 
   useEffect(() => {
@@ -2204,9 +2517,7 @@ export default function OrderDetailPage() {
         .limit(1)
         .maybeSingle();
       const mapping =
-        data &&
-        typeof data.mapping_profile === "object" &&
-        data.mapping_profile
+        data && typeof data.mapping_profile === "object" && data.mapping_profile
           ? (data.mapping_profile as Record<string, string>)
           : null;
       if (mapping) {
@@ -2225,17 +2536,23 @@ export default function OrderDetailPage() {
       const { data } = await supabase
         .from("order_import_profiles")
         .select(
-          "id, profile_name, target, file_extensions, header_aliases, default_mapping, is_default, is_active",
+          "id, profile_name, target, file_extensions, header_aliases, block_rules, default_mapping, is_default, is_active",
         )
         .eq("tenant_id", tenantId)
         .eq("is_active", true);
 
       const rows = (data ?? []) as OrderImportProfileRow[];
-      const nextByTarget: Record<"items" | "bom", OrderImportProfileRow[]> = {
+      const nextByTarget: Record<
+        ConstructionImportTarget,
+        OrderImportProfileRow[]
+      > = {
         items: [],
         bom: [],
       };
-      const nextDefaults: Record<"items" | "bom", Record<string, string> | null> = {
+      const nextDefaults: Record<
+        ConstructionImportTarget,
+        Record<string, string> | null
+      > = {
         items: null,
         bom: null,
       };
@@ -2243,7 +2560,11 @@ export default function OrderDetailPage() {
       rows.forEach((row) => {
         const target = row.target === "bom" ? "bom" : "items";
         nextByTarget[target].push(row);
-        if (row.is_default && row.default_mapping && typeof row.default_mapping === "object") {
+        if (
+          row.is_default &&
+          row.default_mapping &&
+          typeof row.default_mapping === "object"
+        ) {
           nextDefaults[target] = row.default_mapping;
         }
       });
@@ -2261,28 +2582,462 @@ export default function OrderDetailPage() {
     }
     setConstructionImportProfileName(
       constructionImportTarget === "bom"
-        ? "BOM importa profils"
-        : "Vienību importa profils",
+        ? t("orders.detail.importModalBomProfileName")
+        : t("orders.detail.importModalProductsProfileName"),
     );
-  }, [constructionImportProfileName, constructionImportTarget]);
+  }, [constructionImportProfileName, constructionImportTarget, t]);
+
+  const constructionImportMappingLabels = useMemo(
+    () => ({
+      position: t("settings.orderInputs.columnLabels.position"),
+      sku: t("settings.orderInputs.columnLabels.sku"),
+      item_type: t("orders.detail.importModalMapping.itemType"),
+      item_name: t("settings.orderInputs.columnLabels.itemName"),
+      qty: t("settings.orderInputs.columnLabels.qty"),
+      dimensions: t("settings.orderInputs.columnLabels.dimensions"),
+      color: t("settings.orderInputs.columnLabels.finishColor"),
+      material: t("settings.orderInputs.columnLabels.finishColor"),
+    }),
+    [t],
+  );
+
+  const constructionImportMappingFields = useMemo(() => {
+    const fields: Array<{ key: string; label: string }> = [];
+    const seen = new Set<string>();
+
+    const addField = (key: string, label: string) => {
+      if (!key || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      fields.push({ key, label });
+    };
+
+    const configuredColumns =
+      constructionImportTarget === "bom"
+        ? (
+            (bomImportTableField?.columns?.filter(
+              (column) => column.isActive !== false,
+            ) ?? []).length > 0
+              ? bomImportTableField?.columns?.filter(
+                  (column) => column.isActive !== false,
+                ) ?? []
+              : (primaryConstructionField?.columns ?? []).filter(
+                  (column) =>
+                    column.isActive !== false && (column.useInBomTable ?? false),
+                )
+          )
+            : primaryUnitConfiguredColumns.filter(
+                (column) => column.isActive !== false,
+              );
+
+    configuredColumns.forEach((column) => {
+      const draftKey =
+        constructionImportTarget === "bom"
+          ? ({
+              component_code: "position",
+              component_name: "item_name",
+              qty: "qty",
+              dimensions: "dimensions",
+              material: "material",
+            } as Record<string, string>)[column.key] ??
+            ({
+              position: "position",
+              sku: "sku",
+              item_type: "item_type",
+              item_name: "item_name",
+              qty: "qty",
+              dimensions: "dimensions",
+              color: "color",
+              material: "material",
+            } as Record<string, string>)[column.semanticKey ?? column.key] ??
+            column.key
+          : getUnitImportDraftKey(column);
+
+      addField(
+        draftKey,
+        getLocalizedConstructionColumnDisplayLabel(column, locale),
+      );
+    });
+
+    return fields;
+  }, [
+    bomImportTableField?.columns,
+    constructionImportTarget,
+    getUnitImportDraftKey,
+    locale,
+    primaryUnitConfiguredColumns,
+  ]);
+
+  const constructionImportHeaderOptions = useMemo(() => {
+    const sourceHeaderLabels: Record<string, string> = {
+      pozicija: "Pozīcija",
+      position: "Position",
+      artikuls: "Artikuls",
+      article: "Article",
+      sku: "SKU",
+      item_type: "Tips",
+      item_name: "Nosaukums",
+      artikulu_skaits: "Artikulu skaits",
+      qty: "Daudzums",
+      izmeri: "Izmēri",
+      dimensions: "Dimensions",
+      kvm: "KVM",
+      kvm_total: "KVM kopā",
+      color: "Apdare / krāsa",
+      material: "Materiāls",
+      parent_article: "Vecākartikuls",
+    };
+
+    const availableHeaders = Array.from(
+      new Set([
+        ...constructionImportHeaders,
+        ...constructionImportRows.flatMap((row) => Object.keys(row ?? {})),
+      ]),
+    );
+
+    return availableHeaders.map((header) => ({
+      value: header,
+      label: sourceHeaderLabels[header] ?? header,
+    }));
+  }, [constructionImportHeaders, constructionImportRows, t]);
+
+  const constructionImportTargetMeta = useMemo(
+    () => ({
+      items: {
+        label: t("orders.detail.importModalTargets.items.label"),
+        profileName: t("orders.detail.importModalProductsProfileName"),
+        targetTableLabel: t(
+          "orders.detail.importModalTargets.items.tableLabel",
+        ),
+        targetDescription: t(
+          "orders.detail.importModalTargets.items.description",
+        ),
+        applyLabel: t("orders.detail.importModalTargets.items.apply"),
+      },
+      bom: {
+        label: t("orders.detail.importModalTargets.bom.label"),
+        profileName: t("orders.detail.importModalBomProfileName"),
+        targetTableLabel: t("orders.detail.importModalTargets.bom.tableLabel"),
+        targetDescription: t(
+          "orders.detail.importModalTargets.bom.description",
+        ),
+        applyLabel: t("orders.detail.importModalTargets.bom.apply"),
+      },
+    }),
+    [t],
+  );
+
+  const activeDefaultImportProfileName = useMemo(
+    () =>
+      (
+        importProfilesByTarget[constructionImportTarget] ?? []
+      ).find((profile) => profile.is_default)?.profile_name ?? null,
+    [constructionImportTarget, importProfilesByTarget],
+  );
+
+  const importTemplatesForTarget = useMemo(
+    () =>
+      (importProfilesByTarget[constructionImportTarget] ?? []).map(
+        (profile) => ({
+          id: profile.id,
+          name: profile.profile_name,
+          isDefault: profile.is_default,
+        }),
+      ),
+    [constructionImportTarget, importProfilesByTarget],
+  );
+
+  const getOrderInputFieldDisplayLabel = useCallback(
+    (field: OrderInputField) => {
+      if (
+        field.fieldType === "table" &&
+        (field.isPrimaryConstructionTable || field.key === "constructions")
+      ) {
+        return t("orders.detail.orderInputs.title");
+      }
+      if (field.fieldType === "table" && field.isBomImportTable) {
+        return t("orders.detail.orderInputs.bomTitle");
+      }
+      return field.label;
+    },
+    [t],
+  );
+
+  const resolvePreferredConstructionImportBlockRules = useCallback(
+    (
+      target: ConstructionImportTarget,
+      extension?: string,
+      fileName?: string,
+      sourceFieldKeys?: string[],
+    ): ConstructionImportBlockRules => {
+      const profiles = importProfilesByTarget[target] ?? [];
+      const normalizedExtension = String(extension ?? "").toLowerCase();
+      const fileNameTokens = String(fileName ?? "")
+        .toLowerCase()
+        .replace(/\.[a-z0-9]+$/i, "")
+        .split(/[^a-z0-9]+/i)
+        .map((value) => value.trim())
+        .filter((value) => value.length >= 3);
+      const normalizedSourceKeys = new Set(
+        (sourceFieldKeys ?? [])
+          .map((value) => String(value ?? "").trim().toLowerCase())
+          .filter(Boolean),
+      );
+      const bestProfile = profiles
+        .map((profile) => {
+          const parserProfile = readConstructionImportParserProfile(
+            profile.block_rules,
+          );
+          if (!parserProfile?.blockRules) {
+            return null;
+          }
+          let score = 0;
+          if (profile.is_default) {
+            score += 3;
+          }
+          if (
+            normalizedExtension &&
+            parserProfile.matching.fileExtensions?.some(
+              (value) =>
+                String(value ?? "").toLowerCase() === normalizedExtension,
+            )
+          ) {
+            score += 2;
+          }
+          if (parserProfile.layout === "grouped_blocks") {
+            score += 2;
+          }
+          if (
+            fileNameTokens.length > 0 &&
+            parserProfile.documentHints?.fileNameTokens?.some((token) =>
+              fileNameTokens.includes(String(token ?? "").toLowerCase()),
+            )
+          ) {
+            score += 3;
+          }
+          const matchedSourceKeys =
+            parserProfile.documentHints?.sourceFieldKeys?.filter((value) =>
+              normalizedSourceKeys.has(String(value ?? "").trim().toLowerCase()),
+            ).length ?? 0;
+          score += Math.min(4, matchedSourceKeys);
+          return {
+            score,
+            blockRules: parserProfile.blockRules,
+          };
+        })
+        .filter(
+          (
+            value,
+          ): value is {
+            score: number;
+            blockRules: ConstructionImportBlockRules;
+          } => value !== null,
+        )
+        .sort((a, b) => b.score - a.score)[0];
+
+      return {
+        ...DEFAULT_CONSTRUCTION_IMPORT_BLOCK_RULES,
+        ...(bestProfile?.blockRules ?? {}),
+      };
+    },
+    [importProfilesByTarget],
+  );
+
+  const resolvePreferredConstructionImportPdfRules = useCallback(
+    (
+      target: ConstructionImportTarget,
+      extension?: string,
+      fileName?: string,
+      sourceFieldKeys?: string[],
+    ): ConstructionImportPdfRules => {
+      const profiles = importProfilesByTarget[target] ?? [];
+      const normalizedExtension = String(extension ?? "").toLowerCase();
+      const fileNameTokens = String(fileName ?? "")
+        .toLowerCase()
+        .replace(/\.[a-z0-9]+$/i, "")
+        .split(/[^a-z0-9]+/i)
+        .map((value) => value.trim())
+        .filter((value) => value.length >= 3);
+      const normalizedSourceKeys = new Set(
+        (sourceFieldKeys ?? [])
+          .map((value) => String(value ?? "").trim().toLowerCase())
+          .filter(Boolean),
+      );
+      const bestProfile = profiles
+        .map((profile) => {
+          const parserProfile = readConstructionImportParserProfile(
+            profile.block_rules,
+          );
+          if (!parserProfile?.pdfRules) {
+            return null;
+          }
+          let score = 0;
+          if (profile.is_default) {
+            score += 3;
+          }
+          if (
+            normalizedExtension &&
+            parserProfile.matching.fileExtensions?.some(
+              (value) =>
+                String(value ?? "").toLowerCase() === normalizedExtension,
+            )
+          ) {
+            score += 2;
+          }
+          if (
+            fileNameTokens.length > 0 &&
+            parserProfile.documentHints?.fileNameTokens?.some((token) =>
+              fileNameTokens.includes(String(token ?? "").toLowerCase()),
+            )
+          ) {
+            score += 3;
+          }
+          const matchedSourceKeys =
+            parserProfile.documentHints?.sourceFieldKeys?.filter((value) =>
+              normalizedSourceKeys.has(String(value ?? "").trim().toLowerCase()),
+            ).length ?? 0;
+          score += Math.min(4, matchedSourceKeys);
+          return { score, pdfRules: parserProfile.pdfRules };
+        })
+        .filter(
+          (
+            value,
+          ): value is { score: number; pdfRules: ConstructionImportPdfRules } =>
+            value !== null,
+        )
+        .sort((a, b) => b.score - a.score)[0];
+
+      return {
+        rowSelection:
+          bestProfile?.pdfRules.rowSelection ??
+          (target === "bom" ? "component_like_only" : "unit_like_only"),
+      };
+    },
+    [importProfilesByTarget],
+  );
+
+  const resolvePreferredConstructionImportPdfProfile = useCallback(
+    (
+      target: ConstructionImportTarget,
+      fileName?: string,
+      sourceFieldKeys?: string[],
+    ): OrderImportProfileRow | null => {
+      const profiles = importProfilesByTarget[target] ?? [];
+      const normalizedSourceKeys = new Set(
+        (sourceFieldKeys ?? [])
+          .map((value) => String(value ?? "").trim().toLowerCase())
+          .filter(Boolean),
+      );
+      const fileNameTokens = String(fileName ?? "")
+        .toLowerCase()
+        .replace(/\.[a-z0-9]+$/i, "")
+        .split(/[^a-z0-9]+/i)
+        .map((value) => value.trim())
+        .filter((value) => value.length >= 3);
+
+      return (
+        profiles
+          .map((profile) => {
+            const parserProfile = readConstructionImportParserProfile(
+              profile.block_rules,
+            );
+            if (!parserProfile?.pdfRules) {
+              return null;
+            }
+            let score = 0;
+            if (profile.is_default) {
+              score += 3;
+            }
+            if (
+              parserProfile.matching.fileExtensions?.some(
+                (value) => String(value ?? "").toLowerCase() === "pdf",
+              )
+            ) {
+              score += 2;
+            }
+            if (
+              fileNameTokens.length > 0 &&
+              parserProfile.documentHints?.fileNameTokens?.some((token) =>
+                fileNameTokens.includes(String(token ?? "").toLowerCase()),
+              )
+            ) {
+              score += 3;
+            }
+            const matchedSourceKeys =
+              parserProfile.documentHints?.sourceFieldKeys?.filter((value) =>
+                normalizedSourceKeys.has(String(value ?? "").trim().toLowerCase()),
+              ).length ?? 0;
+            score += Math.min(4, matchedSourceKeys);
+            return { score, profile };
+          })
+          .filter(
+            (
+              value,
+            ): value is { score: number; profile: OrderImportProfileRow } =>
+              value !== null,
+          )
+          .sort((a, b) => b.score - a.score)[0]?.profile ?? null
+      );
+    },
+    [importProfilesByTarget],
+  );
 
   const suggestConstructionImportMapping = useCallback((headers: string[]) => {
     const normalize = (value: string) =>
       value
         .trim()
         .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_+|_+$/g, "");
-    const byToken = new Map(headers.map((header) => [normalize(header), header]));
+    const byToken = new Map(
+      headers.map((header) => [normalize(header), header]),
+    );
     return {
       position:
-        byToken.get("position") ?? byToken.get("poz") ?? byToken.get("pozicija") ?? "",
+        byToken.get("position") ??
+        byToken.get("poz") ??
+        byToken.get("pozicija") ??
+        "",
+      sku:
+        byToken.get("sku") ??
+        byToken.get("artikuls") ??
+        byToken.get("article") ??
+        "",
       item_type:
-        byToken.get("item_type") ?? byToken.get("construction") ?? byToken.get("konstrukcija") ?? "",
+        byToken.get("item_type") ??
+        byToken.get("construction") ??
+        byToken.get("konstrukcija") ??
+        "",
       item_name:
-        byToken.get("item_name") ?? byToken.get("name") ?? byToken.get("nosaukums") ?? "",
-      qty: byToken.get("qty") ?? byToken.get("quantity") ?? byToken.get("skaits") ?? "",
-      dimensions: byToken.get("dimensions") ?? byToken.get("size") ?? byToken.get("izmers") ?? "",
+        byToken.get("item_name") ??
+        byToken.get("artikuls") ??
+        byToken.get("article") ??
+        byToken.get("name") ??
+        byToken.get("nosaukums") ??
+        "",
+      qty:
+        byToken.get("qty") ??
+        byToken.get("artikulu_skaits") ??
+        byToken.get("quantity") ??
+        byToken.get("skaits") ??
+        "",
+      dimensions:
+        byToken.get("dimensions") ??
+        byToken.get("izmeri") ??
+        byToken.get("size") ??
+        byToken.get("izmers") ??
+        "",
+      color:
+        byToken.get("color") ??
+        byToken.get("colour") ??
+        byToken.get("krasa") ??
+        byToken.get("krāsa") ??
+        byToken.get("apdare") ??
+        byToken.get("finish") ??
+        "",
       material: byToken.get("material") ?? byToken.get("materials") ?? "",
     };
   }, []);
@@ -2293,18 +3048,173 @@ export default function OrderDetailPage() {
       mapping: Record<string, string>,
     ): Array<Record<string, string>> =>
       rows.map((row, index) => {
+        const resolveValue = (
+          key: (typeof CONSTRUCTION_IMPORT_MAPPING_KEYS)[number],
+        ) => {
+          const mappedHeader = mapping[key];
+          if (mappedHeader) {
+            const mappedValue = String(row[mappedHeader] ?? "").trim();
+            if (mappedValue) {
+              return mappedValue;
+            }
+          }
+
+          const aliasesByKey: Record<
+            (typeof CONSTRUCTION_IMPORT_MAPPING_KEYS)[number],
+            string[]
+          > = {
+            position: ["position", "pozicija", "poz"],
+            sku: ["sku", "artikuls", "article"],
+            item_type: ["item_type", "type", "tips"],
+            item_name: [
+              "item_name",
+              "artikuls",
+              "article",
+              "name",
+              "nosaukums",
+            ],
+            qty: ["qty", "artikulu_skaits", "quantity", "skaits"],
+            dimensions: ["dimensions", "izmeri", "izmers", "size"],
+            color: ["color", "colour", "krasa", "krāsa", "apdare", "finish"],
+            material: ["material", "materials"],
+          };
+
+          for (const alias of aliasesByKey[key]) {
+            const aliasValue = String(row[alias] ?? "").trim();
+            if (aliasValue) {
+              return aliasValue;
+            }
+          }
+          return "";
+        };
+
         const draft: Record<string, string> = {
           source_row_ref: String(index + 2),
+          parent_article: String(
+            row.parent_article ?? row.item_type ?? "",
+          ).trim(),
         };
         CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
-          const header = mapping[key];
-          draft[key] = header ? String(row[header] ?? "") : "";
+          draft[key] = resolveValue(key);
         });
+
+        Object.entries(mapping).forEach(([draftKey, mappedHeader]) => {
+          if (!mappedHeader || draftKey in draft) {
+            return;
+          }
+          const mappedValue = String(row[mappedHeader] ?? "").trim();
+          if (mappedValue) {
+            draft[draftKey] = mappedValue;
+          }
+        });
+
+        // Grouped block imports still need to land on the canonical unit draft keys
+        // even when the file only exposes source labels like "artikulu_skaits".
+        if (!draft.position) {
+          draft.position = String(row.pozicija ?? row.position ?? "").trim();
+        }
+        if (!draft.sku) {
+          draft.sku = String(row.artikuls ?? row.sku ?? "").trim();
+        }
+        if (!draft.item_name) {
+          draft.item_name = String(
+            row.artikuls ?? row.item_name ?? row.item_type ?? row.sku ?? "",
+          ).trim();
+        }
+        if (!draft.qty) {
+          draft.qty = String(row.artikulu_skaits ?? row.qty ?? "").trim();
+        }
+        if (!draft.dimensions) {
+          draft.dimensions = String(row.izmeri ?? row.dimensions ?? "").trim();
+        }
+        if (!draft.color) {
+          draft.color = String(
+            row.color ??
+              row.krasa ??
+              row.krāsa ??
+              row.apdare ??
+              row.finish ??
+              "",
+          ).trim();
+        }
+        if (!draft.m2) {
+          draft.m2 = String(row.kvm ?? "").trim();
+        }
+        if (!draft.m_2) {
+          draft.m_2 = String(row.kvm ?? "").trim();
+        }
+        if (!draft.item_name) {
+          draft.item_name = String(draft.item_type ?? draft.sku ?? "").trim();
+        }
+
         return draft;
       }),
     [],
   );
 
+  const getConstructionImportRowTypeHints = useCallback(
+    (
+      rows: Record<string, unknown>[],
+      mapping: Record<string, string>,
+    ): ConstructionImportRowTypeHints => {
+      let productLikeRows = 0;
+      let componentLikeRows = 0;
+      let unknownRows = 0;
+
+      rows.forEach((row) => {
+        const getValue = (
+          key: (typeof CONSTRUCTION_IMPORT_MAPPING_KEYS)[number],
+        ) => {
+          const header = mapping[key];
+          return header ? String(row[header] ?? "").trim() : "";
+        };
+
+        const parentArticle = String(row.parent_article ?? "").trim();
+        const sku = getValue("sku");
+        const itemType = getValue("item_type");
+        const itemName = getValue("item_name");
+        const position = getValue("position");
+        const qty = getValue("qty");
+        const material = getValue("material");
+        const dimensions = getValue("dimensions");
+
+        if (parentArticle) {
+          componentLikeRows += 1;
+          return;
+        }
+
+        if (itemType) {
+          productLikeRows += 1;
+          return;
+        }
+
+        if (sku && qty && dimensions && !material) {
+          productLikeRows += 1;
+          return;
+        }
+
+        if (itemName && qty && dimensions && !material) {
+          productLikeRows += 1;
+          return;
+        }
+
+        if ((position && qty) || (material && qty) || (dimensions && qty)) {
+          componentLikeRows += 1;
+          return;
+        }
+
+        unknownRows += 1;
+      });
+
+      return {
+        productLikeRows,
+        componentLikeRows,
+        unknownRows,
+        suggestedTarget: componentLikeRows > productLikeRows ? "bom" : "items",
+      };
+    },
+    [],
+  );
 
   const applyConstructionImportMapping = useCallback(
     (mapping: Record<string, string>) => {
@@ -2316,17 +3226,20 @@ export default function OrderDetailPage() {
     [buildConstructionImportDraftRows, constructionImportRows],
   );
 
-  const resolveConstructionImportMapping = useCallback(
+  const resolveBestConstructionImportProfile = useCallback(
     (
       headers: string[],
       options?: {
         extension?: string;
-        target?: "items" | "bom";
+        target?: ConstructionImportTarget;
+        rows?: Record<string, unknown>[];
+        parseMode?: ConstructionImportLayout;
       },
     ) => {
       const target = options?.target ?? constructionImportTarget;
       const extension = options?.extension?.toLowerCase() ?? "";
-      const suggested = suggestConstructionImportMapping(headers);
+      const sampleRows = options?.rows ?? [];
+      const parseMode = options?.parseMode ?? "flat_table";
       const headerSet = new Set(headers);
       const normalize = (value: string) =>
         value
@@ -2334,19 +3247,25 @@ export default function OrderDetailPage() {
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "_")
           .replace(/^_+|_+$/g, "");
-      const normalizedHeaderSet = new Set(headers.map((header) => normalize(header)));
+      const normalizedHeaderSet = new Set(
+        headers.map((header) => normalize(header)),
+      );
 
       const scoreProfile = (profile: OrderImportProfileRow) => {
         let score = 0;
+        const parserProfile = readConstructionImportParserProfile(
+          profile.block_rules,
+        );
+        const rowTypeHints = readConstructionImportRowTypeHints(
+          profile.block_rules,
+        );
         const mapping =
           profile.default_mapping && typeof profile.default_mapping === "object"
             ? (profile.default_mapping as Record<string, string>)
             : {};
         CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
           const mappedHeader = mapping[key];
-          if (mappedHeader && headerSet.has(mappedHeader)) {
-            score += 3;
-          }
+          if (mappedHeader && headerSet.has(mappedHeader)) score += 3;
         });
 
         const aliases =
@@ -2355,39 +3274,113 @@ export default function OrderDetailPage() {
             : {};
         CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
           const values = aliases[key];
-          if (!Array.isArray(values)) {
-            return;
-          }
-          if (values.some((value) => normalizedHeaderSet.has(normalize(String(value ?? ""))))) {
+          if (!Array.isArray(values)) return;
+          if (
+            values.some((value) =>
+              normalizedHeaderSet.has(normalize(String(value ?? ""))),
+            )
+          ) {
             score += 1;
           }
         });
 
         if (extension) {
-          const extensions = (profile.file_extensions ?? []).map((value) =>
-            String(value ?? "").toLowerCase(),
-          );
-          if (extensions.length === 0) {
-            score += 1;
-          } else if (extensions.includes(extension)) {
-            score += 2;
-          }
+          const extensions = (
+            parserProfile?.matching.fileExtensions ??
+            profile.file_extensions ??
+            []
+          ).map((value) => String(value ?? "").toLowerCase());
+          if (extensions.length === 0) score += 1;
+          else if (extensions.includes(extension)) score += 2;
         }
 
-        if (profile.is_default) {
-          score += 1;
+        const requiredHeaders = parserProfile?.matching.requiredHeaders ?? [];
+        if (
+          requiredHeaders.length > 0 &&
+          requiredHeaders.every((header) => headerSet.has(header))
+        ) {
+          score += 3;
+        }
+
+        if (profile.is_default) score += 1;
+
+        if (parserProfile?.layout === parseMode) score += 3;
+        else if (parserProfile?.layout) score -= 1;
+
+        if (rowTypeHints?.suggestedTarget === target) score += 2;
+
+        if (
+          sampleRows.length > 0 &&
+          ((rowTypeHints?.productLikeRows ?? 0) > 0 ||
+            (rowTypeHints?.componentLikeRows ?? 0) > 0)
+        ) {
+          const currentHints = getConstructionImportRowTypeHints(
+            sampleRows,
+            mapping,
+          );
+          const currentDominant =
+            (currentHints.componentLikeRows ?? 0) >
+            (currentHints.productLikeRows ?? 0)
+              ? "bom"
+              : "items";
+          const profileDominant =
+            ((rowTypeHints?.componentLikeRows ?? 0) >
+            (rowTypeHints?.productLikeRows ?? 0))
+              ? "bom"
+              : "items";
+          if (currentDominant === profileDominant) score += 3;
+          else score -= 1;
         }
 
         return score;
       };
 
-      const profiles = importProfilesByTarget[target] ?? [];
-      const bestProfile = profiles
+      return (importProfilesByTarget[target] ?? [])
         .map((profile) => ({ profile, score: scoreProfile(profile) }))
         .filter((entry) => entry.score > 0)
-        .sort((left, right) => right.score - left.score)[0]?.profile;
+        .sort((left, right) => right.score - left.score)[0]?.profile ?? null;
+    },
+    [
+      constructionImportTarget,
+      getConstructionImportRowTypeHints,
+      importProfilesByTarget,
+    ],
+  );
 
-      const nextMapping = { ...suggested };
+  const resolveConstructionImportMapping = useCallback(
+    (
+      headers: string[],
+      options?: {
+        extension?: string;
+        target?: ConstructionImportTarget;
+        rows?: Record<string, unknown>[];
+        parseMode?: ConstructionImportLayout;
+      },
+    ) => {
+      const target = options?.target ?? constructionImportTarget;
+      const extension = options?.extension?.toLowerCase() ?? "";
+      const sampleRows = options?.rows ?? [];
+      const parseMode = options?.parseMode ?? "flat_table";
+      const suggested = suggestConstructionImportMapping(headers);
+      const headerSet = new Set(headers);
+      const normalize = (value: string) =>
+        value
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "");
+      const normalizedHeaderSet = new Set(
+        headers.map((header) => normalize(header)),
+      );
+
+      const bestProfile = resolveBestConstructionImportProfile(headers, {
+        extension,
+        target,
+        rows: sampleRows,
+        parseMode,
+      });
+
+      const nextMapping: Record<string, string> = { ...suggested };
       const mappingCandidates = [
         bestProfile?.default_mapping ?? null,
         defaultImportProfileMappingByTarget[target],
@@ -2405,43 +3398,119 @@ export default function OrderDetailPage() {
           }
         });
       });
+
+      const configuredColumns =
+        target === "bom"
+          ? (
+              (bomImportTableField?.columns?.filter(
+                (column) => column.isActive !== false,
+              ) ?? []).length > 0
+                ? bomImportTableField?.columns?.filter(
+                    (column) => column.isActive !== false,
+                  ) ?? []
+                : primaryUnitConfiguredColumns.filter(
+                    (column) =>
+                      column.isActive !== false &&
+                      (column.useInBomTable ?? false),
+                  )
+            )
+          : primaryUnitConfiguredColumns.filter(
+              (column) => column.isActive !== false,
+            );
+
+      configuredColumns.forEach((column) => {
+        const bomDraftKeyByColumnKey: Record<string, string> = {
+          component_code: "position",
+          component_name: "item_name",
+          qty: "qty",
+          dimensions: "dimensions",
+          material: "material",
+        };
+        const draftKey =
+          target === "bom"
+            ? bomDraftKeyByColumnKey[column.key] ?? getUnitImportDraftKey(column)
+            : getUnitImportDraftKey(column);
+
+        if (nextMapping[draftKey]) {
+          return;
+        }
+
+        const normalizedKey = normalize(String(column.key ?? ""));
+        const normalizedLabel = normalize(String(column.label ?? ""));
+        const targetTokens = [column.key, column.label]
+          .map((value) => normalize(String(value ?? "")))
+          .filter(Boolean);
+        if (
+          ["m2", "m_2", "kvadratmetri", "kvadratmetrs", "platiba", "laukums"].includes(normalizedKey) ||
+          ["m2", "m_2", "kvadratmetri", "kvadratmetrs", "platiba", "laukums"].includes(normalizedLabel)
+        ) {
+          targetTokens.push("kvm", "kvm_total");
+        }
+        const matchedHeader = headers.find((header) =>
+          targetTokens.includes(normalize(header)),
+        );
+        if (matchedHeader) {
+          nextMapping[draftKey] = matchedHeader;
+        }
+      });
       return nextMapping;
     },
     [
+      bomImportTableField?.columns,
       constructionImportTarget,
       defaultImportProfileMappingByTarget,
+      getConstructionImportRowTypeHints,
+      getUnitImportDraftKey,
       importProfilesByTarget,
+      primaryUnitConfiguredColumns,
+      resolveBestConstructionImportProfile,
       savedConstructionImportMapping,
       suggestConstructionImportMapping,
     ],
   );
 
   const handleConstructionImportFile = useCallback(
-    async (file: File) => {
+    async (
+      file: File,
+      options?: {
+        target?: ConstructionImportTarget;
+        skipPreviewBatch?: boolean;
+      },
+    ) => {
       if (!primaryConstructionField) {
-        setConstructionImportError("Define a primary construction table in settings first.");
+        setConstructionImportError(
+          t("orders.detail.errors.missingPrimaryUnitTable"),
+        );
         return;
       }
       try {
+        const target = options?.target ?? constructionImportTarget;
         const extension = getFileExtension(file.name);
+        const blockRules = resolvePreferredConstructionImportBlockRules(
+          target,
+          extension,
+          file.name,
+        );
         if (extension === "pdf") {
+          constructionImportSourceFileRef.current = file;
           setConstructionImportFileName(file.name);
           setConstructionImportSheetName("");
           setConstructionImportRows([]);
           setConstructionImportHeaders([]);
-          setConstructionImportError(
-            "PDF files should be imported with AI/OCR (Add with AI in the construction table above), not via CSV/Excel mapping.",
-          );
-          setConstructionImportAiBridgeFieldId(primaryConstructionField.id);
+          await handleParseConstructionPdfImport({ file });
           return;
         }
         if (!["csv", "xls", "xlsx"].includes(extension)) {
-          setConstructionImportError("Unsupported file type. Use CSV/XLS/XLSX, or AI/OCR for PDF.");
-          setConstructionImportAiBridgeFieldId(null);
+          setConstructionImportError(
+            t("orders.detail.errors.unsupportedImportFileType"),
+          );
           return;
         }
 
-        const parsedWorkbook = await parseOrdersWorkbookDetailed(file);
+        const parsedWorkbook = await parseOrdersWorkbookDetailed(file, {
+          target,
+          blockRules,
+        });
         if (parsedWorkbook.rows.length === 0) {
           setConstructionImportError("No rows found in import file.");
           return;
@@ -2449,7 +3518,15 @@ export default function OrderDetailPage() {
         const headers = parsedWorkbook.headers;
         const nextMapping = resolveConstructionImportMapping(headers, {
           extension,
-          target: constructionImportTarget,
+          target,
+          rows: parsedWorkbook.rows,
+          parseMode: parsedWorkbook.parseMode,
+        });
+        const matchedProfile = resolveBestConstructionImportProfile(headers, {
+          extension,
+          target,
+          rows: parsedWorkbook.rows,
+          parseMode: parsedWorkbook.parseMode,
         });
         const nextDraftRows = buildConstructionImportDraftRows(
           parsedWorkbook.rows,
@@ -2459,10 +3536,16 @@ export default function OrderDetailPage() {
         setConstructionImportSheetName(parsedWorkbook.sheetName);
         setConstructionImportRows(parsedWorkbook.rows);
         setConstructionImportHeaders(headers);
+        setConstructionImportParseMode(parsedWorkbook.parseMode);
         setConstructionImportMapping(nextMapping);
         setConstructionImportDraftRows(nextDraftRows);
+        setConstructionImportMatchedProfileName(
+          matchedProfile?.profile_name ?? null,
+        );
+        constructionImportParsedTargetRef.current = target;
+        constructionImportSourceFileRef.current = file;
 
-        if (supabase && orderState?.id) {
+        if (!options?.skipPreviewBatch && supabase && orderState?.id) {
           const { data: batchData, error: batchError } = await supabase
             .from("order_item_import_batches")
             .insert({
@@ -2493,25 +3576,49 @@ export default function OrderDetailPage() {
             }
           }
         }
-        setConstructionImportAiBridgeFieldId(null);
         setConstructionImportError("");
         setConstructionImportProfileNotice("");
         setConstructionImportAiNotice("");
-        setConstructionImportStep("mapping");
+        setConstructionImportParseSource(null);
+        setConstructionImportParserModel(null);
+        setConstructionImportAiRowTypeHints(null);
+        setConstructionImportAiParserProfileDraft(null);
+        if (parsedWorkbook.parseMode === "flat_table" && !options?.target) {
+          const suggestedTarget = getConstructionImportRowTypeHints(
+            parsedWorkbook.rows,
+            nextMapping,
+          ).suggestedTarget;
+          if (suggestedTarget) {
+            setConstructionImportTarget(suggestedTarget);
+          }
+        }
+        const hasAppliedTemplate =
+          matchedProfile != null &&
+          Object.values(nextMapping).some((value) => Boolean(value));
+        setConstructionImportStep(hasAppliedTemplate ? "review" : "mapping");
         setIsConstructionImportModalOpen(true);
       } catch (error) {
-        setConstructionImportAiBridgeFieldId(null);
+        setConstructionImportAiRowTypeHints(null);
+        setConstructionImportAiParserProfileDraft(null);
+        setConstructionImportMatchedProfileName(null);
+        setConstructionImportParseMode("flat_table");
         setConstructionImportError(
-          error instanceof Error ? error.message : "Failed to parse import file.",
+          error instanceof Error
+            ? error.message
+            : "Failed to parse import file.",
         );
       }
     },
     [
       buildConstructionImportDraftRows,
       constructionImportTarget,
+      getConstructionImportRowTypeHints,
+      handleParseConstructionPdfImport,
       orderState?.id,
       primaryConstructionField,
+      resolvePreferredConstructionImportBlockRules,
       resolveConstructionImportMapping,
+      supabase,
       tenantId,
     ],
   );
@@ -2519,7 +3626,9 @@ export default function OrderDetailPage() {
   const handleAiBootstrapConstructionMapping = useCallback(async () => {
     const sb = supabase;
     if (!sb) {
-      setConstructionImportAiNotice(t("orders.detail.errors.supabaseNotConfigured"));
+      setConstructionImportAiNotice(
+        t("orders.detail.errors.supabaseNotConfigured"),
+      );
       return;
     }
     if (!canUseAiOrderInputImport) {
@@ -2527,7 +3636,9 @@ export default function OrderDetailPage() {
       return;
     }
     if (constructionImportHeaders.length === 0) {
-      setConstructionImportAiNotice("Vispirms ielādē failu ar headeriem.");
+      setConstructionImportAiNotice(
+        t("orders.detail.importModal.loadHeadersFirst"),
+      );
       return;
     }
 
@@ -2555,6 +3666,7 @@ export default function OrderDetailPage() {
           fileName: constructionImportFileName,
           headers: constructionImportHeaders,
           sampleRows: constructionImportRows.slice(0, 30),
+          parseMode: constructionImportParseMode,
         }),
       });
 
@@ -2563,19 +3675,27 @@ export default function OrderDetailPage() {
         mapping?: Record<string, string>;
         confidenceByKey?: Record<string, number>;
         notes?: string;
+        parserProfileDraft?: ConstructionImportParserProfileDraft;
+        rowTypeHints?: {
+          productLikeRows?: number;
+          componentLikeRows?: number;
+          unknownRows?: number;
+          suggestedTarget?: ConstructionImportTarget;
+        };
       };
 
       if (!response.ok) {
         const message =
           payload.error === "feature_not_available"
             ? t("orders.detail.errors.aiImportProOnly")
-            : (payload.error ?? "AI mapping bootstrap neizdevās.");
+            : (payload.error ??
+              t("orders.detail.importModal.aiBootstrapFailed"));
         setConstructionImportAiNotice(message);
         return;
       }
 
       const nextMapping = { ...constructionImportMapping };
-      CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
+      CORE_CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
         const value = payload.mapping?.[key];
         if (value) {
           nextMapping[key] = value;
@@ -2583,17 +3703,35 @@ export default function OrderDetailPage() {
       });
 
       applyConstructionImportMapping(nextMapping);
-
-      const confidenceLabel = CONSTRUCTION_IMPORT_MAPPING_KEYS.map((key) => {
-        const confidence = payload.confidenceByKey?.[key] ?? 0;
-        return `${key}: ${Math.round(confidence * 100)}%`;
-      }).join(" · ");
+      setConstructionImportAiRowTypeHints(payload.rowTypeHints ?? null);
+      setConstructionImportAiParserProfileDraft(
+        payload.parserProfileDraft ?? null,
+      );
+      const confidenceLabel = CORE_CONSTRUCTION_IMPORT_MAPPING_KEYS.map(
+        (key) => {
+          const confidence = payload.confidenceByKey?.[key] ?? 0;
+          return `${key}: ${Math.round(confidence * 100)}%`;
+        },
+      ).join(" · ");
+      const rowHintText =
+        payload.rowTypeHints && typeof payload.rowTypeHints === "object"
+          ? ` · produkti: ${payload.rowTypeHints.productLikeRows ?? 0}, komponentes: ${
+              payload.rowTypeHints.componentLikeRows ?? 0
+            }, nezināmas: ${payload.rowTypeHints.unknownRows ?? 0}`
+          : "";
+      const targetHint =
+        payload.rowTypeHints?.suggestedTarget &&
+        payload.rowTypeHints.suggestedTarget !== constructionImportTarget
+          ? ` · ${t("orders.detail.importModalSuggestedTargetLabel")}: ${constructionImportTargetMeta[payload.rowTypeHints.suggestedTarget].label}`
+          : "";
       setConstructionImportAiNotice(
-        `AI bootstrap pabeigts. ${confidenceLabel}${payload.notes ? ` · ${payload.notes}` : ""}`,
+        `${t("orders.detail.importModal.aiBootstrapCompleted")} ${confidenceLabel}${rowHintText}${targetHint}${payload.notes ? ` · ${payload.notes}` : ""}`,
       );
     } catch (error) {
       setConstructionImportAiNotice(
-        error instanceof Error ? error.message : "AI mapping bootstrap neizdevās.",
+        error instanceof Error
+          ? error.message
+          : t("orders.detail.importModal.aiBootstrapFailed"),
       );
     } finally {
       setIsApplyingConstructionAiBootstrap(false);
@@ -2606,10 +3744,36 @@ export default function OrderDetailPage() {
     constructionImportMapping,
     constructionImportRows,
     constructionImportTarget,
+    constructionImportTargetMeta,
     t,
   ]);
 
-  const handleSaveConstructionImportProfile = useCallback(async () => {
+  useEffect(() => {
+    const sourceFile = constructionImportSourceFileRef.current;
+    if (
+      !isConstructionImportModalOpen ||
+      !sourceFile ||
+      constructionImportRows.length === 0
+    ) {
+      constructionImportParsedTargetRef.current = null;
+      return;
+    }
+    if (
+      constructionImportParsedTargetRef.current === constructionImportTarget
+    ) {
+      return;
+    }
+    void handleConstructionImportFile(sourceFile, {
+      target: constructionImportTarget,
+      skipPreviewBatch: true,
+    });
+  }, [
+    constructionImportRows.length,
+    constructionImportTarget,
+    isConstructionImportModalOpen,
+  ]);
+
+  const handleSaveConstructionImportProfile = useCallback(async (makeDefault = false) => {
     if (!supabase || !tenantId) {
       setConstructionImportProfileNotice(
         t("orders.detail.errors.supabaseNotConfigured"),
@@ -2618,19 +3782,27 @@ export default function OrderDetailPage() {
     }
     const trimmedName = constructionImportProfileName.trim();
     if (!trimmedName) {
-      setConstructionImportProfileNotice("Norādi profila nosaukumu.");
+      setConstructionImportProfileNotice(
+        t("orders.detail.importModal.profileErrors.nameRequired"),
+      );
       return;
     }
-    if (constructionImportHeaders.length === 0) {
-      setConstructionImportProfileNotice("Vispirms ielādē importa failu.");
+    const extension = getFileExtension(constructionImportFileName);
+    const isPdfProfile = extension === "pdf";
+    if (
+      constructionImportHeaders.length === 0 &&
+      !(isPdfProfile && constructionImportDraftRows.length > 0)
+    ) {
+      setConstructionImportProfileNotice(
+        t("orders.detail.importModal.profileErrors.loadFileFirst"),
+      );
       return;
     }
 
     setIsSavingConstructionImportProfile(true);
     setConstructionImportProfileNotice("");
 
-    const extension = getFileExtension(constructionImportFileName);
-    const headerAliases = CONSTRUCTION_IMPORT_MAPPING_KEYS.reduce<
+    const headerAliases = CORE_CONSTRUCTION_IMPORT_MAPPING_KEYS.reduce<
       Record<string, string[]>
     >((acc, key) => {
       const selected = constructionImportMapping[key];
@@ -2640,17 +3812,60 @@ export default function OrderDetailPage() {
       acc[key] = [selected];
       return acc;
     }, {});
+    const parserProfile: ConstructionImportParserProfile =
+      mergeConstructionImportParserProfileDraft(
+        buildConstructionImportParserProfile({
+          target: constructionImportTarget,
+          mapping: constructionImportMapping,
+          headers: constructionImportHeaders,
+          fileExtension: extension,
+          fileName: constructionImportFileName,
+          sheetName: constructionImportSheetName,
+          targetSchemaColumns: constructionImportTargetSchemaColumns,
+          layout: constructionImportParseMode,
+          blockRules: resolvePreferredConstructionImportBlockRules(
+            constructionImportTarget,
+            extension,
+            constructionImportFileName,
+            constructionImportHeaderOptions.map((option) => option.value),
+          ),
+          pdfRules:
+            extension === "pdf"
+              ? {
+                  rowSelection:
+                    constructionImportTarget === "bom"
+                      ? "component_like_only"
+                      : "unit_like_only",
+                }
+              : undefined,
+        }),
+        constructionImportAiParserProfileDraft,
+      );
+    const blockRules = {
+      parser_profile: parserProfile,
+      row_type_hints: constructionImportAiRowTypeHints,
+    };
 
-    const { data: existingProfile } = await supabase
-      .from("order_import_profiles")
-      .select("id")
-      .eq("tenant_id", tenantId)
-      .eq("target", constructionImportTarget)
-      .eq("is_default", true)
-      .limit(1)
-      .maybeSingle();
+    const currentProfiles = importProfilesByTarget[constructionImportTarget] ?? [];
+    const existingByName = currentProfiles.find(
+      (profile) => profile.profile_name.trim().toLowerCase() === trimmedName.toLowerCase(),
+    );
+    const previousDefault = currentProfiles.find((profile) => profile.is_default);
+    let profileId = existingByName?.id ?? null;
 
-    let profileId = existingProfile?.id ?? null;
+    if (makeDefault && previousDefault && previousDefault.id !== profileId) {
+      const { error: unsetDefaultError } = await supabase
+        .from("order_import_profiles")
+        .update({ is_default: false })
+        .eq("tenant_id", tenantId)
+        .eq("target", constructionImportTarget)
+        .eq("is_default", true);
+      if (unsetDefaultError) {
+        setConstructionImportProfileNotice(unsetDefaultError.message);
+        setIsSavingConstructionImportProfile(false);
+        return;
+      }
+    }
 
     if (profileId) {
       const { error: profileUpdateError } = await supabase
@@ -2659,7 +3874,9 @@ export default function OrderDetailPage() {
           profile_name: trimmedName,
           file_extensions: extension ? [extension] : [],
           header_aliases: headerAliases,
+          block_rules: blockRules,
           default_mapping: constructionImportMapping,
+          is_default: makeDefault,
           is_active: true,
         })
         .eq("id", profileId);
@@ -2669,25 +3886,28 @@ export default function OrderDetailPage() {
         return;
       }
     } else {
-      const { data: profileInsertData, error: profileInsertError } = await supabase
-        .from("order_import_profiles")
-        .insert({
-          tenant_id: tenantId,
-          profile_name: trimmedName,
-          target: constructionImportTarget,
-          document_type: "production_documentation",
-          file_extensions: extension ? [extension] : [],
-          header_aliases: headerAliases,
-          default_mapping: constructionImportMapping,
-          is_default: true,
-          is_active: true,
-          created_by: userId || null,
-        })
-        .select("id")
-        .single();
+      const { data: profileInsertData, error: profileInsertError } =
+        await supabase
+          .from("order_import_profiles")
+          .insert({
+            tenant_id: tenantId,
+            profile_name: trimmedName,
+            target: constructionImportTarget,
+            document_type: "production_documentation",
+            file_extensions: extension ? [extension] : [],
+            header_aliases: headerAliases,
+            block_rules: blockRules,
+            default_mapping: constructionImportMapping,
+            is_default: makeDefault,
+            is_active: true,
+            created_by: userId || null,
+          })
+          .select("id")
+          .single();
       if (profileInsertError || !profileInsertData) {
         setConstructionImportProfileNotice(
-          profileInsertError?.message ?? "Neizdevās izveidot profilu.",
+          profileInsertError?.message ??
+            t("orders.detail.importModal.profileErrors.createFailed"),
         );
         setIsSavingConstructionImportProfile(false);
         return;
@@ -2712,6 +3932,7 @@ export default function OrderDetailPage() {
         version_no: nextVersionNo,
         change_note: "Saved from order import modal",
         header_aliases: headerAliases,
+        block_rules: blockRules,
         default_mapping: constructionImportMapping,
         created_by: userId || null,
       });
@@ -2722,40 +3943,213 @@ export default function OrderDetailPage() {
       return;
     }
 
-    setConstructionImportProfileNotice("Profils saglabāts. Turpmāk imports notiks automātiskāk.");
-    setDefaultImportProfileMappingByTarget((prev) => ({
-      ...prev,
-      [constructionImportTarget]: constructionImportMapping,
-    }));
+    setConstructionImportProfileNotice(
+      t(
+        makeDefault
+          ? "orders.detail.importModal.profileSavedAsDefaultNotice"
+          : "orders.detail.importModal.profileSavedNotice",
+        {
+          name: trimmedName,
+        },
+      ),
+    );
+    if (makeDefault) {
+      setDefaultImportProfileMappingByTarget((prev) => ({
+        ...prev,
+        [constructionImportTarget]: constructionImportMapping,
+      }));
+    }
     setImportProfilesByTarget((prev) => {
       const current = prev[constructionImportTarget] ?? [];
-      const withoutDefault = current.filter((profile) => !profile.is_default);
-      const nextDefault: OrderImportProfileRow = {
+      const nextProfile: OrderImportProfileRow = {
         id: String(profileId),
         profile_name: trimmedName,
         target: constructionImportTarget,
         file_extensions: extension ? [extension] : [],
         header_aliases: headerAliases,
+        block_rules: blockRules,
         default_mapping: constructionImportMapping,
-        is_default: true,
+        is_default: makeDefault,
         is_active: true,
       };
+      const withoutCurrent = current.filter((profile) => profile.id !== profileId);
       return {
         ...prev,
-        [constructionImportTarget]: [nextDefault, ...withoutDefault],
+        [constructionImportTarget]: [
+          nextProfile,
+          ...withoutCurrent.map((profile) =>
+            makeDefault ? { ...profile, is_default: false } : profile,
+          ),
+        ],
       };
     });
+    if (makeDefault) {
+      setConstructionImportMatchedProfileName(trimmedName);
+    }
     setIsSavingConstructionImportProfile(false);
   }, [
+    constructionImportAiParserProfileDraft,
+    constructionImportAiRowTypeHints,
+    constructionImportDraftRows,
     constructionImportFileName,
     constructionImportHeaders.length,
     constructionImportMapping,
+    constructionImportParseMode,
     constructionImportProfileName,
+    constructionImportSheetName,
     constructionImportTarget,
+    constructionImportTargetSchemaColumns,
+    importProfilesByTarget,
+    resolvePreferredConstructionImportBlockRules,
+    supabase,
     t,
     tenantId,
     userId,
   ]);
+
+  const handleSetDefaultConstructionImportProfile = useCallback(
+    async (profileId: string) => {
+      if (!supabase || !tenantId) return;
+      setConstructionImportTemplateActionId(profileId);
+      setConstructionImportProfileNotice("");
+      const currentProfiles = importProfilesByTarget[constructionImportTarget] ?? [];
+      const previousDefault = currentProfiles.find((profile) => profile.is_default);
+
+      if (previousDefault && previousDefault.id !== profileId) {
+        await supabase
+          .from("order_import_profiles")
+          .update({ is_default: false })
+          .eq("id", previousDefault.id);
+      }
+
+      const { error } = await supabase
+        .from("order_import_profiles")
+        .update({ is_default: true, is_active: true })
+        .eq("id", profileId);
+
+      if (error) {
+        setConstructionImportProfileNotice(error.message);
+        setConstructionImportTemplateActionId(null);
+        return;
+      }
+
+      setImportProfilesByTarget((prev) => ({
+        ...prev,
+        [constructionImportTarget]: (prev[constructionImportTarget] ?? []).map(
+          (profile) => ({
+            ...profile,
+            is_default: profile.id === profileId,
+          }),
+        ),
+      }));
+      const nextDefaultName =
+        currentProfiles.find((profile) => profile.id === profileId)
+          ?.profile_name ?? null;
+      setConstructionImportMatchedProfileName(nextDefaultName);
+      setConstructionImportProfileNotice(
+        t("orders.detail.importModal.templateSetDefaultNotice", {
+          name: nextDefaultName ?? "",
+        }),
+      );
+      setConstructionImportTemplateActionId(null);
+    },
+    [constructionImportTarget, importProfilesByTarget, supabase, t, tenantId],
+  );
+
+  const handleDeleteConstructionImportProfile = useCallback(
+    async (profileId: string) => {
+      if (!supabase) return;
+      setConstructionImportTemplateActionId(profileId);
+      setConstructionImportProfileNotice("");
+      const deletedName =
+        (importProfilesByTarget[constructionImportTarget] ?? []).find(
+          (profile) => profile.id === profileId,
+        )?.profile_name ?? "";
+      const { error } = await supabase
+        .from("order_import_profiles")
+        .delete()
+        .eq("id", profileId);
+
+      if (error) {
+        setConstructionImportProfileNotice(error.message);
+        setConstructionImportTemplateActionId(null);
+        return;
+      }
+
+      setImportProfilesByTarget((prev) => ({
+        ...prev,
+        [constructionImportTarget]: (prev[constructionImportTarget] ?? []).filter(
+          (profile) => profile.id !== profileId,
+        ),
+      }));
+      if (activeDefaultImportProfileName === deletedName) {
+        setConstructionImportMatchedProfileName(null);
+      }
+      setConstructionImportProfileNotice(
+        t("orders.detail.importModal.templateDeletedNotice", {
+          name: deletedName,
+        }),
+      );
+      setConstructionImportTemplateActionId(null);
+    },
+    [
+      activeDefaultImportProfileName,
+      constructionImportTarget,
+      importProfilesByTarget,
+      supabase,
+      t,
+    ],
+  );
+
+  const handleRenameConstructionImportProfile = useCallback(
+    async (profileId: string, nextName: string) => {
+      if (!supabase || !nextName.trim()) return;
+      setConstructionImportTemplateActionId(profileId);
+      setConstructionImportProfileNotice("");
+      const trimmedName = nextName.trim();
+      const { error } = await supabase
+        .from("order_import_profiles")
+        .update({ profile_name: trimmedName })
+        .eq("id", profileId);
+
+      if (error) {
+        setConstructionImportProfileNotice(error.message);
+        setConstructionImportTemplateActionId(null);
+        return;
+      }
+
+      setImportProfilesByTarget((prev) => ({
+        ...prev,
+        [constructionImportTarget]: (prev[constructionImportTarget] ?? []).map(
+          (profile) =>
+            profile.id === profileId
+              ? { ...profile, profile_name: trimmedName }
+              : profile,
+        ),
+      }));
+      if (constructionImportMatchedProfileName) {
+        const matchedProfile = (importProfilesByTarget[constructionImportTarget] ?? []).find(
+          (profile) => profile.id === profileId,
+        );
+        if (matchedProfile?.profile_name === constructionImportMatchedProfileName) {
+          setConstructionImportMatchedProfileName(trimmedName);
+        }
+      }
+      setConstructionImportProfileNotice(
+        t("orders.detail.importModal.templateRenamedNotice", {
+          name: trimmedName,
+        }),
+      );
+      setConstructionImportTemplateActionId(null);
+    },
+    [
+      constructionImportMatchedProfileName,
+      constructionImportTarget,
+      importProfilesByTarget,
+      supabase,
+      t,
+    ],
+  );
 
   const parseDimensionToken = useCallback((value: string | undefined) => {
     const normalized = String(value ?? "")
@@ -2765,7 +4159,7 @@ export default function OrderDetailPage() {
       return { length: null, width: null, height: null };
     }
     const parts = normalized
-      .split(/x|\*|×|\//i)
+      .split(/x|\*|Ć—|\//i)
       .map((part) => Number(part.trim()))
       .filter((part) => Number.isFinite(part));
     return {
@@ -2784,167 +4178,187 @@ export default function OrderDetailPage() {
 
   const handleApplyConstructionImport = useCallback(async () => {
     if (!primaryConstructionField) {
-      setConstructionImportError("Primary construction table is missing.");
+      setConstructionImportError(
+        t("orders.detail.errors.primaryUnitTableMissing"),
+      );
       return;
     }
     if (constructionImportDraftRows.length === 0) {
-      setConstructionImportError("No parsed rows to import.");
+      setConstructionImportError(
+        t("orders.detail.importModal.errors.noParsedRows"),
+      );
       return;
     }
     if (constructionImportInvalidRowCount > 0) {
-      setConstructionImportError("Fix rows with empty item_name before import.");
+      setConstructionImportError(
+        t("orders.detail.importModal.errors.fixEmptyNames"),
+      );
       return;
     }
 
-    if (constructionImportTarget === "bom") {
-      const orderItemId = activeConstructionOrderItemIdForBomImport;
-      if (!orderItemId) {
-        setConstructionImportError(
-          "BOM importam vispirms atver konkrētu vienību un izvēlies to no konstrukciju tabulas.",
-        );
-        return;
-      }
-      if (!supabase) {
-        setConstructionImportError(t("orders.detail.errors.supabaseNotConfigured"));
-        return;
-      }
-
-      const existingBomLines = bomLinesByOrderItemId[orderItemId] ?? [];
-      const bomInsertPayload = constructionImportDraftRows
-        .filter((row) => String(row.item_name ?? "").trim().length > 0)
-        .map((row, index) => {
-          const parsedQty = Number(String(row.qty ?? "1").replace(/,/g, "."));
-          const qty = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
-          const dims = parseDimensionToken(row.dimensions);
-          return {
-            order_item_id: orderItemId,
-            line_no: existingBomLines.length + index,
-            component_code: String(row.position ?? "").trim() || null,
-            component_name: String(row.item_name ?? "").trim(),
-            component_type: "other" as const,
-            qty,
-            unit: "pcs",
-            length: dims.length,
-            width: dims.width,
-            height: dims.height,
-            attributes: {
-              material: String(row.material ?? "").trim() || null,
-              source_item_type: String(row.item_type ?? "").trim() || null,
-              import_source_file: constructionImportFileName,
-            },
-            source_kind: "import" as const,
-            sort_order: existingBomLines.length + index,
-          };
-        });
-
-      if (bomInsertPayload.length === 0) {
-        setConstructionImportError("BOM importam nav derīgu rindu ar nosaukumu.");
-        return;
-      }
-
-      const { data: insertedBomRows, error: bomInsertError } = await supabase
-        .from("order_item_bom_lines")
-        .insert(bomInsertPayload)
-        .select(
-          "id, order_item_id, line_no, component_code, component_name, component_type, qty, unit, length, width, height, attributes, source_kind, sort_order, created_at, updated_at",
-        );
-
-      if (bomInsertError) {
-        setConstructionImportError(bomInsertError.message);
-        return;
-      }
-
-      if (insertedBomRows && insertedBomRows.length > 0) {
-        setBomLinesByOrderItemId((prev) => ({
-          ...prev,
-          [orderItemId]: [
-            ...(prev[orderItemId] ?? []),
-            ...insertedBomRows.map((row) => mapOrderItemBomLineRow(row as OrderItemBomLineRow)),
-          ].sort((a, b) => a.sortOrder - b.sortOrder || a.lineNo - b.lineNo),
-        }));
-      }
-
-      setConstructionImportError("");
-      setIsConstructionImportModalOpen(false);
-      notify({
-        title: t("header.notificationDefaultTitle"),
-        description: `Pievienotas ${bomInsertPayload.length} BOM rindas.`,
-      });
-      return;
-    }
-
-    const columns = primaryConstructionField.columns ?? [];
-    const columnKeyBySemantic = new Map(
-      columns
-        .filter((column) => column.semanticKey)
-        .map((column) => [column.semanticKey as string, column.key] as const),
-    );
-
-    const importedRows = constructionImportDraftRows.map((row) => {
-      const mappedRow: Record<string, unknown> = {};
-      CONSTRUCTION_IMPORT_MAPPING_KEYS.forEach((key) => {
-        const columnKey = columnKeyBySemantic.get(key);
-        if (!columnKey) {
+    setIsApplyingConstructionImport(true);
+    try {
+      if (constructionImportTarget === "bom") {
+        const orderItemId = activeConstructionOrderItemIdForBomImport;
+        if (!orderItemId) {
+          setConstructionImportError(
+            t("orders.detail.importModal.errors.openSpecificItemFirst"),
+          );
           return;
         }
-        mappedRow[columnKey] = row[key] ?? "";
-      });
-      mappedRow.__import_source_file = constructionImportFileName;
-      mappedRow.__import_source_sheet = constructionImportSheetName || "Sheet1";
-      mappedRow.__import_source_row_ref = row.source_row_ref ?? "";
-      return ensureOrderInputTableRow(mappedRow);
-    });
-
-    const importRowPayloads = importedRows.map((mapped, index) => {
-      const itemName = Object.values(mapped).some((value) => {
-        if (value === null || value === undefined) {
-          return false;
+        if (!supabase) {
+          setConstructionImportError(
+            t("orders.detail.errors.supabaseNotConfigured"),
+          );
+          return;
         }
-        const text = String(value).trim();
-        return text.length > 0;
+
+        const existingBomLines = bomLinesByOrderItemId[orderItemId] ?? [];
+        const bomInsertPayload = constructionImportDraftRows
+          .filter((row) => String(row.item_name ?? "").trim().length > 0)
+          .map((row, index) => {
+            const parsedQty = Number(String(row.qty ?? "1").replace(/,/g, "."));
+            const qty =
+              Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
+            const dims = parseDimensionToken(row.dimensions);
+            return {
+              order_item_id: orderItemId,
+              line_no: existingBomLines.length + index,
+              component_code: String(row.position ?? "").trim() || null,
+              component_name: String(row.item_name ?? "").trim(),
+              component_type: "other" as const,
+              qty,
+              unit: "pcs",
+              length: dims.length,
+              width: dims.width,
+              height: dims.height,
+              attributes: {
+                material: String(row.material ?? "").trim() || null,
+                source_item_type: String(row.item_type ?? "").trim() || null,
+                parent_article: String(row.parent_article ?? "").trim() || null,
+                import_source_file: constructionImportFileName,
+              },
+              source_kind: "import" as const,
+              sort_order: existingBomLines.length + index,
+            };
+          });
+
+        if (bomInsertPayload.length === 0) {
+          setConstructionImportError(
+            t("orders.detail.importModal.errors.noValidComponentRows"),
+          );
+          return;
+        }
+
+        const { data: insertedBomRows, error: bomInsertError } = await supabase
+          .from("order_item_bom_lines")
+          .insert(bomInsertPayload)
+          .select(
+            "id, order_item_id, line_no, component_code, component_name, component_type, qty, unit, length, width, height, attributes, source_kind, sort_order, created_at, updated_at",
+          );
+
+        if (bomInsertError) {
+          setConstructionImportError(bomInsertError.message);
+          return;
+        }
+
+        if (insertedBomRows && insertedBomRows.length > 0) {
+          setBomLinesByOrderItemId((prev) => ({
+            ...prev,
+            [orderItemId]: [
+              ...(prev[orderItemId] ?? []),
+              ...insertedBomRows.map((row) =>
+                mapOrderItemBomLineRow(row as OrderItemBomLineRow),
+              ),
+            ].sort((a, b) => a.sortOrder - b.sortOrder || a.lineNo - b.lineNo),
+          }));
+        }
+
+        setConstructionImportError("");
+        setIsConstructionImportModalOpen(false);
+        notify({
+          title: t("header.notificationDefaultTitle"),
+          description: t("orders.detail.importModal.componentRowsAdded", {
+            count: bomInsertPayload.length,
+          }),
+        });
+        return;
+      }
+
+      const columns = primaryUnitConfiguredColumns.filter(
+        (column) => column.isActive !== false,
+      );
+
+      const importedRows = constructionImportDraftRows.map((row) => {
+        const mappedRow: Record<string, unknown> = {};
+        columns.forEach((column) => {
+          const draftKey = getUnitImportDraftKey(column);
+          const nextValue = row[draftKey] ?? "";
+          if (String(nextValue ?? "").trim().length === 0) {
+            return;
+          }
+          mappedRow[column.key] = nextValue;
+        });
+        mappedRow.__import_source_file = constructionImportFileName;
+        mappedRow.__import_source_sheet =
+          constructionImportSheetName || "Sheet1";
+        mappedRow.__import_source_row_ref = row.source_row_ref ?? "";
+        return ensureOrderInputTableRow(mappedRow);
       });
-      return {
-        source_row_ref: String(index + 2),
-        mapped_payload: mapped,
-        validation_errors: itemName ? [] : [{ message: "Empty mapped row" }],
-      };
-    });
 
-    setConstructionRowsByFieldId((prev) => ({
-      ...prev,
-      [primaryConstructionField.id]: [
-        ...ensureOrderInputTableRows(prev[primaryConstructionField.id]),
-        ...importedRows,
-      ],
-    }));
+      const importRowPayloads = importedRows.map((mapped, index) => {
+        const itemName = Object.values(mapped).some((value) => {
+          if (value === null || value === undefined) {
+            return false;
+          }
+          const text = String(value).trim();
+          return text.length > 0;
+        });
+        return {
+          source_row_ref: String(index + 2),
+          mapped_payload: mapped,
+          validation_errors: itemName ? [] : [{ message: "Empty mapped row" }],
+        };
+      });
 
-    if (supabase && constructionImportBatchId) {
-      for (const payload of importRowPayloads) {
+      setConstructionRowsByFieldId((prev) => ({
+        ...prev,
+        [primaryConstructionField.id]: [
+          ...ensureOrderInputTableRows(prev[primaryConstructionField.id]),
+          ...importedRows,
+        ],
+      }));
+
+      if (supabase && constructionImportBatchId) {
+        for (const payload of importRowPayloads) {
+          await supabase
+            .from("order_item_import_rows")
+            .update({
+              mapped_payload: payload.mapped_payload,
+              validation_errors: payload.validation_errors,
+            })
+            .eq("batch_id", constructionImportBatchId)
+            .eq("source_row_ref", payload.source_row_ref);
+        }
+        await supabase
+          .from("order_item_import_batches")
+          .update({
+            status: "applied",
+            mapping_profile: constructionImportMapping,
+          })
+          .eq("id", constructionImportBatchId);
         await supabase
           .from("order_item_import_rows")
-          .update({
-            mapped_payload: payload.mapped_payload,
-            validation_errors: payload.validation_errors,
-          })
-          .eq("batch_id", constructionImportBatchId)
-          .eq("source_row_ref", payload.source_row_ref);
+          .update({ status: "applied" })
+          .eq("batch_id", constructionImportBatchId);
       }
-      await supabase
-        .from("order_item_import_batches")
-        .update({
-          status: "applied",
-          mapping_profile: constructionImportMapping,
-        })
-        .eq("id", constructionImportBatchId);
-      await supabase
-        .from("order_item_import_rows")
-        .update({ status: "applied" })
-        .eq("batch_id", constructionImportBatchId);
-    }
 
-    setSavedConstructionImportMapping(constructionImportMapping);
-    setConstructionImportError("");
-    setIsConstructionImportModalOpen(false);
+      setSavedConstructionImportMapping(constructionImportMapping);
+      setConstructionImportError("");
+      setIsConstructionImportModalOpen(false);
+    } finally {
+      setIsApplyingConstructionImport(false);
+    }
   }, [
     activeConstructionOrderItemIdForBomImport,
     bomLinesByOrderItemId,
@@ -2955,76 +4369,402 @@ export default function OrderDetailPage() {
     constructionImportMapping,
     constructionImportSheetName,
     constructionImportTarget,
+    getUnitImportDraftKey,
     notify,
     parseDimensionToken,
     primaryConstructionField,
+    primaryUnitConfiguredColumns,
+    setIsApplyingConstructionImport,
     t,
   ]);
 
-  const handleOpenConstructionAiImport = useCallback(() => {
-    const targetFieldId =
-      constructionImportAiBridgeFieldId ?? primaryConstructionField?.id ?? null;
-    if (!targetFieldId) {
+  const handleOpenConstructionAiImport = useCallback(async () => {
+    const field = primaryConstructionField;
+    if (!field || field.fieldType !== "table") {
+      setConstructionImportError(
+        t("orders.detail.errors.primaryUnitTableMissing"),
+      );
       return;
     }
-    const targetId = `construction-table-${targetFieldId}`;
-    const element = document.getElementById(targetId);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    const attachmentId = tableImportAttachmentIds[field.id];
+    if (!attachmentId) {
+      setConstructionImportError(
+        t("orders.detail.importModal.errors.chooseAttachment"),
+      );
+      return;
     }
-    setIsConstructionImportModalOpen(false);
-    setTableImportNotices((prev) => ({
-      ...prev,
-      [targetFieldId]:
-        "PDF detected: choose the file from production documentation and click Add with AI.",
-    }));
-  }, [constructionImportAiBridgeFieldId, primaryConstructionField?.id]);
+    await handleParseConstructionPdfImport({ attachmentId });
+  }, [
+    handleParseConstructionPdfImport,
+    primaryConstructionField,
+    tableImportAttachmentIds,
+    t,
+  ]);
 
   const handleOpenConstructionFileImport = useCallback(() => {
     setConstructionImportStep("source");
     setIsConstructionImportModalOpen(true);
   }, []);
-  const handleImportConstructionFromAttachment = useCallback(
-    async (attachmentId: string) => {
-      const attachment = attachments.find((item) => item.id === attachmentId);
-      if (!attachment) {
-        setConstructionImportError("Selected file is no longer available.");
+  async function handleParseConstructionPdfImport(options: {
+    attachmentId?: string;
+    file?: File;
+  }) {
+    const field = primaryConstructionField;
+    if (!field || field.fieldType !== "table") {
+      setConstructionImportError(
+        t("orders.detail.errors.primaryUnitTableMissing"),
+      );
+      return;
+    }
+    if (!canUseAiOrderInputImport) {
+      setConstructionImportError(t("orders.detail.errors.aiImportProOnly"));
+      return;
+    }
+    if (!supabase || !orderState) {
+      setConstructionImportError(
+        t("orders.detail.errors.supabaseNotConfigured"),
+      );
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      setConstructionImportError(t("orders.detail.errors.signInAgain"));
+      return;
+    }
+
+    setIsParsingTableFieldId(field.id);
+    setConstructionImportError("");
+    setConstructionImportAiNotice("");
+    setConstructionImportParseSource(null);
+    setConstructionImportParserModel(null);
+
+    try {
+      let requestDocument:
+        | { name: string; mimeType: string; base64: string }
+        | undefined;
+
+      if (options.file) {
+        const bytes = new Uint8Array(await options.file.arrayBuffer());
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let index = 0; index < bytes.length; index += chunkSize) {
+          const chunk = bytes.subarray(index, index + chunkSize);
+          binary += String.fromCharCode(...chunk);
+        }
+        requestDocument = {
+          name: options.file.name,
+          mimeType: options.file.type || "application/pdf",
+          base64: btoa(binary),
+        };
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 95000);
+      const sourceName =
+        options.file?.name ??
+        attachments.find((item) => item.id === options.attachmentId)?.name ??
+        "document.pdf";
+      const matchedPdfProfile = resolvePreferredConstructionImportPdfProfile(
+        constructionImportTarget,
+        sourceName,
+      );
+
+      const requestPayload = {
+        orderId: orderState.id,
+        target: constructionImportTarget,
+        attachmentId: options.attachmentId,
+        document: requestDocument,
+        columns: (field.columns ?? []).map((column) => ({
+          key: column.key,
+          label: column.label,
+          aiKey: column.aiKey,
+          fieldType: column.fieldType,
+          options: column.options ?? [],
+          maxSelect: column.maxSelect ?? 1,
+        })),
+      };
+
+      const runPdfParseRequest = async (skipAi: boolean) => {
+        const response = await fetch("/api/order-inputs/ai-parse", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...requestPayload,
+            skipAi,
+            parserProfile: matchedPdfProfile?.block_rules ?? null,
+          }),
+          signal: controller.signal,
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          rows?: unknown[];
+          parserModel?: string;
+          parserProfileDraft?: ConstructionImportParserProfileDraft;
+        };
+        return { response, payload };
+      };
+
+      let parseAttempt = { response: null as Response | null, payload: {} as {
+        error?: string;
+        rows?: unknown[];
+        parserModel?: string;
+        parserProfileDraft?: ConstructionImportParserProfileDraft;
+      }};
+
+      let usedTemplateOnly = false;
+      let usedTemplateFallbackAi = false;
+
+      try {
+        parseAttempt = matchedPdfProfile
+          ? await runPdfParseRequest(true)
+          : await runPdfParseRequest(false);
+        const initialRows = Array.isArray(parseAttempt.payload.rows)
+          ? parseAttempt.payload.rows
+          : [];
+        if (
+          matchedPdfProfile &&
+          parseAttempt.response?.ok &&
+          initialRows.length === 0
+        ) {
+          usedTemplateFallbackAi = true;
+          parseAttempt = await runPdfParseRequest(false);
+        } else if (matchedPdfProfile && initialRows.length > 0) {
+          usedTemplateOnly = true;
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      const response = parseAttempt.response as Response;
+      const payload = parseAttempt.payload;
+      setConstructionImportParserModel(payload.parserModel ?? null);
+
+      if (!response.ok) {
+        const message =
+          payload.error === "feature_not_available"
+            ? t("orders.detail.errors.aiImportProOnly")
+            : (payload.error ?? t("orders.detail.errors.parsePdfFailed"));
+        setConstructionImportError(message);
         return;
       }
-      const resolvedUrl =
-        attachment.url?.startsWith("http")
-          ? attachment.url
-          : signedAttachmentUrls[attachment.id];
+
+      const normalizedRows = normalizeAiTableRows(
+        payload.rows ?? [],
+        field.columns ?? [],
+        options.attachmentId
+          ? { attachmentId: options.attachmentId }
+          : undefined,
+      );
+
+      const draftRows = normalizedRows.map((row, index) => {
+        const sourceRow = row as Record<string, unknown>;
+        const nextDraft: Record<string, string> = {
+          source_row_ref: String(index + 1),
+        };
+
+        (field.columns ?? []).forEach((column) => {
+          const semanticKey = column.semanticKey;
+          if (!semanticKey) {
+            return;
+          }
+          const value = sourceRow[column.key];
+          if (value === null || value === undefined) {
+            return;
+          }
+          nextDraft[String(semanticKey)] = Array.isArray(value)
+            ? value.join(", ")
+            : String(value);
+        });
+
+        return nextDraft;
+      });
+
+      const pdfRules = resolvePreferredConstructionImportPdfRules(
+        constructionImportTarget,
+        "pdf",
+        options.file?.name ??
+          attachments.find((item) => item.id === options.attachmentId)?.name ??
+          "",
+        Array.isArray(payload.rows)
+          ? payload.rows.flatMap((row) =>
+              row && typeof row === "object" ? Object.keys(row as object) : [],
+            )
+          : [],
+      );
+      const filteredDraftRows =
+        pdfRules.rowSelection === "unit_like_only"
+          ? (() => {
+              const unitRows = draftRows.filter(
+                isUnitLikeConstructionImportDraftRow,
+              );
+              return unitRows.length > 0 ? unitRows : draftRows;
+            })()
+          : pdfRules.rowSelection === "component_like_only"
+            ? (() => {
+                const componentRows = draftRows.filter(
+                  isComponentLikeConstructionImportDraftRow,
+                );
+                return componentRows.length > 0 ? componentRows : draftRows;
+              })()
+            : draftRows;
+
+      constructionImportSourceFileRef.current = options.file ?? null;
+      setConstructionImportFileName(sourceName);
+      setConstructionImportSheetName("");
+      setConstructionImportRows([]);
+      setConstructionImportHeaders([]);
+      setConstructionImportParseMode("flat_table");
+      setConstructionImportDraftRows(filteredDraftRows);
+      setConstructionImportAiParserProfileDraft(
+        payload.parserProfileDraft ?? null,
+      );
+      constructionImportParsedTargetRef.current = constructionImportTarget;
+      setConstructionImportStep("review");
+      setConstructionImportMatchedProfileName(
+        matchedPdfProfile?.profile_name ?? null,
+      );
+      setConstructionImportParseSource(
+        matchedPdfProfile
+          ? usedTemplateFallbackAi
+            ? "template_fallback_ai"
+            : usedTemplateOnly
+              ? "template"
+              : "automatic"
+          : "automatic",
+      );
+      if (matchedPdfProfile) {
+        setConstructionImportAiNotice(
+          usedTemplateFallbackAi
+            ? t("orders.detail.importModal.templateFallbackNotice", {
+                name: matchedPdfProfile.profile_name,
+              })
+            : t("orders.detail.importModal.templateAppliedNotice", {
+                name: matchedPdfProfile.profile_name,
+              }),
+        );
+      } else if (payload.parserModel) {
+        setConstructionImportAiNotice(
+          t("orders.detail.importModal.automaticDetectionNotice"),
+        );
+      }
+
+      notify({
+        title:
+          filteredDraftRows.length > 0
+            ? t("orders.detail.aiImport.pdfParsed")
+            : t("orders.detail.aiImport.noRowsDetected"),
+        description:
+          filteredDraftRows.length > 0
+            ? t("orders.detail.aiImport.detectedRowsForField", {
+                count: filteredDraftRows.length,
+                field: field.label,
+              })
+            : t("orders.detail.aiImport.checkPdfAndColumns"),
+        variant: draftRows.length > 0 ? "success" : "info",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error && error.name === "AbortError"
+          ? t("orders.detail.errors.parsingTimedOut")
+          : t("orders.detail.errors.parsePdfFailed");
+      setConstructionImportError(message);
+      notify({
+        title: t("orders.detail.aiImport.pdfParseFailed"),
+        description: message,
+        variant: "error",
+      });
+    } finally {
+      setIsParsingTableFieldId(null);
+    }
+  }
+  const handleImportConstructionFromAttachment = useCallback(
+    async (attachmentId: string) => {
+      setConstructionImportError("");
+      const attachment = attachments.find((item) => item.id === attachmentId);
+      if (!attachment) {
+        setConstructionImportError(
+          t("orders.detail.importModal.errors.selectedFileMissing"),
+        );
+        return;
+      }
+      let resolvedUrl = attachment.url?.startsWith("http")
+        ? attachment.url
+        : signedAttachmentUrls[attachment.id];
+      if (
+        !resolvedUrl &&
+        attachment.url &&
+        supabase
+      ) {
+        let path = attachment.url;
+        if (storagePublicPrefix && path.startsWith(storagePublicPrefix)) {
+          path = path.slice(storagePublicPrefix.length);
+        }
+        const { data } = await supabase.storage
+          .from(supabaseBucket)
+          .createSignedUrl(path, 60 * 60);
+        if (data?.signedUrl) {
+          resolvedUrl = data.signedUrl;
+          setSignedAttachmentUrls((prev) => ({
+            ...prev,
+            [attachment.id]: data.signedUrl as string,
+          }));
+        }
+      }
       if (!resolvedUrl) {
         setConstructionImportError(
-          "Cannot access selected file yet. Please open Files tab once and try again.",
+          t("orders.detail.importModal.errors.fileNotAccessibleYet"),
         );
         return;
       }
       try {
         const response = await fetch(resolvedUrl);
         if (!response.ok) {
-          throw new Error("Failed to download selected file.");
+          throw new Error(t("orders.detail.importModal.errors.downloadFailed"));
         }
         const blob = await response.blob();
         const file = new File([blob], attachment.name, {
           type: blob.type || attachment.mimeType || undefined,
         });
         await handleConstructionImportFile(file);
+        setConstructionImportError("");
       } catch (error) {
         setConstructionImportError(
-          error instanceof Error ? error.message : "Failed to load selected file.",
+          error instanceof Error
+            ? error.message
+            : t("orders.detail.importModal.errors.loadSelectedFileFailed"),
         );
       }
     },
-    [attachments, handleConstructionImportFile, signedAttachmentUrls],
+    [
+      attachments,
+      handleConstructionImportFile,
+      signedAttachmentUrls,
+      supabase,
+      supabaseBucket,
+      storagePublicPrefix,
+      t,
+    ],
   );
-
+  const isOpeningConstructionAiImport =
+    Boolean(primaryConstructionField) &&
+    isParsingTableFieldId === primaryConstructionField?.id;
 
   const supplementalOrderInputGroups = useMemo(() => {
     const groups = new Map<string, OrderInputField[]>();
     activeOrderInputFields
       .filter((field) => field.fieldType !== "table")
+      .filter(
+        (field) =>
+          field.scope !== "construction_attribute" &&
+          !(!field.scope && field.groupKey === "production_scope"),
+      )
       .forEach((field) => {
         const current = groups.get(field.groupKey) ?? [];
         current.push(field);
@@ -3040,7 +4780,9 @@ export default function OrderDetailPage() {
     (fieldId: string, row: unknown) => {
       const rowIds = getOrderInputTableRowAttachmentIds(row);
       const rowKey = getConstructionRowKey(fieldId, row);
-      const linkedIds = rowKey ? orderItemDocumentIdsByRowKey[rowKey] ?? [] : [];
+      const linkedIds = rowKey
+        ? (orderItemDocumentIdsByRowKey[rowKey] ?? [])
+        : [];
       return Array.from(new Set([...linkedIds, ...rowIds]));
     },
     [getConstructionRowKey, orderItemDocumentIdsByRowKey],
@@ -3057,7 +4799,8 @@ export default function OrderDetailPage() {
     }
     const rows = getConstructionRows(field.id);
     const row = rows.find(
-      (item) => getOrderInputTableRowId(item) === activeConstructionDetail.rowId,
+      (item) =>
+        getOrderInputTableRowId(item) === activeConstructionDetail.rowId,
     );
     if (!row) {
       return null;
@@ -3069,7 +4812,9 @@ export default function OrderDetailPage() {
       .map((attachmentId) =>
         attachments.find((attachment) => attachment.id === attachmentId),
       )
-      .filter((attachment): attachment is OrderAttachment => Boolean(attachment));
+      .filter((attachment): attachment is OrderAttachment =>
+        Boolean(attachment),
+      );
     return {
       field,
       row,
@@ -3089,8 +4834,9 @@ export default function OrderDetailPage() {
   ]);
   const activeConstructionAttachmentIds = useMemo(
     () =>
-      activeConstructionDetailData?.attachments.map((attachment) => attachment.id) ??
-      [],
+      activeConstructionDetailData?.attachments.map(
+        (attachment) => attachment.id,
+      ) ?? [],
     [activeConstructionDetailData],
   );
   useEffect(() => {
@@ -3152,7 +4898,9 @@ export default function OrderDetailPage() {
   const updateBomDraft = useCallback(
     (
       orderItemId: string,
-      patch: Partial<OrderItemBomLineDraft> | ((draft: OrderItemBomLineDraft) => OrderItemBomLineDraft),
+      patch:
+        | Partial<OrderItemBomLineDraft>
+        | ((draft: OrderItemBomLineDraft) => OrderItemBomLineDraft),
     ) => {
       setBomDraftsByOrderItemId((prev) => {
         const current = prev[orderItemId] ?? DEFAULT_BOM_DRAFT;
@@ -3303,7 +5051,7 @@ export default function OrderDetailPage() {
     (detail: NonNullable<typeof activeConstructionDetailData>) => {
       const orderItemId = detail.orderItem?.id;
       const draft = orderItemId
-        ? bomDraftsByOrderItemId[orderItemId] ?? DEFAULT_BOM_DRAFT
+        ? (bomDraftsByOrderItemId[orderItemId] ?? DEFAULT_BOM_DRAFT)
         : DEFAULT_BOM_DRAFT;
       return (
         <div className="rounded-md border border-border bg-background px-3 py-3">
@@ -3414,7 +5162,9 @@ export default function OrderDetailPage() {
                 >
                   <SelectTrigger className="h-9 w-full">
                     <SelectValue
-                      placeholder={t("orders.detail.orderInputs.bomComponentType")}
+                      placeholder={t(
+                        "orders.detail.orderInputs.bomComponentType",
+                      )}
                     />
                   </SelectTrigger>
                   <SelectContent>
@@ -3600,11 +5350,11 @@ export default function OrderDetailPage() {
     }
     return value === null || value === undefined ? "" : String(value);
   };
-  const normalizeAiTableRows = (
+  function normalizeAiTableRows(
     rows: unknown[],
     columns: OrderInputTableColumn[],
     options?: { attachmentId?: string },
-  ) => {
+  ) {
     return rows
       .map((row) => {
         if (!row || typeof row !== "object") {
@@ -3641,7 +5391,7 @@ export default function OrderDetailPage() {
           : next;
       })
       .filter((row): row is Record<string, unknown> => Boolean(row));
-  };
+  }
   const isOrderInputsDirty = useMemo(
     () =>
       activeOrderInputFields.some((field) => {
@@ -4469,7 +6219,10 @@ export default function OrderDetailPage() {
       const desiredItems = primaryField
         ? buildOrderItemsFromConstructionField({
             orderId: orderState.id,
-            field: primaryField,
+            field: {
+              ...primaryField,
+              columns: primaryUnitConfiguredColumns,
+            },
             value: constructionRowsByFieldId[primaryField.id],
           })
         : [];
@@ -4489,7 +6242,9 @@ export default function OrderDetailPage() {
       }
 
       if (!isMissingOrderItemsSchema(existingItemsResult.error)) {
-        const desiredKeys = new Set(desiredItems.map((item) => item.source_row_id));
+        const desiredKeys = new Set(
+          desiredItems.map((item) => item.source_row_id),
+        );
         const idsToDelete = (existingItemsResult.data ?? [])
           .filter((item) => !desiredKeys.has(item.source_row_id))
           .map((item) => item.id);
@@ -4781,10 +6536,13 @@ export default function OrderDetailPage() {
     const normalized = normalizeOrderInputValue(field, value);
     const label = (
       <span className="font-medium">
-        {field.label}
+        {getOrderInputFieldDisplayLabel(field)}
         {field.isRequired && <span className="ml-1 text-destructive">*</span>}
       </span>
     );
+    const isPrimaryUnitsTable =
+      field.fieldType === "table" &&
+      (field.isPrimaryConstructionTable || field.key === "constructions");
 
     if (field.fieldType === "toggle_number") {
       const payload = normalized as { enabled: boolean; amount: number | null };
@@ -4829,8 +6587,8 @@ export default function OrderDetailPage() {
                 {field.unit}
               </span>
             )}
-            </div>
           </div>
+        </div>
       );
     }
 
@@ -4907,19 +6665,40 @@ export default function OrderDetailPage() {
     }
 
     if (field.fieldType === "table") {
-      const columns = field.columns ?? [];
+      const columns = field.isPrimaryConstructionTable
+        ? primaryUnitConfiguredColumns
+        : (field.columns ?? []);
       const rows = getConstructionRows(field.id);
-      const visibleColumns = columns.filter(
-        (column) => (column.isActive ?? true) && (column.showInTable ?? true),
-      );
+      const hasRowValueForColumn = (columnKey: string) =>
+        rows.some((row) => {
+          if (!row || typeof row !== "object") {
+            return false;
+          }
+          const value = (row as Record<string, unknown>)[columnKey];
+          if (Array.isArray(value)) {
+            return value.some((item) => String(item ?? "").trim().length > 0);
+          }
+          return String(value ?? "").trim().length > 0;
+        });
+      const visibleColumns = columns
+        .filter(
+          (column) => (column.isActive ?? true) && (column.showInTable ?? true),
+        )
+        .filter((column) =>
+          field.isPrimaryConstructionTable ? true : hasRowValueForColumn(column.key),
+        )
+        .map((column) => ({
+          ...column,
+          label: getLocalizedConstructionColumnDisplayLabel(column, locale),
+        }));
       const selectedAttachmentId = tableImportAttachmentIds[field.id] ?? "";
       const availableParseAttachments = productionDocumentationParseAttachments;
       const selectedAttachment = availableParseAttachments.find(
         (item) => item.id === selectedAttachmentId,
       );
       const aiButtonTooltipBasic = t("orders.detail.aiImport.description");
-      const importNotice = tableImportNotices[field.id] ?? "";
       const isParsingThisField = isParsingTableFieldId === field.id;
+      const importNotice = tableImportNotices[field.id] ?? "";
       const selectedRows = tableRowSelections[field.id] ?? [];
       const allSelected =
         rows.length > 0 && selectedRows.length === rows.length;
@@ -4999,42 +6778,55 @@ export default function OrderDetailPage() {
       };
       const resolveColumnWidth = (column: OrderInputTableColumn) => {
         const token = `${column.key} ${column.label}`.toLowerCase();
+        const semanticToken = column.semanticKey?.toLowerCase() ?? "";
         if (
+          semanticToken === "qty" ||
           token.includes("skaits") ||
           token.includes("gab") ||
           token.includes("qty") ||
           token.includes("quantity")
         ) {
-          return "88px";
+          return "96px";
         }
         if (
+          semanticToken === "dimensions" ||
           token.includes("izmērs") ||
           token.includes("izmers") ||
           token.includes("size")
         ) {
-          return "170px";
+          return "160px";
         }
         if (
+          semanticToken === "color" ||
           token.includes("krāsa") ||
           token.includes("krasa") ||
           token.includes("color")
         ) {
-          return "220px";
+          return "190px";
         }
         if (
+          semanticToken === "item_name" ||
           token.includes("nosaukums") ||
           token.includes("name") ||
           token.includes("description")
         ) {
           return "260px";
         }
-        if (token.includes("konstrukcija") || token.includes("construction")) {
-          return "190px";
-        }
-        if (token.includes("position") || token.includes("poz")) {
+        if (
+          semanticToken === "item_type" ||
+          token.includes("construction") ||
+          token.includes("konstrukcija")
+        ) {
           return "170px";
         }
-        return "180px";
+        if (
+          semanticToken === "position" ||
+          token.includes("position") ||
+          token.includes("poz")
+        ) {
+          return "130px";
+        }
+        return "150px";
       };
       return (
         <div
@@ -5042,10 +6834,16 @@ export default function OrderDetailPage() {
           id={`construction-table-${field.id}`}
           className="min-w-0 max-w-full space-y-3 md:col-span-2"
         >
-          <div className="flex min-w-0 max-w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm font-medium">{label}</div>
+          <div
+            className={`flex min-w-0 max-w-full flex-col gap-2 sm:flex-row sm:items-center ${
+              isPrimaryUnitsTable ? "sm:justify-end" : "sm:justify-between"
+            }`}
+          >
+            {!isPrimaryUnitsTable ? (
+              <div className="text-sm font-medium">{label}</div>
+            ) : null}
             <div className="flex min-w-0 max-w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-end">
-              {canUseAiOrderInputImport && (
+              {!isPrimaryUnitsTable && canUseAiOrderInputImport && (
                 <div className="flex min-w-0 max-w-full flex-col gap-1.5">
                   <div className="flex min-w-0 max-w-full flex-col gap-2 sm:flex-row sm:flex-wrap">
                     <Select
@@ -5095,7 +6893,9 @@ export default function OrderDetailPage() {
                         if (!selectedAttachmentId) {
                           setTableImportNotices((prev) => ({
                             ...prev,
-                            [field.id]: "Vispirms izvēlies failu.",
+                            [field.id]: t(
+                              "orders.detail.aiImport.chooseFileFirst",
+                            ),
                           }));
                           return;
                         }
@@ -5113,7 +6913,7 @@ export default function OrderDetailPage() {
                       disabled={!canEditOrderInputs || isParsingThisField}
                       className="w-full sm:w-auto"
                     >
-                      Importēt izvēlēto failu
+                      {t("orders.detail.aiImport.importSelectedFile")}
                     </Button>
                     {canUseAiOrderInputImport ? (
                       <Button
@@ -5169,6 +6969,19 @@ export default function OrderDetailPage() {
                 </div>
               )}
 
+              {isPrimaryUnitsTable ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="default"
+                  onClick={handleOpenConstructionFileImport}
+                  disabled={!canEditOrderInputs}
+                  className="w-full sm:w-auto"
+                >
+                  <UploadIcon className="h-4 w-4" />
+                  {t("orders.detail.orderInputs.importAction")}
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 variant="outline"
@@ -5190,15 +7003,17 @@ export default function OrderDetailPage() {
               </Button>
             </div>
           </div>
-          {importNotice && (
+          {!isPrimaryUnitsTable && importNotice && (
             <div className="text-xs text-muted-foreground">{importNotice}</div>
           )}
-          {canUseAiOrderInputImport && selectedAttachment && (
-            <div className="text-xs text-muted-foreground">
-              {t("orders.detail.aiImport.source")}: {selectedAttachment.name}
-            </div>
-          )}
-          {!canUseAiOrderInputImport && (
+          {!isPrimaryUnitsTable &&
+            canUseAiOrderInputImport &&
+            selectedAttachment && (
+              <div className="text-xs text-muted-foreground">
+                {t("orders.detail.aiImport.source")}: {selectedAttachment.name}
+              </div>
+            )}
+          {!isPrimaryUnitsTable && !canUseAiOrderInputImport && (
             <div className="text-xs text-muted-foreground">
               {t("orders.detail.aiImport.proOnly")}
             </div>
@@ -5208,14 +7023,14 @@ export default function OrderDetailPage() {
               {t("orders.detail.aiImport.noColumnsConfigured")}
             </div>
           ) : (
-            <div className="w-full max-w-full overflow-x-auto rounded-lg border border-border">
+            <div className="w-full max-w-full overflow-x-auto rounded-lg border border-border md:overflow-x-visible">
               {isParsingThisField && (
                 <LoadingSpinner
                   className="justify-start border-b border-border px-3 py-2"
                   label={t("orders.detail.aiImport.addingRows")}
                 />
               )}
-              <table className="w-full table-fixed text-sm">
+              <table className="min-w-full table-fixed text-sm md:table-auto">
                 <colgroup>
                   {visibleColumns.map((column) => (
                     <col
@@ -5223,20 +7038,20 @@ export default function OrderDetailPage() {
                       style={{ width: resolveColumnWidth(column) }}
                     />
                   ))}
-                  <col style={{ width: "116px" }} />
+                  <col style={{ width: "144px" }} />
                 </colgroup>
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
                     {visibleColumns.map((column) => (
                       <th
                         key={column.key}
-                        className="whitespace-nowrap px-3 py-2 text-left"
+                        className="px-3 py-2 text-left leading-tight whitespace-normal"
                       >
                         {column.label}
                         {column.unit ? ` (${column.unit})` : ""}
                       </th>
                     ))}
-                    <th className="whitespace-nowrap px-3 py-2 text-right">
+                    <th className="px-3 py-2 text-right leading-tight whitespace-normal">
                       <div className="flex items-center justify-end gap-2">
                         <span>{t("orders.page.actions")}</span>
                         <Checkbox
@@ -5262,262 +7077,287 @@ export default function OrderDetailPage() {
                       </td>
                     </tr>
                   ) : (
-                    rows.map((row, rowIndex) => (
+                    rows.map((row, rowIndex) =>
                       (() => {
                         const rowId = getOrderInputTableRowId(row);
                         const isActiveRow =
                           selectedConstructionRowId !== null &&
                           rowId === selectedConstructionRowId;
                         return (
-                      <tr
-                        key={rowId ?? `row-${rowIndex}`}
-                        className={`border-t border-border ${
-                          isActiveRow ? "bg-primary/5" : ""
-                        }`}
-                      >
-                        {visibleColumns.map((column) => {
-                          const cellValue =
-                            typeof row === "object" && row !== null
-                              ? (row as Record<string, unknown>)[column.key]
-                              : "";
-                          if (column.fieldType === "select") {
-                            const maxSelect = Math.max(
-                              1,
-                              Math.min(3, column.maxSelect ?? 1),
-                            );
-                            const currentValues = Array.isArray(cellValue)
-                              ? cellValue.filter(
-                                  (item): item is string =>
-                                    typeof item === "string",
-                                )
-                              : typeof cellValue === "string" && cellValue
-                                ? [cellValue]
-                                : [];
-                            const isMultiSelect = maxSelect > 1;
-                            const canAddMore = currentValues.length < maxSelect;
-                            const handleAddValue = (value: string) => {
-                              if (!value) {
-                                return;
-                              }
-                              if (currentValues.includes(value)) {
-                                return;
-                              }
-                              const nextValues = [
-                                ...currentValues,
-                                value,
-                              ].slice(0, maxSelect);
-                              setConstructionRowsByFieldId((prev) => {
-                                const nextRows = [...rows];
-                                const currentRow =
-                                  typeof nextRows[rowIndex] === "object" &&
-                                  nextRows[rowIndex]
-                                    ? ensureOrderInputTableRow(
-                                        nextRows[rowIndex],
-                                      )
-                                    : ensureOrderInputTableRow({});
-                                currentRow[column.key] =
-                                  maxSelect === 1 ? value : nextValues;
-                                nextRows[rowIndex] = currentRow;
-                                return { ...prev, [field.id]: nextRows };
-                              });
-                            };
-                            return (
-                              <td
-                                key={column.key}
-                                className="whitespace-nowrap px-3 py-2 align-top"
-                              >
-                                <Select
-                                  value={
-                                    isMultiSelect
-                                      ? "__none__"
-                                      : (currentValues[0] ?? "__none__")
+                          <tr
+                            key={rowId ?? `row-${rowIndex}`}
+                            className={`border-t border-border ${
+                              isActiveRow ? "bg-primary/5" : ""
+                            }`}
+                          >
+                            {visibleColumns.map((column) => {
+                              const cellValue =
+                                typeof row === "object" && row !== null
+                                  ? (row as Record<string, unknown>)[column.key]
+                                  : "";
+                              if (column.fieldType === "select") {
+                                const maxSelect = Math.max(
+                                  1,
+                                  Math.min(3, column.maxSelect ?? 1),
+                                );
+                                const currentValues = Array.isArray(cellValue)
+                                  ? cellValue.filter(
+                                      (item): item is string =>
+                                        typeof item === "string",
+                                    )
+                                  : typeof cellValue === "string" && cellValue
+                                    ? [cellValue]
+                                    : [];
+                                const isMultiSelect = maxSelect > 1;
+                                const canAddMore =
+                                  currentValues.length < maxSelect;
+                                const handleAddValue = (value: string) => {
+                                  if (!value) {
+                                    return;
                                   }
-                                  disabled={
-                                    !canEditOrderInputs ||
-                                    (isMultiSelect && !canAddMore)
+                                  if (currentValues.includes(value)) {
+                                    return;
                                   }
-                                  onValueChange={(value) => {
-                                    if (value === "__none__") {
-                                      if (!isMultiSelect) {
-                                        updateRow(rowIndex, column.key, "");
+                                  const nextValues = [
+                                    ...currentValues,
+                                    value,
+                                  ].slice(0, maxSelect);
+                                  setConstructionRowsByFieldId((prev) => {
+                                    const nextRows = [...rows];
+                                    const currentRow =
+                                      typeof nextRows[rowIndex] === "object" &&
+                                      nextRows[rowIndex]
+                                        ? ensureOrderInputTableRow(
+                                            nextRows[rowIndex],
+                                          )
+                                        : ensureOrderInputTableRow({});
+                                    currentRow[column.key] =
+                                      maxSelect === 1 ? value : nextValues;
+                                    nextRows[rowIndex] = currentRow;
+                                    return { ...prev, [field.id]: nextRows };
+                                  });
+                                };
+                                return (
+                                  <td
+                                    key={column.key}
+                                    className="whitespace-nowrap px-3 py-2 align-top"
+                                  >
+                                    <Select
+                                      value={
+                                        isMultiSelect
+                                          ? "__none__"
+                                          : (currentValues[0] ?? "__none__")
                                       }
+                                      disabled={
+                                        !canEditOrderInputs ||
+                                        (isMultiSelect && !canAddMore)
+                                      }
+                                      onValueChange={(value) => {
+                                        if (value === "__none__") {
+                                          if (!isMultiSelect) {
+                                            updateRow(rowIndex, column.key, "");
+                                          }
+                                          return;
+                                        }
+                                        if (isMultiSelect) {
+                                          handleAddValue(value);
+                                          return;
+                                        }
+                                        updateRow(rowIndex, column.key, value);
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-9 w-full rounded-md">
+                                        <SelectValue
+                                          placeholder={
+                                            isMultiSelect
+                                              ? canAddMore
+                                                ? t(
+                                                    "orders.detail.aiImport.select",
+                                                  )
+                                                : t(
+                                                    "orders.detail.aiImport.maxSelected",
+                                                  )
+                                              : t(
+                                                  "orders.detail.aiImport.select",
+                                                )
+                                          }
+                                        />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__none__">
+                                          {isMultiSelect
+                                            ? canAddMore
+                                              ? t(
+                                                  "orders.detail.aiImport.select",
+                                                )
+                                              : t(
+                                                  "orders.detail.aiImport.maxSelected",
+                                                )
+                                            : t(
+                                                "orders.detail.aiImport.select",
+                                              )}
+                                        </SelectItem>
+                                        {(column.options ?? []).map(
+                                          (option) => (
+                                            <SelectItem
+                                              key={option}
+                                              value={option}
+                                            >
+                                              {option}
+                                            </SelectItem>
+                                          ),
+                                        )}
+                                      </SelectContent>
+                                    </Select>
+                                    {isMultiSelect &&
+                                      currentValues.length > 0 && (
+                                        <div className="mt-2 flex flex-wrap gap-1">
+                                          {currentValues.map((chip) => (
+                                            <button
+                                              key={chip}
+                                              type="button"
+                                              onClick={() => {
+                                                const nextValues =
+                                                  currentValues.filter(
+                                                    (item) => item !== chip,
+                                                  );
+                                                setConstructionRowsByFieldId(
+                                                  (prev) => {
+                                                    const nextRows = [...rows];
+                                                    const currentRow =
+                                                      typeof nextRows[
+                                                        rowIndex
+                                                      ] === "object" &&
+                                                      nextRows[rowIndex]
+                                                        ? ensureOrderInputTableRow(
+                                                            nextRows[rowIndex],
+                                                          )
+                                                        : ensureOrderInputTableRow(
+                                                            {},
+                                                          );
+                                                    currentRow[column.key] =
+                                                      maxSelect === 1
+                                                        ? (nextValues[0] ?? "")
+                                                        : nextValues;
+                                                    nextRows[rowIndex] =
+                                                      currentRow;
+                                                    return {
+                                                      ...prev,
+                                                      [field.id]: nextRows,
+                                                    };
+                                                  },
+                                                );
+                                              }}
+                                              disabled={!canEditOrderInputs}
+                                              className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
+                                            >
+                                              {chip}
+                                              <span aria-hidden="true">
+                                                &times;
+                                              </span>
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td
+                                  key={column.key}
+                                  className="whitespace-nowrap px-3 py-2 align-top"
+                                >
+                                  <Input
+                                    type={
+                                      column.fieldType === "number"
+                                        ? "number"
+                                        : "text"
+                                    }
+                                    value={String(cellValue ?? "")}
+                                    disabled={!canEditOrderInputs}
+                                    onChange={(event) =>
+                                      updateRow(
+                                        rowIndex,
+                                        column.key,
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="h-9 w-full px-2 text-sm"
+                                  />
+                                </td>
+                              );
+                            })}
+                            <td className="whitespace-nowrap px-3 py-2 align-top text-right">
+                              <div className="flex items-start justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant={isActiveRow ? "default" : "outline"}
+                                  onClick={() => {
+                                    if (!rowId) {
                                       return;
                                     }
-                                    if (isMultiSelect) {
-                                      handleAddValue(value);
-                                      return;
-                                    }
-                                    updateRow(rowIndex, column.key, value);
+                                    setActiveConstructionDetail({
+                                      fieldId: field.id,
+                                      rowId,
+                                    });
                                   }}
                                 >
-                                  <SelectTrigger className="h-9 w-full rounded-md">
-                                    <SelectValue
-                                      placeholder={
-                                        isMultiSelect
-                                          ? canAddMore
-                                            ? t("orders.detail.aiImport.select")
-                                            : t(
-                                                "orders.detail.aiImport.maxSelected",
-                                              )
-                                          : t("orders.detail.aiImport.select")
-                                      }
-                                    />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">
-                                      {isMultiSelect
-                                        ? canAddMore
-                                          ? t("orders.detail.aiImport.select")
-                                          : t(
-                                              "orders.detail.aiImport.maxSelected",
-                                            )
-                                        : t("orders.detail.aiImport.select")}
-                                    </SelectItem>
-                                    {(column.options ?? []).map((option) => (
-                                      <SelectItem key={option} value={option}>
-                                        {option}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {isMultiSelect && currentValues.length > 0 && (
-                                  <div className="mt-2 flex flex-wrap gap-1">
-                                    {currentValues.map((chip) => (
-                                      <button
-                                        key={chip}
-                                        type="button"
-                                        onClick={() => {
-                                          const nextValues =
-                                            currentValues.filter(
-                                              (item) => item !== chip,
-                                            );
-                                          setConstructionRowsByFieldId((prev) => {
-                                            const nextRows = [...rows];
-                                            const currentRow =
-                                              typeof nextRows[rowIndex] ===
-                                                "object" && nextRows[rowIndex]
-                                                ? ensureOrderInputTableRow(
-                                                    nextRows[rowIndex],
-                                                  )
-                                                : ensureOrderInputTableRow({});
-                                            currentRow[column.key] =
-                                              maxSelect === 1
-                                                ? (nextValues[0] ?? "")
-                                                : nextValues;
-                                            nextRows[rowIndex] = currentRow;
-                                            return {
-                                              ...prev,
-                                              [field.id]: nextRows,
-                                            };
-                                          });
-                                        }}
-                                        disabled={!canEditOrderInputs}
-                                        className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
-                                      >
-                                        {chip}
-                                        <span aria-hidden="true">&times;</span>
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </td>
-                            );
-                          }
-                          return (
-                            <td
-                              key={column.key}
-                              className="whitespace-nowrap px-3 py-2 align-top"
-                            >
-                              <Input
-                                type={
-                                  column.fieldType === "number"
-                                    ? "number"
-                                    : "text"
-                                }
-                                value={String(cellValue ?? "")}
-                                disabled={!canEditOrderInputs}
-                                onChange={(event) =>
-                                  updateRow(
-                                    rowIndex,
-                                    column.key,
-                                    event.target.value,
-                                  )
-                                }
-                                className="h-9 w-full px-2 text-sm"
-                              />
-                            </td>
-                          );
-                        })}
-                        <td className="whitespace-nowrap px-3 py-2 align-top text-right">
-                          <div className="flex items-start justify-end gap-2">
-                            <Button
-                              size="sm"
-                              variant={isActiveRow ? "default" : "outline"}
-                              onClick={() => {
-                                if (!rowId) {
-                                  return;
-                                }
-                                setActiveConstructionDetail({
-                                  fieldId: field.id,
-                                  rowId,
-                                });
-                              }}
-                            >
-                              <PanelRightIcon className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                const nextRows = [
-                                  ...rows,
-                                  cloneOrderInputTableRow(row),
-                                ];
-                                setConstructionRowsByFieldId((prev) => ({
-                                  ...prev,
-                                  [field.id]: nextRows,
-                                }));
-                              }}
-                              disabled={!canEditOrderInputs}
-                            >
-                              <CopyIcon className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => removeRow(rowIndex)}
-                              disabled={!canEditOrderInputs}
-                            >
-                              <Trash2Icon className="h-4 w-4" />
-                            </Button>
+                                  <PanelRightIcon className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    const nextRows = [
+                                      ...rows,
+                                      cloneOrderInputTableRow(row),
+                                    ];
+                                    setConstructionRowsByFieldId((prev) => ({
+                                      ...prev,
+                                      [field.id]: nextRows,
+                                    }));
+                                  }}
+                                  disabled={!canEditOrderInputs}
+                                >
+                                  <CopyIcon className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => removeRow(rowIndex)}
+                                  disabled={!canEditOrderInputs}
+                                >
+                                  <Trash2Icon className="h-4 w-4" />
+                                </Button>
                             <Checkbox
                               variant="box"
                               checked={selectedRows.includes(rowIndex)}
                               onChange={(event) => {
                                 setTableRowSelections((prev) => {
                                   const current = prev[field.id] ?? [];
-                                  if (event.target.checked) {
-                                    return {
-                                      ...prev,
-                                      [field.id]: [...current, rowIndex],
-                                    };
-                                  }
-                                  return {
-                                    ...prev,
-                                    [field.id]: current.filter(
-                                      (idx) => idx !== rowIndex,
-                                    ),
+                                      if (event.target.checked) {
+                                        return {
+                                          ...prev,
+                                          [field.id]: [...current, rowIndex],
+                                        };
+                                      }
+                                      return {
+                                        ...prev,
+                                        [field.id]: current.filter(
+                                          (idx) => idx !== rowIndex,
+                                        ),
                                   };
                                 });
                               }}
                               disabled={!canEditOrderInputs}
+                              className="mt-2"
                             />
                           </div>
                         </td>
-                      </tr>
+                          </tr>
                         );
-                      })()
-                    ))
+                      })(),
+                    )
                   )}
                 </tbody>
               </table>
@@ -5545,30 +7385,32 @@ export default function OrderDetailPage() {
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_320px]">
                 <div className="space-y-3">
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {activeConstructionDetailData.field.columns?.map((column) => {
-                      const rawValue =
-                        activeConstructionDetailData.row[column.key];
-                      const value = Array.isArray(rawValue)
-                        ? rawValue.join(" / ")
-                        : String(rawValue ?? "").trim();
-                      if (!value) {
-                        return null;
-                      }
-                      return (
-                        <div
-                          key={column.key}
-                          className="rounded-md border border-border bg-background px-3 py-2"
-                        >
-                          <div className="text-xs text-muted-foreground">
-                            {column.label}
+                    {activeConstructionDetailData.field.columns?.map(
+                      (column) => {
+                        const rawValue =
+                          activeConstructionDetailData.row[column.key];
+                        const value = Array.isArray(rawValue)
+                          ? rawValue.join(" / ")
+                          : String(rawValue ?? "").trim();
+                        if (!value) {
+                          return null;
+                        }
+                        return (
+                          <div
+                            key={column.key}
+                            className="rounded-md border border-border bg-background px-3 py-2"
+                          >
+                            <div className="text-xs text-muted-foreground">
+                              {column.label}
+                            </div>
+                            <div className="mt-1 text-sm font-medium text-foreground">
+                              {value}
+                              {column.unit ? ` ${column.unit}` : ""}
+                            </div>
                           </div>
-                          <div className="mt-1 text-sm font-medium text-foreground">
-                            {value}
-                            {column.unit ? ` ${column.unit}` : ""}
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      },
+                    )}
                   </div>
                 </div>
                 <div className="space-y-3">
@@ -5577,7 +7419,9 @@ export default function OrderDetailPage() {
                       {t("orders.detail.orderInputs.detailSourceField")}
                     </div>
                     <div className="mt-1 text-sm font-medium">
-                      {activeConstructionDetailData.field.label}
+                      {getOrderInputFieldDisplayLabel(
+                        activeConstructionDetailData.field,
+                      )}
                     </div>
                     <div className="mt-3 text-xs text-muted-foreground">
                       {t("orders.detail.orderInputs.detailRowId")}
@@ -5621,7 +7465,9 @@ export default function OrderDetailPage() {
                             >
                               <div className="text-sm font-medium break-all">
                                 {attachment.name ||
-                                  t("orders.detail.orderInputs.detailUnknownFile")}
+                                  t(
+                                    "orders.detail.orderInputs.detailUnknownFile",
+                                  )}
                               </div>
                               <div className="mt-1 text-xs text-muted-foreground">
                                 {attachment.createdAt
@@ -5632,10 +7478,12 @@ export default function OrderDetailPage() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  asChild={
-                                    Boolean(signedAttachmentUrls[attachment.id])
+                                  asChild={Boolean(
+                                    signedAttachmentUrls[attachment.id],
+                                  )}
+                                  disabled={
+                                    !signedAttachmentUrls[attachment.id]
                                   }
-                                  disabled={!signedAttachmentUrls[attachment.id]}
                                 >
                                   {signedAttachmentUrls[attachment.id] ? (
                                     <a
@@ -5643,11 +7491,15 @@ export default function OrderDetailPage() {
                                       target="_blank"
                                       rel="noreferrer"
                                     >
-                                      {t("orders.detail.orderInputs.detailOpenFile")}
+                                      {t(
+                                        "orders.detail.orderInputs.detailOpenFile",
+                                      )}
                                     </a>
                                   ) : (
                                     <span>
-                                      {t("orders.detail.orderInputs.detailOpenFile")}
+                                      {t(
+                                        "orders.detail.orderInputs.detailOpenFile",
+                                      )}
                                     </span>
                                   )}
                                 </Button>
@@ -6951,407 +8803,90 @@ export default function OrderDetailPage() {
           </div>
         </div>
       </BottomSheet>
-      <BottomSheet
-        id="construction-import-modal"
+      <ConstructionImportModal
         open={isConstructionImportModalOpen}
         onClose={() => {
           setIsConstructionImportModalOpen(false);
           setConstructionImportStep("source");
+          constructionImportParsedTargetRef.current = null;
         }}
-        ariaLabel="CSV Excel import"
-        title="CSV/Excel imports"
         closeButtonLabel={t("profile.close")}
-        showOnDesktop
-        keyboardAware
-        panelClassName="md:left-1/2 md:max-h-[92dvh] md:w-[min(96vw,1100px)] md:-translate-x-1/2 md:rounded-xl md:border md:border-border md:shadow-2xl"
-      >
-        <div className="max-h-[74dvh] space-y-4 overflow-y-auto p-3 md:max-h-[calc(92dvh-4.5rem)] md:p-4">
-          <p className="text-xs text-muted-foreground">
-            Augsuplade failu, pielago mappingu un izlabo rindas pirms pievienosanas konstrukciju sarakstam.
-          </p>
-
-          <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
-            <div className="mb-2 text-xs text-muted-foreground">Importa vednis</div>
-            <div className="grid gap-2 md:grid-cols-4">
-              {CONSTRUCTION_IMPORT_STEPS.map((step, index) => {
-                const isActive = constructionImportStep === step;
-                const isDone = CONSTRUCTION_IMPORT_STEPS.indexOf(constructionImportStep) > index;
-                const labels: Record<(typeof CONSTRUCTION_IMPORT_STEPS)[number], string> = {
-                  source: "1. Avots",
-                  mapping: "2. Mapping",
-                  review: "3. Priekšskatījums",
-                  save: "4. Saglabāšana",
-                };
-                return (
-                  <div
-                    key={`wizard-step-${step}`}
-                    className={`rounded-md border px-2 py-1 text-xs ${
-                      isActive
-                        ? "border-primary bg-primary/5 text-primary"
-                        : isDone
-                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                          : "border-border bg-background text-muted-foreground"
-                    }`}
-                  >
-                    {labels[step]}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid gap-2 md:max-w-[340px]">
-            <div className="text-xs text-muted-foreground">Ko pievienot no importa</div>
-            <Select
-              value={constructionImportTarget}
-              onValueChange={(value) =>
-                setConstructionImportTarget(value === "bom" ? "bom" : "items")
-              }
-            >
-              <SelectTrigger className="h-9 w-full">
-                <SelectValue placeholder="Izvēlies mērķi" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="items">Vienības (Item/Konstrukcija)</SelectItem>
-                <SelectItem value="bom">BOM (komponentes izvēlētai vienībai)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="rounded-lg border border-border/70 bg-muted/10 p-3 text-xs">
-            <div className="font-medium text-foreground">Mērķa tabula</div>
-            <div className="mt-1 text-muted-foreground">
-              {constructionImportTarget === "items"
-                ? "Items imports raksta primārajā konstrukciju tabulā (no Settings konfigurētās kolonnas)."
-                : "BOM imports raksta uz order_item_bom_lines (atsevišķa BOM tabula; Settings BOM kolonnas tiek izmantotas mapping vednī)."}
-            </div>
-            <div className="mt-2 text-muted-foreground">Kolonnas: {constructionImportTargetSchemaColumns.join(", ") || "-"}</div>
-          </div>
-
-          <FileField
-            label="Importa fails"
-            accept=".xlsx,.xls,.csv,.pdf"
-            onChange={(event) => {
-              const file = event.target.files?.[0] ?? null;
-              if (!file) {
-                return;
-              }
-              void handleConstructionImportFile(file);
-            }}
-          />
-
-          <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3">
-            <div className="text-xs text-muted-foreground">
-              Vai izvēlies failu no pievienotās ražošanas dokumentācijas (PDF/XLSX/XLS/CSV).
-            </div>
-            <div className="flex flex-col gap-2 md:flex-row md:items-center">
-              <Select
-                value={tableImportAttachmentIds[primaryConstructionField?.id ?? ""] || "__none__"}
-                onValueChange={(value) => {
-                  if (!primaryConstructionField) {
-                    return;
-                  }
-                  const nextId = value === "__none__" ? "" : value;
-                  setTableImportAttachmentIds((prev) => ({
-                    ...prev,
-                    [primaryConstructionField.id]: nextId,
-                  }));
-                }}
-                disabled={!primaryConstructionField}
-              >
-                <SelectTrigger className="h-9 w-full md:w-90">
-                  <SelectValue placeholder="Izvēlies pievienoto failu" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Izvēlies pievienoto failu</SelectItem>
-                  {productionDocumentationParseAttachments.map((attachment) => (
-                    <SelectItem key={`construction-modal-attachment-${attachment.id}`} value={attachment.id}>
-                      {attachment.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const fieldId = primaryConstructionField?.id;
-                  if (!fieldId) {
-                    return;
-                  }
-                  const attachmentId = tableImportAttachmentIds[fieldId];
-                  if (!attachmentId) {
-                    setConstructionImportError("Izvēlies pievienoto failu importam.");
-                    return;
-                  }
-                  void handleImportConstructionFromAttachment(attachmentId);
-                }}
-              >
-                Importēt no pievienotā faila
-              </Button>
-            </div>
-          </div>
-
-          {constructionImportAiBridgeFieldId ? (
-            <div className="rounded-lg border border-amber-300/60 bg-amber-50/60 p-3 text-xs text-amber-800">
-              PDF failiem izmanto AI importu.
-              <div className="mt-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleOpenConstructionAiImport}
-                >
-                  Atvert AI importu
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          {constructionImportStep !== "source" ? (
-            <>
-              <div className="text-xs text-muted-foreground">
-                Mapping izvēlnē redzami tie headeri, kas atrasti importa failā.
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void handleAiBootstrapConstructionMapping()}
-                  disabled={isApplyingConstructionAiBootstrap || constructionImportHeaders.length === 0}
-                >
-                  {isApplyingConstructionAiBootstrap ? "AI analizē..." : "AI Mapping Bootstrap"}
-                </Button>
-                <div className="text-xs text-muted-foreground">
-                  AI ieteiks mappingu no headeriem + piemēra rindām; pēc tam vari piekoriģēt manuāli.
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-            {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((mappingKey) => (
-              <div key={`modal-mapping-${mappingKey}`} className="space-y-1">
-                <div className="text-xs text-muted-foreground">
-                  {CONSTRUCTION_IMPORT_LABELS[mappingKey]}
-                </div>
-                <Select
-                  value={constructionImportMapping[mappingKey] || "__none__"}
-                  onValueChange={(value) => {
-                    const nextMapping = {
-                      ...constructionImportMapping,
-                      [mappingKey]: value === "__none__" ? "" : value,
-                    };
-                    applyConstructionImportMapping(nextMapping);
-                  }}
-                >
-                  <SelectTrigger className="h-9 w-full">
-                    <SelectValue placeholder={mappingKey} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">
-                      (nav piesaistīts) - {mappingKey}
-                    </SelectItem>
-                    {constructionImportHeaders.map((header) => (
-                      <SelectItem
-                        key={`modal-${mappingKey}-${header}`}
-                        value={header}
-                      >
-                        {header}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
-              </div>
-            </>
-          ) : null}
-
-          {constructionImportAiNotice ? (
-            <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
-              {constructionImportAiNotice}
-            </div>
-          ) : null}
-
-          {constructionImportError ? (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              {constructionImportError}
-            </div>
-          ) : null}
-
-          {(constructionImportStep === "review" || constructionImportStep === "save") && constructionImportDraftRows.length > 0 ? (
-            <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                {constructionImportFileName}
-                {constructionImportSheetName
-                  ? ` · lapa: ${constructionImportSheetName}`
-                  : ""}{" "}
-                · {constructionImportDraftRows.length} rindas
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Priekšskatījumā redzamas visas atrastās rindas.
-              </div>
-              {constructionImportMissingMappingKeys.length > 0 ? (
-                <div className="text-xs text-amber-700">
-                  Trukst obligatais mappings:{" "}
-                  {constructionImportMissingMappingKeys.join(", ")}
-                </div>
-              ) : null}
-              {constructionImportInvalidRowCount > 0 ? (
-                <div className="text-xs text-amber-700">
-                  {constructionImportInvalidRowCount} rindas ir bez nosaukuma.
-                </div>
-              ) : null}
-              <div className="max-h-[48vh] overflow-auto rounded-lg border border-border bg-background">
-                <table className="min-w-full table-fixed text-xs">
-                  <thead className="sticky top-0 bg-muted/40">
-                    <tr>
-                      <th className="w-12 px-2 py-1 text-left">#</th>
-                      {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((key) => (
-                        <th key={`head-${key}`} className="min-w-40 px-2 py-1 text-left">
-                          {CONSTRUCTION_IMPORT_LABELS[key]}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {constructionImportDraftRows.map((row, rowIndex) => (
-                      <tr key={`modal-preview-${row.source_row_ref}`}>
-                        <td className="px-2 py-1 text-muted-foreground">
-                          {row.source_row_ref}
-                        </td>
-                        {CONSTRUCTION_IMPORT_MAPPING_KEYS.map((key) => (
-                          <td
-                            key={`cell-${row.source_row_ref}-${key}`}
-                            className="min-w-40 px-2 py-1 align-top"
-                          >
-                            <Input
-                              value={String(row[key] ?? "")}
-                              onChange={(event) =>
-                                setConstructionImportDraftRows((prev) => {
-                                  const next = [...prev];
-                                  if (!next[rowIndex]) {
-                                    return prev;
-                                  }
-                                  next[rowIndex] = {
-                                    ...next[rowIndex],
-                                    [key]: event.target.value,
-                                  };
-                                  return next;
-                                })
-                              }
-                              className="h-8 min-w-[140px]"
-                            />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
-
-          {constructionImportStep === "save" ? (
-            <div className="space-y-2 border-t border-border pt-3">
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-              <Input
-                value={constructionImportProfileName}
-                onChange={(event) => setConstructionImportProfileName(event.target.value)}
-                placeholder="Profila nosaukums"
-                className="h-9"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void handleSaveConstructionImportProfile()}
-                disabled={isSavingConstructionImportProfile || constructionImportHeaders.length === 0}
-              >
-                {isSavingConstructionImportProfile ? "Saglabā..." : "Saglabāt kā noklusēto profilu (iemācīt parseri)"}
-              </Button>
-            </div>
-              <div className="text-xs text-muted-foreground">
-                Pirmreizējai uzstādīšanai: ielādē tipisku failu, saliec mappingu (vai AI importam PDF gadījumā), tad saglabā kā noklusēto profilu.
-                Tālāk parseris šo profilu izmantos automātiski šim mērķim (Items vai BOM).
-              </div>
-              {constructionImportProfileNotice ? (
-                <div className="text-xs text-muted-foreground">{constructionImportProfileNotice}</div>
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  const stepIndex = CONSTRUCTION_IMPORT_STEPS.indexOf(constructionImportStep);
-                  if (stepIndex <= 0) {
-                    return;
-                  }
-                  setConstructionImportStep(CONSTRUCTION_IMPORT_STEPS[stepIndex - 1]);
-                }}
-                disabled={constructionImportStep === "source"}
-              >
-                Atpakaļ
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  if (constructionImportStep === "source") {
-                    if (!isConstructionImportMappingReady) {
-                      return;
-                    }
-                    setConstructionImportStep("mapping");
-                    return;
-                  }
-                  if (constructionImportStep === "mapping") {
-                    if (!isConstructionImportReviewReady) {
-                      return;
-                    }
-                    setConstructionImportStep("review");
-                    return;
-                  }
-                  if (constructionImportStep === "review") {
-                    setConstructionImportStep("save");
-                  }
-                }}
-                disabled={
-                  (constructionImportStep === "source" && !isConstructionImportMappingReady) ||
-                  (constructionImportStep === "mapping" && !isConstructionImportReviewReady) ||
-                  constructionImportStep === "save"
-                }
-              >
-                Tālāk
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                setIsConstructionImportModalOpen(false);
-                setConstructionImportStep("source");
-              }}
-            >
-              Aizvert
-            </Button>
-            <Button
-              type="button"
-              onClick={handleApplyConstructionImport}
-              disabled={
-                !canEditOrderInputs ||
-                constructionImportDraftRows.length === 0 ||
-                constructionImportInvalidRowCount > 0
-              }
-            >
-              {constructionImportTarget === "bom" ? "Pievienot BOM rindas" : "Pievienot importetas rindas"}
-            </Button>
-          </div>
-        </div>
-        </div>
-      </BottomSheet>
+        step={constructionImportStep}
+        setStep={setConstructionImportStep}
+        steps={CONSTRUCTION_IMPORT_STEPS}
+        target={constructionImportTarget}
+        setTarget={setConstructionImportTarget}
+        targetMetaByValue={constructionImportTargetMeta}
+        parseMode={constructionImportParseMode}
+        targetSchemaColumns={constructionImportTargetSchemaColumns}
+        previewColumns={constructionImportPreviewColumns}
+        onFileChange={handleConstructionImportFile}
+        primaryConstructionFieldId={primaryConstructionField?.id}
+        selectedAttachmentId={
+          tableImportAttachmentIds[primaryConstructionField?.id ?? ""] || ""
+        }
+        onAttachmentChange={(attachmentId) => {
+          if (!primaryConstructionField) {
+            return;
+          }
+          setTableImportAttachmentIds((prev) => ({
+            ...prev,
+            [primaryConstructionField.id]: attachmentId,
+          }));
+        }}
+        attachments={productionDocumentationParseAttachments}
+        onImportFromAttachment={() => {
+          const fieldId = primaryConstructionField?.id;
+          if (!fieldId) {
+            return;
+          }
+          const attachmentId = tableImportAttachmentIds[fieldId];
+          if (!attachmentId) {
+            setConstructionImportError(
+              t("orders.detail.importModal.errors.chooseAttachment"),
+            );
+            return;
+          }
+          return handleImportConstructionFromAttachment(attachmentId);
+        }}
+        onOpenAiImport={handleOpenConstructionAiImport}
+        isOpeningAiImport={Boolean(isOpeningConstructionAiImport)}
+        onAiBootstrap={handleAiBootstrapConstructionMapping}
+        isApplyingAiBootstrap={isApplyingConstructionAiBootstrap}
+        headers={constructionImportHeaders}
+        headerOptions={constructionImportHeaderOptions}
+        mapping={constructionImportMapping}
+        applyMapping={applyConstructionImportMapping}
+        mappingFields={constructionImportMappingFields}
+        aiNotice={constructionImportAiNotice}
+        aiRowTypeHints={constructionImportAiRowTypeHints}
+        error={constructionImportError}
+        draftRows={constructionImportDraftRows}
+        setDraftRows={setConstructionImportDraftRows}
+        fileName={constructionImportFileName}
+        sheetName={constructionImportSheetName}
+        missingMappingKeys={constructionImportMissingMappingKeys}
+        invalidRowCount={constructionImportInvalidRowCount}
+        profileName={constructionImportProfileName}
+        setProfileName={setConstructionImportProfileName}
+        onSaveProfile={handleSaveConstructionImportProfile}
+        isSavingProfile={isSavingConstructionImportProfile}
+        profileNotice={constructionImportProfileNotice}
+        activeTemplateName={activeDefaultImportProfileName}
+        matchedTemplateName={constructionImportMatchedProfileName}
+        templates={importTemplatesForTarget}
+        onSetDefaultTemplate={handleSetDefaultConstructionImportProfile}
+        onDeleteTemplate={handleDeleteConstructionImportProfile}
+        onRenameTemplate={handleRenameConstructionImportProfile}
+        templateActionId={constructionImportTemplateActionId}
+        isMappingReady={isConstructionImportMappingReady}
+        isReviewReady={isConstructionImportReviewReady}
+        canEditOrderInputs={canEditOrderInputs}
+        isApplyingImport={isApplyingConstructionImport}
+        onApplyImport={handleApplyConstructionImport}
+        parseSource={constructionImportParseSource}
+        parserModel={constructionImportParserModel}
+      />
       <BottomSheet
         id="order-sections-drawer"
         open={isMobileSectionsOpen}
@@ -7418,7 +8953,9 @@ export default function OrderDetailPage() {
                   {t("orders.detail.orderInputs.detailSourceField")}
                 </div>
                 <div className="mt-1 text-sm font-medium">
-                  {activeConstructionDetailData.field.label}
+                  {getOrderInputFieldDisplayLabel(
+                    activeConstructionDetailData.field,
+                  )}
                 </div>
                 <div className="mt-3 text-xs text-muted-foreground">
                   {t("orders.detail.orderInputs.detailRowId")}
@@ -7444,7 +8981,8 @@ export default function OrderDetailPage() {
                 </div>
                 <div className="grid gap-2">
                   {activeConstructionDetailData.field.columns?.map((column) => {
-                    const rawValue = activeConstructionDetailData.row[column.key];
+                    const rawValue =
+                      activeConstructionDetailData.row[column.key];
                     const value = Array.isArray(rawValue)
                       ? rawValue.join(" / ")
                       : String(rawValue ?? "").trim();
@@ -7503,7 +9041,9 @@ export default function OrderDetailPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              asChild={Boolean(signedAttachmentUrls[attachment.id])}
+                              asChild={Boolean(
+                                signedAttachmentUrls[attachment.id],
+                              )}
                               disabled={!signedAttachmentUrls[attachment.id]}
                             >
                               {signedAttachmentUrls[attachment.id] ? (
@@ -7512,11 +9052,15 @@ export default function OrderDetailPage() {
                                   target="_blank"
                                   rel="noreferrer"
                                 >
-                                  {t("orders.detail.orderInputs.detailOpenFile")}
+                                  {t(
+                                    "orders.detail.orderInputs.detailOpenFile",
+                                  )}
                                 </a>
                               ) : (
                                 <span>
-                                  {t("orders.detail.orderInputs.detailOpenFile")}
+                                  {t(
+                                    "orders.detail.orderInputs.detailOpenFile",
+                                  )}
                                 </span>
                               )}
                             </Button>
@@ -8316,14 +9860,6 @@ export default function OrderDetailPage() {
                 ) : (
                   <div className="space-y-6">
                     <div className="space-y-3">
-                      <div>
-                        <div className="text-sm font-semibold">
-                          Ražošanas vienības
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Ražojamās vienības, to atribūti un saistītie importa dati.
-                        </p>
-                      </div>
                       {constructionTableFields.length === 0 ? (
                         <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
                           <p className="text-sm font-medium">
@@ -8346,50 +9882,22 @@ export default function OrderDetailPage() {
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={handleOpenConstructionFileImport}
-                            >
-                              Importēt no CSV/Excel
-                            </Button>
-                          </div>
-                          {primaryConstructionField ? (
-                            renderOrderInputField(primaryConstructionField)
-                          ) : null}
+                          {primaryConstructionField
+                            ? renderOrderInputField(primaryConstructionField)
+                            : null}
                         </div>
                       )}
                     </div>
                     {supplementalOrderInputGroups.size > 0 ? (
                       <div className="space-y-3">
-                        <div>
-                          <div className="text-sm font-semibold">
-                            {t("orders.detail.orderInputs.additionalSection")}
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {t(
-                              "orders.detail.orderInputs.additionalSectionDescription",
-                            )}
-                          </p>
+                        <div className="text-sm font-semibold">
+                          {t("orders.detail.orderInputs.additionalSection")}
                         </div>
-                        {Array.from(supplementalOrderInputGroups.entries()).map(
-                          ([groupKey, fields]) => (
-                            <div key={groupKey} className="space-y-3">
-                              <div className="text-sm font-semibold">
-                                {groupKey === "production_scope"
-                                  ? t("orders.detail.orderInputs.productionScope")
-                                  : t("orders.detail.orderInputs.orderInfo")}
-                              </div>
-                              <div className="grid gap-3 md:grid-cols-2">
-                                {fields.map((field) =>
-                                  renderOrderInputField(field),
-                                )}
-                              </div>
-                            </div>
-                          ),
-                        )}
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {Array.from(supplementalOrderInputGroups.values()).flat().map((field) =>
+                            renderOrderInputField(field),
+                          )}
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -8441,17 +9949,21 @@ export default function OrderDetailPage() {
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="flex flex-wrap gap-2">
-                  {(["all", "status", "comment", "file"] as const).map((filter) => (
-                    <Button
-                      key={filter}
-                      type="button"
-                      variant={historyFilter === filter ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setHistoryFilter(filter)}
-                    >
-                      {t(`orders.detail.workflow.historyFilter.${filter}`)}
-                    </Button>
-                  ))}
+                  {(["all", "status", "comment", "file"] as const).map(
+                    (filter) => (
+                      <Button
+                        key={filter}
+                        type="button"
+                        variant={
+                          historyFilter === filter ? "default" : "outline"
+                        }
+                        size="sm"
+                        onClick={() => setHistoryFilter(filter)}
+                      >
+                        {t(`orders.detail.workflow.historyFilter.${filter}`)}
+                      </Button>
+                    ),
+                  )}
                 </div>
                 {visibleHistoryEvents.length > 0 ? (
                   <div className="space-y-3">
@@ -8481,8 +9993,12 @@ export default function OrderDetailPage() {
                               ) : (
                                 <div className="text-sm font-medium text-foreground">
                                   {event.type === "comment"
-                                    ? t("orders.detail.workflow.historyEvent.commentAdded")
-                                    : t("orders.detail.workflow.historyEvent.fileAdded")}
+                                    ? t(
+                                        "orders.detail.workflow.historyEvent.commentAdded",
+                                      )
+                                    : t(
+                                        "orders.detail.workflow.historyEvent.fileAdded",
+                                      )}
                                 </div>
                               )}
                             </div>

@@ -1205,7 +1205,7 @@ export default function OrdersPage() {
         sticky
         title={t("orders.page.title")}
         subtitle={t("orders.page.subtitle")}
-        className="md:z-20"
+        className="orders-sticky-header md:z-20"
         actions={
           <div className="hidden items-center justify-end gap-2 md:flex">
             {canOpenExternalOrders ? (

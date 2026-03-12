@@ -445,7 +445,7 @@
       tabs: {
         overview: "Pārskats",
         files: "Faili un komentāri",
-        details: "Konstrukcijas",
+        details: "Ražojamās vienības",
         workflow: "Process",
         external: "Ārpakalpojumi",
         history: "Vēsture",
@@ -520,47 +520,46 @@
       sendBack: "Nosūtīt atpakaļ",
       delete: "Dzēst",
       orderInputs: {
-        title: "Konstrukcijas",
+        title: "Ražojamās vienības",
         description:
           "Ražojamās vienības, to atribūti un saistītie importa dati.",
-        noneConfiguredTitle: "Konstrukciju struktūra nav konfigurēta",
+        noneConfiguredTitle: "Vienību struktūra nav konfigurēta",
         noneConfiguredDescription1:
-          "Šajā sadaļā tiek uzturētas pasūtījuma konstrukcijas un to papildatribūti, ko izmanto imports, ražošana un izsekojamība.",
+          "Šajā sadaļā tiek uzturētas pasūtījuma ražojamās vienības un to papildatribūti, ko izmanto imports, ražošana un izsekojamība.",
         noneConfiguredDescription2:
-          "Konfigurējiet konstrukciju un pasūtījuma papildlaukus sadaļā Iestatījumi -> Struktūra un atgriezieties šeit.",
-        constructionsSection: "Konstrukciju saraksts",
+          "Konfigurējiet vienību un pasūtījuma papildlaukus sadaļā Iestatījumi -> Struktūra un atgriezieties šeit.",
+        constructionsSection: "Vienību saraksts",
         constructionsSectionDescription:
           "Galvenās ražojamās vienības šajā pasūtījumā.",
-        additionalSection: "Papildinformācija",
-        additionalSectionDescription:
-          "Papildlauki un metadati, kas papildina konstrukciju datus.",
-        noConstructionTableTitle: "Konstrukciju tabula nav konfigurēta",
+        additionalSection: "Pasūtījuma papildlauki",
+        additionalSectionDescription: "",
+        noConstructionTableTitle: "Vienību tabula nav konfigurēta",
         noConstructionTableDescription:
-          "Lai importētu un uzturētu ražojamās vienības, iestatījumos pievienojiet vismaz vienu konstrukciju tabulu.",
+          "Lai importētu un uzturētu ražojamās vienības, iestatījumos pievienojiet vismaz vienu vienību tabulu.",
+        importAction: "Imports",
         openDetail: "Atvērt detaļas",
-        detailTitle: "Konstrukcijas detaļas",
+        detailTitle: "Vienības detaļas",
         detailDescription:
-          "Atlasītās konstrukcijas atribūti, izcelsme un saistītie faili.",
-        detailEmpty:
-          "Izvēlieties konstrukciju no saraksta, lai apskatītu detaļas.",
+          "Atlasītās vienības atribūti, izcelsme un saistītie faili.",
+        detailEmpty: "Izvēlieties vienību no saraksta, lai apskatītu detaļas.",
         detailAttributes: "Atribūti",
         detailDocuments: "Saistītie faili",
-        detailNoDocuments: "Šai konstrukcijai vēl nav piesaistītu failu.",
+        detailNoDocuments: "Šai vienībai vēl nav piesaistītu failu.",
         detailSource: "Avots",
         detailSourceField: "Datu avots",
         detailRowId: "Rindas ID",
         detailFileCount: "Faili",
         detailOpenFile: "Atvērt failu",
         detailUnknownFile: "Fails",
-        bomTitle: "BOM / komponentes",
+        bomTitle: "Komponentes",
         bomDescription:
-          "Materiāli, detaļas un furnitūra, kas pieder šai konstrukcijai.",
-        bomEmpty: "BOM rindas šai konstrukcijai vēl nav pievienotas.",
-        bomAdd: "Pievienot BOM rindu",
+          "Materiāli, detaļas un furnitūra, kas pieder šai vienībai.",
+        bomEmpty: "Komponentes šai vienībai vēl nav pievienotas.",
+        bomAdd: "Pievienot komponenti",
         bomAdding: "Pievieno...",
-        bomSave: "Saglabāt BOM rindu",
-        bomDelete: "Dzēst BOM rindu?",
-        bomDeleteDescription: "Tas noņems izvēlēto BOM rindu no konstrukcijas.",
+        bomSave: "Saglabāt komponenti",
+        bomDelete: "Dzēst komponenti?",
+        bomDeleteDescription: "Tas noņems izvēlēto komponenti no vienības.",
         bomComponentName: "Komponentes nosaukums",
         bomComponentCode: "Kods",
         bomComponentType: "Tips",
@@ -571,16 +570,16 @@
         bomHeight: "Augstums",
         bomNotes: "Piezīmes",
         bomSortOrder: "Secība",
-        bomLoadFailed: "Neizdevās ielādēt BOM rindas.",
-        bomSaveFailed: "Neizdevās saglabāt BOM rindu.",
-        bomDeleteFailed: "Neizdevās dzēst BOM rindu.",
-        bomSaved: "BOM rinda saglabāta.",
-        bomDeleted: "BOM rinda dzēsta.",
+        bomLoadFailed: "Neizdevās ielādēt komponentes.",
+        bomSaveFailed: "Neizdevās saglabāt komponenti.",
+        bomDeleteFailed: "Neizdevās dzēst komponenti.",
+        bomSaved: "Komponente saglabāta.",
+        bomDeleted: "Komponente dzēsta.",
         productionScope: "Ražošanas tvērums",
         orderInfo: "Pasūtījuma informācija",
         editPermissionHint:
           "Šos laukus var rediģēt tikai Inženierija un Administrators.",
-        save: "Saglabāt konstrukcijas",
+        save: "Saglabāt vienības",
       },
       attachments: {
         title: "Pielikumi",
@@ -729,8 +728,10 @@
         choosePdfFromProductionDocs:
           "Izvēlieties PDF/XLSX no ražošanas dokumentācijas",
         chooseFile: "Izvēlēties failu",
+        chooseFileFirst: "Vispirms izvēlieties failu.",
         adding: "Pievieno...",
         addWithAi: "Pievienot ar AI",
+        importSelectedFile: "Importēt izvēlēto failu",
         noColumnsConfigured: "Šim tabulas laukam nav konfigurētu kolonnu.",
         addingRows: "Pievieno rindas ar AI...",
         noRowsYet: "Rindu vēl nav.",
@@ -757,6 +758,210 @@
           "Pārbaudiet izvēlēto PDF failu un tabulas kolonnas.",
         pdfParseFailed: "PDF apstrāde neizdevās",
       },
+      importModal: {
+        title: "Imports",
+        description:
+          "Izvēlies failu, pārbaudi laukus un pievieno rindas vienību sarakstam.",
+        wizard: "Importa vednis",
+        steps: {
+          source: "1. Fails",
+          mapping: "2. Lauki",
+          detected: "2. Atpazītie lauki",
+          review: "3. Pārbaude",
+          save: "4. Veidne",
+        },
+        addFromImport: "Ko pievienot no importa",
+        selectTarget: "Izvēlies mērķi",
+        columnsPrefix: "Kolonnas",
+        fileLabel: "Importa fails",
+        attachmentPrompt:
+          "Vai izvēlies failu no pievienotās ražošanas dokumentācijas (PDF/XLSX/XLS/CSV).",
+        selectAttachment: "Izvēlies pievienoto failu",
+        importFromAttachment: "Importēt no pievienotā faila",
+        pdfUseAi: "PDF faili tiek nolasīti automātiski.",
+        openAiImport: "Importēt PDF",
+        sourceModes: {
+          uploadHint:
+            "Augšupielādē CSV, Excel vai PDF failu. Sistēma pati atvērs nākamo soli pēc faila tipa.",
+          attachmentHint:
+            "Vai izvēlies failu no ražošanas dokumentācijas. Sistēma pati noteiks, kā to apstrādāt.",
+        },
+        selectedFile: "Izvēlētais fails",
+        fileKinds: {
+          pdf: "PDF",
+          csv: "CSV",
+          spreadsheet: "Excel",
+        },
+        processingModes: {
+          ai: "Automātiska atpazīšana",
+          mapping: "Kolonnu saskaņošana",
+        },
+        mappingHint: "Norādi, kuri faila lauki atbilst sistēmas laukiem.",
+        pdfDetectedFieldsHint:
+          "Sistēma jau atpazina šos laukus no PDF. Pārbaudi tikai to, kas nav atpazīts pareizi.",
+        pdfCorrectionHint:
+          "Ja kāds lauks nav atpazīts vai ir jāprecizē, piesaisti to zemāk.",
+        aiBootstrap: "Atrast laukus automātiski",
+        aiAnalyzing: "Nosaka laukus...",
+        aiBootstrapHint:
+          "Sistēma mēģinās aizpildīt laukus automātiski; pēc tam vari pielabot manuāli.",
+        loadHeadersFirst: "Vispirms ielādē failu ar headeriem.",
+        aiBootstrapFailed: "Neizdevās noteikt laukus automātiski.",
+        aiBootstrapCompleted: "Lauki aizpildīti automātiski.",
+        unmapped: "(nav piesaistīts) - {key}",
+        sheetPrefix: "lapa",
+        aiSuggestion: "Ieteikums",
+        suggestedTargetBanner: "Imports drīzāk izskatās pēc {target}.",
+        rowAnalysis:
+          "Rindu analīze: vienības {products}, komponentes {components}, nezināmas {unknown}.",
+        useSuggestedTarget: "Lietot ieteikto mērķi",
+        rowNouns: {
+          products: "vienības",
+          components: "komponentes",
+        },
+        preview: {
+          productsTitle: "Vienību priekšskatījums",
+          productsHint:
+            "Pārbaudi, vai rindas atbilst vienību sarakstam un vai galvenie atribūti ir ielasīti pareizi.",
+          componentsTitle: "Komponenšu priekšskatījums",
+          componentsHint:
+            "Pārbaudi, vai atlasītās rindas tiešām ir komponentes izvēlētajai vienībai un vai nosaukumi ir korekti.",
+        },
+        stats: {
+          target: "Mērķis",
+          rows: "Rindas",
+          named: "Ar nosaukumu",
+          productRows: "Vienību rindas",
+          componentRows: "Komponenšu rindas",
+          suspiciousRows: "Aizdomīgās rindas",
+        },
+        parseModes: {
+          flatTable:
+            "Avots ir plakana tabula: katra rinda tiek interpretēta kā viena importa rinda.",
+          groupedBlocks:
+            "Avots ir bloku formātā: vienības dati tiek ņemti no bloka virsraksta un kopsavilkuma, komponentes no apakšējās tabulas.",
+        },
+        mismatchProducts:
+          "{count} rindas izskatās pēc komponentēm, nevis vienību rindām.",
+        mismatchComponents:
+          "{count} rindas izskatās pēc vienību rindām, nevis komponenšu rindām.",
+        missingMapping: "Trūkst obligāts lauks: {keys}",
+        invalidRows: "{count} rindas ir bez nosaukuma.",
+        filters: {
+          all: "Visas rindas",
+          matching: "Atbilstošās",
+          mismatch: "Aizdomīgās",
+          issues: "Bez nosaukuma",
+        },
+        requiredFields: "Obligātie lauki",
+        additionalFields: "Papildu lauki",
+        selectVisible: "Atlasīt redzamās",
+        clearSelected: "Noņemt atlasi",
+        removeSelectedRows: "Dzēst atlasītās rindas",
+        actionsColumn: "Darbības",
+        removeRow: "Noņemt",
+        profileName: "Vednes nosaukums",
+        savingProfile: "Saglabā...",
+        saveTemplateTitle: "Saglabāt vedni",
+        saveTemplate: "Saglabāt vedni",
+        saveDefaultProfile: "Saglabāt kā noklusēto vedni",
+        saveHint:
+          "Ja šo faila formātu izmantosiet atkārtoti, saglabā vedni. Nākamreiz imports tiks aizpildīts automātiski.",
+        activeTemplateTitle: "Noklusētā vedne",
+        activeTemplateHint:
+          "Šim importa mērķim pašlaik tiek izmantota vedne “{name}”. Ja fails ir līdzīgā stilā, lauki tiks aizpildīti automātiski.",
+        matchedTemplateTitle: "Pielietota vedne",
+        matchedTemplateHint:
+          "Šim failam tika pielietota vedne “{name}”. Vari uzreiz pārbaudīt rezultātu.",
+        parseSources: {
+          template: "Izmantota saglabātā vedne",
+          templateFallback: "Vedne neatrada pietiekami daudz datu, izmantota automātiska atpazīšana",
+          automatic: "Izmantota automātiska atpazīšana",
+        },
+        templateAppliedNotice:
+          "Šim failam tika pielietota vedne “{name}”. Rezultātu vari uzreiz pārbaudīt.",
+        templateFallbackNotice:
+          "Vedne “{name}” neatpazina pietiekami daudz datu, tāpēc tika izmantota automātiska atpazīšana.",
+        automaticDetectionNotice:
+          "Šim failam tika izmantota automātiska atpazīšana.",
+        savedTemplatesTitle: "Saglabātās vednes",
+        savedTemplatesHint:
+          "Šīs uzņēmuma vednes vari izmantot atkārtoti līdzīgiem importa failiem.",
+        defaultTemplateBadge: "Noklusētā",
+        setDefaultTemplate: "Uzlikt kā noklusēto",
+        renameTemplateSave: "Saglabāt",
+        renameTemplateCancel: "Atcelt",
+        reviewImport: "Pārbaudīt importu",
+        openDetectedFields: "Labot laukus",
+        changeFile: "Mainīt failu",
+        hideFileOptions: "Paslēpt faila izvēli",
+        pdfFixInReview:
+          "{count} rindām trūkst nosaukuma. Aizpildi to kolonnā “Produkta nosaukums” tieši priekšskatījumā.",
+        pdfNoSourceFieldsHint:
+          "Šim PDF nav atrasti tieši piesaistāmi avota lauki. Ja kaut kas trūkst, izlabo to priekšskatījuma tabulā.",
+        profileSavedNotice:
+          "Vedne “{name}” saglabāta. To varēsi izmantot atkārtoti šī uzņēmuma importiem.",
+        profileSavedAsDefaultNotice:
+          "Vedne “{name}” saglabāta kā noklusētā. Nākamajiem līdzīgiem failiem tā tiks lietota automātiski.",
+        templateSetDefaultNotice:
+          "Vedne “{name}” tagad ir noklusētā šim importa mērķim.",
+        templateDeletedNotice: "Vedne “{name}” ir dzēsta.",
+        templateRenamedNotice: "Vedne pārsaukta uz “{name}”.",
+        profileErrors: {
+          nameRequired: "Norādi vednes nosaukumu.",
+          loadFileFirst: "Vispirms ielādē importa failu.",
+          createFailed: "Neizdevās saglabāt vedni.",
+        },
+        next: "Tālāk",
+        componentRowsAdded: "Pievienotas {count} komponenšu rindas.",
+        errors: {
+          noParsedRows: "Nav atrastu rindu importam.",
+          fixEmptyNames: "Izlabo rindas bez vienības nosaukuma pirms importa.",
+          openSpecificItemFirst:
+            "Komponenšu importam vispirms atver konkrētu vienību un izvēlies to no vienību tabulas.",
+          noValidComponentRows:
+            "Komponenšu importam nav derīgu rindu ar nosaukumu.",
+          chooseAttachment: "Izvēlies pievienoto failu importam.",
+          selectedFileMissing: "Izvēlētais fails vairs nav pieejams.",
+          fileNotAccessibleYet:
+            "Izvēlētais fails vēl nav pieejams. Atver Files sadaļu un mēģini vēlreiz.",
+          downloadFailed: "Neizdevās lejupielādēt izvēlēto failu.",
+          loadSelectedFileFailed: "Neizdevās ielādēt izvēlēto failu.",
+          pdfDetectedUseProductionDocs:
+            "Atrasts PDF fails: izvēlies to no ražošanas dokumentācijas un spied Pievienot ar AI.",
+        },
+      },
+      importModalMapping: {
+        itemType: "Artikuls / tips",
+      },
+      importModalSource: {
+        article: "Artikuls",
+        itemType: "Produkta tips",
+        articleCount: "Artikulu skaits",
+        parentArticle: "Vecākartikuls",
+        fromBlockHeader: "no bloka virsraksta",
+        fromBlockSummary: "no bloka kopsavilkuma",
+        fromComponentTable: "no komponenšu tabulas",
+      },
+      importModalTargets: {
+        items: {
+          label: "Ražojamās vienības",
+          tableLabel: "Vienību tabula",
+          description:
+            "Imports raksta primārajā vienību tabulā no Settings konfigurētajām kolonnām.",
+          apply: "Pievienot importētās rindas",
+        },
+        bom: {
+          label: "Komponentes izvēlētai vienībai",
+          tableLabel: "Komponenšu tabula",
+          description:
+            "Imports raksta komponenšu rindas izvēlētajai vienībai; mappingā tiek izmantotas komponenšu kolonnas.",
+          apply: "Pievienot komponentes",
+        },
+      },
+      importModalProductsProfileName: "Vienību importa profils",
+      importModalBomProfileName: "Komponenšu importa profils",
+      importModalSuggestedTargetLabel: "ieteiktais mērķis",
       errors: {
         loadOrderInputs: "Neizdevās ielādēt pasūtījuma ievades laukus.",
         loadOrderValues: "Neizdevās ielādēt pasūtījuma vērtības.",
@@ -781,6 +986,13 @@
           "Neizdevās augšupielādēt partnera pieprasījuma failus.",
         featureProOnly: "Šī funkcija pieejama Pro plānā.",
         sendToPartnerFailed: "Neizdevās nosūtīt partnerim.",
+        missingPrimaryUnitTable:
+          "Vispirms iestatījumos definējiet primāro vienību tabulu.",
+        pdfUseAiImport:
+          "PDF faili jāimportē ar AI/OCR (Pievienot ar AI virs vienību tabulas), nevis ar CSV/Excel mappingu.",
+        unsupportedImportFileType:
+          "Neatbalstīts faila tips. Izmantojiet CSV/XLS/XLSX vai AI/OCR PDF failiem.",
+        primaryUnitTableMissing: "Trūkst primārās vienību tabulas.",
       },
       confirm: {
         removeNamedFile: 'Noņemt "{name}"?',
@@ -1486,7 +1698,7 @@
     section: {
       structure: "Pasūtījuma lauki",
       orderFields: "Pasūtījuma lauki",
-      constructions: "Konstrukcijas",
+      constructions: "Vienību lauki",
       operations: "Ražošana",
       partners: "Partneri",
       users: "Lietotāji",
@@ -1499,7 +1711,7 @@
       orderFields:
         "Definējiet pasūtījuma lauku nosaukumus, redzamību un attēlošanas secību.",
       constructions:
-        "Konfigurējiet konstrukciju kolonnas, papildatribūtus un importa laukus.",
+        "Nosakiet, kuri lauki tiek izmantoti ražošanas vienībām un komponentēm.",
       operations:
         "Konfigurējiet darba laikus, stacijas un darbību noklusējumus.",
       partners: "Pārvaldiet ārējos partnerus, grupas un lauku kartējumus.",
@@ -1589,26 +1801,57 @@
       removeSelectedReasonsConfirm: "Noņemt {count} atlasīto iemeslu(-us)?",
     },
     orderInputs: {
-      title: "Konstrukcijas",
+      title: "Vienību lauki",
       description:
-        "Konfigurējiet konstrukciju saraksta kolonnas, papildatribūtus un importa laukus.",
+        "Nosakiet, kuri lauki tiek izmantoti ražošanas vienībām un komponentēm.",
       guidanceTitle: "Kas tiek konfigurēts šeit",
       guidanceDescription:
-        "Šī sadaļa ir paredzēta papildlaukiem un papildu tabulu kolonnām. Core konstrukciju modelis un nākotnes BOM loģika netiek balstīta tikai uz šo konfiguratoru.",
-      coreFieldsTitle: "Core lauki paliek sistēmas modelī",
+        "Šeit nosakiet, kurus laukus lietot vienību tabulā, importā un komponentēs.",
+      coreFieldsTitle: "Pamatlauki vienību tabulai",
       coreFieldsDescription:
-        "Pozīcija, konstrukcija, nosaukums, daudzums, izmērs, sistēma, materiāls un līdzīgi pamatdati jāuztver kā biznesa modelis, nevis brīvi definējams form builder.",
-      customFieldsTitle: "Šeit pievieno tikai papildus atribūtus",
+        "Pozīcija, tips, nosaukums, daudzums, izmēri, krāsa, sistēma un līdzīgi lauki ir galvenais vienību modelis ikdienas darbam.",
+      customFieldsTitle: "Papildu lauki",
       customFieldsDescription:
-        "Piemēram: atvēruma tips, stikla pakete, furnitūras grupa, piezīmes, klasifikatori un citas uzņēmumam specifiskas kolonnas.",
+        "Piemēram: m2, atvēruma tips, stikla pakete, furnitūras grupa, piezīmes un citi uzņēmumam specifiski lauki.",
       empty: "Papildlauki vēl nav konfigurēti. Pievienojiet noklusētos laukus.",
       addDefaultFields: "Pievienot noklusētos laukus",
-      createConstructionTable: "Izveidot konstrukciju tabulu",
-      coreColumnsTitle: "Core konstrukciju kolonnas",
+      createConstructionTable: "Izveidot vienību tabulu",
+      bom: "Komponentes",
+      coreColumnsTitle: "Pamatlauki",
       coreColumnsDescription:
-        "Primārā konstrukciju tabula ir viena un tiek izmantota order_items, ražošanas un importa plūsmās.",
+        "Šie lauki veido vienību tabulu un tiek izmantoti importā un ražošanas darbā.",
+      columnSubtitleCore: "Pamata lauks",
+      columnSubtitleErp: "Paplašināts lauks",
+      columnSubtitleCustom: "Papildlauks",
+      advancedColumnsTitle: "Papildu sistēmas lauki",
+      columnSubtitleKey: "Atslēga",
+      columnLabels: {
+        position: "Rindas Nr.",
+        itemType: "Produkta tips",
+        itemName: "Produkta nosaukums",
+        dimensions: "Izmēri",
+        qty: "Daudzums",
+        material: "Materiāls",
+        finishColor: "Apdare / krāsa",
+        sku: "Artikula kods (SKU)",
+        uom: "Mērvienība (UoM)",
+        revision: "Revīzija",
+        lifecycleStatus: "Statuss",
+        validFrom: "Spēkā no",
+        validTo: "Spēkā līdz",
+        supplyType: "Piegādes tips",
+        itemGroup: "Produktu grupa",
+        routeCode: "Maršruta kods",
+        netWeight: "Neto svars (kg)",
+        volume: "Tilpums (m3)",
+        defaultSupplier: "Noklusētais piegādātājs",
+        qualityClass: "Kvalitātes klase",
+        certificationRequired: "Sertifikācija obligāta",
+        productionNotes: "Ražošanas piezīmes",
+      },
       label: "Nosaukums",
       labelPlaceholder: "Konstrukciju skaits",
+      inTable: "Tabulā",
       scope: "Piemērojums",
       group: "Grupa",
       type: "Tips",
@@ -1637,7 +1880,7 @@
       options: 'Opcijas (atdaliet ar komatu, jaunu rindu vai "\\\\")',
       optionsPlaceholder: "Tips A, Tips B",
       maxSelects: "Maks. izvēļu skaits (1-3)",
-      primaryConstructionTable: "Primārā konstrukciju tabula",
+      primaryConstructionTable: "Primārā vienību tabula",
       showInProduction: "Rādīt ražošanā",
       production: "Ražošana",
       noOrderInputs: "Papildlauki nav konfigurēti.",

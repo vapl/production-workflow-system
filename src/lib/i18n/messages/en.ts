@@ -440,7 +440,7 @@
       tabs: {
         overview: "Overview",
         files: "Files & Comments",
-        details: "Order details",
+        details: "Manufacturing units",
         workflow: "Process",
         external: "External Jobs",
         history: "History",
@@ -521,6 +521,8 @@
           "Order inputs are used to capture sales details and production scope for each order.",
         noneConfiguredDescription2:
           "Configure fields in Settings -> Structure -> Order inputs, then return here.",
+        additionalSection: "Additional order fields",
+        additionalSectionDescription: "",
         productionScope: "Production scope",
         orderInfo: "Order info",
         editPermissionHint: "Only Engineering and Admin can edit these fields.",
@@ -670,8 +672,10 @@
         choosePdfFromProductionDocs:
           "Choose PDF/XLSX from Production documentation",
         chooseFile: "Choose file",
+        chooseFileFirst: "Choose a file first.",
         adding: "Adding...",
         addWithAi: "Add with AI",
+        importSelectedFile: "Import selected file",
         noColumnsConfigured: "No columns configured for this table field.",
         addingRows: "Adding rows with AI...",
         noRowsYet: "No rows yet.",
@@ -696,6 +700,210 @@
         checkPdfAndColumns: "Check the selected PDF and table columns.",
         pdfParseFailed: "PDF parse failed",
       },
+      importModal: {
+        title: "Import",
+        description:
+          "Choose a file, review the fields, and add rows to the units list.",
+        wizard: "Import wizard",
+        steps: {
+          source: "1. File",
+          mapping: "2. Fields",
+          detected: "2. Detected fields",
+          review: "3. Review",
+          save: "4. Template",
+        },
+        addFromImport: "What to add from import",
+        selectTarget: "Select target",
+        columnsPrefix: "Columns",
+        fileLabel: "Import file",
+        attachmentPrompt:
+          "Or select a file from attached production documentation (PDF/XLSX/XLS/CSV).",
+        selectAttachment: "Select attached file",
+        importFromAttachment: "Import from attached file",
+        pdfUseAi: "PDF files are parsed automatically.",
+        openAiImport: "Import PDF",
+        sourceModes: {
+          uploadHint:
+            "Upload a CSV, Excel, or PDF file. The next step opens automatically based on the file type.",
+          attachmentHint:
+            "Or pick a file from production documentation. The system decides how to process it automatically.",
+        },
+        selectedFile: "Selected file",
+        fileKinds: {
+          pdf: "PDF",
+          csv: "CSV",
+          spreadsheet: "Excel",
+        },
+        processingModes: {
+          ai: "Automatic detection",
+          mapping: "Field matching",
+        },
+        mappingHint: "Choose which file fields should fill the system fields.",
+        pdfDetectedFieldsHint:
+          "The system already detected these fields from the PDF. Only review fields that were not recognized correctly.",
+        pdfCorrectionHint:
+          "If a field was not recognized or needs adjustment, assign it below.",
+        aiBootstrap: "Fill fields automatically",
+        aiAnalyzing: "Detecting fields...",
+        aiBootstrapHint:
+          "The system tries to fill fields automatically; you can adjust them manually afterwards.",
+        loadHeadersFirst: "Load a file with headers first.",
+        aiBootstrapFailed: "Automatic field detection failed.",
+        aiBootstrapCompleted: "Fields filled automatically.",
+        unmapped: "(unmapped) - {key}",
+        sheetPrefix: "sheet",
+        aiSuggestion: "Suggestion",
+        suggestedTargetBanner: "This import looks more like {target}.",
+        rowAnalysis:
+          "Row analysis: units {products}, components {components}, unknown {unknown}.",
+        useSuggestedTarget: "Use suggested target",
+        rowNouns: {
+          products: "units",
+          components: "components",
+        },
+        preview: {
+          productsTitle: "Unit preview",
+          productsHint:
+            "Check whether rows match the unit list and whether the main attributes were parsed correctly.",
+          componentsTitle: "Component preview",
+          componentsHint:
+            "Check whether selected rows are truly components of the selected item and whether names are correct.",
+        },
+        stats: {
+          target: "Target",
+          rows: "Rows",
+          named: "Named",
+          productRows: "Unit rows",
+          componentRows: "Component rows",
+          suspiciousRows: "Suspicious rows",
+        },
+        parseModes: {
+          flatTable:
+            "Source is a flat table: each row is interpreted as one import row.",
+          groupedBlocks:
+            "Source is block-based: unit data comes from the block header and summary, components from the nested table.",
+        },
+        mismatchProducts:
+          "{count} rows look like components, not unit rows.",
+        mismatchComponents:
+          "{count} rows look like units, not component rows.",
+        missingMapping: "Required field is missing: {keys}",
+        invalidRows: "{count} rows have no name.",
+        filters: {
+          all: "All rows",
+          matching: "Matching",
+          mismatch: "Suspicious",
+          issues: "No name",
+        },
+        requiredFields: "Required fields",
+        additionalFields: "Additional fields",
+        selectVisible: "Select visible",
+        clearSelected: "Clear selection",
+        removeSelectedRows: "Delete selected rows",
+        actionsColumn: "Actions",
+        removeRow: "Remove",
+        profileName: "Template name",
+        savingProfile: "Saving...",
+        saveTemplateTitle: "Save template",
+        saveTemplate: "Save template",
+        saveDefaultProfile: "Save as default template",
+        saveHint:
+          "If this file format will be reused, save a template. Next time the import will be filled automatically.",
+        activeTemplateTitle: "Default template",
+        activeTemplateHint:
+          "This import target currently uses the template “{name}”. If the file has a similar structure, fields will be filled automatically.",
+        matchedTemplateTitle: "Applied template",
+        matchedTemplateHint:
+          "The template “{name}” was applied to this file. You can review the result immediately.",
+        parseSources: {
+          template: "Saved template used",
+          templateFallback:
+            "Template did not detect enough data, automatic detection was used",
+          automatic: "Automatic detection used",
+        },
+        templateAppliedNotice:
+          "The template “{name}” was applied to this file. You can review the result immediately.",
+        templateFallbackNotice:
+          "The template “{name}” did not detect enough data, so automatic detection was used.",
+        automaticDetectionNotice:
+          "Automatic detection was used for this file.",
+        savedTemplatesTitle: "Saved templates",
+        savedTemplatesHint:
+          "These company templates can be reused for similar import files.",
+        defaultTemplateBadge: "Default",
+        setDefaultTemplate: "Set as default",
+        renameTemplateSave: "Save",
+        renameTemplateCancel: "Cancel",
+        reviewImport: "Review import",
+        openDetectedFields: "Fix fields",
+        changeFile: "Change file",
+        hideFileOptions: "Hide file options",
+        pdfFixInReview:
+          "{count} rows are missing a name. Fill it in directly in the “Product name” column in preview.",
+        pdfNoSourceFieldsHint:
+          "No directly mappable source fields were detected for this PDF. If anything is missing, correct it in the preview table.",
+        profileSavedNotice:
+          "Template “{name}” was saved. You can reuse it for this company's imports.",
+        profileSavedAsDefaultNotice:
+          "Template “{name}” was saved as default. It will be used automatically for similar files next time.",
+        templateSetDefaultNotice:
+          "Template “{name}” is now the default for this import target.",
+        templateDeletedNotice: "Template “{name}” was deleted.",
+        templateRenamedNotice: "Template was renamed to “{name}”.",
+        profileErrors: {
+          nameRequired: "Enter a template name.",
+          loadFileFirst: "Load an import file first.",
+          createFailed: "Failed to save the template.",
+        },
+        next: "Next",
+        componentRowsAdded: "Added {count} component rows.",
+        errors: {
+          noParsedRows: "No parsed rows to import.",
+          fixEmptyNames: "Fix rows with empty unit names before import.",
+          openSpecificItemFirst:
+            "For component import, open a specific unit first and select it from the units table.",
+          noValidComponentRows: "No valid named rows found for component import.",
+          chooseAttachment: "Choose an attached file for import.",
+          selectedFileMissing: "Selected file is no longer available.",
+          fileNotAccessibleYet:
+            "The selected file is not accessible yet. Open the Files tab once and try again.",
+          downloadFailed: "Failed to download the selected file.",
+          loadSelectedFileFailed: "Failed to load the selected file.",
+          pdfDetectedUseProductionDocs:
+            "PDF detected: choose it from production documentation and click Add with AI.",
+        },
+      },
+      importModalMapping: {
+        itemType: "Article / type",
+      },
+      importModalSource: {
+        article: "Article",
+        itemType: "Product type",
+        articleCount: "Article count",
+        parentArticle: "Parent article",
+        fromBlockHeader: "from block header",
+        fromBlockSummary: "from block summary",
+        fromComponentTable: "from components table",
+      },
+      importModalTargets: {
+        items: {
+          label: "Manufacturing units",
+          tableLabel: "Units table",
+          description:
+            "Import writes into the primary unit table using columns configured in Settings.",
+          apply: "Add imported rows",
+        },
+        bom: {
+          label: "Components for selected item",
+          tableLabel: "Components table",
+          description:
+            "Import writes component rows for the selected item; mapping uses component columns.",
+          apply: "Add components",
+        },
+      },
+      importModalProductsProfileName: "Units import profile",
+      importModalBomProfileName: "Components import profile",
+      importModalSuggestedTargetLabel: "suggested target",
       errors: {
         loadOrderInputs: "Failed to load order inputs.",
         loadOrderValues: "Failed to load order values.",
@@ -719,6 +927,12 @@
         uploadPartnerRequestFiles: "Failed to upload partner request files.",
         featureProOnly: "This feature is available on Pro plan.",
         sendToPartnerFailed: "Failed to send to partner.",
+        missingPrimaryUnitTable: "Define a primary units table in settings first.",
+        pdfUseAiImport:
+          "PDF files should be imported with AI/OCR (Add with AI above the units table), not via CSV/Excel mapping.",
+        unsupportedImportFileType:
+          "Unsupported file type. Use CSV/XLS/XLSX, or AI/OCR for PDF.",
+        primaryUnitTableMissing: "Primary units table is missing.",
       },
       confirm: {
         removeNamedFile: 'Remove "{name}"?',
@@ -1409,7 +1623,7 @@
     section: {
       structure: "Order fields",
       orderFields: "Order fields",
-      constructions: "Constructions",
+      constructions: "Unit fields",
       operations: "Production",
       partners: "Partners",
       users: "Users",
@@ -1420,7 +1634,7 @@
       structure: "Define order field labels, visibility, and display order.",
       orderFields: "Define order field labels, visibility, and display order.",
       constructions:
-        "Configure construction columns, additional attributes, and import fields.",
+        "Choose which fields are used for manufacturing units and components.",
       operations:
         "Configure production hours, stations, and operation defaults.",
       partners: "Manage external partners, groups, and field mappings.",
@@ -1508,17 +1722,51 @@
       removeSelectedReasonsConfirm: "Remove {count} selected reason(s)?",
     },
     orderInputs: {
-      title: "Constructions",
+      title: "Unit fields",
       description:
-        "Configure construction list columns, additional attributes, and import fields.",
+        "Choose which fields are used for units and company-specific data.",
       empty: "No order inputs yet. Add defaults to get started.",
       addDefaultFields: "Add default fields",
-      createConstructionTable: "Create construction table",
-      coreColumnsTitle: "Core construction columns",
+      createConstructionTable: "Create unit table",
+      bom: "Components",
+      customFieldsTitle: "Additional fields",
+      customFieldsDescription:
+        "For example: m2, opening type, glass unit, hardware group, notes, and other company-specific fields.",
+      coreColumnsTitle: "Base fields",
       coreColumnsDescription:
-        "There is one primary construction table used by order_items, production, and import flows.",
+        "These fields make up the unit table and are used in import and day-to-day production work.",
+      columnSubtitleCore: "Base field",
+      columnSubtitleErp: "Extended field",
+      columnSubtitleCustom: "Extra field",
+      advancedColumnsTitle: "System fields",
+      columnSubtitleKey: "Key",
+      columnLabels: {
+        position: "Line No.",
+        itemType: "Item type",
+        itemName: "Item name",
+        dimensions: "Dimensions",
+        qty: "Quantity",
+        material: "Material",
+        finishColor: "Finish / color",
+        sku: "Item code (SKU)",
+        uom: "Unit of measure (UoM)",
+        revision: "Revision",
+        lifecycleStatus: "Status",
+        validFrom: "Valid from",
+        validTo: "Valid to",
+        supplyType: "Supply type",
+        itemGroup: "Item group",
+        routeCode: "Route code",
+        netWeight: "Net weight (kg)",
+        volume: "Volume (m3)",
+        defaultSupplier: "Default supplier",
+        qualityClass: "Quality class",
+        certificationRequired: "Certification required",
+        productionNotes: "Production notes",
+      },
       label: "Label",
       labelPlaceholder: "Construction count",
+      inTable: "In table",
       scope: "Scope",
       group: "Group",
       type: "Type",
@@ -1545,7 +1793,7 @@
       options: 'Options (comma, newline, or "\\\\" separated)',
       optionsPlaceholder: "Type A, Type B",
       maxSelects: "Max selects (1-3)",
-      primaryConstructionTable: "Primary construction table",
+      primaryConstructionTable: "Primary unit table",
       showInProduction: "Show in production",
       production: "Production",
       noOrderInputs: "No order inputs configured.",

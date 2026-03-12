@@ -221,7 +221,10 @@ export function BottomSheet({
         aria-label={ariaLabel}
         aria-hidden={!open}
         className={cn(
-          "fixed flex max-h-[78dvh] flex-col inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-card pb-[calc(4rem+env(safe-area-inset-bottom))] shadow-2xl will-change-transform transition-[transform,opacity] duration-350 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          "fixed inset-x-0 bottom-0 z-50 flex max-h-[78dvh] flex-col rounded-t-3xl border-t border-border bg-card pb-[calc(4rem+env(safe-area-inset-bottom))] shadow-2xl will-change-transform transition-[transform,opacity] duration-350 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          showOnDesktop
+            ? "md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:max-h-[92dvh] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:pb-0"
+            : "",
           showOnDesktop ? "" : "md:hidden",
           open
             ? "translate-y-0 opacity-100 pointer-events-auto"

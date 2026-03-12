@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -90,31 +90,8 @@ interface SettingsDataState {
   removePartnerGroup: (groupId: string) => Promise<void>;
 }
 
-const mojibakePattern = /[ÃÂÄÅ]/;
-const utf8Encoder = new TextEncoder();
-const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
-
 function decodeUtf8Mojibake(value: string): string {
-  if (!mojibakePattern.test(value)) {
-    return value;
-  }
-
-  const bytes = new Uint8Array(value.length);
-  for (let index = 0; index < value.length; index += 1) {
-    const codePoint = value.charCodeAt(index);
-    if (codePoint > 0xff) {
-      return value;
-    }
-    bytes[index] = codePoint;
-  }
-
-  const decoded = utf8Decoder.decode(bytes);
-  if (decoded.includes("�")) {
-    return value;
-  }
-
-  const roundTrip = String.fromCharCode(...utf8Encoder.encode(decoded));
-  return roundTrip === value ? decoded : value;
+  return value;
 }
 
 function normalizeMaybeString(value?: string | null): string | undefined {
@@ -180,6 +157,7 @@ function mapOrderInputField(row: {
     isPrimaryConstructionTable?: boolean;
     isBomImportTable?: boolean;
     showInTable?: boolean;
+    useInBomTable?: boolean;
   } | null;
   is_required?: boolean | null;
   is_active?: boolean | null;
@@ -199,6 +177,7 @@ function mapOrderInputField(row: {
     isActive: column.isActive ?? true,
     showInTable: column.showInTable ?? true,
     showInProduction: column.showInProduction ?? true,
+    useInBomTable: column.useInBomTable ?? false,
   }));
 
   return {
@@ -218,6 +197,7 @@ function mapOrderInputField(row: {
     isActive: row.is_active ?? true,
     showInTable: row.options?.showInTable ?? true,
     showInProduction: row.show_in_production ?? false,
+    useInBomTable: row.options?.useInBomTable ?? false,
     sortOrder: row.sort_order ?? 0,
   };
 }
@@ -229,6 +209,7 @@ function buildOrderInputOptionsPayload(payload: {
   isPrimaryConstructionTable?: boolean;
   isBomImportTable?: boolean;
   showInTable?: boolean;
+  useInBomTable?: boolean;
 }) {
   if (
     !payload.options &&
@@ -236,7 +217,8 @@ function buildOrderInputOptionsPayload(payload: {
     !payload.scope &&
     !payload.isPrimaryConstructionTable &&
     !payload.isBomImportTable &&
-    payload.showInTable === undefined
+    payload.showInTable === undefined &&
+    payload.useInBomTable === undefined
   ) {
     return null;
   }
@@ -247,6 +229,7 @@ function buildOrderInputOptionsPayload(payload: {
     isPrimaryConstructionTable: payload.isPrimaryConstructionTable ?? false,
     isBomImportTable: payload.isBomImportTable ?? false,
     showInTable: payload.showInTable ?? true,
+    useInBomTable: payload.useInBomTable ?? false,
   };
 }
 
@@ -865,7 +848,8 @@ export function useSettingsData(): SettingsDataState {
           patch.scope !== undefined ||
           patch.isPrimaryConstructionTable !== undefined ||
           patch.isBomImportTable !== undefined ||
-          patch.showInTable !== undefined
+          patch.showInTable !== undefined ||
+          patch.useInBomTable !== undefined
         ) {
           const currentField = orderInputFields.find((field) => field.id === fieldId);
           updatePayload.options = buildOrderInputOptionsPayload({
@@ -878,6 +862,7 @@ export function useSettingsData(): SettingsDataState {
             isBomImportTable:
               patch.isBomImportTable ?? currentField?.isBomImportTable,
             showInTable: patch.showInTable ?? currentField?.showInTable,
+            useInBomTable: patch.useInBomTable ?? currentField?.useInBomTable,
           });
         }
         if (patch.isRequired !== undefined)
@@ -1404,3 +1389,5 @@ export function useSettingsData(): SettingsDataState {
 
   return value;
 }
+
+

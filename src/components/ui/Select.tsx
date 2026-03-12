@@ -5,7 +5,11 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 
-const Select = SelectPrimitive.Root;
+const Select = ({
+  ...props
+}: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Root>) => (
+  <SelectPrimitive.Root {...props} />
+);
 const SelectGroup = SelectPrimitive.Group;
 const SelectValue = SelectPrimitive.Value;
 
@@ -77,6 +81,7 @@ const SelectContent = ({
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       className={cn(
+        "radix-select-content",
         "relative z-50 max-h-64 min-w-32 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",

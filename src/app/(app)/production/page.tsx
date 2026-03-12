@@ -604,7 +604,7 @@ export default function ProductionPage() {
           const orderItemsResult = await supabase
             .from("order_items")
             .select(
-              "id, order_id, source_kind, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, attributes, created_at, updated_at",
+              "id, order_id, source_kind, source_row_id, sort_order, position, item_name, item_type, qty, material, dimensions, sku, uom, revision, lifecycle_status, valid_from, valid_to, supply_type, item_group, route_code, net_weight, volume, default_supplier, quality_class, certification_required, production_notes, attributes, created_at, updated_at",
             )
             .in("order_id", orderIds)
             .eq("source_kind", "order_input_table")

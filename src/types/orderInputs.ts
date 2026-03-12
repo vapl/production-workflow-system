@@ -39,6 +39,7 @@ export interface OrderInputTableColumn {
   isActive?: boolean;
   showInTable?: boolean;
   showInProduction?: boolean;
+  useInBomTable?: boolean;
   maxSelect?: number;
 }
 
@@ -60,6 +61,7 @@ export interface OrderInputField {
   isActive: boolean;
   showInTable?: boolean;
   showInProduction?: boolean;
+  useInBomTable?: boolean;
   sortOrder: number;
 }
 

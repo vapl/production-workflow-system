@@ -314,6 +314,22 @@
   .desktop-sticky-bleed-no-shadow {
     @apply md:before:shadow-none;
   }
+
+  .scrollbar-hidden {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
+
+  body[data-scroll-locked]:has(.radix-select-content) {
+    overflow: auto !important;
+    padding-right: 0 !important;
+    margin-right: 0 !important;
+    overscroll-behavior: auto !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
