@@ -324,6 +324,32 @@
     display: none;
   }
 
+  .scrollbar-subtle {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 23, 42, 0.28) transparent;
+  }
+
+  .scrollbar-subtle::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-subtle::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-subtle::-webkit-scrollbar-thumb {
+    background: rgba(15, 23, 42, 0.22);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .scrollbar-subtle:hover::-webkit-scrollbar-thumb {
+    background: rgba(15, 23, 42, 0.34);
+    background-clip: padding-box;
+  }
+
   body[data-scroll-locked]:has(.radix-select-content) {
     overflow: auto !important;
     padding-right: 0 !important;

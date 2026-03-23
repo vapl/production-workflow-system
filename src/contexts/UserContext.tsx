@@ -105,6 +105,29 @@ const UserContext = createContext<UserContextValue>({
   setLocale: async () => ({ ok: true }),
 });
 
+async function syncRealtimeSession(
+  session:
+    | {
+        access_token?: string | null;
+      }
+    | null
+    | undefined,
+) {
+  if (!supabase) {
+    return;
+  }
+  const fallbackToken = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  const accessToken = session?.access_token ?? fallbackToken;
+  if (!accessToken) {
+    return;
+  }
+  try {
+    await supabase.realtime.setAuth(accessToken);
+  } catch {
+    // Ignore realtime auth sync failures. Core auth/session flow should continue.
+  }
+}
+
 function getStoragePathFromUrl(url: string, bucket: string) {
   if (!url) {
     return null;
@@ -578,6 +601,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     async function hydrate() {
       try {
         const { data } = await sb.auth.getSession();
+        await syncRealtimeSession(data.session);
         const sessionUser = data.session?.user;
         if (!isMounted) {
           return;
@@ -688,6 +712,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const { data: authListener } = sb.auth.onAuthStateChange(
       async (_event, session) => {
         try {
+        await syncRealtimeSession(session);
         const sessionUser = session?.user;
         if (!sessionUser) {
           setUser({ ...fallbackUser, loading: false });
@@ -804,6 +829,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           if (error) {
             await sb.auth.signOut({ scope: "local" });
           }
+          await syncRealtimeSession(null);
         }
         if (typeof window !== "undefined") {
           window.location.replace("/auth");

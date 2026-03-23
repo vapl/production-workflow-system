@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
@@ -26,6 +27,16 @@ import { QrScannerModal } from "@/components/qr/QrScannerModal";
 import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate } from "@/lib/domain/formatters";
+import { filterProductionAttachments } from "@/lib/domain/productionAttachments";
+import {
+  getQueueGroupWorkedMinutes,
+  summarizeWorkedMinutesByItem,
+  summarizeWorkedMinutesByRun,
+} from "@/lib/domain/productionDurations";
+import {
+  collectRunItemIds,
+  publishProductionLiveEvent,
+} from "@/lib/domain/productionLive";
 import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus";
 import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
@@ -37,6 +48,17 @@ import {
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
+import type {
+  BatchRunRow,
+  OperatorQueueItem as QueueItem,
+  OrderAttachmentRow,
+  ProductionItemRow,
+  ProductionPriority as Priority,
+  ProductionStation as Station,
+  ProductionStatusEventRow as StatusEventRow,
+  StationDependencyRow,
+  StationTrackingMode,
+} from "@/types/production";
 import {
   FileIcon,
   FileTextIcon,
@@ -53,35 +75,6 @@ import {
   ActivityIcon,
   XIcon,
 } from "lucide-react";
-
-type Priority = "low" | "normal" | "high" | "urgent";
-type StationTrackingMode =
-  | "construction_level"
-  | "order_level"
-  | "receipt_only";
-
-type Station = {
-  id: string;
-  name: string;
-  sortOrder: number;
-  trackingMode: StationTrackingMode;
-};
-
-type ProductionItemRow = {
-  id: string;
-  order_id: string;
-  batch_code: string;
-  item_name: string;
-  qty: number;
-  material: string | null;
-  status: "queued" | "pending" | "in_progress" | "paused" | "blocked" | "done";
-  station_id: string | null;
-  meta?: Record<string, unknown> | null;
-  started_at?: string | null;
-  done_at?: string | null;
-  duration_minutes?: number | null;
-  created_at?: string | null;
-};
 
 function getProductionItemRowIndex(item: ProductionItemRow) {
   if (!item.meta || typeof item.meta !== "object") {
@@ -106,63 +99,40 @@ function getProductionItemRowKey(item: ProductionItemRow) {
   return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
 }
 
-type BatchRunRow = {
-  id: string;
-  order_id: string;
-  batch_code: string;
-  station_id: string | null;
-  route_key: string;
-  step_index: number;
-  status: "queued" | "pending" | "in_progress" | "paused" | "blocked" | "done";
-  blocked_reason?: string | null;
-  blocked_reason_id?: string | null;
-  planned_date?: string | null;
-  started_at: string | null;
-  done_at: string | null;
-  duration_minutes?: number | null;
-  orders?: {
-    order_number: string | null;
-    due_date: string | null;
-    priority: Priority | null;
-    customer_name: string | null;
-  } | null;
-};
-
-type StationDependencyRow = {
-  id: string;
-  station_id: string;
-  depends_on_station_id: string;
-};
-
-type OrderAttachmentRow = {
-  id: string;
-  order_id: string;
+function UserAvatar({
+  avatarUrl,
+  name,
+  fallback,
+  sizeClass,
+}: {
+  avatarUrl?: string | null;
   name: string;
-  url: string | null;
-  created_at: string | null;
-  size: number | null;
-  mime_type: string | null;
-  category: string | null;
-};
+  fallback: string;
+  sizeClass: string;
+}) {
+  if (avatarUrl) {
+    return (
+      <div className={`relative overflow-hidden rounded-full ${sizeClass}`}>
+        <Image
+          src={avatarUrl}
+          alt={name}
+          fill
+          sizes="48px"
+          className="object-cover"
+        />
+      </div>
+    );
+  }
 
-type QueueItem = {
-  id: string;
-  orderId: string;
-  orderNumber: string;
-  customerName: string;
-  dueDate: string;
-  priority: Priority;
-  status: BatchRunRow["status"];
-  plannedDate: string | null;
-  batchCode: string;
-  totalQty: number;
-  material: string;
-  attachments: OrderAttachmentRow[];
-  startedAt?: string | null;
-  doneAt?: string | null;
-  items: ProductionItemRow[];
-  trackingMode: StationTrackingMode;
-};
+  return (
+    <div
+      className={`flex items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground ${sizeClass}`}
+    >
+      {fallback}
+    </div>
+  );
+}
+
 
 type PendingAction = {
   itemId: string;
@@ -174,17 +144,6 @@ type PendingRunAction = {
 };
 
 type QueueStatusFilter = "all" | BatchRunRow["status"];
-
-type StatusEventRow = {
-  id: string;
-  production_item_id: string | null;
-  order_id: string | null;
-  batch_run_id: string | null;
-  from_status: string | null;
-  to_status: string | null;
-  reason: string | null;
-  created_at: string;
-};
 
 function priorityBadge(priority: Priority) {
   if (priority === "urgent") return "priority-urgent";
@@ -211,14 +170,51 @@ function normalizeTrackingMode(value: unknown): StationTrackingMode {
 
 function isFuturePlannedDate(plannedDate: string | null | undefined) {
   if (!plannedDate) return false;
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
   return plannedDate > today;
+}
+
+function getProductionItemSourceKey(item: ProductionItemRow) {
+  const meta = item.meta as Record<string, unknown> | null;
+  const sourceRowId =
+    meta && typeof meta.sourceRowId === "string"
+      ? meta.sourceRowId
+      : undefined;
+  const rowKey =
+    meta && typeof meta.rowKey === "string" ? meta.rowKey : undefined;
+  return sourceRowId ?? rowKey ?? null;
+}
+
+function getBatchRunSourceKey(run: Pick<BatchRunRow, "route_key">) {
+  return run.route_key && run.route_key !== "default" ? run.route_key : null;
+}
+
+function matchesProductionItemToRun(
+  item: ProductionItemRow,
+  run: Pick<BatchRunRow, "order_id" | "station_id" | "batch_code" | "route_key">,
+) {
+  if (item.order_id !== run.order_id) {
+    return false;
+  }
+  if (item.station_id !== run.station_id) {
+    return false;
+  }
+  const itemSourceKey = getProductionItemSourceKey(item);
+  const runSourceKey = getBatchRunSourceKey(run);
+  if (itemSourceKey && runSourceKey) {
+    return itemSourceKey === runSourceKey;
+  }
+  return item.batch_code === run.batch_code;
 }
 
 function getItemGroupKey(item: ProductionItemRow) {
   const meta = item.meta as Record<string, unknown> | null;
-  const rowKey =
-    meta && typeof meta.rowKey === "string" ? meta.rowKey : undefined;
+  const sourceKey = getProductionItemSourceKey(item);
   const fieldLabel =
     meta && typeof meta.fieldLabel === "string" ? meta.fieldLabel : "";
   const rowIndex =
@@ -227,7 +223,7 @@ function getItemGroupKey(item: ProductionItemRow) {
       ? String(meta.rowIndex)
       : "";
   const fallback = `${item.item_name}|${fieldLabel}|${rowIndex}`;
-  return `${item.order_id}|${item.batch_code}|${rowKey ?? fallback}`;
+  return `${item.order_id}|${sourceKey ?? fallback}`;
 }
 
 function pickLatestItem(
@@ -253,6 +249,32 @@ function formatDuration(totalMinutes: number) {
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
+function formatLiveDuration(
+  startedAt: string | null | undefined,
+  doneAt: string | null | undefined,
+  nowMs: number,
+) {
+  if (!startedAt) return "0s";
+  const startMs = Date.parse(startedAt);
+  if (!Number.isFinite(startMs)) {
+    return "0s";
+  }
+  const endMs = doneAt ? Date.parse(doneAt) : nowMs;
+  const safeEndMs = Number.isFinite(endMs) ? endMs : nowMs;
+  const totalSeconds = Math.max(0, Math.floor((safeEndMs - startMs) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  }
+  return `${seconds}s`;
+}
+
 function getStoragePathFromUrl(url: string, bucket: string) {
   const marker = `/storage/v1/object/public/${bucket}/`;
   const index = url.indexOf(marker);
@@ -263,7 +285,7 @@ function getStoragePathFromUrl(url: string, bucket: string) {
 }
 
 function renderAttachmentIcon(attachment: OrderAttachmentRow) {
-  const name = attachment.name.toLowerCase();
+  const name = (attachment.name ?? "").toLowerCase();
   const isPdf = name.endsWith(".pdf");
   const isImage =
     name.endsWith(".png") ||
@@ -385,6 +407,7 @@ export default function OperatorProductionPage() {
   const [activityError, setActivityError] = useState("");
   const [todayWorkedMinutes, setTodayWorkedMinutes] = useState(0);
   const [weekWorkedMinutes, setWeekWorkedMinutes] = useState(0);
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
     "Production planner",
     "Admin",
@@ -456,6 +479,21 @@ export default function OperatorProductionPage() {
     setSearchQuery(searchParams.get("q") || "");
     setOnlyBlocked(searchParams.get("blocked") === "1");
   }, [searchParams, selectedDateParam]);
+
+  useEffect(() => {
+    const hasActiveRuns = batchRuns.some(
+      (run) => run.status === "in_progress" && Boolean(run.started_at),
+    );
+    if (!hasActiveRuns) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [batchRuns]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -581,7 +619,7 @@ export default function OperatorProductionPage() {
       let runsQuery = sb
         .from("batch_runs")
         .select(
-          "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, priority, customer_name)",
+          "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, production_due_date, priority, customer_name)",
         )
         .in("station_id", stationIds)
         .order("created_at", { ascending: false });
@@ -620,13 +658,15 @@ export default function OperatorProductionPage() {
           : (row.orders ?? null);
         return {
           ...(row as Omit<BatchRunRow, "orders">),
-          orders: relatedOrder
-            ? {
-                order_number: relatedOrder.order_number ?? null,
-                due_date: relatedOrder.due_date ?? null,
-                priority: (relatedOrder.priority ?? null) as Priority | null,
-                customer_name: relatedOrder.customer_name ?? null,
-              }
+              orders: relatedOrder
+                ? {
+                    order_number: relatedOrder.order_number ?? null,
+                    due_date: relatedOrder.due_date ?? null,
+                    production_due_date:
+                      relatedOrder.production_due_date ?? null,
+                    priority: (relatedOrder.priority ?? null) as Priority | null,
+                    customer_name: relatedOrder.customer_name ?? null,
+                  }
             : null,
         };
       });
@@ -781,38 +821,18 @@ export default function OperatorProductionPage() {
       }
       const events = (data ?? []) as StatusEventRow[];
       setActivityEvents(events);
-      const doneItemIds = Array.from(
-        new Set(
-          events
-            .filter(
-              (row) =>
-                row.to_status === "done" &&
-                typeof row.production_item_id === "string",
-            )
-            .map((row) => row.production_item_id as string),
-        ),
-      );
-      if (doneItemIds.length === 0) {
+      if (events.length === 0) {
         setTodayWorkedMinutes(0);
         setWeekWorkedMinutes(0);
         return;
       }
-      const { data: doneItems, error: doneItemsError } = await sb
-        .from("production_items")
-        .select("id, duration_minutes, done_at")
-        .in("id", doneItemIds);
-      if (!isMounted || doneItemsError || !doneItems) {
-        return;
-      }
-      const todayMinutes = doneItems
-        .filter((item) => item.done_at?.slice(0, 10) === today)
-        .reduce((sum, item) => sum + Number(item.duration_minutes ?? 0), 0);
-      const weeklyMinutes = doneItems.reduce(
-        (sum, item) => sum + Number(item.duration_minutes ?? 0),
-        0,
+      const itemSummary = summarizeWorkedMinutesByItem(events, today);
+      const runSummary = summarizeWorkedMinutesByRun(
+        events.filter((event) => !event.production_item_id),
+        today,
       );
-      setTodayWorkedMinutes(todayMinutes);
-      setWeekWorkedMinutes(weeklyMinutes);
+      setTodayWorkedMinutes(itemSummary.todayMinutes + runSummary.todayMinutes);
+      setWeekWorkedMinutes(itemSummary.totalMinutes + runSummary.totalMinutes);
     };
     void loadActivity();
     return () => {
@@ -937,7 +957,7 @@ export default function OperatorProductionPage() {
   const signAttachments = async (list: OrderAttachmentRow[]) => {
     const sb = supabase;
     if (!sb || list.length === 0) {
-      return;
+      return {} as Record<string, string>;
     }
     const results = await Promise.all(
       list.map(async (attachment) => {
@@ -963,23 +983,54 @@ export default function OperatorProductionPage() {
         return { id: attachment.id, url: data?.signedUrl };
       }),
     );
+    const generatedUrls: Record<string, string> = {};
     setSignedUrls((prev) => {
       const next = { ...prev };
       results.forEach((result) => {
         if (result.url) {
           next[result.id] = result.url;
+          generatedUrls[result.id] = result.url;
         }
       });
       return next;
     });
+    return generatedUrls;
+  };
+
+  const openPrimaryAttachment = async (item: QueueItem) => {
+    const primaryAttachment = item.attachments[0];
+    if (!primaryAttachment) {
+      return;
+    }
+    let targetUrl = signedUrls[primaryAttachment.id] ?? primaryAttachment.url;
+    if (!signedUrls[primaryAttachment.id]) {
+      setSigningJobs((prev) => {
+        const updated = new Set(prev);
+        updated.add(item.id);
+        return updated;
+      });
+      try {
+        const generatedUrls = await signAttachments([primaryAttachment]);
+        targetUrl =
+          generatedUrls[primaryAttachment.id] ??
+          signedUrls[primaryAttachment.id] ??
+          primaryAttachment.url;
+      } finally {
+        setSigningJobs((prev) => {
+          const updated = new Set(prev);
+          updated.delete(item.id);
+          return updated;
+        });
+      }
+    }
+    if (targetUrl) {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
+    }
   };
 
   const attachmentsByOrder = useMemo(() => {
     const map = new Map<string, OrderAttachmentRow[]>();
-    attachments.forEach((attachment) => {
-      if (attachment.category !== "production_report") {
-        return;
-      }
+    filterProductionAttachments(attachments).forEach((attachment) => {
       if (!map.has(attachment.order_id)) {
         map.set(attachment.order_id, []);
       }
@@ -987,20 +1038,6 @@ export default function OperatorProductionPage() {
     });
     return map;
   }, [attachments]);
-
-  const orderDurationMap = useMemo(() => {
-    const map = new Map<string, number>();
-    productionItems.forEach((item) => {
-      if (item.duration_minutes == null) {
-        return;
-      }
-      map.set(
-        item.order_id,
-        (map.get(item.order_id) ?? 0) + item.duration_minutes,
-      );
-    });
-    return map;
-  }, [productionItems]);
 
   const stationsById = useMemo(() => {
     return new Map(stations.map((station) => [station.id, station.name]));
@@ -1044,6 +1081,14 @@ export default function OperatorProductionPage() {
       visibleStations.map((station) => [station.id, station.trackingMode]),
     );
     visibleStations.forEach((station) => map.set(station.id, []));
+    const queueGroups = new Map<
+      string,
+      {
+        stationId: string;
+        trackingMode: StationTrackingMode;
+        runs: BatchRunRow[];
+      }
+    >();
     batchRuns.forEach((run) => {
       if (!run.station_id) {
         return;
@@ -1051,12 +1096,65 @@ export default function OperatorProductionPage() {
       if (run.status === "done") {
         return;
       }
-      const items = productionItems.filter(
-        (item) =>
-          item.order_id === run.order_id &&
-          item.batch_code === run.batch_code &&
-          item.station_id === run.station_id,
+      const trackingMode =
+        stationModeById.get(run.station_id) ?? "construction_level";
+      const groupKey =
+        trackingMode === "construction_level"
+          ? [
+              run.station_id,
+              run.order_id,
+              run.route_key && run.route_key !== "default"
+                ? run.route_key
+                : run.batch_code,
+            ].join(":")
+          : `${run.station_id}:${run.order_id}`;
+      const existingGroup = queueGroups.get(groupKey);
+      if (existingGroup) {
+        existingGroup.runs.push(run);
+        return;
+      }
+      queueGroups.set(groupKey, {
+        stationId: run.station_id,
+        trackingMode,
+        runs: [run],
+      });
+    });
+
+    const queueItemByKey = new Map<string, QueueItem>();
+    queueGroups.forEach(({ stationId, trackingMode, runs }, groupedKey) => {
+      const representativeRun = [...runs].sort((a, b) => {
+        const aStarted = a.started_at ? Date.parse(a.started_at) : 0;
+        const bStarted = b.started_at ? Date.parse(b.started_at) : 0;
+        if (aStarted !== bStarted) {
+          return bStarted - aStarted;
+        }
+        return a.id.localeCompare(b.id);
+      })[0];
+      if (!representativeRun) {
+        return;
+      }
+      const batchCodes = new Set(runs.map((run) => run.batch_code));
+      const routeKeys = new Set(
+        runs
+          .map((run) => run.route_key)
+          .filter((value): value is string => Boolean(value && value !== "default")),
       );
+      const items = productionItems.filter((item) => {
+        if (item.order_id !== representativeRun.order_id) {
+          return false;
+        }
+        if (item.station_id !== stationId) {
+          return false;
+        }
+        if (trackingMode === "construction_level") {
+          const sourceKey = getProductionItemSourceKey(item);
+          if (sourceKey && routeKeys.size > 0) {
+            return routeKeys.has(sourceKey);
+          }
+          return batchCodes.has(item.batch_code);
+        }
+        return true;
+      });
       const latestByGroup = new Map<string, ProductionItemRow>();
       items.forEach((row) => {
         const key = getItemGroupKey(row);
@@ -1064,38 +1162,152 @@ export default function OperatorProductionPage() {
         latestByGroup.set(key, pickLatestItem(existing, row));
       });
       const dedupedItems = Array.from(latestByGroup.values());
-      const totalQty = dedupedItems.reduce(
+      const totalQtyFromItems = dedupedItems.reduce(
         (sum, item) => sum + Number(item.qty ?? 0),
         0,
       );
+      const totalQty =
+        trackingMode === "construction_level"
+          ? totalQtyFromItems
+          : Math.max(
+              totalQtyFromItems,
+              dedupedItems.length,
+              1,
+            );
       const material = items.find((item) => item.material)?.material ?? "";
-      const orderNumber = run.orders?.order_number ?? "Order";
-      const customerName = run.orders?.customer_name ?? "Customer";
-      const dueDate = run.orders?.due_date ?? "";
-      const priority = run.orders?.priority ?? "normal";
+      const primaryConstructionItem = dedupedItems[0] ?? items[0] ?? null;
+      const unitType =
+        trackingMode === "construction_level" &&
+        typeof primaryConstructionItem?.meta?.fieldLabel === "string" &&
+        primaryConstructionItem.meta.fieldLabel.trim().length > 0
+          ? primaryConstructionItem.meta.fieldLabel.trim()
+          : null;
+      const unitName =
+        trackingMode === "construction_level" &&
+        typeof primaryConstructionItem?.item_name === "string" &&
+        primaryConstructionItem.item_name.trim().length > 0
+          ? primaryConstructionItem.item_name.trim()
+          : null;
+      const orderNumber =
+        representativeRun.orders?.order_number ?? t("production.main.common.order");
+      const customerName =
+        representativeRun.orders?.customer_name ?? t("production.main.common.customer");
+      const dueDate =
+        representativeRun.orders?.production_due_date ??
+        representativeRun.orders?.due_date ??
+        "";
+      const priority = representativeRun.orders?.priority ?? "normal";
+      const plannedDate = runs
+        .map((item) => item.planned_date)
+        .filter((value): value is string => Boolean(value))
+        .sort()[0] ?? null;
+      const startedAt = runs
+        .map((item) => item.started_at)
+        .filter((value): value is string => Boolean(value))
+        .sort()[0] ?? null;
+      const doneAt = runs
+        .map((item) => item.done_at)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? null;
+      const durationMinutes = getQueueGroupWorkedMinutes({
+        trackingMode,
+        runs,
+        items: dedupedItems,
+      });
+      const statusOrder: BatchRunRow["status"][] = [
+        "blocked",
+        "paused",
+        "in_progress",
+        "queued",
+        "pending",
+        "done",
+      ];
+      const aggregatedStatus =
+        statusOrder.find((candidate) =>
+          runs.some((candidateRun) => candidateRun.status === candidate),
+        ) ?? representativeRun.status;
       const queueItem = {
-        id: run.id,
-        orderId: run.order_id,
+        id: representativeRun.id,
+        runIds: runs.map((item) => item.id),
+        orderId: representativeRun.order_id,
         orderNumber,
         customerName,
         dueDate,
         priority,
-        status: run.status,
-        plannedDate: run.planned_date ?? null,
-        batchCode: run.batch_code,
+        status: aggregatedStatus,
+        plannedDate,
+        batchCode: representativeRun.batch_code,
         totalQty,
         material,
-        attachments: attachmentsByOrder.get(run.order_id) ?? [],
-        startedAt: run.started_at,
-        doneAt: run.done_at,
+        attachments: attachmentsByOrder.get(representativeRun.order_id) ?? [],
+        startedAt,
+        doneAt,
+        durationMinutes,
         items: dedupedItems,
-        trackingMode:
-          stationModeById.get(run.station_id) ?? "construction_level",
+        trackingMode,
+        unitType,
+        unitName,
       } satisfies QueueItem;
-      map.get(run.station_id)?.push(queueItem);
+      const dedupeKey =
+        trackingMode === "construction_level"
+          ? groupedKey
+          : `${stationId}:${representativeRun.order_id}`;
+      const existing = queueItemByKey.get(dedupeKey);
+      if (!existing) {
+        queueItemByKey.set(dedupeKey, queueItem);
+      } else {
+        const existingDate = existing.plannedDate ?? "";
+        const nextDate = queueItem.plannedDate ?? "";
+        const shouldReplace =
+          nextDate > existingDate ||
+          (nextDate === existingDate &&
+            (queueItem.startedAt ?? "") > (existing.startedAt ?? ""));
+        if (shouldReplace) {
+          queueItemByKey.set(dedupeKey, queueItem);
+        }
+      }
+    });
+    const stationItemsMap = new Map<string, QueueItem[]>();
+    queueItemByKey.forEach((queueItem) => {
+      const stationId = queueItem.runIds
+        .map((runId) => batchRuns.find((run) => run.id === runId)?.station_id ?? "")
+        .find(Boolean) ?? "";
+      const list = stationItemsMap.get(stationId) ?? [];
+      list.push(queueItem);
+      stationItemsMap.set(stationId, list);
+    });
+
+    stationItemsMap.forEach((items, stationId) => {
+      const sourceBackedIdentities = new Set(
+        items
+          .filter((item) =>
+            item.items.some((row) => Boolean(getProductionItemSourceKey(row))),
+          )
+          .map((item) => `${item.orderId}:${item.customerName}`),
+      );
+
+      const filteredItems = items.filter((item) => {
+        const itemIdentity = `${item.orderId}:${item.customerName}`;
+        const hasSourceBackedItems = item.items.some((row) =>
+          Boolean(getProductionItemSourceKey(row)),
+        );
+
+        if (hasSourceBackedItems) {
+          return true;
+        }
+
+        if (sourceBackedIdentities.has(itemIdentity)) {
+          return false;
+        }
+
+        return true;
+      });
+
+      map.set(stationId, filteredItems);
     });
     return map;
-  }, [batchRuns, productionItems, visibleStations, attachmentsByOrder]);
+  }, [attachmentsByOrder, batchRuns, productionItems, t, visibleStations]);
 
   const filteredQueueByStation = useMemo(() => {
     const map = new Map<string, QueueItem[]>();
@@ -1152,6 +1364,16 @@ export default function OperatorProductionPage() {
     return map;
   }, [queueByStation]);
 
+  const queueItemById = useMemo(() => {
+    const map = new Map<string, QueueItem>();
+    Array.from(queueByStation.values())
+      .flat()
+      .forEach((item) => {
+        map.set(item.id, item);
+      });
+    return map;
+  }, [queueByStation]);
+
   const quickActionItem = quickActionOrderId
     ? (queueItemByOrderId.get(quickActionOrderId) ?? null)
     : null;
@@ -1181,7 +1403,7 @@ export default function OperatorProductionPage() {
 
   const activitySummary = useMemo(() => {
     const todayEvents = activityEvents.filter(
-      (row) => row.created_at.slice(0, 10) === today,
+      (row) => String(row.created_at ?? "").slice(0, 10) === today,
     );
     const started = todayEvents.filter(
       (row) => row.to_status === "in_progress",
@@ -1285,7 +1507,8 @@ export default function OperatorProductionPage() {
       const stationName = targetItem.station_id
         ? (stationsById.get(targetItem.station_id) ?? "Station")
         : "Station";
-      const orderNumber = run.orders?.order_number ?? "Order";
+      const orderNumber =
+        run.orders?.order_number ?? t("production.main.common.order");
       const reason = extra?.reason ?? "Blocked";
       const roles =
         notificationRoles.length > 0
@@ -1313,7 +1536,8 @@ export default function OperatorProductionPage() {
       const stationName = targetItem.station_id
         ? (stationsById.get(targetItem.station_id) ?? "Station")
         : "Station";
-      const orderNumber = run.orders?.order_number ?? "Order";
+      const orderNumber =
+        run.orders?.order_number ?? t("production.main.common.order");
       const roles =
         notificationRoles.length > 0
           ? notificationRoles
@@ -1339,7 +1563,8 @@ export default function OperatorProductionPage() {
       const stationName = targetItem.station_id
         ? (stationsById.get(targetItem.station_id) ?? "Station")
         : "Station";
-      const orderNumber = run.orders?.order_number ?? "Order";
+      const orderNumber =
+        run.orders?.order_number ?? t("production.main.common.order");
       const roles =
         notificationRoles.length > 0
           ? notificationRoles
@@ -1384,13 +1609,40 @@ export default function OperatorProductionPage() {
             status: appliedStatus,
             started_at:
               appliedStatus === "in_progress"
-                ? (item.started_at ?? nextRunStartedAt ?? now)
-                : item.started_at,
-            done_at: appliedStatus === "done" ? (nextRunDoneAt ?? now) : null,
+                ? (nextRunStartedAt ?? now)
+                : appliedStatus === "queued" ||
+                    appliedStatus === "pending" ||
+                    appliedStatus === "paused" ||
+                    appliedStatus === "blocked"
+                  ? null
+                  : item.started_at,
+            done_at:
+              appliedStatus === "done"
+                ? (nextRunDoneAt ?? now)
+                : appliedStatus === "queued" ||
+                    appliedStatus === "pending" ||
+                    appliedStatus === "in_progress" ||
+                    appliedStatus === "paused" ||
+                    appliedStatus === "blocked"
+                  ? null
+                  : item.done_at,
           }
         : item,
     );
     setProductionItems(nextItems);
+    publishProductionLiveEvent({
+      type: "status-changed",
+      runId,
+      orderId: run.order_id,
+      batchCode: run.batch_code,
+      stationId: run.station_id,
+      status: appliedStatus,
+      startedAt: nextRunStartedAt,
+      doneAt: nextRunDoneAt,
+      durationMinutes: nextRunDuration,
+      itemIds: collectRunItemIds(nextItems, run),
+      changedAt: new Date().toISOString(),
+    });
 
     if (appliedStatus === "done") {
       const nextRuns = batchRuns.map((item) =>
@@ -1452,6 +1704,112 @@ export default function OperatorProductionPage() {
     }
   };
 
+  const handleRunOnlyStatusUpdate = async (
+    runId: string,
+    status: PendingRunAction["action"],
+    extra?: { reason?: string | null; reasonId?: string | null },
+  ) => {
+    const sb = supabase;
+    if (!sb) {
+      return;
+    }
+    const run = batchRuns.find((item) => item.id === runId);
+    if (!run) {
+      return;
+    }
+
+    const { data: transitionedRun, error: transitionError } =
+      await transitionBatchRunStatus(sb, {
+        batchRunId: runId,
+        toStatus: status,
+        reason: extra?.reason ?? null,
+        reasonId: extra?.reasonId ?? null,
+        actorUserId: currentUser.id,
+      });
+
+    if (transitionError) {
+      setDataError(
+        transitionError.message ?? "Failed to transition batch run status.",
+      );
+      return;
+    }
+    if (!transitionedRun) {
+      setDataError("No batch run returned from transition.");
+      return;
+    }
+
+    const appliedStatus = (transitionedRun.status ??
+      status) as BatchRunRow["status"];
+    const nextRunStartedAt = transitionedRun.started_at ?? run.started_at ?? null;
+    const nextRunDoneAt = transitionedRun.done_at ?? run.done_at ?? null;
+    const nextRunDuration =
+      typeof transitionedRun.duration_minutes === "number"
+        ? transitionedRun.duration_minutes
+        : (run.duration_minutes ?? null);
+
+    setBatchRuns((prev) =>
+      prev.map((item) =>
+        item.id === runId
+          ? {
+              ...item,
+              status: appliedStatus,
+              blocked_reason: transitionedRun.blocked_reason ?? null,
+              blocked_reason_id: transitionedRun.blocked_reason_id ?? null,
+              started_at: nextRunStartedAt,
+              done_at: nextRunDoneAt,
+              duration_minutes: nextRunDuration,
+            }
+          : item,
+      ),
+    );
+    publishProductionLiveEvent({
+      type: "status-changed",
+      runId,
+      orderId: run.order_id,
+      batchCode: run.batch_code,
+      stationId: run.station_id,
+      status: appliedStatus,
+      startedAt: nextRunStartedAt,
+      doneAt: nextRunDoneAt,
+      durationMinutes: nextRunDuration,
+      itemIds: collectRunItemIds(productionItems, run),
+      changedAt: new Date().toISOString(),
+    });
+
+    if (appliedStatus === "done") {
+      const nextRuns = batchRuns.map((item) =>
+        item.id === runId
+          ? {
+              ...item,
+              status: appliedStatus,
+              started_at: nextRunStartedAt,
+              done_at: nextRunDoneAt,
+              duration_minutes: nextRunDuration,
+            }
+          : item,
+      );
+      if (
+        isOrderProductionComplete(
+          nextRuns
+            .filter((item) => item.order_id === run.order_id)
+            .map((item) => ({
+              status: item.status,
+              stationId: item.station_id,
+            })),
+          rules.productionCompletionConfig,
+        )
+      ) {
+        const totalDuration = nextRuns
+          .filter((item) => item.order_id === run.order_id)
+          .reduce((sum, item) => sum + Number(item.duration_minutes ?? 0), 0);
+        await sb
+          .from("orders")
+          .update({ production_duration_minutes: totalDuration })
+          .eq("id", run.order_id);
+      }
+    }
+  };
+
   const handleRunStatusUpdate = async (
     runId: string,
     status: PendingRunAction["action"],
@@ -1464,19 +1822,71 @@ export default function OperatorProductionPage() {
     if (!run) {
       return;
     }
-    const runItems = productionItems.filter(
-      (item) =>
-        item.order_id === run.order_id &&
-        item.batch_code === run.batch_code &&
-        item.station_id === run.station_id,
-    );
-    if (runItems.length === 0) {
-      return;
-    }
     const runTrackingMode =
       stations.find((station) => station.id === run.station_id)?.trackingMode ??
       "construction_level";
-    if (status === "done" && runTrackingMode === "receipt_only") {
+    const aggregatedQueueItem = queueItemById.get(runId);
+    const targetRunIds =
+      runTrackingMode === "construction_level"
+        ? [runId]
+        : (aggregatedQueueItem?.runIds ?? [runId]);
+    const batchCodes = new Set(
+      targetRunIds
+        .map((targetRunId) => batchRuns.find((item) => item.id === targetRunId))
+        .filter(Boolean)
+        .map((item) => item!.batch_code),
+    );
+    const routeKeys = new Set(
+      targetRunIds
+        .map((targetRunId) => batchRuns.find((item) => item.id === targetRunId))
+        .filter(Boolean)
+        .map((item) => getBatchRunSourceKey(item!))
+        .filter((value): value is string => Boolean(value)),
+    );
+    const runItems =
+      aggregatedQueueItem?.items.filter((item) => {
+        const itemSourceKey = getProductionItemSourceKey(item);
+        if (itemSourceKey && routeKeys.size > 0) {
+          return routeKeys.has(itemSourceKey);
+        }
+        return batchCodes.has(item.batch_code);
+      }) ??
+      productionItems.filter((item) => {
+        if (routeKeys.size > 0) {
+          const itemSourceKey = getProductionItemSourceKey(item);
+          if (itemSourceKey) {
+            return (
+              item.order_id === run.order_id &&
+              item.station_id === run.station_id &&
+              routeKeys.has(itemSourceKey)
+            );
+          }
+        }
+        return matchesProductionItemToRun(item, run);
+      });
+    if (runTrackingMode !== "construction_level") {
+      setPendingRunAction({ runId, action: status });
+      try {
+        for (const targetRunId of targetRunIds) {
+          await handleRunOnlyStatusUpdate(targetRunId, status, extra);
+        }
+      } finally {
+        setPendingRunAction(null);
+      }
+      return;
+    }
+    if (runItems.length === 0) {
+      setPendingRunAction({ runId, action: status });
+      try {
+        for (const targetRunId of targetRunIds) {
+          await handleRunOnlyStatusUpdate(targetRunId, status, extra);
+        }
+      } finally {
+        setPendingRunAction(null);
+      }
+      return;
+    }
+    if (status === "done") {
       if (isFuturePlannedDate(run.planned_date ?? null)) {
         return;
       }
@@ -1552,11 +1962,8 @@ export default function OperatorProductionPage() {
         return;
       }
       const dependencies = dependenciesByStation.get(item.station_id) ?? [];
-      const run = batchRuns.find(
-        (candidate) =>
-          candidate.order_id === item.order_id &&
-          candidate.batch_code === item.batch_code &&
-          candidate.station_id === item.station_id,
+      const run = batchRuns.find((candidate) =>
+        matchesProductionItemToRun(item, candidate),
       );
       if (!run) {
         return;
@@ -2030,17 +2437,12 @@ export default function OperatorProductionPage() {
             className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background shadow-sm"
             aria-label={t("production.operator.profile.openPanel")}
           >
-            {currentUser.avatarUrl ? (
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.name}
-                className="h-9 w-9 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
-                {userInitials || "U"}
-              </div>
-            )}
+            <UserAvatar
+              avatarUrl={currentUser.avatarUrl}
+              name={currentUser.name}
+              fallback={userInitials || "U"}
+              sizeClass="h-9 w-9"
+            />
           </button>
         }
       />
@@ -2056,17 +2458,12 @@ export default function OperatorProductionPage() {
             onClick={() => setIsProfilePanelOpen(true)}
             className="hidden items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-muted/40 md:inline-flex"
           >
-            {currentUser.avatarUrl ? (
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.name}
-                className="h-7 w-7 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
-                {userInitials || "U"}
-              </div>
-            )}
+            <UserAvatar
+              avatarUrl={currentUser.avatarUrl}
+              name={currentUser.name}
+              fallback={userInitials || "U"}
+              sizeClass="h-7 w-7"
+            />
             <span className="max-w-56 truncate font-medium">
               {currentUser.name} ({userRoleLabel})
             </span>
@@ -2326,13 +2723,10 @@ export default function OperatorProductionPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {visibleStations.map((station) => {
           const queue = filteredQueueByStation.get(station.id) ?? [];
-          const stationTotalMinutes = queue.reduce((sum, item) => {
-            const itemMinutes = item.items.reduce(
-              (rowSum, row) => rowSum + Number(row.duration_minutes ?? 0),
-              0,
-            );
-            return sum + itemMinutes;
-          }, 0);
+          const stationTotalMinutes = queue.reduce(
+            (sum, item) => sum + Number(item.durationMinutes ?? 0),
+            0,
+          );
           return (
             <Card key={station.id} className="min-h-60">
               <CardHeader className="pb-2">
@@ -2378,16 +2772,16 @@ export default function OperatorProductionPage() {
                           );
                         }
                         const metaLine = metaParts.join(" - ");
-                        const stationDurationMinutes = item.items.reduce(
-                          (sum, row) => sum + Number(row.duration_minutes ?? 0),
-                          0,
-                        );
-                        const orderDurationMinutes =
-                          orderDurationMap.get(item.orderId) ?? 0;
                         const isConstructionTracking =
                           item.trackingMode === "construction_level";
                         const isReceiptOnlyTracking =
                           item.trackingMode === "receipt_only";
+                        const stationDurationMinutes = isConstructionTracking
+                          ? Number(item.durationMinutes ?? 0)
+                          : 0;
+                        const orderDurationMinutes = !isConstructionTracking
+                          ? Number(item.durationMinutes ?? 0)
+                          : 0;
                         const hasBatchStarted =
                           Boolean(item.startedAt) ||
                           item.status === "in_progress" ||
@@ -2433,19 +2827,48 @@ export default function OperatorProductionPage() {
                             )
                           : 0;
                         const elapsedLabel = item.startedAt
-                          ? formatDuration(elapsedMinutes)
+                          ? item.status === "in_progress"
+                            ? formatLiveDuration(
+                                item.startedAt,
+                                item.doneAt ?? null,
+                                liveNowMs,
+                              )
+                            : formatDuration(elapsedMinutes)
                           : null;
+                        const customerName = item.customerName?.trim() ?? "";
+                        const materialName = item.material?.trim() ?? "";
+                        const showMaterialName =
+                          materialName.length > 0 &&
+                          materialName.toLowerCase() !==
+                            customerName.toLowerCase() &&
+                          materialName.toLowerCase() !==
+                            item.orderNumber.toLowerCase();
                         return (
                           <>
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <span className="font-semibold">
-                                  {item.orderNumber} / {item.batchCode}
+                                  {item.orderNumber}
                                 </span>
-                                <div className="mt-1 text-[11px] text-muted-foreground">
-                                  {item.customerName}
-                                </div>
+                            <div className="mt-1 text-[11px] text-muted-foreground">
+                              {item.customerName}
+                            </div>
+                            {isConstructionTracking &&
+                            (item.unitType || item.unitName) ? (
+                              <div className="mt-1.5 space-y-0.5 text-[12px] leading-5">
+                                {item.unitType ? (
+                                  <div className="text-muted-foreground">
+                                    {item.unitType}
+                                  </div>
+                                ) : null}
+                                {item.unitName ? (
+                                  <div className="font-medium text-foreground">
+                                    {item.unitName}
+                                  </div>
+                                ) : null}
                               </div>
+                            ) : null}
+                          </div>
                               <div className="flex items-center gap-2">
                                 <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
                                   {
@@ -2470,9 +2893,11 @@ export default function OperatorProductionPage() {
                                 {metaLine}
                               </div>
                             ) : null}
-                            <div className="mt-1 text-muted-foreground">
-                              {item.material}
-                            </div>
+                            {showMaterialName && !isConstructionTracking ? (
+                              <div className="mt-1 text-muted-foreground">
+                                {item.material}
+                              </div>
+                            ) : null}
                             {stationDurationMinutes > 0 ? (
                               <div className="mt-1 text-[11px] text-muted-foreground">
                                 {t("production.operator.queue.stationTime")}{" "}
@@ -2799,11 +3224,15 @@ export default function OperatorProductionPage() {
                                 ) : null}
                               </div>
                             ) : null}
-                            {item.items.length > 0 && !isConstructionTracking ? (
+                            {!isConstructionTracking ||
+                            (isConstructionTracking &&
+                              item.items.length === 0) ? (
                               <div className="mt-3 rounded-md border border-border bg-muted/20 px-2 py-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <div className="text-[11px] text-muted-foreground">
-                                    {isReceiptOnlyTracking
+                                    {isConstructionTracking && item.items.length === 0
+                                      ? t("production.operator.queue.batchActions")
+                                      : isReceiptOnlyTracking
                                       ? t("production.operator.queue.receiptAction")
                                       : t("production.operator.queue.batchActions")}
                                   </div>
@@ -2895,51 +3324,65 @@ export default function OperatorProductionPage() {
                             ) : null}
                             {item.attachments.length > 0 ? (
                               <div className="mt-3 space-y-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 gap-2 text-xs"
-                                  onClick={async () => {
-                                    const next = new Set(expandedJobs);
-                                    if (next.has(item.id)) {
-                                      next.delete(item.id);
+                                <div className="flex flex-wrap gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 gap-2 text-xs"
+                                    onClick={() => void openPrimaryAttachment(item)}
+                                  >
+                                    {signingJobs.has(item.id) ? (
+                                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                    ) : (
+                                      <FileTextIcon className="h-3.5 w-3.5" />
+                                    )}
+                                    {t("production.operator.files.openPrimary")}
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 gap-2 text-xs"
+                                    onClick={async () => {
+                                      const next = new Set(expandedJobs);
+                                      if (next.has(item.id)) {
+                                        next.delete(item.id);
+                                        setExpandedJobs(next);
+                                        return;
+                                      }
+                                      next.add(item.id);
                                       setExpandedJobs(next);
-                                      return;
-                                    }
-                                    next.add(item.id);
-                                    setExpandedJobs(next);
-                                    if (!signingJobs.has(item.id)) {
-                                      setSigningJobs((prev) => {
-                                        const updated = new Set(prev);
-                                        updated.add(item.id);
-                                        return updated;
-                                      });
-                                      await signAttachments(
-                                        item.attachments.filter(
-                                          (attachment) =>
-                                            !signedUrls[attachment.id],
-                                        ),
-                                      );
-                                      setSigningJobs((prev) => {
-                                        const updated = new Set(prev);
-                                        updated.delete(item.id);
-                                        return updated;
-                                      });
-                                    }
-                                  }}
-                                >
-                                  {signingJobs.has(item.id) ? (
-                                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                  ) : null}
-                                  {expandedJobs.has(item.id) ? (
-                                    <ChevronUpIcon className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ChevronDownIcon className="h-3.5 w-3.5" />
-                                  )}
-                                  {expandedJobs.has(item.id)
-                                    ? t("production.operator.files.hide")
-                                    : t("production.operator.files.show")}
-                                </Button>
+                                      if (!signingJobs.has(item.id)) {
+                                        setSigningJobs((prev) => {
+                                          const updated = new Set(prev);
+                                          updated.add(item.id);
+                                          return updated;
+                                        });
+                                        await signAttachments(
+                                          item.attachments.filter(
+                                            (attachment) =>
+                                              !signedUrls[attachment.id],
+                                          ),
+                                        );
+                                        setSigningJobs((prev) => {
+                                          const updated = new Set(prev);
+                                          updated.delete(item.id);
+                                          return updated;
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    {signingJobs.has(item.id) ? (
+                                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                    ) : expandedJobs.has(item.id) ? (
+                                      <ChevronUpIcon className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <ChevronDownIcon className="h-3.5 w-3.5" />
+                                    )}
+                                    {expandedJobs.has(item.id)
+                                      ? t("production.operator.files.hide")
+                                      : t("production.operator.files.show")}
+                                  </Button>
+                                </div>
                                 {expandedJobs.has(item.id) ? (
                                   <div className="space-y-2">
                                     {signingJobs.has(item.id) ? (
@@ -3418,17 +3861,12 @@ export default function OperatorProductionPage() {
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
-              {currentUser.avatarUrl ? (
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.name}
-                  className="h-12 w-12 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
-                  {userInitials || "U"}
-                </div>
-              )}
+              <UserAvatar
+                avatarUrl={currentUser.avatarUrl}
+                name={currentUser.name}
+                fallback={userInitials || "U"}
+                sizeClass="h-12 w-12"
+              />
               <div className="min-w-0">
                 <div className="truncate font-semibold">{currentUser.name}</div>
                 <div className="text-sm text-muted-foreground">
@@ -3521,17 +3959,12 @@ export default function OperatorProductionPage() {
           </div>
           <div className="space-y-4">
             <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
-              {currentUser.avatarUrl ? (
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.name}
-                  className="h-12 w-12 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
-                  {userInitials || "U"}
-                </div>
-              )}
+              <UserAvatar
+                avatarUrl={currentUser.avatarUrl}
+                name={currentUser.name}
+                fallback={userInitials || "U"}
+                sizeClass="h-12 w-12"
+              />
               <div className="min-w-0">
                 <div className="truncate font-semibold">{currentUser.name}</div>
                 <div className="text-sm text-muted-foreground">

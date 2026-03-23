@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { SlidersHorizontalIcon } from "lucide-react";
+import { useState, type ComponentType } from "react";
+import { SlidersHorizontalIcon, type LucideProps } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -14,6 +14,7 @@ type FiltersDropdownProps = {
   children: React.ReactNode;
   className?: string;
   contentClassName?: string;
+  icon?: ComponentType<LucideProps>;
 };
 
 export function FiltersDropdown({
@@ -21,6 +22,7 @@ export function FiltersDropdown({
   children,
   className,
   contentClassName,
+  icon: Icon = SlidersHorizontalIcon,
 }: FiltersDropdownProps) {
   const [open, setOpen] = useState(false);
 
@@ -36,7 +38,7 @@ export function FiltersDropdown({
           aria-label={label}
           aria-expanded={open}
         >
-          <SlidersHorizontalIcon className="h-4 w-4" />
+          <Icon className="h-4 w-4" />
           {label}
         </button>
       </PopoverTrigger>

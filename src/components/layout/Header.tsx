@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   BellIcon,
+  Building2Icon,
   ChevronDownIcon,
   FactoryIcon,
   HelpCircleIcon,
+  LogOutIcon,
   SearchIcon,
+  UserCircle2Icon,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -554,6 +557,7 @@ export function Header() {
                         role="menuitem"
                         onClick={() => setUserMenuOpen(false)}
                       >
+                        <UserCircle2Icon className="h-4 w-4 text-muted-foreground" />
                         {t("header.profile")}
                       </Link>
                       {user.isAdmin ? (
@@ -563,11 +567,15 @@ export function Header() {
                           role="menuitem"
                           onClick={() => setUserMenuOpen(false)}
                         >
+                          <Building2Icon className="h-4 w-4 text-muted-foreground" />
                           {t("header.companySettings")}
                         </Link>
                       ) : null}
                       <div className="my-1 h-px bg-border" />
-                      <ThemeToggle variant="menu" />
+                      <ThemeToggle
+                        variant="menu"
+                        className="[&_svg]:text-muted-foreground"
+                      />
                       <div className="my-1 h-px bg-border" />
                       <button
                         type="button"
@@ -578,6 +586,7 @@ export function Header() {
                           signOut();
                         }}
                       >
+                        <LogOutIcon className="h-4 w-4 text-muted-foreground" />
                         {t("header.signOut")}
                       </button>
                     </div>

@@ -472,6 +472,8 @@ const requiredActiveOrderStatuses: OrderStatus[] = [
   "in_production",
 ];
 
+const showLegacyProductionRoutingSettings = false;
+
 const requiredActiveExternalStatuses: ExternalJobStatus[] = [
   "requested",
   "ordered",
@@ -3926,33 +3928,47 @@ export default function SettingsPage() {
                 handleSaveWorkHours={handleSaveWorkHours}
                 isWorkdaySaving={isWorkdaySaving}
               />
-              <OperationsWorkstationsCard
-                t={t}
-                optionLabel={optionLabel}
-                stationName={stationName}
-                setStationName={setStationName}
-                stationDescription={stationDescription}
-                setStationDescription={setStationDescription}
-                stationTrackingMode={stationTrackingMode}
-                setStationTrackingMode={setStationTrackingMode}
-                stationTrackingModeOptions={stationTrackingModeOptions}
-                handleSaveStation={handleSaveStation}
-                editingStationId={editingStationId}
-                resetStationForm={resetStationForm}
-                selectedWorkStationIds={selectedWorkStationIds}
-                setSelectedWorkStationIds={setSelectedWorkStationIds}
-                displayStations={displayStations}
-                handleDeleteSelectedWorkStations={
-                  handleDeleteSelectedWorkStations
-                }
-                setDragStationId={setDragStationId}
-                handleStationDrop={handleStationDrop}
-                updateWorkStation={updateWorkStation}
-                handleEditStation={handleEditStation}
-                handleCopyWorkStation={handleCopyWorkStation}
-                confirmRemove={confirmRemove}
-                removeWorkStation={removeWorkStation}
-              />
+              {showLegacyProductionRoutingSettings ? (
+                <OperationsWorkstationsCard
+                  t={t}
+                  optionLabel={optionLabel}
+                  stationName={stationName}
+                  setStationName={setStationName}
+                  stationDescription={stationDescription}
+                  setStationDescription={setStationDescription}
+                  stationTrackingMode={stationTrackingMode}
+                  setStationTrackingMode={setStationTrackingMode}
+                  stationTrackingModeOptions={stationTrackingModeOptions}
+                  handleSaveStation={handleSaveStation}
+                  editingStationId={editingStationId}
+                  resetStationForm={resetStationForm}
+                  selectedWorkStationIds={selectedWorkStationIds}
+                  setSelectedWorkStationIds={setSelectedWorkStationIds}
+                  displayStations={displayStations}
+                  handleDeleteSelectedWorkStations={
+                    handleDeleteSelectedWorkStations
+                  }
+                  setDragStationId={setDragStationId}
+                  handleStationDrop={handleStationDrop}
+                  updateWorkStation={updateWorkStation}
+                  handleEditStation={handleEditStation}
+                  handleCopyWorkStation={handleCopyWorkStation}
+                  confirmRemove={confirmRemove}
+                  removeWorkStation={removeWorkStation}
+                />
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{t("settings.operations.routingMovedTitle")}</CardTitle>
+                    <CardDescription>
+                      {t("settings.operations.routingMovedDescription")}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    {t("settings.operations.routingMovedHint")}
+                  </CardContent>
+                </Card>
+              )}
 
               <OperationsQrSettingsCard
                 t={t}
@@ -3989,12 +4005,14 @@ export default function SettingsPage() {
                 notificationMessage={notificationMessage}
               />
 
-              <OperationsStationDependenciesCard
-                t={t}
-                displayStations={displayStations}
-                stationDependenciesByStation={stationDependenciesByStation}
-                updateStationDependencies={updateStationDependencies}
-              />
+              {showLegacyProductionRoutingSettings ? (
+                <OperationsStationDependenciesCard
+                  t={t}
+                  displayStations={displayStations}
+                  stationDependenciesByStation={stationDependenciesByStation}
+                  updateStationDependencies={updateStationDependencies}
+                />
+              ) : null}
 
               <OperationsOperatorAssignmentsCard
                 t={t}

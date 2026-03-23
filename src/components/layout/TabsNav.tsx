@@ -191,7 +191,7 @@ export function TabsNav() {
           return {
             ...tab,
             href: canViewProductionPlanner
-              ? "/production"
+              ? "/production/ready"
               : "/production/operator",
           };
         })
@@ -222,6 +222,9 @@ export function TabsNav() {
     desktopTabs.find((t) => {
       if (t.value === "warehouse") {
         return pathname.startsWith("/warehouse");
+      }
+      if (t.value === "production") {
+        return pathname.startsWith("/production");
       }
       return t.href === "/" ? pathname === "/" : pathname.startsWith(t.href);
     })?.value ??
@@ -279,6 +282,8 @@ export function TabsNav() {
               const isActive =
                 value === "warehouse"
                   ? pathname.startsWith("/warehouse")
+                  : value === "production"
+                    ? pathname.startsWith("/production")
                   : href === "/"
                     ? pathname === "/"
                     : pathname.startsWith(href);

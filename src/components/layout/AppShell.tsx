@@ -40,9 +40,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const [isDesktopTabsVisible, setIsDesktopTabsVisible] = useState(true);
   const swipeStartX = useRef<number | null>(null);
   const swipeStartY = useRef<number | null>(null);
   const pullStartYRef = useRef<number | null>(null);
+  const lastScrollYRef = useRef(0);
+  const lastTabsToggleYRef = useRef(0);
   const isAuthRoute = pathname?.startsWith("/auth");
   const isExternalJobRespondRoute = pathname?.startsWith(
     "/external-jobs/respond/",
@@ -51,14 +54,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const hasAdminAccess = isAdminLike(user);
   const isWarehouseUser = user.role === "Warehouse" && !hasAdminAccess;
   const isOrderDetailRoute = /^\/orders\/[^/]+$/.test(pathname ?? "");
+  const isProductionJobDetailRoute =
+    /^\/production\/jobs\/[^/]+$/.test(pathname ?? "");
+  const isProductionQueuesRoute = pathname?.startsWith("/production/queues");
   const hideTabsNav =
     isExternalJobRespondRoute ||
     isOrderDetailRoute ||
+    isProductionJobDetailRoute ||
+    isProductionQueuesRoute ||
     pathname?.startsWith("/profile") ||
     pathname?.startsWith("/company") ||
     (pathname?.startsWith("/production/operator") && !isWarehouseUser);
   const hideHeader =
-    isExternalJobRespondRoute || pathname?.startsWith("/production/operator");
+    isExternalJobRespondRoute ||
+    isProductionQueuesRoute ||
+    pathname?.startsWith("/production/operator");
   const canViewDashboard = hasPermission("dashboard.view");
   const canViewProduction = hasPermission("production.view");
   const canViewProductionOperator = hasPermission("production.operator.view");
@@ -104,7 +114,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             },
             canViewProduction
               ? {
-                  href: "/production",
+                  href: "/production/ready",
                   label: t("appShell.production"),
                   icon: FactoryIcon,
                 }
@@ -222,6 +232,61 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("touchend", handleTouchEnd);
     };
   }, [hideHeader, isMobileDrawerOpen]);
+
+  useEffect(() => {
+    if (hideTabsNav) {
+      lastScrollYRef.current = 0;
+      lastTabsToggleYRef.current = 0;
+      return;
+    }
+
+    const handleScroll = () => {
+      if (window.innerWidth < 768) {
+        if (!isDesktopTabsVisible) {
+          setIsDesktopTabsVisible(true);
+        }
+        lastScrollYRef.current = window.scrollY;
+        lastTabsToggleYRef.current = window.scrollY;
+        return;
+      }
+
+      const currentY = window.scrollY;
+
+      if (lastScrollYRef.current === 0 && lastTabsToggleYRef.current === 0) {
+        lastScrollYRef.current = currentY;
+        lastTabsToggleYRef.current = currentY;
+      }
+
+      if (currentY <= 16) {
+        if (!isDesktopTabsVisible) {
+          setIsDesktopTabsVisible(true);
+        }
+        lastTabsToggleYRef.current = currentY;
+      } else if (
+        isDesktopTabsVisible &&
+        currentY - lastTabsToggleYRef.current > 120
+      ) {
+        setIsDesktopTabsVisible(false);
+        lastTabsToggleYRef.current = currentY;
+      } else if (
+        !isDesktopTabsVisible &&
+        lastTabsToggleYRef.current - currentY > 96
+      ) {
+        setIsDesktopTabsVisible(true);
+        lastTabsToggleYRef.current = currentY;
+      }
+
+      lastScrollYRef.current = currentY;
+    };
+
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", handleScroll);
+    };
+  }, [hideTabsNav, isDesktopTabsVisible]);
 
   useEffect(() => {
     const threshold = 72;
@@ -657,16 +722,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </>
       )}
       {!hideTabsNav ? (
-        <div className="sticky top-0 z-30 w-full md:bg-app-surface">
-          <div className="container mx-auto w-full px-0 py-0 md:px-4 md:py-3">
+        <div
+          className={cn(
+            "sticky top-0 z-30 w-full overflow-hidden transition-[transform,opacity,padding,margin] duration-200 ease-out md:bg-app-surface",
+            isDesktopTabsVisible || hideTabsNav
+              ? "translate-y-0 opacity-100 md:mb-0"
+              : "-translate-y-full opacity-0 md:-mb-16",
+          )}
+        >
+          <div
+            className={cn(
+              "container mx-auto w-full px-0 py-0 transition-[padding] duration-200 ease-out md:px-4",
+              isDesktopTabsVisible || hideTabsNav ? "md:py-3" : "md:py-0",
+            )}
+          >
             <TabsNav />
           </div>
         </div>
       ) : null}
-      <div className="flex min-h-screen w-full items-start justify-center overflow-x-clip bg-app-surface font-sans text-foreground">
+      <div
+        className="flex min-h-screen w-full items-start justify-center overflow-x-clip bg-app-surface font-sans text-foreground"
+        style={
+          {
+            "--desktop-tabs-offset":
+              hideTabsNav || !isDesktopTabsVisible ? "0rem" : "4rem",
+          } as React.CSSProperties
+        }
+      >
         <main
           className={cn(
             "container mx-auto px-4 py-0 pb-8",
+            isProductionQueuesRoute &&
+              "md:flex md:h-[100dvh] md:max-h-[100dvh] md:flex-col md:overflow-hidden md:pb-0",
             hideHeader ? null : "",
             hideTabsNav
               ? null

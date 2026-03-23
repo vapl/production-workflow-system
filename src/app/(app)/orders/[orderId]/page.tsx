@@ -239,6 +239,12 @@ type OrderItemBomLineDraft = {
   notes: string;
 };
 
+type ExternalJobEditDraft = {
+  partnerId: string;
+  partnerRequestComment: string;
+  values: Record<string, unknown>;
+};
+
 type OrderItemBomLineRow = {
   id: string;
   order_item_id: string;
@@ -587,7 +593,7 @@ export default function OrderDetailPage() {
   const [productionDisplayStatus, setProductionDisplayStatus] =
     useState<OrderStatus | null>(null);
   const [productionCompletionProgress, setProductionCompletionProgress] =
-    useState<{ done: number; total: number; mode: "all" | "stations" } | null>(
+    useState<{ done: number; total: number; mode: "all" | "stations" | "steps" } | null>(
       null,
     );
   const [inlineEditingField, setInlineEditingField] = useState<string | null>(
@@ -675,6 +681,18 @@ export default function OrderDetailPage() {
   >({});
   const [externalJobValuesByJobId, setExternalJobValuesByJobId] = useState<
     Record<string, Record<string, unknown>>
+  >({});
+  const [editingExternalJobId, setEditingExternalJobId] = useState<
+    string | null
+  >(null);
+  const [savingExternalJobId, setSavingExternalJobId] = useState<string | null>(
+    null,
+  );
+  const [externalJobEditDrafts, setExternalJobEditDrafts] = useState<
+    Record<string, ExternalJobEditDraft>
+  >({});
+  const [externalJobEditErrors, setExternalJobEditErrors] = useState<
+    Record<string, string>
   >({});
   const [orderInputValues, setOrderInputValues] = useState<
     Record<string, unknown>
@@ -1624,7 +1642,7 @@ export default function OrderDetailPage() {
     let isMounted = true;
     const loadProductionStatus = async () => {
       const { data, error } = await sb
-        .from("production_items")
+        .from("batch_runs")
         .select("status, station_id")
         .eq("order_id", orderState.id);
       if (!isMounted) {
@@ -1635,30 +1653,9 @@ export default function OrderDetailPage() {
         setProductionCompletionProgress(null);
         return;
       }
-      const completionMode = rules.productionCompletionConfig.mode;
-      if (completionMode === "completion_stations_done") {
-        const selectedStationIds = new Set(
-          rules.productionCompletionConfig.completionStationIds,
-        );
-        const byStation = new Map<string, Array<{ status: string }>>();
-        data.forEach((item) => {
-          if (!item.station_id || !selectedStationIds.has(item.station_id)) {
-            return;
-          }
-          const entry = byStation.get(item.station_id) ?? [];
-          entry.push({ status: item.status });
-          byStation.set(item.station_id, entry);
-        });
-        const total = byStation.size;
-        const done = Array.from(byStation.values()).filter((items) =>
-          items.every((item) => item.status === "done"),
-        ).length;
-        setProductionCompletionProgress({ done, total, mode: "stations" });
-      } else {
-        const total = data.length;
-        const done = data.filter((item) => item.status === "done").length;
-        setProductionCompletionProgress({ done, total, mode: "all" });
-      }
+      const total = data.length;
+      const done = data.filter((item) => item.status === "done").length;
+      setProductionCompletionProgress({ done, total, mode: "steps" });
       const isDone = isOrderProductionComplete(
         data.map((item) => ({
           status: item.status,
@@ -1666,7 +1663,14 @@ export default function OrderDetailPage() {
         })),
         rules.productionCompletionConfig,
       );
-      setProductionDisplayStatus(isDone ? "done" : "in_production");
+      const hasActiveWork = data.some((item) =>
+        ["queued", "in_progress", "paused", "blocked", "done"].includes(
+          item.status,
+        ),
+      );
+      setProductionDisplayStatus(
+        isDone ? "done" : hasActiveWork ? "in_production" : "ready_for_production",
+      );
     };
     void loadProductionStatus();
     return () => {
@@ -2160,6 +2164,69 @@ export default function OrderDetailPage() {
     }
     return undefined;
   };
+  const getExternalDraftValueByKeys = (
+    values: Record<string, unknown>,
+    ...keys: string[]
+  ) => {
+    for (const key of keys) {
+      const field = externalFieldsByKey.get(key.trim().toLowerCase());
+      if (!field) {
+        continue;
+      }
+      return values[field.id];
+    }
+    return undefined;
+  };
+
+  const startEditingExternalJob = useCallback(
+    (job: ExternalJob) => {
+      const matchedPartner = activePartners.find(
+        (partner) =>
+          partner.id === job.partnerId ||
+          partner.name === job.partnerName ||
+          (partner.email && partner.email === job.partnerEmail),
+      );
+      const nextValues = manualExternalJobFields.reduce<Record<string, unknown>>(
+        (acc, field) => {
+          const currentValue = externalJobValuesByJobId[job.id]?.[field.id];
+          if (!isEmptyExternalFieldValue(currentValue)) {
+            acc[field.id] = currentValue;
+            return acc;
+          }
+          const normalizedKey = field.key.trim().toLowerCase();
+          const semantic = getExternalFieldSemantic(field);
+          if (normalizedKey === "status") {
+            acc[field.id] = job.status;
+          } else if (semantic === "external_order") {
+            acc[field.id] = job.externalOrderNumber;
+          } else if (semantic === "due_date") {
+            acc[field.id] = job.dueDate;
+          } else if (normalizedKey === "quantity" || normalizedKey === "qty") {
+            acc[field.id] = job.quantity ?? "";
+          } else if (field.fieldType === "toggle") {
+            acc[field.id] = false;
+          }
+          return acc;
+        },
+        {},
+      );
+      setExternalJobEditDrafts((prev) => ({
+        ...prev,
+        [job.id]: {
+          partnerId: matchedPartner?.id ?? job.partnerId ?? "",
+          partnerRequestComment: job.partnerRequestComment ?? "",
+          values: nextValues,
+        },
+      }));
+      setExternalJobEditErrors((prev) => {
+        const next = { ...prev };
+        delete next[job.id];
+        return next;
+      });
+      setEditingExternalJobId(job.id);
+    },
+    [activePartners, externalJobValuesByJobId, manualExternalJobFields],
+  );
 
   const formatExternalFieldValue = (
     field: ExternalJobField,
@@ -2176,12 +2243,16 @@ export default function OrderDetailPage() {
         semantic === "unit_price");
     if (value === null || value === undefined) {
       if (showPending) {
-        return `pending from ${partnerName ?? "partner"}`;
+        return t("orders.detail.external.pendingFrom", {
+          partner: partnerName ?? t("orders.detail.external.partner"),
+        });
       }
       return "--";
     }
     if (field.fieldType === "toggle") {
-      return value === true ? "Yes" : "No";
+      return value === true
+        ? t("orders.detail.external.yes")
+        : t("orders.detail.external.no");
     }
     if (field.fieldType === "date" && typeof value === "string" && value) {
       return formatDate(value);
@@ -2189,12 +2260,200 @@ export default function OrderDetailPage() {
     const text = String(value);
     if (!text) {
       if (showPending) {
-        return `pending from ${partnerName ?? "partner"}`;
+        return t("orders.detail.external.pendingFrom", {
+          partner: partnerName ?? t("orders.detail.external.partner"),
+        });
       }
       return "--";
     }
     return field.unit ? `${text} ${field.unit}` : text;
   };
+  const getExternalFieldDisplayLabel = (field: ExternalJobField) => {
+    const normalizedKey = normalizeExternalFieldToken(field.key);
+    const normalizedLabel = normalizeExternalFieldToken(field.label);
+    if (field.fieldRole === "planned_price") {
+      return t("orders.detail.external.fieldLabels.unitPrice");
+    }
+    if (field.fieldRole === "invoice_price") {
+      return t("orders.detail.external.fieldLabels.invoicePrice");
+    }
+    const semantic = getExternalFieldSemantic(field);
+    if (semantic === "external_order") {
+      return t("orders.detail.external.fieldLabels.externalOrder");
+    }
+    if (semantic === "due_date") {
+      return t("orders.detail.external.fieldLabels.dueDate");
+    }
+    if (
+      normalizedKey === "quantity" ||
+      normalizedKey === "qty" ||
+      normalizedLabel === "quantity" ||
+      normalizedLabel === "qty"
+    ) {
+      return t("orders.detail.external.fieldLabels.quantity");
+    }
+    if (normalizedKey === "status" || normalizedLabel === "status") {
+      return t("orders.detail.external.fieldLabels.status");
+    }
+    return field.label;
+  };
+  const renderExternalJobManualFieldInputs = (
+    values: Record<string, unknown>,
+    setValues: (
+      updater: (prev: Record<string, unknown>) => Record<string, unknown>,
+    ) => void,
+    options?: { hideStatusField?: boolean },
+  ) => (
+    <div className="grid gap-3 lg:grid-cols-2">
+      {manualExternalJobFields.map((field) => {
+        if (
+          options?.hideStatusField &&
+          field.key.trim().toLowerCase() === "status"
+        ) {
+          return null;
+        }
+        const rawValue = values[field.id];
+        const fieldLabel = getExternalFieldDisplayLabel(field);
+        if (field.fieldType === "toggle") {
+          return (
+            <div
+              key={field.id}
+              className="flex h-10 items-center rounded-lg border border-border bg-input-background px-3"
+            >
+              <Checkbox
+                checked={rawValue === true}
+                onChange={(event) =>
+                  setValues((prev) => ({
+                    ...prev,
+                    [field.id]: event.target.checked,
+                  }))
+                }
+                label={
+                  <>
+                    {fieldLabel}
+                    {field.isRequired ? " *" : ""}
+                  </>
+                }
+                containerClassName="text-sm"
+              />
+            </div>
+          );
+        }
+        if (field.fieldType === "select") {
+          const isStatusField = field.key.trim().toLowerCase() === "status";
+          const selectOptions = isStatusField
+            ? Object.entries(externalJobStatusLabels).map(([value, label]) => ({
+                value,
+                label,
+              }))
+            : (field.options ?? []).map((option) => ({
+                value: option,
+                label: option,
+              }));
+          return (
+            <SelectField
+              key={field.id}
+              label={fieldLabel}
+              value={
+                typeof rawValue === "string" && rawValue ? rawValue : "__none__"
+              }
+              onValueChange={(value) =>
+                setValues((prev) => ({
+                  ...prev,
+                  [field.id]: value === "__none__" ? "" : value,
+                }))
+              }
+            >
+              <Select
+                value={
+                  typeof rawValue === "string" && rawValue
+                    ? rawValue
+                    : "__none__"
+                }
+                onValueChange={(value) =>
+                  setValues((prev) => ({
+                    ...prev,
+                    [field.id]: value === "__none__" ? "" : value,
+                  }))
+                }
+              >
+                <SelectTrigger className="h-10 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">
+                    {t("orders.detail.external.selectValue")}
+                  </SelectItem>
+                  {selectOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SelectField>
+          );
+        }
+        if (field.fieldType === "date") {
+          return (
+            <DatePicker
+              key={field.id}
+              label={fieldLabel}
+              value={typeof rawValue === "string" ? rawValue : ""}
+              onChange={(value) =>
+                setValues((prev) => ({
+                  ...prev,
+                  [field.id]: value,
+                }))
+              }
+              placeholder={t("orders.detail.external.selectDate")}
+              className="space-y-2 text-sm font-medium"
+              triggerClassName="h-10"
+            />
+          );
+        }
+        if (field.fieldType === "textarea") {
+          return (
+            <TextAreaField
+              key={field.id}
+              label={fieldLabel}
+              value={typeof rawValue === "string" ? rawValue : ""}
+              onChange={(event) =>
+                setValues((prev) => ({
+                  ...prev,
+                  [field.id]: event.target.value,
+                }))
+              }
+              className="min-h-20"
+            />
+          );
+        }
+        return (
+          <label
+            key={field.id}
+            className="space-y-2 text-sm font-medium"
+          >
+            {fieldLabel}
+            <Input
+              type={field.fieldType === "number" ? "number" : "text"}
+              value={
+                typeof rawValue === "string" || typeof rawValue === "number"
+                  ? String(rawValue)
+                  : ""
+              }
+              onChange={(event) =>
+                setValues((prev) => ({
+                  ...prev,
+                  [field.id]: event.target.value,
+                }))
+              }
+              className="h-10 w-full px-3 text-sm"
+            />
+          </label>
+        );
+      })}
+    </div>
+  );
   const constructionTableFields = useMemo(() => {
     const tableFields = activeOrderInputFields.filter(
       (field) => field.fieldType === "table",
@@ -5568,12 +5827,28 @@ export default function OrderDetailPage() {
             : t("orders.detail.overview.onTrack"),
         tone: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200",
       };
+  const activeProductionStepCount =
+    productionDisplayStatus === "done"
+      ? 0
+      : productionCompletionProgress?.mode === "steps"
+        ? Math.max(
+            0,
+            (productionCompletionProgress.total ?? 0) -
+              (productionCompletionProgress.done ?? 0),
+          )
+        : 0;
   const progressPercent = productionCompletionProgress
-    ? Math.round(
-        (productionCompletionProgress.done /
-          Math.max(productionCompletionProgress.total, 1)) *
-          100,
-      )
+    ? productionCompletionProgress.mode === "steps"
+      ? Math.round(
+          ((productionCompletionProgress.done + activeProductionStepCount * 0.6) /
+            Math.max(productionCompletionProgress.total, 1)) *
+            100,
+        )
+      : Math.round(
+          (productionCompletionProgress.done /
+            Math.max(productionCompletionProgress.total, 1)) *
+            100,
+        )
     : displayStatus === "done"
       ? 100
       : displayStatus === "in_production"
@@ -5591,6 +5866,8 @@ export default function OrderDetailPage() {
     ? `${productionCompletionProgress.done} / ${productionCompletionProgress.total} ${
         productionCompletionProgress.mode === "stations"
           ? t("orders.detail.productionCompletion.stations")
+          : productionCompletionProgress.mode === "steps"
+            ? t("orders.detail.productionCompletion.steps")
           : t("orders.detail.productionCompletion.items")
       }`
     : displayStatus === "done"
@@ -6259,6 +6536,18 @@ export default function OrderDetailPage() {
             setIsSavingOrderInputs(false);
             return;
           }
+
+          const { error: deleteRouteRunsError } = await supabase
+            .from("batch_runs")
+            .delete()
+            .eq("order_id", orderState.id)
+            .in("route_key", idsToDelete)
+            .eq("status", "pending");
+          if (deleteRouteRunsError) {
+            setOrderInputError(deleteRouteRunsError.message);
+            setIsSavingOrderInputs(false);
+            return;
+          }
         }
 
         if (desiredItems.length > 0) {
@@ -6293,6 +6582,68 @@ export default function OrderDetailPage() {
 
         if (!isMissingOrderItemsSchema(savedItemsResult.error)) {
           const savedItems = (savedItemsResult.data ?? []).map(mapOrderItemRow);
+
+          const activeStationsResult = await supabase
+            .from("workstations")
+            .select("id, sort_order")
+            .eq("is_active", true)
+            .order("sort_order", { ascending: true });
+
+          if (activeStationsResult.error) {
+            setOrderInputError(activeStationsResult.error.message);
+            setIsSavingOrderInputs(false);
+            return;
+          }
+
+          const activeStations = activeStationsResult.data ?? [];
+          if (activeStations.length > 0 && savedItems.length > 0) {
+            const existingRunsResult = await supabase
+              .from("batch_runs")
+              .select("id, route_key")
+              .eq("order_id", orderState.id)
+              .in(
+                "route_key",
+                savedItems.map((item) => item.id),
+              );
+
+            if (existingRunsResult.error) {
+              setOrderInputError(existingRunsResult.error.message);
+              setIsSavingOrderInputs(false);
+              return;
+            }
+
+            const routeKeysWithRuns = new Set(
+              (existingRunsResult.data ?? [])
+                .map((run) => run.route_key)
+                .filter((value): value is string => Boolean(value)),
+            );
+
+            const defaultRuns = savedItems
+              .filter((item) => !routeKeysWithRuns.has(item.id))
+              .flatMap((item) =>
+                activeStations.map((station, index) => ({
+                  order_id: orderState.id,
+                  batch_code: `B${(item.sortOrder ?? 0) + 1}`,
+                  station_id: station.id,
+                  route_key: item.id,
+                  step_index: station.sort_order ?? index,
+                  status: "pending",
+                  planned_date: null,
+                })),
+              );
+
+            if (defaultRuns.length > 0) {
+              const { error: insertDefaultRunsError } = await supabase
+                .from("batch_runs")
+                .insert(defaultRuns);
+              if (insertDefaultRunsError) {
+                setOrderInputError(insertDefaultRunsError.message);
+                setIsSavingOrderInputs(false);
+                return;
+              }
+            }
+          }
+
           const desiredDocuments = primaryField
             ? buildOrderItemDocumentsFromTableField({
                 rows: constructionRowsByFieldId[primaryField.id],
@@ -7761,7 +8112,7 @@ export default function OrderDetailPage() {
       if (missingRequired) {
         setExternalError(
           t("orders.detail.errors.fieldRequired", {
-            field: missingRequired.label,
+            field: getExternalFieldDisplayLabel(missingRequired),
           }),
         );
         return;
@@ -8096,6 +8447,232 @@ export default function OrderDetailPage() {
           : prev,
       );
     }
+  }
+
+  async function handleSaveExternalJob(externalJobId: string) {
+    if (!orderState) {
+      return;
+    }
+    const draft = externalJobEditDrafts[externalJobId];
+    const job = orderState.externalJobs?.find(
+      (item) => item.id === externalJobId,
+    );
+    if (!draft || !job) {
+      return;
+    }
+    if (!draft.partnerId) {
+      setExternalJobEditErrors((prev) => ({
+        ...prev,
+        [externalJobId]: t("orders.detail.errors.partnerRequired"),
+      }));
+      return;
+    }
+    const partner = activePartners.find((item) => item.id === draft.partnerId);
+    if (!partner) {
+      setExternalJobEditErrors((prev) => ({
+        ...prev,
+        [externalJobId]: t("orders.detail.errors.selectValidPartner"),
+      }));
+      return;
+    }
+    const missingRequired = manualExternalJobFields.find((field) => {
+      if (!field.isRequired) {
+        return false;
+      }
+      const value = draft.values[field.id];
+      if (field.fieldType === "toggle") {
+        return value === undefined;
+      }
+      return isEmptyExternalFieldValue(value);
+    });
+    if (missingRequired) {
+      setExternalJobEditErrors((prev) => ({
+        ...prev,
+        [externalJobId]: t("orders.detail.errors.fieldRequired", {
+          field: getExternalFieldDisplayLabel(missingRequired),
+        }),
+      }));
+      return;
+    }
+
+    const externalOrderNumberRaw = getExternalDraftValueByKeys(
+      draft.values,
+      "external_order_number",
+      "external_order_no",
+      "order_number",
+    );
+    const dueDateRaw = getExternalDraftValueByKeys(
+      draft.values,
+      "due_date",
+      "due",
+    );
+    const quantityRaw = getExternalDraftValueByKeys(
+      draft.values,
+      "quantity",
+      "qty",
+    );
+
+    let resolvedQuantity: number | null | undefined;
+    if (typeof quantityRaw === "number" && Number.isFinite(quantityRaw)) {
+      resolvedQuantity = quantityRaw;
+    } else if (typeof quantityRaw === "string") {
+      if (quantityRaw.trim().length === 0) {
+        resolvedQuantity = null;
+      } else {
+        const parsed = Number(quantityRaw);
+        if (!Number.isFinite(parsed)) {
+          setExternalJobEditErrors((prev) => ({
+            ...prev,
+            [externalJobId]: t("orders.detail.errors.fieldRequired", {
+              field:
+                manualExternalJobFields.find((field) => {
+                  const key = field.key.trim().toLowerCase();
+                  return key === "quantity" || key === "qty";
+                })?.label ?? t("orders.detail.quantity"),
+            }),
+          }));
+          return;
+        }
+        resolvedQuantity = parsed;
+      }
+    }
+
+    setSavingExternalJobId(externalJobId);
+    setExternalJobEditErrors((prev) => {
+      const next = { ...prev };
+      delete next[externalJobId];
+      return next;
+    });
+
+    const updated = await updateExternalJob(externalJobId, {
+      partnerId: partner.id,
+      partnerName: partner.name,
+      partnerEmail: partner.email,
+      partnerRequestComment:
+        draft.partnerRequestComment.trim().length > 0
+          ? draft.partnerRequestComment.trim()
+          : "",
+      externalOrderNumber:
+        typeof externalOrderNumberRaw === "string" &&
+        externalOrderNumberRaw.trim().length > 0
+          ? externalOrderNumberRaw.trim()
+          : job.externalOrderNumber,
+      dueDate:
+        typeof dueDateRaw === "string" && dueDateRaw.trim().length > 0
+          ? dueDateRaw
+          : job.dueDate,
+      quantity: resolvedQuantity,
+    });
+
+    if (!updated) {
+      setSavingExternalJobId(null);
+      setExternalJobEditErrors((prev) => ({
+        ...prev,
+        [externalJobId]: t("partners.receive.saveFailed"),
+      }));
+      return;
+    }
+
+    if (supabase && tenantId && manualExternalJobFields.length > 0) {
+      const rows: Array<{
+        tenant_id: string;
+        external_job_id: string;
+        field_id: string;
+        value: unknown;
+      }> = [];
+      const clearFieldIds: string[] = [];
+
+      for (const field of manualExternalJobFields) {
+        const raw = draft.values[field.id];
+        if (field.fieldType === "toggle") {
+          rows.push({
+            tenant_id: tenantId,
+            external_job_id: externalJobId,
+            field_id: field.id,
+            value: raw === true,
+          });
+          continue;
+        }
+        if (isEmptyExternalFieldValue(raw)) {
+          clearFieldIds.push(field.id);
+          continue;
+        }
+        if (field.fieldType === "number") {
+          const parsed =
+            typeof raw === "number" ? raw : Number(String(raw).trim());
+          if (!Number.isFinite(parsed)) {
+            continue;
+          }
+          rows.push({
+            tenant_id: tenantId,
+            external_job_id: externalJobId,
+            field_id: field.id,
+            value: parsed,
+          });
+          continue;
+        }
+        rows.push({
+          tenant_id: tenantId,
+          external_job_id: externalJobId,
+          field_id: field.id,
+          value: raw,
+        });
+      }
+
+      if (clearFieldIds.length > 0) {
+        await supabase
+          .from("external_job_field_values")
+          .delete()
+          .eq("external_job_id", externalJobId)
+          .in("field_id", clearFieldIds);
+      }
+      if (rows.length > 0) {
+        await supabase
+          .from("external_job_field_values")
+          .upsert(rows, { onConflict: "external_job_id,field_id" });
+      }
+    }
+
+    const nextFieldValues = manualExternalJobFields.reduce<
+      Record<string, unknown>
+    >((acc, field) => {
+      const raw = draft.values[field.id];
+      if (field.fieldType === "toggle") {
+        acc[field.id] = raw === true;
+        return acc;
+      }
+      if (!isEmptyExternalFieldValue(raw)) {
+        acc[field.id] = raw;
+      }
+      return acc;
+    }, {});
+
+    setExternalJobValuesByJobId((prev) => ({
+      ...prev,
+      [externalJobId]: nextFieldValues,
+    }));
+    setOrderState((prev) =>
+      prev
+        ? {
+            ...prev,
+            externalJobs: (prev.externalJobs ?? []).map((item) =>
+              item.id === externalJobId ? updated : item,
+            ),
+          }
+        : prev,
+    );
+    setExternalJobEditDrafts((prev) => {
+      const next = { ...prev };
+      delete next[externalJobId];
+      return next;
+    });
+    setExternalJobEditErrors((prev) => {
+      const next = { ...prev };
+      delete next[externalJobId];
+      return next;
+    });
+    setEditingExternalJobId(null);
+    setSavingExternalJobId(null);
   }
 
   function handleExternalFilesAdded(externalJobId: string, files: FileList) {
@@ -10628,166 +11205,10 @@ export default function OrderDetailPage() {
                 {externalRequestMode === "manual" ? (
                   manualExternalJobFields.length > 0 ? (
                     <div className="space-y-2">
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        {manualExternalJobFields.map((field) => {
-                          const rawValue = externalJobFieldValues[field.id];
-                          if (field.fieldType === "toggle") {
-                            return (
-                              <div
-                                key={field.id}
-                                className="flex h-10 items-center rounded-lg border border-border bg-input-background px-3"
-                              >
-                                <Checkbox
-                                  checked={rawValue === true}
-                                  onChange={(event) =>
-                                    setExternalJobFieldValues((prev) => ({
-                                      ...prev,
-                                      [field.id]: event.target.checked,
-                                    }))
-                                  }
-                                  label={
-                                    <>
-                                      {field.label}
-                                      {field.isRequired ? " *" : ""}
-                                    </>
-                                  }
-                                  containerClassName="text-sm"
-                                />
-                              </div>
-                            );
-                          }
-                          if (field.fieldType === "select") {
-                            const isStatusField =
-                              field.key.trim().toLowerCase() === "status";
-                            const selectOptions = isStatusField
-                              ? Object.entries(externalJobStatusLabels).map(
-                                  ([value, label]) => ({
-                                    value,
-                                    label,
-                                  }),
-                                )
-                              : (field.options ?? []).map((option) => ({
-                                  value: option,
-                                  label: option,
-                                }));
-                            return (
-                              <SelectField
-                                key={field.id}
-                                label={field.label}
-                                value={
-                                  typeof rawValue === "string" && rawValue
-                                    ? rawValue
-                                    : "__none__"
-                                }
-                                onValueChange={(value) =>
-                                  setExternalJobFieldValues((prev) => ({
-                                    ...prev,
-                                    [field.id]:
-                                      value === "__none__" ? "" : value,
-                                  }))
-                                }
-                              >
-                                <Select
-                                  value={
-                                    typeof rawValue === "string" && rawValue
-                                      ? rawValue
-                                      : "__none__"
-                                  }
-                                  onValueChange={(value) =>
-                                    setExternalJobFieldValues((prev) => ({
-                                      ...prev,
-                                      [field.id]:
-                                        value === "__none__" ? "" : value,
-                                    }))
-                                  }
-                                >
-                                  <SelectTrigger className="h-10 w-full">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">
-                                      {t("orders.detail.external.selectValue")}
-                                    </SelectItem>
-                                    {selectOptions.map((option) => (
-                                      <SelectItem
-                                        key={option.value}
-                                        value={option.value}
-                                      >
-                                        {option.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </SelectField>
-                            );
-                          }
-                          if (field.fieldType === "date") {
-                            return (
-                              <DatePicker
-                                key={field.id}
-                                label={field.label}
-                                value={
-                                  typeof rawValue === "string" ? rawValue : ""
-                                }
-                                onChange={(value) =>
-                                  setExternalJobFieldValues((prev) => ({
-                                    ...prev,
-                                    [field.id]: value,
-                                  }))
-                                }
-                                className="space-y-2 text-sm font-medium"
-                                triggerClassName="h-10"
-                              />
-                            );
-                          }
-                          if (field.fieldType === "textarea") {
-                            return (
-                              <TextAreaField
-                                key={field.id}
-                                label={field.label}
-                                value={
-                                  typeof rawValue === "string" ? rawValue : ""
-                                }
-                                onChange={(event) =>
-                                  setExternalJobFieldValues((prev) => ({
-                                    ...prev,
-                                    [field.id]: event.target.value,
-                                  }))
-                                }
-                                className="min-h-20"
-                              />
-                            );
-                          }
-                          return (
-                            <label
-                              key={field.id}
-                              className="space-y-2 text-sm font-medium"
-                            >
-                              {field.label}
-                              <Input
-                                type={
-                                  field.fieldType === "number"
-                                    ? "number"
-                                    : "text"
-                                }
-                                value={
-                                  typeof rawValue === "string" ||
-                                  typeof rawValue === "number"
-                                    ? String(rawValue)
-                                    : ""
-                                }
-                                onChange={(event) =>
-                                  setExternalJobFieldValues((prev) => ({
-                                    ...prev,
-                                    [field.id]: event.target.value,
-                                  }))
-                                }
-                                className="h-10 w-full px-3 text-sm"
-                              />
-                            </label>
-                          );
-                        })}
-                      </div>
+                      {renderExternalJobManualFieldInputs(
+                        externalJobFieldValues,
+                        setExternalJobFieldValues,
+                      )}
                     </div>
                   ) : (
                     <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
@@ -10882,7 +11303,7 @@ export default function OrderDetailPage() {
                   <p className="text-xs text-destructive">{externalError}</p>
                 )}
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  Plan:{" "}
+                  {t("orders.detail.external.planLabel")}:{" "}
                   <span className="font-medium">{subscription.planCode}</span>{" "}
                   {canSendExternalJobToPartner
                     ? t("orders.detail.external.planIncludesSend")
@@ -10905,6 +11326,9 @@ export default function OrderDetailPage() {
                     {visibleExternalJobs.map((job) => {
                       const pendingFiles = externalJobFiles[job.id] ?? [];
                       const uploadState = externalJobUpload[job.id];
+                      const isEditingJob = editingExternalJobId === job.id;
+                      const editDraft = externalJobEditDrafts[job.id];
+                      const editError = externalJobEditErrors[job.id];
                       const partnerGroupName =
                         activeGroups.find(
                           (group) =>
@@ -10920,114 +11344,212 @@ export default function OrderDetailPage() {
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="font-medium">
-                                  {job.partnerName}
-                                </div>
-                                {partnerGroupName ? (
-                                  <span className="text-xs text-muted-foreground">
-                                    {partnerGroupName}
-                                  </span>
-                                ) : null}
-                              </div>
-                              {job.quantity !== undefined && (
-                                <div className="text-xs text-muted-foreground">
-                                  Qty: {job.quantity}
-                                </div>
-                              )}
-                              <div className="mt-2 rounded-md border border-border bg-muted/20 px-2 py-2">
-                                <div className="mb-1 text-[11px] font-medium text-muted-foreground">
-                                  Timeline
-                                </div>
-                                <div className="space-y-1">
-                                  {buildExternalTimeline(job).map((item) => (
-                                    <div
-                                      key={`${job.id}-${item.label}-${item.at}`}
-                                      className="flex items-center justify-between gap-2 text-xs"
+                              {isEditingJob && editDraft ? (
+                                <div className="space-y-3">
+                                  <SelectField
+                                    label={t("orders.detail.external.partner")}
+                                    value={editDraft.partnerId || "__none__"}
+                                    onValueChange={(value) =>
+                                      setExternalJobEditDrafts((prev) => ({
+                                        ...prev,
+                                        [job.id]: {
+                                          ...editDraft,
+                                          partnerId:
+                                            value === "__none__" ? "" : value,
+                                        },
+                                      }))
+                                    }
+                                  >
+                                    <Select
+                                      value={editDraft.partnerId || "__none__"}
+                                      onValueChange={(value) =>
+                                        setExternalJobEditDrafts((prev) => ({
+                                          ...prev,
+                                          [job.id]: {
+                                            ...editDraft,
+                                            partnerId:
+                                              value === "__none__" ? "" : value,
+                                          },
+                                        }))
+                                      }
                                     >
-                                      <span className="text-muted-foreground">
-                                        {item.label}
-                                      </span>
-                                      <span>{item.at}</span>
+                                      <SelectTrigger className="h-10 w-full">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__none__">
+                                          {t(
+                                            "orders.detail.external.selectPartner",
+                                          )}
+                                        </SelectItem>
+                                        {activePartners.map((partner) => (
+                                          <SelectItem
+                                            key={partner.id}
+                                            value={partner.id}
+                                          >
+                                            {partner.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </SelectField>
+                                  {manualExternalJobFields.length > 0 ? (
+                                    <div className="space-y-2">
+                                      {renderExternalJobManualFieldInputs(
+                                        editDraft.values,
+                                        (updater) =>
+                                          setExternalJobEditDrafts((prev) => ({
+                                            ...prev,
+                                            [job.id]: {
+                                              ...editDraft,
+                                              values: updater(editDraft.values),
+                                            },
+                                          })),
+                                        { hideStatusField: true },
+                                      )}
                                     </div>
-                                  ))}
+                                  ) : null}
+                                  <TextAreaField
+                                    label={t("orders.detail.external.partnerComment")}
+                                    value={editDraft.partnerRequestComment}
+                                    onChange={(event) =>
+                                      setExternalJobEditDrafts((prev) => ({
+                                        ...prev,
+                                        [job.id]: {
+                                          ...editDraft,
+                                          partnerRequestComment:
+                                            event.target.value,
+                                        },
+                                      }))
+                                    }
+                                    placeholder={t(
+                                      "orders.detail.external.partnerCommentPlaceholder",
+                                    )}
+                                    className="min-h-20"
+                                  />
+                                  {editError ? (
+                                    <p className="text-xs text-destructive">
+                                      {editError}
+                                    </p>
+                                  ) : null}
                                 </div>
-                              </div>
-                              {job.partnerRequestComment ? (
-                                <div className="text-xs text-muted-foreground">
-                                  {t("orders.detail.external.requestNote")}:{" "}
-                                  {job.partnerRequestComment}
-                                </div>
-                              ) : null}
-                              {job.partnerResponseNote ? (
-                                <div className="text-xs text-muted-foreground">
-                                  {t("orders.detail.external.note")}:{" "}
-                                  {job.partnerResponseNote}
-                                </div>
-                              ) : null}
-                              {(job.requestMode === "partner_portal"
-                                ? portalResponseExternalJobFields.length > 0
-                                  ? portalResponseExternalJobFields
-                                  : manualExternalJobFields
-                                : manualExternalJobFields
-                              ).length > 0 && (
-                                <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                              ) : (
+                                <>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="font-medium">
+                                      {job.partnerName}
+                                    </div>
+                                    {partnerGroupName ? (
+                                      <span className="text-xs text-muted-foreground">
+                                        {partnerGroupName}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  {job.quantity !== undefined && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {t("orders.detail.external.fieldLabels.quantity")}
+                                      : {job.quantity}
+                                    </div>
+                                  )}
+                                  <div className="mt-2 rounded-md border border-border bg-muted/20 px-2 py-2">
+                                    <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                                      {t("orders.detail.external.timelineLabel")}
+                                    </div>
+                                    <div className="space-y-1">
+                                      {buildExternalTimeline(job).map((item) => (
+                                        <div
+                                          key={`${job.id}-${item.label}-${item.at}`}
+                                          className="flex items-center justify-between gap-2 text-xs"
+                                        >
+                                          <span className="text-muted-foreground">
+                                            {item.label}
+                                          </span>
+                                          <span>{item.at}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  {job.partnerRequestComment ? (
+                                    <div className="text-xs text-muted-foreground">
+                                      {t("orders.detail.external.requestNote")}:{" "}
+                                      {job.partnerRequestComment}
+                                    </div>
+                                  ) : null}
+                                  {job.partnerResponseNote ? (
+                                    <div className="text-xs text-muted-foreground">
+                                      {t("orders.detail.external.note")}:{" "}
+                                      {job.partnerResponseNote}
+                                    </div>
+                                  ) : null}
                                   {(job.requestMode === "partner_portal"
                                     ? portalResponseExternalJobFields.length > 0
                                       ? portalResponseExternalJobFields
                                       : manualExternalJobFields
                                     : manualExternalJobFields
-                                  ).map((field, index, fields) => {
-                                    const semantic =
-                                      getExternalFieldSemantic(field);
-                                    if (
-                                      semantic !== "other" &&
-                                      fields
-                                        .slice(0, index)
-                                        .some(
-                                          (candidate) =>
-                                            getExternalFieldSemantic(
-                                              candidate,
-                                            ) === semantic,
-                                        )
-                                    ) {
-                                      return null;
-                                    }
-                                    const value =
-                                      externalJobValuesByJobId[job.id]?.[
-                                        field.id
-                                      ];
-                                    const fallbackValue =
-                                      semantic === "external_order"
-                                        ? job.requestMode === "partner_portal"
-                                          ? job.partnerResponseOrderNumber
-                                          : job.externalOrderNumber
-                                        : semantic === "due_date"
-                                          ? job.requestMode === "partner_portal"
-                                            ? job.partnerResponseDueDate
-                                            : job.dueDate
-                                          : semantic === "unit_price" &&
-                                              job.requestMode !==
+                                  ).length > 0 && (
+                                    <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                                      {(job.requestMode === "partner_portal"
+                                        ? portalResponseExternalJobFields.length >
+                                          0
+                                          ? portalResponseExternalJobFields
+                                          : manualExternalJobFields
+                                        : manualExternalJobFields
+                                      ).map((field, index, fields) => {
+                                        const semantic =
+                                          getExternalFieldSemantic(field);
+                                        if (
+                                          semantic !== "other" &&
+                                          fields
+                                            .slice(0, index)
+                                            .some(
+                                              (candidate) =>
+                                                getExternalFieldSemantic(
+                                                  candidate,
+                                                ) === semantic,
+                                            )
+                                        ) {
+                                          return null;
+                                        }
+                                        const value =
+                                          externalJobValuesByJobId[job.id]?.[
+                                            field.id
+                                          ];
+                                        const fallbackValue =
+                                          semantic === "external_order"
+                                            ? job.requestMode ===
+                                              "partner_portal"
+                                              ? job.partnerResponseOrderNumber
+                                              : job.externalOrderNumber
+                                            : semantic === "due_date"
+                                              ? job.requestMode ===
                                                 "partner_portal"
-                                            ? undefined
-                                            : undefined;
-                                    const resolvedValue =
-                                      isEmptyExternalFieldValue(value)
-                                        ? fallbackValue
-                                        : value;
-                                    return (
-                                      <div key={field.id}>
-                                        {field.label}:{" "}
-                                        {formatExternalFieldValue(
-                                          field,
-                                          resolvedValue,
-                                          job.requestMode,
-                                          job.partnerName,
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
+                                                ? job.partnerResponseDueDate
+                                                : job.dueDate
+                                              : semantic === "unit_price" &&
+                                                  job.requestMode !==
+                                                    "partner_portal"
+                                                ? undefined
+                                                : undefined;
+                                        const resolvedValue =
+                                          isEmptyExternalFieldValue(value)
+                                            ? fallbackValue
+                                            : value;
+                                        return (
+                                          <div key={field.id}>
+                                            {getExternalFieldDisplayLabel(field)}
+                                            :{" "}
+                                            {formatExternalFieldValue(
+                                              field,
+                                              resolvedValue,
+                                              job.requestMode,
+                                              job.partnerName,
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
@@ -11036,12 +11558,58 @@ export default function OrderDetailPage() {
                               >
                                 {externalJobStatusLabels[job.status]}
                               </Badge>
+                              {isEditingJob ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    onClick={() =>
+                                      void handleSaveExternalJob(job.id)
+                                    }
+                                    disabled={savingExternalJobId === job.id}
+                                  >
+                                    {savingExternalJobId === job.id
+                                      ? t("orders.detail.saving")
+                                      : t("orders.detail.external.save")}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setEditingExternalJobId(null);
+                                      setExternalJobEditDrafts((prev) => {
+                                        const next = { ...prev };
+                                        delete next[job.id];
+                                        return next;
+                                      });
+                                      setExternalJobEditErrors((prev) => {
+                                        const next = { ...prev };
+                                        delete next[job.id];
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    {t("orders.detail.external.cancel")}
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startEditingExternalJob(job)}
+                                >
+                                  <PencilIcon className="mr-2 h-4 w-4" />
+                                  {t("orders.detail.external.edit")}
+                                </Button>
+                              )}
                               {canSendExternalJobToPartner ? (
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleSendToPartner(job.id)}
-                                  disabled={sendingToPartnerJobId === job.id}
+                                  disabled={
+                                    sendingToPartnerJobId === job.id ||
+                                    isEditingJob
+                                  }
                                 >
                                   {sendingToPartnerJobId === job.id
                                     ? t("orders.detail.sending")
@@ -11070,6 +11638,7 @@ export default function OrderDetailPage() {
                                     value as ExternalJobStatus,
                                   )
                                 }
+                                disabled={isEditingJob}
                               >
                                 <SelectTrigger className="h-8 w-40 rounded-md text-xs">
                                   <SelectValue />
@@ -11088,6 +11657,7 @@ export default function OrderDetailPage() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleRemoveExternalJob(job.id)}
+                                disabled={isEditingJob}
                               >
                                 <Trash2Icon className="h-4 w-4" />
                               </Button>

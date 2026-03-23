@@ -74,6 +74,12 @@ export default function ProfilePage() {
   >("idle");
   const [languageMessage, setLanguageMessage] = useState("");
 
+  const isPinOperatorProfile =
+    user.role === "Operator" &&
+    String(user.email ?? "")
+      .toLowerCase()
+      .endsWith("@internal.production.local");
+
   useEffect(() => {
     setFullName(user.name ?? "");
     setAvatarUrl(user.avatarUrl ?? "");
@@ -114,7 +120,7 @@ export default function ProfilePage() {
       .update({
         full_name: fullName.trim(),
         avatar_url: avatarUrl.trim() || null,
-        phone: phone.trim() || null,
+        phone: isPinOperatorProfile ? null : phone.trim() || null,
       })
       .eq("id", user.id);
     if (error) {
@@ -298,9 +304,6 @@ export default function ProfilePage() {
                 {fullName || t("profile.userFallback")}
               </div>
               <div className="text-xs text-muted-foreground">
-                {user.email ?? "--"}
-              </div>
-              <div className="text-xs text-muted-foreground">
                 {t("profile.role")}: {user.role}
                 {user.isOwner
                   ? ` / ${t("profile.owner")}`
@@ -319,21 +322,25 @@ export default function ProfilePage() {
               onChange={(event) => setFullName(event.target.value)}
               className="h-11 text-sm"
             />
-            <InputField
-              label={t("profile.email")}
-              icon="email"
-              value={user.email ?? ""}
-              readOnly
-              className="h-11 text-sm text-muted-foreground"
-              wrapperClassName="h-11 bg-muted"
-            />
-            <InputField
-              label={t("profile.phone")}
-              icon="phone"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              className="h-11 text-sm"
-            />
+            {isPinOperatorProfile ? null : (
+              <>
+                <InputField
+                  label={t("profile.email")}
+                  icon="email"
+                  value={user.email ?? ""}
+                  readOnly
+                  className="h-11 text-sm text-muted-foreground"
+                  wrapperClassName="h-11 bg-muted"
+                />
+                <InputField
+                  label={t("profile.phone")}
+                  icon="phone"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  className="h-11 text-sm"
+                />
+              </>
+            )}
           </div>
 
           <div className="space-y-2">

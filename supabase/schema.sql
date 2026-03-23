@@ -30,10 +30,22 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists is_owner boolean not null default false;
 
+alter table public.profiles
+  add column if not exists is_active boolean not null default true;
+
+alter table public.profiles
+  add column if not exists login_code text;
+
+alter table public.profiles
+  add column if not exists auth_mode text not null default 'password';
+
 create index if not exists profiles_tenant_id_idx on public.profiles(tenant_id);
 create unique index if not exists profiles_one_owner_per_tenant_uidx
   on public.profiles(tenant_id)
   where is_owner = true and tenant_id is not null;
+create unique index if not exists profiles_login_code_uidx
+  on public.profiles(login_code)
+  where login_code is not null;
 
 alter table public.profiles
   drop constraint if exists profiles_locale_check;
@@ -41,6 +53,13 @@ alter table public.profiles
 alter table public.profiles
   add constraint profiles_locale_check
   check (locale in ('lv', 'en', 'ru'));
+
+alter table public.profiles
+  drop constraint if exists profiles_auth_mode_check;
+
+alter table public.profiles
+  add constraint profiles_auth_mode_check
+  check (auth_mode in ('password', 'pin'));
 
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
@@ -52,6 +71,7 @@ create table if not exists public.orders (
   order_field_values jsonb,
   order_field_labels jsonb,
   due_date date not null,
+  production_due_date date,
   priority text not null check (priority in ('low', 'normal', 'high', 'urgent')),
   status text not null check (status in ('pending', 'in_progress', 'completed', 'cancelled')),
   source text not null default 'manual',
@@ -70,6 +90,7 @@ create table if not exists public.orders (
 create index if not exists orders_tenant_id_idx on public.orders(tenant_id);
 create index if not exists orders_status_idx on public.orders(status);
 create index if not exists orders_due_date_idx on public.orders(due_date);
+create index if not exists orders_production_due_date_idx on public.orders(production_due_date);
 create index if not exists orders_external_id_idx on public.orders(external_id);
 create index if not exists orders_updated_by_idx on public.orders(updated_by);
 
@@ -1058,15 +1079,21 @@ create index if not exists station_dependencies_depends_on_idx
 create table if not exists public.operators (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete set null,
   name text not null,
   role text,
   station_id uuid references public.workstations(id) on delete set null,
+  hourly_rate numeric,
+  overtime_rate numeric,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists operators_tenant_id_idx on public.operators(tenant_id);
+create unique index if not exists operators_user_id_uidx
+  on public.operators(user_id)
+  where user_id is not null;
 create index if not exists operators_station_id_idx on public.operators(station_id);
 
 create table if not exists public.stop_reasons (
@@ -1532,15 +1559,19 @@ begin
 
   v_started_at := v_run.started_at;
   v_done_at := v_run.done_at;
-  v_duration := v_run.duration_minutes;
+  v_duration := coalesce(v_run.duration_minutes, 0);
 
   if p_to_status = 'in_progress' then
-    v_started_at := coalesce(v_run.started_at, v_now);
+    if v_run.status in ('paused', 'blocked') then
+      v_started_at := v_now;
+    else
+      v_started_at := coalesce(v_run.started_at, v_now);
+    end if;
     v_done_at := null;
   elsif p_to_status = 'done' then
     v_started_at := coalesce(v_run.started_at, v_now);
     v_done_at := coalesce(v_run.done_at, v_now);
-    v_duration := greatest(
+    v_duration := coalesce(v_run.duration_minutes, 0) + greatest(
       1,
       round(extract(epoch from (v_done_at - v_started_at)) / 60.0)::integer
     );
@@ -1549,6 +1580,13 @@ begin
     v_done_at := null;
     v_duration := null;
   elsif p_to_status in ('paused', 'blocked') then
+    if v_run.started_at is not null then
+      v_duration := coalesce(v_run.duration_minutes, 0) + greatest(
+        1,
+        round(extract(epoch from (v_now - v_run.started_at)) / 60.0)::integer
+      );
+    end if;
+    v_started_at := null;
     v_done_at := null;
   end if;
 
@@ -1569,8 +1607,9 @@ begin
   update public.production_items pi
      set status = p_to_status,
          started_at = case
-           when p_to_status = 'in_progress' then coalesce(pi.started_at, v_started_at, v_now)
+           when p_to_status = 'in_progress' then coalesce(v_started_at, v_now)
            when p_to_status in ('queued', 'pending') then null
+           when p_to_status in ('paused', 'blocked') then null
            else pi.started_at
          end,
          done_at = case

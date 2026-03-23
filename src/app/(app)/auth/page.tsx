@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LogInIcon } from "lucide-react";
+
+import { AuthShell } from "@/components/auth/AuthShell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
 import { normalizeUserRole, useCurrentUser } from "@/contexts/UserContext";
@@ -271,11 +273,7 @@ export default function AuthPage() {
     if (inviteFlag && user.isAuthenticated && user.requiresPasswordSetup) {
       setInviteMode(true);
     }
-  }, [
-    authModeChecked,
-    user.isAuthenticated,
-    user.requiresPasswordSetup,
-  ]);
+  }, [authModeChecked, user.isAuthenticated, user.requiresPasswordSetup]);
 
   useEffect(() => {
     if (!supabase) {
@@ -538,7 +536,9 @@ export default function AuthPage() {
       router.replace("/orders");
     } catch (error) {
       const messageText =
-        error instanceof Error ? error.message : t("authPage.errors.signInFailed");
+        error instanceof Error
+          ? error.message
+          : t("authPage.errors.signInFailed");
       if (messageText.toLowerCase().includes("timed out")) {
         setStatus("sending");
         setMessage(t("authPage.messages.completingSignIn"));
@@ -779,29 +779,22 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
-      <div className="w-full max-w-2xl space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-semibold">{t("authPage.title")}</h1>
-          <p className="text-sm text-muted-foreground">
+    <AuthShell currentView="auth">
+      <div className="w-full max-w-xl space-y-4">
+        <div className="space-y-1.5 text-center md:space-y-2">
+          <h1 className="text-[2.8rem] font-semibold leading-[0.9] tracking-tight text-slate-950 md:text-[clamp(2.35rem,3vw,3.15rem)]">
+            {t("authPage.title")}
+          </h1>
+          <p className="mx-auto max-w-md text-base text-slate-600 md:text-base">
             {t("authPage.subtitle")}
           </p>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {recoveryMode
-                ? t("authPage.resetPassword")
-                : inviteMode
-                  ? t("authPage.completeInvite")
-                  : t("authPage.accessPws")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
+        <div className="rounded-4xl border border-slate-200 bg-white p-5 shadow-[0_24px_60px_rgba(15,23,42,0.08)] md:p-6">
+          <div className="space-y-6">
             {recoveryMode ? (
               <form onSubmit={handleResetPassword} className="space-y-4">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-slate-500">
                   {t("authPage.setNewPasswordHint")}
                 </p>
                 <InputField
@@ -811,7 +804,7 @@ export default function AuthPage() {
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
                   placeholder={t("authPage.placeholders.createNewPassword")}
-                  className="h-11 text-sm"
+                  wrapperClassName="h-12"
                   required
                 />
                 <InputField
@@ -823,11 +816,11 @@ export default function AuthPage() {
                     setConfirmNewPassword(event.target.value)
                   }
                   placeholder={t("authPage.placeholders.repeatNewPassword")}
-                  className="h-11 text-sm"
+                  wrapperClassName="h-12"
                   required
                 />
                 <Button
-                  className="mt-2"
+                  className="mt-2 h-12 w-full rounded-2xl text-base"
                   type="submit"
                   disabled={status === "sending"}
                 >
@@ -838,7 +831,7 @@ export default function AuthPage() {
               </form>
             ) : inviteMode ? (
               <form onSubmit={handleInviteComplete} className="space-y-4">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-slate-500">
                   {t("authPage.finishSetupHint")}
                 </p>
                 <InputField
@@ -847,7 +840,7 @@ export default function AuthPage() {
                   value={inviteFullName}
                   onChange={(event) => setInviteFullName(event.target.value)}
                   placeholder={t("authPage.placeholders.yourName")}
-                  className="h-11 text-sm"
+                  wrapperClassName="h-12"
                 />
                 <InputField
                   label={t("authPage.phoneOptional")}
@@ -855,7 +848,7 @@ export default function AuthPage() {
                   value={invitePhone}
                   onChange={(event) => setInvitePhone(event.target.value)}
                   placeholder={t("authPage.placeholders.phoneExample")}
-                  className="h-11 text-sm"
+                  wrapperClassName="h-12"
                 />
                 <InputField
                   label={t("authPage.password")}
@@ -864,7 +857,7 @@ export default function AuthPage() {
                   value={invitePassword}
                   onChange={(event) => setInvitePassword(event.target.value)}
                   placeholder={t("authPage.placeholders.createPassword")}
-                  className="h-11 text-sm"
+                  wrapperClassName="h-12"
                   required
                 />
                 <InputField
@@ -876,25 +869,42 @@ export default function AuthPage() {
                     setInviteConfirmPassword(event.target.value)
                   }
                   placeholder={t("authPage.placeholders.repeatPassword")}
-                  className="h-11 text-sm"
+                  wrapperClassName="h-12"
                   required
                 />
                 {inviteError ? (
-                  <p className="text-sm text-destructive">{inviteError}</p>
+                  <p className="rounded-2xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                    {inviteError}
+                  </p>
                 ) : null}
-                <Button type="submit" disabled={status === "sending"}>
+                <Button
+                  type="submit"
+                  disabled={status === "sending"}
+                  className="h-12 w-full rounded-2xl text-base"
+                >
                   {status === "sending"
                     ? t("authPage.saving")
                     : t("authPage.completeSetup")}
                 </Button>
               </form>
             ) : (
-              <Tabs value={tab} onValueChange={setTab}>
-                <TabsList>
-                  <TabsTrigger value="signin">{t("authPage.signIn")}</TabsTrigger>
-                  <TabsTrigger value="signup">{t("authPage.createAccount")}</TabsTrigger>
+              <Tabs value={tab} onValueChange={setTab} className="space-y-4">
+                <TabsList className="h-auto w-full rounded-2xl border border-slate-200 bg-slate-100 p-1 [--tabs-active-bg:var(--color-white)] [--tabs-active-border:var(--color-slate-200)] [--tabs-active-text:var(--color-slate-950)] [--tabs-bg:transparent] [--tabs-border:transparent] [--tabs-hover-text:var(--color-slate-700)] [--tabs-ring:var(--color-sky-200)] [--tabs-text:var(--color-slate-500)]">
+                  <TabsTrigger
+                    className="h-10 flex-1 rounded-xl text-sm"
+                    value="signin"
+                  >
+                    {t("authPage.signIn")}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="h-10 flex-1 rounded-xl text-sm"
+                    value="signup"
+                  >
+                    {t("authPage.createAccount")}
+                  </TabsTrigger>
                 </TabsList>
-                <TabsContent value="signin" className="mt-6 space-y-4">
+
+                <TabsContent value="signin" className="mt-0 space-y-4">
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <InputField
                       label={t("authPage.workEmail")}
@@ -903,7 +913,7 @@ export default function AuthPage() {
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
                       placeholder={t("authPage.placeholders.workEmail")}
-                      className="h-11 text-sm"
+                      wrapperClassName="h-12"
                       required
                     />
                     <InputField
@@ -913,15 +923,16 @@ export default function AuthPage() {
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
                       placeholder={t("authPage.placeholders.yourPassword")}
-                      className="h-11 text-sm"
+                      wrapperClassName="h-12"
                       required
                     />
                     <div className="flex flex-wrap items-center gap-3">
                       <Button
                         type="submit"
                         disabled={status === "sending"}
-                        className="mt-2"
+                        className="h-12 rounded-2xl px-6 text-base"
                       >
+                        <LogInIcon className="h-5 w-5" />
                         {status === "sending"
                           ? t("authPage.signingIn")
                           : t("authPage.signIn")}
@@ -929,7 +940,7 @@ export default function AuthPage() {
                       <Button
                         type="button"
                         variant="ghost"
-                        className="mt-2"
+                        className="h-12 rounded-2xl px-4 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                         onClick={handleForgotPassword}
                         disabled={status === "sending"}
                       >
@@ -937,12 +948,13 @@ export default function AuthPage() {
                       </Button>
                     </div>
                   </form>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-slate-500">
                     {t("authPage.inviteOnlyHint")}
                   </p>
                 </TabsContent>
-                <TabsContent value="signup" className="mt-6 space-y-4">
-                  <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+
+                <TabsContent value="signup" className="mt-0 space-y-4">
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
                     {t("authPage.ownerOnlySignupHint")}
                   </div>
                   <form onSubmit={handleSubmit} className="space-y-4">
@@ -952,14 +964,14 @@ export default function AuthPage() {
                       value={fullName}
                       onChange={(event) => setFullName(event.target.value)}
                       placeholder={t("authPage.placeholders.ownerName")}
-                      className="h-11 text-sm"
+                      wrapperClassName="h-12"
                     />
                     <InputField
                       label={t("authPage.companyName")}
                       value={companyName}
                       onChange={(event) => setCompanyName(event.target.value)}
                       placeholder={t("authPage.placeholders.companyName")}
-                      className="h-11 text-sm"
+                      wrapperClassName="h-12"
                     />
                     <InputField
                       label={t("authPage.workEmail")}
@@ -968,7 +980,7 @@ export default function AuthPage() {
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
                       placeholder={t("authPage.placeholders.ownerEmail")}
-                      className="h-11 text-sm"
+                      wrapperClassName="h-12"
                       required
                     />
                     <InputField
@@ -978,7 +990,7 @@ export default function AuthPage() {
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
                       placeholder={t("authPage.placeholders.createPassword")}
-                      className="h-11 text-sm"
+                      wrapperClassName="h-12"
                       required
                     />
                     <InputField
@@ -990,13 +1002,17 @@ export default function AuthPage() {
                         setConfirmPassword(event.target.value)
                       }
                       placeholder={t("authPage.placeholders.repeatPassword")}
-                      className="h-11 text-sm"
+                      wrapperClassName="h-12"
                       required
                     />
-                    <div className="rounded-lg border border-border bg-background px-4 py-3 text-xs text-muted-foreground">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
                       {t("authPage.billingComingSoonHint")}
                     </div>
-                    <Button type="submit" disabled={status === "sending"}>
+                    <Button
+                      type="submit"
+                      disabled={status === "sending"}
+                      className="h-12 w-full rounded-2xl text-base"
+                    >
                       {status === "sending"
                         ? t("authPage.creating")
                         : t("authPage.createAccount")}
@@ -1005,12 +1021,13 @@ export default function AuthPage() {
                 </TabsContent>
               </Tabs>
             )}
-            {message && (
+
+            {message ? (
               <p
-                className={`text-sm ${
+                className={`rounded-2xl border px-4 py-3 text-sm ${
                   status === "error"
-                    ? "text-destructive"
-                    : "text-muted-foreground"
+                    ? "border-destructive/25 bg-destructive/5 text-destructive"
+                    : "border-slate-200 bg-slate-50 text-slate-600"
                 }`}
               >
                 {message}{" "}
@@ -1030,10 +1047,10 @@ export default function AuthPage() {
                   </Button>
                 ) : null}
               </p>
-            )}
-          </CardContent>
-        </Card>
+            ) : null}
+          </div>
+        </div>
       </div>
-    </div>
+    </AuthShell>
   );
 }

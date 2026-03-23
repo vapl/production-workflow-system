@@ -6,7 +6,11 @@ import { format, isValid, parseISO, startOfDay } from "date-fns";
 
 import { cn } from "@/components/ui/utils";
 import { Calendar } from "@/components/ui/Calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/Popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/Popover";
 import { useWorkingCalendar } from "@/contexts/WorkingCalendarContext";
 
 type DatePickerProps = {
@@ -49,9 +53,11 @@ export function DatePicker({
   const formatted = selectedDate ? format(selectedDate, "dd.MM.yyyy") : "";
 
   return (
-    <label className={cn("space-y-2", className)}>
+    <label className={cn("flex flex-col", className)}>
       {label ? (
-        <span className={cn("text-sm font-medium text-foreground", labelClassName)}>
+        <span
+          className={cn("text-sm font-medium text-foreground", labelClassName)}
+        >
           {label}
         </span>
       ) : null}
@@ -66,7 +72,11 @@ export function DatePicker({
               triggerClassName,
             )}
           >
-            <span className={formatted ? "text-foreground" : "text-muted-foreground"}>
+            <span
+              className={
+                formatted ? "text-foreground" : "text-muted-foreground"
+              }
+            >
               {formatted || placeholder}
             </span>
             <CalendarIcon className="absolute right-3 h-4 w-4 text-muted-foreground" />

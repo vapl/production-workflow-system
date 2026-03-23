@@ -1,41 +1,51 @@
-type Priority = "low" | "normal" | "high" | "urgent";
-type QueueStatus = "queued" | "pending" | "in_progress" | "blocked" | "done";
+import type {
+  BatchRunRow,
+  ProductionItemRow,
+  ProductionPriority,
+  ProductionStation,
+  ProductionStatus,
+  StationTrackingMode,
+} from "@/types/production";
+import { getQueueGroupWorkedMinutes } from "@/lib/domain/productionDurations";
 
-type StationLike = {
-  id: string;
-};
+type StationLike = Pick<ProductionStation, "id" | "trackingMode">;
 
-type ProductionItemLike = {
+type ProductionItemLike = Pick<
+  ProductionItemRow,
+  | "id"
+  | "order_id"
+  | "batch_code"
+  | "item_name"
+  | "status"
+  | "station_id"
+  | "qty"
+  | "material"
+  | "meta"
+  | "started_at"
+  | "done_at"
+  | "duration_minutes"
+>;
+
+type BatchRunLike = Pick<
+  BatchRunRow,
+  | "id"
+  | "order_id"
+  | "batch_code"
+  | "station_id"
+  | "route_key"
+  | "status"
+  | "planned_date"
+  | "started_at"
+  | "done_at"
+  | "duration_minutes"
+  | "orders"
+>;
+
+type OrderItemLike = {
   id: string;
   order_id: string;
-  batch_code: string;
   item_name: string;
-  status: QueueStatus;
-  station_id: string | null;
-  qty: number;
-  material: string | null;
-  meta: Record<string, unknown> | null;
-  started_at?: string | null;
-  done_at?: string | null;
-  duration_minutes?: number | null;
-};
-
-type BatchRunLike = {
-  id: string;
-  order_id: string;
-  batch_code: string;
-  station_id: string | null;
-  status: QueueStatus;
-  planned_date?: string | null;
-  started_at?: string | null;
-  done_at?: string | null;
-  duration_minutes?: number | null;
-  orders?: {
-    order_number: string | null;
-    due_date: string | null;
-    priority: Priority | null;
-    customer_name: string | null;
-  } | null;
+  item_type?: string | null;
 };
 
 export type ProductionQueueItem = {
@@ -44,8 +54,8 @@ export type ProductionQueueItem = {
   orderNumber: string;
   customerName: string;
   dueDate: string;
-  priority: Priority;
-  status: QueueStatus;
+  priority: ProductionPriority;
+  status: ProductionStatus;
   batchCode: string;
   totalQty: number;
   material: string;
@@ -53,7 +63,12 @@ export type ProductionQueueItem = {
   startedAt?: string | null;
   doneAt?: string | null;
   durationMinutes?: number | null;
+  stationId: string;
+  runIds: string[];
+  trackingMode: StationTrackingMode;
   items: ProductionItemLike[];
+  unitType?: string | null;
+  unitName?: string | null;
 };
 
 type ReadyBatchGroupLike = {
@@ -61,24 +76,45 @@ type ReadyBatchGroupLike = {
   customerName: string;
   batchCode: string;
   material: string;
-  priority: Priority;
+  priority: ProductionPriority;
 };
 
 export function buildQueueByStation(params: {
   batchRuns: BatchRunLike[];
   productionItems: ProductionItemLike[];
+  orderItems?: OrderItemLike[];
   stations: StationLike[];
   viewDate: string;
   plannedRangeDays: number;
+  includeDone?: boolean;
 }) {
-  const { batchRuns, productionItems, stations, viewDate, plannedRangeDays } =
+  const {
+    batchRuns,
+    productionItems,
+    orderItems = [],
+    stations,
+    viewDate,
+    plannedRangeDays,
+  } =
     params;
+  const includeDone = params.includeDone ?? false;
   const map = new Map<string, ProductionQueueItem[]>();
+  const stationById = new Map(stations.map((station) => [station.id, station]));
   stations.forEach((station) => map.set(station.id, []));
   const seenRuns = new Set<string>();
   const startDate = new Date(viewDate);
   const endDate = new Date(viewDate);
   endDate.setDate(endDate.getDate() + Math.max(plannedRangeDays - 1, 0));
+
+  const queueGroups = new Map<
+    string,
+    {
+      stationId: string;
+      trackingMode: StationTrackingMode;
+      runs: BatchRunLike[];
+    }
+  >();
+  const orderItemById = new Map(orderItems.map((item) => [item.id, item]));
 
   batchRuns.forEach((run) => {
     if (seenRuns.has(run.id)) {
@@ -88,7 +124,10 @@ export function buildQueueByStation(params: {
     if (!run.station_id) {
       return;
     }
-    if (run.status === "done") {
+    if (run.status === "pending") {
+      return;
+    }
+    if (run.status === "done" && !includeDone) {
       return;
     }
     if (run.planned_date) {
@@ -97,39 +136,155 @@ export function buildQueueByStation(params: {
         return;
       }
     }
-    const items = productionItems.filter(
-      (item) =>
-        item.order_id === run.order_id &&
-        item.batch_code === run.batch_code &&
-        item.station_id === run.station_id,
+    const trackingMode =
+      stationById.get(run.station_id)?.trackingMode ?? "construction_level";
+    const groupKey =
+      trackingMode === "construction_level"
+        ? `${run.station_id}:${run.order_id}:${run.route_key || run.batch_code || run.id}`
+        : `${run.station_id}:${run.order_id}`;
+    const existing = queueGroups.get(groupKey);
+    if (existing) {
+      existing.runs.push(run);
+      return;
+    }
+    queueGroups.set(groupKey, {
+      stationId: run.station_id,
+      trackingMode,
+      runs: [run],
+    });
+  });
+
+  queueGroups.forEach(({ stationId, trackingMode, runs }) => {
+    const representativeRun = [...runs].sort((a, b) => {
+      const aStarted = a.started_at ? new Date(a.started_at).getTime() : 0;
+      const bStarted = b.started_at ? new Date(b.started_at).getTime() : 0;
+      if (aStarted !== bStarted) {
+        return bStarted - aStarted;
+      }
+      return a.id.localeCompare(b.id);
+    })[0];
+
+    if (!representativeRun) {
+      return;
+    }
+
+    const batchCodes = new Set(runs.map((run) => run.batch_code));
+    const items = productionItems.filter((item) => {
+      if (item.order_id !== representativeRun.order_id) {
+        return false;
+      }
+      if (item.station_id !== stationId) {
+        return false;
+      }
+      if (trackingMode === "construction_level") {
+        return batchCodes.has(item.batch_code);
+      }
+      return true;
+    });
+
+    const totalQtyFromItems = items.reduce(
+      (sum, item) => sum + Number(item.qty ?? 0),
+      0,
     );
-    const totalQty = items.reduce((sum, item) => sum + Number(item.qty ?? 0), 0);
-    const material = items.find((item) => item.material)?.material ?? "";
+    const uniqueLogicalUnits = new Set(
+      runs
+        .map((run) => run.route_key?.trim())
+        .filter((key): key is string => Boolean(key && key !== "default")),
+    );
+    const totalQty =
+      totalQtyFromItems > 0
+        ? totalQtyFromItems
+        : uniqueLogicalUnits.size > 0
+          ? uniqueLogicalUnits.size
+          : 1;
+    const material =
+      items.find((item) => item.material)?.material ??
+      representativeRun.orders?.customer_name ??
+      "";
+    const sortedPlannedDates = runs
+      .map((run) => run.planned_date)
+      .filter((date): date is string => Boolean(date))
+      .sort();
+    const sortedStartedAt = runs
+      .map((run) => run.started_at)
+      .filter((date): date is string => Boolean(date))
+      .sort();
+    const sortedDoneAt = runs
+      .map((run) => run.done_at)
+      .filter((date): date is string => Boolean(date))
+      .sort();
+    const statusOrder: ProductionStatus[] = [
+      "blocked",
+      "paused",
+      "in_progress",
+      "queued",
+      "pending",
+      "done",
+    ];
+    const status =
+      statusOrder.find((candidate) =>
+        runs.some((run) => run.status === candidate),
+      ) ?? representativeRun.status;
+
     const queueItem = {
-      id: run.id,
-      orderId: run.order_id,
-      orderNumber: run.orders?.order_number ?? "Order",
-      customerName: run.orders?.customer_name ?? "Customer",
-      dueDate: run.orders?.due_date ?? "",
-      priority: run.orders?.priority ?? "normal",
-      status: run.status,
-      batchCode: run.batch_code,
+      id: representativeRun.id,
+      orderId: representativeRun.order_id,
+      orderNumber: representativeRun.orders?.order_number ?? "Order",
+      customerName: representativeRun.orders?.customer_name ?? "Customer",
+      dueDate:
+        representativeRun.orders?.production_due_date ??
+        representativeRun.orders?.due_date ??
+        "",
+      priority: representativeRun.orders?.priority ?? "normal",
+      status,
+      batchCode:
+        trackingMode === "construction_level"
+          ? representativeRun.batch_code
+          : representativeRun.batch_code || "B1",
       totalQty,
-      material,
-      plannedDate: run.planned_date ?? null,
-      startedAt: run.started_at ?? null,
-      doneAt: run.done_at ?? null,
-      durationMinutes: run.duration_minutes ?? null,
+      material: material ?? "",
+      plannedDate: sortedPlannedDates[0] ?? null,
+      startedAt: sortedStartedAt[0] ?? null,
+      doneAt: sortedDoneAt.at(-1) ?? null,
+      durationMinutes: getQueueGroupWorkedMinutes({
+        trackingMode,
+        runs,
+        items,
+      }),
+      stationId,
+      runIds: runs.map((run) => run.id),
+      trackingMode,
       items,
+      unitType:
+        trackingMode === "construction_level"
+          ? (items.find(
+              (item) =>
+                typeof item.meta?.fieldLabel === "string" &&
+                item.meta.fieldLabel.trim().length > 0,
+            )?.meta?.fieldLabel as string | undefined) ??
+            orderItemById.get(representativeRun.route_key)?.item_type ??
+            null
+          : null,
+      unitName:
+        trackingMode === "construction_level"
+          ? items.find(
+              (item) =>
+                typeof item.item_name === "string" &&
+                item.item_name.trim().length > 0,
+            )?.item_name ??
+            orderItemById.get(representativeRun.route_key)?.item_name ??
+            null
+          : null,
     } satisfies ProductionQueueItem;
-    map.get(run.station_id)?.push(queueItem);
+
+    map.get(stationId)?.push(queueItem);
   });
   return map;
 }
 
 export function filterReadyBatchGroups<T extends ReadyBatchGroupLike>(
   groups: T[],
-  priority: Priority | "all",
+  priority: ProductionPriority | "all",
   search: string,
 ) {
   const query = search.trim().toLowerCase();

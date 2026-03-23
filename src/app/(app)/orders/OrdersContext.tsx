@@ -108,7 +108,7 @@ interface OrdersContextValue {
       partnerRequestComment?: string;
       partnerResponseNote?: string | null;
       externalOrderNumber: string;
-      quantity?: number;
+      quantity?: number | null;
       dueDate: string;
       status: ExternalJobStatus;
       deliveryNoteNo?: string | null;
