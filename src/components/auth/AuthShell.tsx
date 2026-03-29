@@ -94,11 +94,10 @@ export function AuthShell({ currentView, children }: AuthShellProps) {
   );
 
   return (
-    <main className="h-screen overflow-hidden bg-slate-100 md:grid md:grid-cols-[minmax(320px,1.2fr)_minmax(420px,0.8fr)]">
+    <main className="h-[100dvh] overflow-hidden bg-slate-100 md:grid md:grid-cols-[minmax(320px,1.2fr)_minmax(420px,0.8fr)]">
       <section className="relative hidden overflow-hidden bg-[linear-gradient(160deg,#1767c7_0%,#1f77d5_55%,#1558ae_100%)] px-8 py-10 text-white md:block">
         <div className="relative flex h-full flex-col">
           {renderNav({})}
-
           <div className="flex flex-1 items-center">
             <div>
               <div className="text-[clamp(5rem,10vw,9rem)] font-semibold leading-none tracking-[-0.07em]">
@@ -109,21 +108,22 @@ export function AuthShell({ currentView, children }: AuthShellProps) {
               </div>
             </div>
           </div>
-
           <div className="rounded-2xl bg-white/10 px-4 py-2 text-sm font-medium text-white/90 backdrop-blur-sm">
             {t("header.appName")}
           </div>
         </div>
       </section>
 
-      <section className="h-screen overflow-y-auto bg-slate-50 px-4 py-8 md:px-8 md:py-6">
-        <div className="flex min-h-full flex-col items-center justify-center gap-6">
+      <section className="h-[100dvh] overflow-hidden bg-slate-50 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] md:h-screen md:overflow-y-auto md:px-8 md:py-6">
+        <div className="flex h-full min-h-0 flex-col items-center gap-4 md:min-h-full md:justify-center md:gap-6">
           {renderNav({
             className:
               "w-full max-w-md justify-center border-slate-200 bg-white p-1 shadow-sm backdrop-blur-none md:hidden",
             mobile: true,
           })}
-          <div className="flex w-full items-center justify-center">{children}</div>
+          <div className="flex min-h-0 w-full flex-1 items-stretch justify-center md:flex-none md:items-center">
+            {children}
+          </div>
         </div>
       </section>
     </main>

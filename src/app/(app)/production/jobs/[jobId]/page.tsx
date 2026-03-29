@@ -35,6 +35,7 @@ import { ProductionRoutingSettingsModal } from "@/components/production/Producti
 import { ProductionStationCatalogModal } from "@/components/production/ProductionStationCatalogModal";
 import { ProductionStatCard } from "@/components/production/ProductionStatCard";
 import { cn } from "@/components/ui/utils";
+import { useWorkingCalendar } from "@/contexts/WorkingCalendarContext";
 import { useI18n } from "@/lib/i18n/useI18n";
 import {
   formatProductionDate,
@@ -50,9 +51,9 @@ import type { ProductionSplitRow } from "@/lib/domain/buildProductionSplitRows";
 import { prepareProductionQrRows } from "@/lib/domain/prepareProductionQrRows";
 import { isProductionAttachment } from "@/lib/domain/productionAttachments";
 import {
-  buildWorkedMinutesByItem,
-  buildWorkedMinutesByRun,
-  getQueueGroupWorkedMinutes,
+  buildWorkedBreakdownByItem,
+  buildWorkedBreakdownByRun,
+  getQueueGroupWorkedBreakdown,
 } from "@/lib/domain/productionDurations";
 import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
@@ -164,6 +165,7 @@ function buildDefaultBatchCode(itemIndex: number) {
 
 export default function ProductionJobDetailPage() {
   const { t } = useI18n();
+  const { workdays, shifts, overtimeEnabled } = useWorkingCalendar();
   const params = useParams<{ jobId?: string }>();
   const jobId = params?.jobId ?? "";
 
@@ -288,8 +290,7 @@ export default function ProductionJobDetailPage() {
             "id, production_item_id, order_id, batch_run_id, from_status, to_status, reason, created_at, actor_user_id",
           )
           .eq("order_id", jobId)
-          .order("created_at", { ascending: false })
-          .limit(50),
+          .order("created_at", { ascending: false }),
         sb
           .from("workstations")
           .select("id, tenant_id, name, description, tracking_mode, sort_order")
@@ -717,9 +718,16 @@ export default function ProductionJobDetailPage() {
   }, [productionItemsBySourceRowId, sortedRuns, uniqueOrderItems]);
   const kpis = useMemo(() => {
     const todayIso = new Date().toISOString().slice(0, 10);
+      const workingCalendar = { workdays, shifts, overtimeEnabled };
     const totalUnits = uniqueOrderItems.length;
-    const workedMinutesByItem = buildWorkedMinutesByItem(activityEvents);
-    const workedMinutesByRun = buildWorkedMinutesByRun(activityEvents);
+    const workedBreakdownByItem = buildWorkedBreakdownByItem(
+      activityEvents,
+      workingCalendar,
+    );
+    const workedBreakdownByRun = buildWorkedBreakdownByRun(
+      activityEvents,
+      workingCalendar,
+    );
     const operatorTouchedUnitIds = new Set<string>();
     activityEvents.forEach((event) => {
       const productionItemId = event.production_item_id;
@@ -793,7 +801,7 @@ export default function ProductionJobDetailPage() {
         runs: [run],
       });
     });
-    const totalMinutes = Array.from(groupedRunDurations.values()).reduce(
+    const workedBreakdown = Array.from(groupedRunDurations.values()).reduce(
       (sum, group) => {
         const batchCodes = new Set(group.runs.map((run) => run.batch_code));
         const itemsForGroup = productionItems.filter((item) => {
@@ -815,18 +823,21 @@ export default function ProductionJobDetailPage() {
           }
           return batchCodes.has(item.batch_code);
         });
-        return (
-          sum +
-          getQueueGroupWorkedMinutes({
-            trackingMode: group.trackingMode,
-            runs: group.runs,
-            items: itemsForGroup,
-            workedMinutesByItem,
-            workedMinutesByRun,
-          })
-        );
+        const groupBreakdown = getQueueGroupWorkedBreakdown({
+          trackingMode: group.trackingMode,
+          runs: group.runs,
+          items: itemsForGroup,
+          workedBreakdownByItem,
+          workedBreakdownByRun,
+        });
+
+        return {
+          totalMinutes: sum.totalMinutes + groupBreakdown.totalMinutes,
+          regularMinutes: sum.regularMinutes + groupBreakdown.regularMinutes,
+          overtimeMinutes: sum.overtimeMinutes + groupBreakdown.overtimeMinutes,
+        };
       },
-      0,
+      { totalMinutes: 0, regularMinutes: 0, overtimeMinutes: 0 },
     );
     const startedUnitsCount = uniqueOrderItems.filter((item) => {
       if (operatorTouchedUnitIds.has(item.id)) {
@@ -885,7 +896,9 @@ export default function ProductionJobDetailPage() {
         : 0;
 
     return {
-      totalMinutes,
+      totalMinutes: workedBreakdown.totalMinutes,
+      regularMinutes: workedBreakdown.regularMinutes,
+      overtimeMinutes: workedBreakdown.overtimeMinutes,
       progressPercent: Math.max(progressPercent, routeProgressPercent),
       routeStatusCounts,
       totalRunCount,
@@ -900,7 +913,10 @@ export default function ProductionJobDetailPage() {
     order,
     productionItems,
     productionItemsBySourceRowId,
+    overtimeEnabled,
+    shifts,
     workstations,
+    workdays,
     sortedRuns,
     runsByOrderItemId,
     uniqueOrderItems,
@@ -2022,7 +2038,7 @@ export default function ProductionJobDetailPage() {
       ) : null}
 
       <div className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
           <ProductionStatCard
             label={t("production.main.jobs.progress")}
             value={`${kpis.progressPercent}%`}
@@ -2095,6 +2111,16 @@ export default function ProductionJobDetailPage() {
             label={t("production.main.jobs.actualTime")}
             value={formatProductionDuration(kpis.totalMinutes)}
             hint={t("production.main.jobs.actualTimeHint")}
+          />
+          <ProductionStatCard
+            label={t("production.main.jobs.regularTime")}
+            value={formatProductionDuration(kpis.regularMinutes)}
+            hint={t("production.main.jobs.regularTimeHint")}
+          />
+          <ProductionStatCard
+            label={t("production.main.jobs.overtimeTime")}
+            value={formatProductionDuration(kpis.overtimeMinutes)}
+            hint={t("production.main.jobs.overtimeTimeHint")}
           />
           <ProductionStatCard
             label={t("production.main.jobs.dueStatus")}

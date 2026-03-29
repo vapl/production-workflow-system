@@ -5,7 +5,7 @@ import type {
   StationTrackingMode,
 } from "@/types/production";
 import {
-  computeWorkingMinutes,
+  computeWorkedMinutesBreakdown,
   type WorkingCalendar,
 } from "@/lib/domain/workingCalendar";
 
@@ -21,7 +21,44 @@ function roundMinutes(startMs: number, endMs: number) {
   return Math.max(0, Math.round((endMs - startMs) / 60000));
 }
 
-function overlapMinutes(
+export type WorkedTimeBreakdown = {
+  totalMinutes: number;
+  regularMinutes: number;
+  overtimeMinutes: number;
+};
+
+function addBreakdowns(
+  current: WorkedTimeBreakdown,
+  next: WorkedTimeBreakdown,
+): WorkedTimeBreakdown {
+  return {
+    totalMinutes: current.totalMinutes + next.totalMinutes,
+    regularMinutes: current.regularMinutes + next.regularMinutes,
+    overtimeMinutes: current.overtimeMinutes + next.overtimeMinutes,
+  };
+}
+
+function getBreakdownForInterval(
+  startMs: number,
+  endMs: number,
+  calendar?: WorkingCalendar | null,
+): WorkedTimeBreakdown {
+  const totalMinutes = roundMinutes(startMs, endMs);
+  if (!calendar) {
+    return {
+      totalMinutes,
+      regularMinutes: totalMinutes,
+      overtimeMinutes: 0,
+    };
+  }
+  return computeWorkedMinutesBreakdown(
+    new Date(startMs).toISOString(),
+    new Date(endMs).toISOString(),
+    calendar,
+  );
+}
+
+function overlapBreakdown(
   startMs: number,
   endMs: number,
   rangeStartMs: number,
@@ -31,16 +68,13 @@ function overlapMinutes(
   const overlapStart = Math.max(startMs, rangeStartMs);
   const overlapEnd = Math.min(endMs, rangeEndMs);
   if (overlapEnd <= overlapStart) {
-    return 0;
+    return {
+      totalMinutes: 0,
+      regularMinutes: 0,
+      overtimeMinutes: 0,
+    };
   }
-  if (calendar) {
-    return computeWorkingMinutes(
-      new Date(overlapStart).toISOString(),
-      new Date(overlapEnd).toISOString(),
-      calendar,
-    );
-  }
-  return roundMinutes(overlapStart, overlapEnd);
+  return getBreakdownForInterval(overlapStart, overlapEnd, calendar);
 }
 
 export type WorkedMinutesRange = {
@@ -102,43 +136,121 @@ function buildWorkedMinutesByKey(
 
       if (isWorkStopStatus(event.to_status) && activeStart != null) {
         totalMinutes += resolvedRange
-          ? overlapMinutes(
+          ? overlapBreakdown(
               activeStart,
               eventTime,
               resolvedRange.startMs,
               resolvedRange.endMs,
               calendar,
-            )
-          : calendar
-            ? computeWorkingMinutes(
-                new Date(activeStart).toISOString(),
-                new Date(eventTime).toISOString(),
-                calendar,
-              )
-            : roundMinutes(activeStart, eventTime);
+            ).totalMinutes
+          : getBreakdownForInterval(
+              activeStart,
+              eventTime,
+              calendar,
+            ).totalMinutes;
         activeStart = null;
       }
     });
 
     if (activeStart != null) {
       totalMinutes += resolvedRange
-        ? overlapMinutes(
+        ? overlapBreakdown(
             activeStart,
             now,
             resolvedRange.startMs,
             resolvedRange.endMs,
             calendar,
-          )
-        : calendar
-          ? computeWorkingMinutes(
-              new Date(activeStart).toISOString(),
-              new Date(now).toISOString(),
-              calendar,
-            )
-          : roundMinutes(activeStart, now);
+          ).totalMinutes
+        : getBreakdownForInterval(
+            activeStart,
+            now,
+            calendar,
+          ).totalMinutes;
     }
 
     result.set(key, totalMinutes);
+  });
+
+  return result;
+}
+
+function buildWorkedBreakdownByKey(
+  events: ProductionStatusEventRow[],
+  getKey: (event: ProductionStatusEventRow) => string | null,
+  range?: WorkedMinutesRange | null,
+  calendar?: WorkingCalendar | null,
+) {
+  const eventsByKey = new Map<string, ProductionStatusEventRow[]>();
+
+  events.forEach((event) => {
+    const key = getKey(event);
+    if (!key) {
+      return;
+    }
+    const list = eventsByKey.get(key) ?? [];
+    list.push(event);
+    eventsByKey.set(key, list);
+  });
+
+  const result = new Map<string, WorkedTimeBreakdown>();
+  const now = Date.now();
+  const resolvedRange = resolveRange(range);
+
+  eventsByKey.forEach((entityEvents, key) => {
+    const sortedEvents = [...entityEvents].sort((a, b) =>
+      String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")),
+    );
+    let activeStart: number | null = null;
+    let total = {
+      totalMinutes: 0,
+      regularMinutes: 0,
+      overtimeMinutes: 0,
+    };
+
+    sortedEvents.forEach((event) => {
+      const eventTime = event.created_at ? Date.parse(event.created_at) : NaN;
+      if (!Number.isFinite(eventTime)) {
+        return;
+      }
+
+      if (isWorkStartStatus(event.to_status)) {
+        activeStart = eventTime;
+        return;
+      }
+
+      if (isWorkStopStatus(event.to_status) && activeStart != null) {
+        total = addBreakdowns(
+          total,
+          resolvedRange
+            ? overlapBreakdown(
+                activeStart,
+                eventTime,
+                resolvedRange.startMs,
+                resolvedRange.endMs,
+                calendar,
+              )
+            : getBreakdownForInterval(activeStart, eventTime, calendar),
+        );
+        activeStart = null;
+      }
+    });
+
+    if (activeStart != null) {
+      total = addBreakdowns(
+        total,
+        resolvedRange
+          ? overlapBreakdown(
+              activeStart,
+              now,
+              resolvedRange.startMs,
+              resolvedRange.endMs,
+              calendar,
+            )
+          : getBreakdownForInterval(activeStart, now, calendar),
+      );
+    }
+
+    result.set(key, total);
   });
 
   return result;
@@ -190,43 +302,132 @@ function summarizeWorkedMinutesByKey(
       }
 
       if (isWorkStopStatus(event.to_status) && activeStart != null) {
-        totalMinutes += calendar
-          ? computeWorkingMinutes(
-              new Date(activeStart).toISOString(),
-              new Date(eventTime).toISOString(),
-              calendar,
-            )
-          : roundMinutes(activeStart, eventTime);
-        todayMinutes += overlapMinutes(
+        totalMinutes += getBreakdownForInterval(
+          activeStart,
+          eventTime,
+          calendar,
+        ).totalMinutes;
+        todayMinutes += overlapBreakdown(
           activeStart,
           eventTime,
           todayStartMs,
           tomorrowStartMs,
           calendar,
+        ).totalMinutes;
+        activeStart = null;
+      }
+    });
+
+    if (activeStart != null) {
+      totalMinutes += getBreakdownForInterval(
+        activeStart,
+        now,
+        calendar,
+      ).totalMinutes;
+      todayMinutes += overlapBreakdown(
+        activeStart,
+        now,
+        todayStartMs,
+        tomorrowStartMs,
+        calendar,
+      ).totalMinutes;
+    }
+  });
+
+  return { totalMinutes, todayMinutes };
+}
+
+function summarizeWorkedBreakdownByKey(
+  events: ProductionStatusEventRow[],
+  getKey: (event: ProductionStatusEventRow) => string | null,
+  todayIso: string,
+  calendar?: WorkingCalendar | null,
+) {
+  const eventsByKey = new Map<string, ProductionStatusEventRow[]>();
+
+  events.forEach((event) => {
+    const key = getKey(event);
+    if (!key) {
+      return;
+    }
+    const list = eventsByKey.get(key) ?? [];
+    list.push(event);
+    eventsByKey.set(key, list);
+  });
+
+  const todayStart = new Date(`${todayIso}T00:00:00`);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const todayStartMs = todayStart.getTime();
+  const tomorrowStartMs = tomorrowStart.getTime();
+  const now = Date.now();
+
+  let total = {
+    totalMinutes: 0,
+    regularMinutes: 0,
+    overtimeMinutes: 0,
+  };
+  let today = {
+    totalMinutes: 0,
+    regularMinutes: 0,
+    overtimeMinutes: 0,
+  };
+
+  eventsByKey.forEach((entityEvents) => {
+    const sortedEvents = [...entityEvents].sort((a, b) =>
+      String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")),
+    );
+    let activeStart: number | null = null;
+
+    sortedEvents.forEach((event) => {
+      const eventTime = event.created_at ? Date.parse(event.created_at) : NaN;
+      if (!Number.isFinite(eventTime)) {
+        return;
+      }
+
+      if (isWorkStartStatus(event.to_status)) {
+        activeStart = eventTime;
+        return;
+      }
+
+      if (isWorkStopStatus(event.to_status) && activeStart != null) {
+        total = addBreakdowns(
+          total,
+          getBreakdownForInterval(activeStart, eventTime, calendar),
+        );
+        today = addBreakdowns(
+          today,
+          overlapBreakdown(
+            activeStart,
+            eventTime,
+            todayStartMs,
+            tomorrowStartMs,
+            calendar,
+          ),
         );
         activeStart = null;
       }
     });
 
     if (activeStart != null) {
-      totalMinutes += calendar
-        ? computeWorkingMinutes(
-            new Date(activeStart).toISOString(),
-            new Date(now).toISOString(),
-            calendar,
-          )
-        : roundMinutes(activeStart, now);
-      todayMinutes += overlapMinutes(
-        activeStart,
-        now,
-        todayStartMs,
-        tomorrowStartMs,
-        calendar,
+      total = addBreakdowns(
+        total,
+        getBreakdownForInterval(activeStart, now, calendar),
+      );
+      today = addBreakdowns(
+        today,
+        overlapBreakdown(
+          activeStart,
+          now,
+          todayStartMs,
+          tomorrowStartMs,
+          calendar,
+        ),
       );
     }
   });
 
-  return { totalMinutes, todayMinutes };
+  return { total, today };
 }
 
 export function buildWorkedMinutesByItem(
@@ -305,6 +506,82 @@ export function summarizeWorkedMinutesByRun(
   );
 }
 
+export function buildWorkedBreakdownByItem(
+  events: ProductionStatusEventRow[],
+  calendar?: WorkingCalendar | null,
+) {
+  return buildWorkedBreakdownByKey(
+    events,
+    (event) => event.production_item_id ?? null,
+    undefined,
+    calendar,
+  );
+}
+
+export function buildWorkedBreakdownByItemInRange(
+  events: ProductionStatusEventRow[],
+  range: WorkedMinutesRange,
+  calendar?: WorkingCalendar | null,
+) {
+  return buildWorkedBreakdownByKey(
+    events,
+    (event) => event.production_item_id ?? null,
+    range,
+    calendar,
+  );
+}
+
+export function buildWorkedBreakdownByRun(
+  events: ProductionStatusEventRow[],
+  calendar?: WorkingCalendar | null,
+) {
+  return buildWorkedBreakdownByKey(
+    events,
+    (event) => event.batch_run_id ?? null,
+    undefined,
+    calendar,
+  );
+}
+
+export function buildWorkedBreakdownByRunInRange(
+  events: ProductionStatusEventRow[],
+  range: WorkedMinutesRange,
+  calendar?: WorkingCalendar | null,
+) {
+  return buildWorkedBreakdownByKey(
+    events,
+    (event) => event.batch_run_id ?? null,
+    range,
+    calendar,
+  );
+}
+
+export function summarizeWorkedBreakdownByItem(
+  events: ProductionStatusEventRow[],
+  todayIso: string,
+  calendar?: WorkingCalendar | null,
+) {
+  return summarizeWorkedBreakdownByKey(
+    events,
+    (event) => event.production_item_id ?? null,
+    todayIso,
+    calendar,
+  );
+}
+
+export function summarizeWorkedBreakdownByRun(
+  events: ProductionStatusEventRow[],
+  todayIso: string,
+  calendar?: WorkingCalendar | null,
+) {
+  return summarizeWorkedBreakdownByKey(
+    events,
+    (event) => event.batch_run_id ?? null,
+    todayIso,
+    calendar,
+  );
+}
+
 export function getProductionItemWorkedMinutes(
   item: Pick<ProductionItemRow, "id" | "duration_minutes">,
   workedMinutesByItem?: Map<string, number>,
@@ -319,6 +596,38 @@ export function getBatchRunWorkedMinutes(
   workedMinutesByRun?: Map<string, number>,
 ) {
   return workedMinutesByRun?.get(run.id) ?? Number(run.duration_minutes ?? 0);
+}
+
+export function getProductionItemWorkedBreakdown(
+  item: Pick<ProductionItemRow, "id" | "duration_minutes">,
+  workedBreakdownByItem?: Map<string, WorkedTimeBreakdown>,
+): WorkedTimeBreakdown {
+  const breakdown = workedBreakdownByItem?.get(item.id);
+  if (breakdown) {
+    return breakdown;
+  }
+  const totalMinutes = Number(item.duration_minutes ?? 0);
+  return {
+    totalMinutes,
+    regularMinutes: totalMinutes,
+    overtimeMinutes: 0,
+  };
+}
+
+export function getBatchRunWorkedBreakdown(
+  run: Pick<BatchRunRow, "id" | "duration_minutes">,
+  workedBreakdownByRun?: Map<string, WorkedTimeBreakdown>,
+): WorkedTimeBreakdown {
+  const breakdown = workedBreakdownByRun?.get(run.id);
+  if (breakdown) {
+    return breakdown;
+  }
+  const totalMinutes = Number(run.duration_minutes ?? 0);
+  return {
+    totalMinutes,
+    regularMinutes: totalMinutes,
+    overtimeMinutes: 0,
+  };
 }
 
 export function getQueueGroupWorkedMinutes(params: {
@@ -358,4 +667,50 @@ export function getQueueGroupWorkedMinutes(params: {
     const runMinutes = getBatchRunWorkedMinutes(run, workedMinutesByRun);
     return Math.max(maxMinutes, runMinutes);
   }, 0);
+}
+
+export function getQueueGroupWorkedBreakdown(params: {
+  trackingMode: StationTrackingMode;
+  runs: Array<Pick<BatchRunRow, "id" | "duration_minutes">>;
+  items: Array<Pick<ProductionItemRow, "id" | "duration_minutes">>;
+  workedBreakdownByItem?: Map<string, WorkedTimeBreakdown>;
+  workedBreakdownByRun?: Map<string, WorkedTimeBreakdown>;
+}): WorkedTimeBreakdown {
+  const {
+    trackingMode,
+    runs,
+    items,
+    workedBreakdownByItem,
+    workedBreakdownByRun,
+  } = params;
+
+  if (trackingMode === "construction_level") {
+    if (items.length > 0) {
+      return items.reduce(
+        (sum, item) =>
+          addBreakdowns(
+            sum,
+            getProductionItemWorkedBreakdown(item, workedBreakdownByItem),
+          ),
+        { totalMinutes: 0, regularMinutes: 0, overtimeMinutes: 0 },
+      );
+    }
+    return runs.reduce(
+      (sum, run) =>
+        addBreakdowns(sum, getBatchRunWorkedBreakdown(run, workedBreakdownByRun)),
+      { totalMinutes: 0, regularMinutes: 0, overtimeMinutes: 0 },
+    );
+  }
+
+  if (runs.length === 0) {
+    return { totalMinutes: 0, regularMinutes: 0, overtimeMinutes: 0 };
+  }
+
+  return runs.reduce<WorkedTimeBreakdown>(
+    (selected, run) => {
+      const current = getBatchRunWorkedBreakdown(run, workedBreakdownByRun);
+      return current.totalMinutes > selected.totalMinutes ? current : selected;
+    },
+    { totalMinutes: 0, regularMinutes: 0, overtimeMinutes: 0 },
+  );
 }

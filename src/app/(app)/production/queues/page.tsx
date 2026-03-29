@@ -11,27 +11,34 @@ import {
 import Link from "next/link";
 import {
   AlertTriangleIcon,
+  ArrowLeftIcon,
   CalendarIcon,
   FileTextIcon,
   ExternalLinkIcon,
   ListChecksIcon,
   RefreshCcwIcon,
+  SearchIcon,
+  XIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
 import { Input } from "@/components/ui/Input";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import {
   ProductionSplitPlanner,
   type ProductionSplitPlannerRow,
 } from "@/components/production/ProductionSplitPlanner";
+import { useWorkingCalendar } from "@/contexts/WorkingCalendarContext";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 import {
   buildQueueByStation,
   type ProductionQueueItem,
@@ -53,6 +60,7 @@ import type {
   ProductionItemRow,
   ProductionPriority,
   ProductionStation,
+  ProductionStatusEventRow,
 } from "@/types/production";
 
 function normalizeJoinedOrder(value: unknown): BatchRunRow["orders"] {
@@ -150,6 +158,7 @@ function formatQueueGroupDate(
 
 export default function ProductionQueuesPage() {
   const { t } = useI18n();
+  const { workdays, shifts, overtimeEnabled } = useWorkingCalendar();
   const user = useCurrentUser();
   const today = useMemo(() => getLocalDateInputValue(), []);
   const [isLoading, setIsLoading] = useState(false);
@@ -160,6 +169,9 @@ export default function ProductionQueuesPage() {
   );
   const [orderItems, setOrderItems] = useState<ProductionJobOrderItem[]>([]);
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
+  const [activityEvents, setActivityEvents] = useState<
+    ProductionStatusEventRow[]
+  >([]);
   const [quickFilter, setQuickFilter] = useState<QueueQuickFilter>("none");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -182,16 +194,20 @@ export default function ProductionQueuesPage() {
   const [splitStations, setSplitStations] = useState<ProductionStation[]>([]);
   const [isReplanning, setIsReplanning] = useState(false);
   const [search, setSearch] = useState("");
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [queueViewMode, setQueueViewMode] = useState<
     "active" | "completed" | "all"
   >("active");
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [showLeftFade, setShowLeftFade] = useState(false);
   const [showRightFade, setShowRightFade] = useState(false);
   const [scrolledColumns, setScrolledColumns] = useState<
     Record<string, boolean>
   >({});
   const liveReloadTimeoutRef = useRef<number | null>(null);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
 
   useEffect(() => {
     if (!dataError) {
@@ -205,6 +221,17 @@ export default function ProductionQueuesPage() {
     };
   }, [dataError]);
 
+  const closeMobileSearch = useCallback(() => {
+    setIsMobileSearchOpen(false);
+  }, []);
+
+  const openMobileSearch = useCallback(() => {
+    setIsMobileSearchOpen(true);
+    window.setTimeout(() => {
+      mobileSearchInputRef.current?.focus();
+    }, 50);
+  }, []);
+
   const loadData = useCallback(async () => {
     setIsLoading(true);
     setDataError("");
@@ -213,7 +240,7 @@ export default function ProductionQueuesPage() {
       setIsLoading(false);
       return;
     }
-    const [stationsResult, itemsResult, orderItemsResult, runsResult] =
+    const [stationsResult, itemsResult, orderItemsResult, runsResult, eventsResult] =
       await Promise.all([
         sb
           .from("workstations")
@@ -238,12 +265,20 @@ export default function ProductionQueuesPage() {
           )
           .order("step_index", { ascending: true })
           .order("planned_date", { ascending: true }),
+        sb
+          .from("production_status_events")
+          .select(
+            "id, production_item_id, batch_run_id, order_id, from_status, to_status, reason, created_at, actor_user_id",
+          )
+          .order("created_at", { ascending: false })
+          .limit(5000),
       ]);
     if (
       stationsResult.error ||
       itemsResult.error ||
       orderItemsResult.error ||
-      runsResult.error
+      runsResult.error ||
+      eventsResult.error
     ) {
       setDataError(t("production.main.errors.loadFailed"));
       setIsLoading(false);
@@ -270,6 +305,9 @@ export default function ProductionQueuesPage() {
         ...(row as Omit<BatchRunRow, "orders">),
         orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
       })),
+    );
+    setActivityEvents(
+      (eventsResult.data ?? []) as ProductionStatusEventRow[],
     );
     setIsLoading(false);
   }, [t]);
@@ -420,6 +458,8 @@ export default function ProductionQueuesPage() {
         batchRuns,
         productionItems,
         orderItems,
+        activityEvents,
+        calendar: { workdays, shifts, overtimeEnabled },
         stations,
         viewDate: "2000-01-01",
         plannedRangeDays: 36500,
@@ -427,10 +467,14 @@ export default function ProductionQueuesPage() {
       }),
     [
       batchRuns,
+      activityEvents,
       orderItems,
       productionItems,
       queueViewMode,
+      overtimeEnabled,
+      shifts,
       stations,
+      workdays,
     ],
   );
 
@@ -1075,19 +1119,37 @@ export default function ProductionQueuesPage() {
     }
   };
 
+  const backToReadyButton = (
+    <Tooltip content={t("production.main.queues.backToReady")} side="bottom">
+      <Button asChild variant="outline" size="icon" className="rounded-full">
+        <Link
+          href="/production/ready"
+          aria-label={t("production.main.queues.backToReady")}
+        >
+          <ArrowLeftIcon className="h-4 w-4" />
+        </Link>
+      </Button>
+    </Tooltip>
+  );
+
+  const mobileBackToReadyButton = (
+    <Button asChild variant="outline" size="icon" className="rounded-full">
+      <Link
+        href="/production/ready"
+        aria-label={t("production.main.queues.backToReady")}
+      >
+        <ArrowLeftIcon className="h-4 w-4" />
+      </Link>
+    </Button>
+  );
+
   return (
-    <div className="space-y-4 md:flex md:min-h-0 md:flex-1 md:flex-col md:overflow-hidden">
+    <section className="relative space-y-4 pb-24 pt-16 md:flex md:min-h-0 md:flex-1 md:flex-col md:overflow-hidden md:pb-0 md:pt-0">
       <DesktopPageHeader
         titleBlockClassName="md:max-w-none xl:max-w-none"
         title={
-          <span className="inline-flex items-center gap-2 whitespace-nowrap">
-            <Link
-              href="/production/ready"
-              className="text-muted-foreground text-xl transition hover:text-foreground"
-            >
-              {t("production.main.subnav.ready")}
-            </Link>
-            <span className="text-muted-foreground text-xl ">&gt;</span>
+          <span className="inline-flex items-center gap-3 whitespace-nowrap">
+            {backToReadyButton}
             <span>{t("production.main.queues.title")}</span>
           </span>
         }
@@ -1288,6 +1350,8 @@ export default function ProductionQueuesPage() {
         title={t("production.main.queues.title")}
         subtitle={t("production.main.queues.mobileSubtitle")}
         showCompact={false}
+        rightAction={mobileBackToReadyButton}
+        className="pt-6 pb-6"
       />
 
       {dataError ? (
@@ -1298,17 +1362,7 @@ export default function ProductionQueuesPage() {
 
       <Card className="border-border/80 shadow-sm md:hidden">
         <CardContent className="pt-5">
-          <div className="grid gap-3 md:hidden">
-            <Input
-              icon="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("production.main.queues.searchPlaceholder")}
-              className="h-10"
-            />
-          </div>
-
-          <div className="mt-3 flex flex-col gap-2 md:hidden">
+          <div className="flex flex-col gap-2 md:hidden">
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant={queueViewMode === "active" ? "default" : "outline"}
@@ -1331,59 +1385,6 @@ export default function ProductionQueuesPage() {
               >
                 {t("production.main.queues.viewMode.all")}
               </Button>
-              <FiltersDropdown
-                contentClassName="w-[320px] p-4"
-                label={t("production.main.queues.advancedFilters.trigger")}
-              >
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {t("production.main.queues.advancedFilters.quickFiltersLabel")}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {quickFilterOptions.map((filter) => (
-                        <Button
-                          key={filter.value}
-                          variant={quickFilter === filter.value ? "default" : "outline"}
-                          size="sm"
-                          className="h-8 rounded-full px-3"
-                          onClick={() =>
-                            setQuickFilter((prev) =>
-                              prev === filter.value ? "none" : filter.value,
-                            )
-                          }
-                        >
-                          {filter.label} {quickFilterCounts.get(filter.value) ?? 0}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="h-px bg-border/70" />
-                  <DatePicker
-                    label={t("production.main.queues.advancedFilters.fromDate")}
-                    value={dateFrom}
-                    onChange={(value) => setDateFrom(value || "")}
-                    className="space-y-1 text-xs text-muted-foreground"
-                  />
-                  <DatePicker
-                    label={t("production.main.queues.advancedFilters.toDate")}
-                    value={dateTo}
-                    onChange={(value) => setDateTo(value || "")}
-                    className="space-y-1 text-xs text-muted-foreground"
-                  />
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-center"
-                    onClick={() => {
-                      setQuickFilter("none");
-                      resetAdvancedFilters();
-                    }}
-                    disabled={quickFilter === "none" && !hasAdvancedDateFilter}
-                  >
-                    {t("production.main.queues.advancedFilters.reset")}
-                  </Button>
-                </div>
-              </FiltersDropdown>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <FiltersDropdown
@@ -1485,6 +1486,142 @@ export default function ProductionQueuesPage() {
           </div>
         </CardContent>
       </Card>
+
+      {isMobileSearchOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/45 backdrop-blur-[1.5px] md:hidden">
+          <div className="w-full px-4 pb-[calc(env(safe-area-inset-bottom)-2px)]">
+            <div className="flex items-center gap-2">
+              <Input
+                ref={mobileSearchInputRef}
+                type="search"
+                autoFocus
+                icon="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("production.main.queues.searchPlaceholder")}
+                enterKeyHint="search"
+                className="h-12 text-[16px]"
+                wrapperClassName="rounded-full border-border bg-background shadow-lg"
+              />
+              <button
+                type="button"
+                onClick={closeMobileSearch}
+                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg"
+                aria-label={t("production.main.common.close")}
+              >
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="fixed inset-0 -z-10 h-full w-full"
+            aria-label={t("production.main.common.close")}
+            onClick={closeMobileSearch}
+          />
+        </div>
+      ) : null}
+
+      <BottomSheet
+        open={isMobileFiltersOpen}
+        onClose={() => setIsMobileFiltersOpen(false)}
+        ariaLabel={t("production.main.queues.advancedFilters.trigger")}
+        title={t("production.main.queues.advancedFilters.trigger")}
+        closeButtonLabel={t("production.main.common.close")}
+        keyboardAware
+        enableSwipeToClose
+      >
+        <div className="space-y-4 overflow-y-auto px-4 pb-4 pt-3">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t("production.main.queues.advancedFilters.quickFiltersLabel")}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {quickFilterOptions.map((filter) => (
+                <Button
+                  key={filter.value}
+                  variant={quickFilter === filter.value ? "default" : "outline"}
+                  size="sm"
+                  className="h-9 rounded-full px-3"
+                  onClick={() =>
+                    setQuickFilter((prev) =>
+                      prev === filter.value ? "none" : filter.value,
+                    )
+                  }
+                >
+                  {filter.label} {quickFilterCounts.get(filter.value) ?? 0}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t("production.main.queues.viewMode.active")} /{" "}
+              {t("production.main.queues.viewMode.completed")}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={queueViewMode === "active" ? "default" : "outline"}
+                size="sm"
+                className="h-9 rounded-full px-4"
+                onClick={() => setQueueViewMode("active")}
+              >
+                {t("production.main.queues.viewMode.active")}
+              </Button>
+              <Button
+                variant={queueViewMode === "completed" ? "default" : "outline"}
+                size="sm"
+                className="h-9 rounded-full px-4"
+                onClick={() => setQueueViewMode("completed")}
+              >
+                {t("production.main.queues.viewMode.completed")}
+              </Button>
+              <Button
+                variant={queueViewMode === "all" ? "default" : "outline"}
+                size="sm"
+                className="h-9 rounded-full px-4"
+                onClick={() => setQueueViewMode("all")}
+              >
+                {t("production.main.queues.viewMode.all")}
+              </Button>
+            </div>
+          </div>
+
+          <div className="h-px bg-border/70" />
+
+          <DatePicker
+            label={t("production.main.queues.advancedFilters.fromDate")}
+            value={dateFrom}
+            onChange={(value) => setDateFrom(value || "")}
+            className="space-y-1 text-xs text-muted-foreground"
+          />
+          <DatePicker
+            label={t("production.main.queues.advancedFilters.toDate")}
+            value={dateTo}
+            onChange={(value) => setDateTo(value || "")}
+            className="space-y-1 text-xs text-muted-foreground"
+          />
+
+          <div className="flex items-center justify-between border-t border-border pt-3">
+            <p className="text-xs text-muted-foreground">
+              {t("production.main.queues.advancedFilters.historyHint")}
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-3"
+              onClick={() => {
+                setQuickFilter("none");
+                resetAdvancedFilters();
+              }}
+              disabled={quickFilter === "none" && !hasAdvancedDateFilter}
+            >
+              {t("production.main.queues.advancedFilters.reset")}
+            </Button>
+          </div>
+        </div>
+      </BottomSheet>
 
       <div className="relative md:min-h-0 md:flex-1">
         <div
@@ -1686,9 +1823,12 @@ export default function ProductionQueuesPage() {
                                     {t("production.main.common.qty")}{" "}
                                     {item.totalQty} |{" "}
                                     {t("production.main.queues.time")}{" "}
-                                    {formatQueueDuration(
-                                      Number(item.durationMinutes ?? 0),
-                                    )}
+                                    {formatQueueDuration(Number(item.durationMinutes ?? 0))}
+                                    {Number(item.overtimeMinutes ?? 0) > 0
+                                      ? ` | ${t("production.main.queues.overtime")} ${formatQueueDuration(
+                                          Number(item.overtimeMinutes ?? 0),
+                                        )}`
+                                      : ""}
                                   </div>
                                   {item.status === "done" && item.doneAt ? (
                                     <div className="text-[12px] leading-5 text-emerald-700">
@@ -1835,6 +1975,34 @@ export default function ProductionQueuesPage() {
         }}
         onSubmit={() => void handleConfirmReplan()}
       />
-    </div>
+      <div
+        className={`fixed inset-x-4 bottom-[calc(2.75rem+env(safe-area-inset-bottom))] z-30 transition-all duration-200 md:hidden ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
+        <div className="flex items-end justify-start gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-12 w-12 rounded-full bg-card shadow-lg"
+            onClick={() => setIsMobileFiltersOpen(true)}
+            aria-label={t("production.main.queues.advancedFilters.trigger")}
+          >
+            <ListChecksIcon className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-12 w-12 rounded-full bg-card shadow-lg"
+            onClick={openMobileSearch}
+            aria-label={t("production.main.common.search")}
+          >
+            <SearchIcon className="h-5 w-5" />
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const APP_HOSTS = new Set(["app.domain.eu", "app.localhost"]);
-const MARKETING_HOSTS = new Set(["domain.eu", "www.domain.eu", "localhost"]);
+const MARKETING_HOSTS = new Set(["domain.eu", "www.domain.eu"]);
 
 function getHostname(request: NextRequest) {
   const hostHeader = request.headers.get("host") ?? "";
@@ -14,8 +14,10 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Host-based skeleton for future deploy setup:
-  // - app.domain.eu should open product dashboard by default.
+  // - app.domain.eu / app.localhost should open product dashboard by default.
   // - domain.eu / www.domain.eu should keep marketing homepage on `/`.
+  // - localhost stays flexible during development so both marketing `/`
+  //   and app routes like `/dashboard` remain directly accessible.
   // Extend here with stricter host + path rewrites once DNS/proxy is configured.
   if (APP_HOSTS.has(hostname) && pathname === "/") {
     const url = request.nextUrl.clone();

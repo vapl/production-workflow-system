@@ -29,8 +29,8 @@ import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate } from "@/lib/domain/formatters";
 import { filterProductionAttachments } from "@/lib/domain/productionAttachments";
 import {
-  summarizeWorkedMinutesByItem,
-  summarizeWorkedMinutesByRun,
+  summarizeWorkedBreakdownByItem,
+  summarizeWorkedBreakdownByRun,
 } from "@/lib/domain/productionDurations";
 import {
   collectRunItemIds,
@@ -40,8 +40,8 @@ import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus";
 import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
 import {
+  computeWorkedSecondsBreakdown,
   computeWorkingMinutes,
-  computeWorkingSeconds,
   parseWorkingCalendar,
   type WorkingCalendar,
 } from "@/lib/domain/workingCalendar";
@@ -256,11 +256,11 @@ function formatLiveDuration(
   calendar: WorkingCalendar,
 ) {
   if (!startedAt) return "0s";
-  const totalSeconds = computeWorkingSeconds(
+  const totalSeconds = computeWorkedSecondsBreakdown(
     startedAt,
     doneAt ?? new Date(nowMs).toISOString(),
     calendar,
-  );
+  ).totalSeconds;
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
@@ -382,6 +382,7 @@ export default function OperatorProductionPage() {
   const [workingCalendar, setWorkingCalendar] = useState<WorkingCalendar>({
     workdays: [1, 2, 3, 4, 5],
     shifts: [{ start: "08:00", end: "17:00" }],
+    overtimeEnabled: false,
   });
   const [stopReasons, setStopReasons] = useState<
     Array<{ id: string; label: string }>
@@ -823,18 +824,22 @@ export default function OperatorProductionPage() {
         setWeekWorkedMinutes(0);
         return;
       }
-      const itemSummary = summarizeWorkedMinutesByItem(
+      const itemSummary = summarizeWorkedBreakdownByItem(
         events,
         today,
         workingCalendar,
       );
-      const runSummary = summarizeWorkedMinutesByRun(
+      const runSummary = summarizeWorkedBreakdownByRun(
         events.filter((event) => !event.production_item_id),
         today,
         workingCalendar,
       );
-      setTodayWorkedMinutes(itemSummary.todayMinutes + runSummary.todayMinutes);
-      setWeekWorkedMinutes(itemSummary.totalMinutes + runSummary.totalMinutes);
+      setTodayWorkedMinutes(
+        itemSummary.today.totalMinutes + runSummary.today.totalMinutes,
+      );
+      setWeekWorkedMinutes(
+        itemSummary.total.totalMinutes + runSummary.total.totalMinutes,
+      );
     };
     void loadActivity();
     return () => {

@@ -1550,6 +1550,7 @@
         jobs: "Darba uzdevumi",
       },
       queues: {
+        backToReady: "Atpakaļ uz Gatavs ražošanai",
         title: "Staciju rindas",
         subtitle:
           "Atsevišķs plānotāja skats ar backlog, termiņiem un rindu kartītēm pa stacijām.",
@@ -1595,6 +1596,7 @@
         loading: "Ielādē...",
         noQueuedWork: "Nav ieplānota darba rindā",
         time: "Laiks",
+        overtime: "Virsst.",
         replanRows: "Pārplānot rindas",
         jobDetail: "Darba uzdevums",
         lockedStarted: "Jau uzsākts ražošanā.",
@@ -1632,6 +1634,10 @@
         queueStepsHint: "Saplānotie ražošanas soļi.",
         actualTime: "Faktiskais laiks",
         actualTimeHint: "Uzkrātais izpildes laiks.",
+        regularTime: "Parastais laiks",
+        regularTimeHint: "Nostrādātais laiks darba maiņās.",
+        overtimeTime: "Virsstundas",
+        overtimeTimeHint: "Nostrādātais laiks virsstundu logā.",
         dueStatus: "Termiņa statuss",
         dueNow: "Termiņš tagad",
         onTrack: "Plānā",
@@ -1740,6 +1746,7 @@
       },
       operators: {
         readyBreadcrumb: "Gatavs ražošanai",
+        backToReady: "Atpakaļ uz Gatavs ražošanai",
         title: "Operatori",
         subtitle:
           "Produktivitāte, laiks un izpildītās vienības pa operatoriem.",
@@ -1827,6 +1834,7 @@
         openProfile: "Atvērt profilu",
       },
       operatorDetail: {
+        backToOperators: "Atpakaļ uz Operatoriem",
         operatorsBreadcrumb: "Operatori",
         subtitle: "Operatora detalizēts skats",
         mobileSubtitle: "Operatora detalizēts skats ar KPI un likmēm.",
@@ -1837,6 +1845,8 @@
         payRates: "Darba likmes",
         hourlyRate: "Stundas likme",
         overtimeRate: "Virsstundu likme",
+        regularHours: "Parastās stundas",
+        overtimeHours: "Virsstundas",
         currentLaborCost: "Pašreizējās darba izmaksas",
         saveRates: "Saglabāt likmes",
         filters: "Algu aprēķina filtri",
@@ -2145,9 +2155,20 @@
       notificationsDescription:
         "Izvēlieties, kas saņem sistēmas paziņojumus par bloķētiem un atsāktiem darbiem.",
       workdays: "Darba dienas",
-      shifts: "Maiņas",
+        shifts: "Maiņas",
+        overtimeEnabled: "Iespējot virsstundas",
+        overtimeEnabledHint:
+          "Ja izslēgts, laiks skaitās tikai maiņas ietvaros un virsstundu lauki tiek paslēpti.",
+        shiftStart: "Maiņas {index} sākums",
+      shiftEnd: "Maiņas {index} beigas",
+        overtimeStart: "Maiņas {index} virsstundu sākums",
+        overtimeEnd: "Maiņas {index} virsstundu beigas",
       addShift: "Pievienot maiņu",
       overnightShiftHint: "Atbalstīta nakts maiņa, piemēram, 22:00 līdz 06:00.",
+        overtimeStartHint:
+          "Pirms maiņas sākuma no šī laika darbs skaitās kā virsstundas.",
+        overtimeEndHint:
+          "Pēc maiņas beigām līdz šim laikam darbs skaitās kā virsstundas. Pēc tam taimeris apstājas.",
       saveHours: "Saglabāt darba laikus",
       stationName: "Stacijas nosaukums",
       stationNamePlaceholder: "Griešana",

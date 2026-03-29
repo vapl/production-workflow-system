@@ -4,9 +4,15 @@ import type {
   ProductionPriority,
   ProductionStation,
   ProductionStatus,
+  ProductionStatusEventRow,
   StationTrackingMode,
 } from "@/types/production";
-import { getQueueGroupWorkedMinutes } from "@/lib/domain/productionDurations";
+import {
+  buildWorkedBreakdownByItem,
+  buildWorkedBreakdownByRun,
+  getQueueGroupWorkedBreakdown,
+} from "@/lib/domain/productionDurations";
+import type { WorkingCalendar } from "@/lib/domain/workingCalendar";
 
 type StationLike = Pick<ProductionStation, "id" | "trackingMode">;
 
@@ -63,6 +69,8 @@ export type ProductionQueueItem = {
   startedAt?: string | null;
   doneAt?: string | null;
   durationMinutes?: number | null;
+  regularMinutes?: number | null;
+  overtimeMinutes?: number | null;
   stationId: string;
   runIds: string[];
   trackingMode: StationTrackingMode;
@@ -83,6 +91,8 @@ export function buildQueueByStation(params: {
   batchRuns: BatchRunLike[];
   productionItems: ProductionItemLike[];
   orderItems?: OrderItemLike[];
+  activityEvents?: ProductionStatusEventRow[];
+  calendar?: WorkingCalendar | null;
   stations: StationLike[];
   viewDate: string;
   plannedRangeDays: number;
@@ -92,6 +102,8 @@ export function buildQueueByStation(params: {
     batchRuns,
     productionItems,
     orderItems = [],
+    activityEvents = [],
+    calendar,
     stations,
     viewDate,
     plannedRangeDays,
@@ -115,6 +127,14 @@ export function buildQueueByStation(params: {
     }
   >();
   const orderItemById = new Map(orderItems.map((item) => [item.id, item]));
+  const workedBreakdownByItem = buildWorkedBreakdownByItem(
+    activityEvents,
+    calendar,
+  );
+  const workedBreakdownByRun = buildWorkedBreakdownByRun(
+    activityEvents,
+    calendar,
+  );
 
   batchRuns.forEach((run) => {
     if (seenRuns.has(run.id)) {
@@ -225,6 +245,13 @@ export function buildQueueByStation(params: {
       statusOrder.find((candidate) =>
         runs.some((run) => run.status === candidate),
       ) ?? representativeRun.status;
+    const workedBreakdown = getQueueGroupWorkedBreakdown({
+      trackingMode,
+      runs,
+      items,
+      workedBreakdownByItem,
+      workedBreakdownByRun,
+    });
 
     const queueItem = {
       id: representativeRun.id,
@@ -246,11 +273,9 @@ export function buildQueueByStation(params: {
       plannedDate: sortedPlannedDates[0] ?? null,
       startedAt: sortedStartedAt[0] ?? null,
       doneAt: sortedDoneAt.at(-1) ?? null,
-      durationMinutes: getQueueGroupWorkedMinutes({
-        trackingMode,
-        runs,
-        items,
-      }),
+      durationMinutes: workedBreakdown.totalMinutes,
+      regularMinutes: workedBreakdown.regularMinutes,
+      overtimeMinutes: workedBreakdown.overtimeMinutes,
       stationId,
       runIds: runs.map((run) => run.id),
       trackingMode,

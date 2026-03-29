@@ -62,7 +62,7 @@ export const defaultPermissionRoles: PermissionRoleMap = {
 };
 
 type AppRoute =
-  | "/"
+  | "/dashboard"
   | "/orders"
   | "/warehouse"
   | "/production"
@@ -142,7 +142,8 @@ export function canAccessRoute(
   if (isProductionWorker(user) && !isAdminLike(user)) {
     return route === "/production/operator";
   }
-  if (route === "/") return hasPermission(user, "dashboard.view", roleMap);
+  if (route === "/dashboard")
+    return hasPermission(user, "dashboard.view", roleMap);
   if (route === "/settings")
     return hasPermission(user, "settings.view", roleMap);
   if (route === "/production")

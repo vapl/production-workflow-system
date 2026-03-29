@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangleIcon,
@@ -8,11 +8,15 @@ import {
   ClipboardListIcon,
   Layers3Icon,
   PaperclipIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
   TimerResetIcon,
   Users2Icon,
+  XIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
@@ -26,6 +30,7 @@ import {
   computeReadyProductionKpis,
   filterReadyBatchGroups,
 } from "@/lib/domain/productionReady";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabaseClient";
 import type {
@@ -99,6 +104,9 @@ export default function ProductionReadyPage() {
   const [readyDueFilter, setReadyDueFilter] = useState<
     "all" | "late" | "today" | "week"
   >("all");
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [readyOrders, setReadyOrders] = useState<ReadyOrderRow[]>([]);
   const [productionItems, setProductionItems] = useState<ProductionItemRow[]>(
     [],
@@ -108,6 +116,8 @@ export default function ProductionReadyPage() {
   const [orderAttachments, setOrderAttachments] = useState<
     Record<string, OrderAttachmentRow[]>
   >({});
+  const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
 
   useEffect(() => {
     if (supabaseUnavailable) {
@@ -276,8 +286,19 @@ export default function ProductionReadyPage() {
   const activeFilterCount =
     (readyPriority !== "all" ? 1 : 0) + (readyDueFilter !== "all" ? 1 : 0);
 
+  const closeMobileSearch = useCallback(() => {
+    setIsMobileSearchOpen(false);
+  }, []);
+
+  const openMobileSearch = useCallback(() => {
+    setIsMobileSearchOpen(true);
+    window.setTimeout(() => {
+      mobileSearchInputRef.current?.focus();
+    }, 50);
+  }, []);
+
   return (
-    <div className="space-y-4">
+    <section className="relative flex flex-col gap-4 pb-28 pt-16 md:pb-0 md:pt-0">
       <DesktopPageHeader
         sticky
         title={t("production.main.planning.readyForProduction")}
@@ -303,9 +324,10 @@ export default function ProductionReadyPage() {
         title={t("production.main.planning.readyForProduction")}
         subtitle={t("production.main.ready.mobileSubtitle")}
         showCompact={false}
+        className="pt-6 pb-6"
       />
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <ProductionStatCard
           label={t("production.main.ready.readyJobs")}
           value={kpis.total}
@@ -348,7 +370,7 @@ export default function ProductionReadyPage() {
             </div>
           ) : null}
 
-          <div className="rounded-2xl border border-border bg-muted/10 p-4">
+          <div className="hidden rounded-2xl border border-border bg-muted/10 p-4 md:block">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
               <div className="min-w-0 flex-1">
                 <Input
@@ -583,6 +605,213 @@ export default function ProductionReadyPage() {
           ) : null}
         </CardContent>
       </Card>
-    </div>
+
+      {isMobileSearchOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/45 backdrop-blur-[1.5px] md:hidden">
+          <div className="w-full px-4 pb-[calc(env(safe-area-inset-bottom)-2px)]">
+            <div className="flex items-center gap-2">
+              <Input
+                ref={mobileSearchInputRef}
+                type="search"
+                autoFocus
+                icon="search"
+                value={readySearch}
+                onChange={(event) => setReadySearch(event.target.value)}
+                placeholder={t("production.main.planning.orderCustomerPlaceholder")}
+                enterKeyHint="search"
+                className="h-12 text-[16px]"
+                wrapperClassName="rounded-full border-border bg-background shadow-lg"
+              />
+              <button
+                type="button"
+                onClick={closeMobileSearch}
+                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg"
+                aria-label={t("production.main.common.close")}
+              >
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="fixed inset-0 -z-10 h-full w-full"
+            aria-label={t("production.main.common.close")}
+            onClick={closeMobileSearch}
+          />
+        </div>
+      ) : null}
+
+      <BottomSheet
+        open={isFiltersOpen}
+        onClose={() => setIsFiltersOpen(false)}
+        ariaLabel={t("production.main.ready.filters")}
+        title={t("production.main.ready.filters")}
+        closeButtonLabel={t("production.main.common.close")}
+        keyboardAware
+        enableSwipeToClose
+      >
+        <div className="space-y-4 overflow-y-auto px-4 pb-4 pt-3">
+          <div className="space-y-2">
+            <div className="text-sm font-medium text-foreground">
+              {t("production.main.common.priority")}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["all", t("production.main.common.all")],
+                  ["urgent", t("production.main.priority.urgent")],
+                  ["high", t("production.main.priority.high")],
+                  ["normal", t("production.main.priority.normal")],
+                  ["low", t("production.main.priority.low")],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() =>
+                    setReadyPriority(value as ProductionPriority | "all")
+                  }
+                  className={`inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-medium transition ${
+                    readyPriority === value
+                      ? "border-foreground bg-foreground text-background shadow-sm"
+                      : "border-border bg-background text-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-medium text-foreground">
+              {t("production.main.ready.dueFilter")}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["all", t("production.main.common.all")],
+                  ["late", t("production.main.ready.dueLate")],
+                  ["today", t("production.main.ready.dueToday")],
+                  ["week", t("production.main.ready.dueWeek")],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() =>
+                    setReadyDueFilter(value as "all" | "late" | "today" | "week")
+                  }
+                  className={`inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-medium transition ${
+                    readyDueFilter === value
+                      ? "border-foreground bg-foreground text-background shadow-sm"
+                      : "border-border bg-background text-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between border-t border-border pt-3">
+            <div className="text-sm text-muted-foreground">
+              {t("production.main.ready.activeFilters", {
+                count: activeFilterCount,
+              })}
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setReadyPriority("all");
+                setReadyDueFilter("all");
+              }}
+              disabled={activeFilterCount === 0}
+            >
+              {t("production.main.ready.resetFilters")}
+            </Button>
+          </div>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={isMobileNavOpen}
+        onClose={() => setIsMobileNavOpen(false)}
+        ariaLabel={t("production.main.common.actions")}
+        title={t("production.main.common.actions")}
+        closeButtonLabel={t("production.main.common.close")}
+        keyboardAware
+        enableSwipeToClose
+      >
+        <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3">
+          <Button
+            asChild
+            variant="outline"
+            className="h-12 w-full justify-start rounded-2xl"
+            onClick={() => setIsMobileNavOpen(false)}
+          >
+            <Link href="/production/queues">
+              <Layers3Icon className="mr-2 h-4 w-4" />
+              {t("production.main.subnav.queues")}
+            </Link>
+          </Button>
+          <Button
+            asChild
+            variant="outline"
+            className="h-12 w-full justify-start rounded-2xl"
+            onClick={() => setIsMobileNavOpen(false)}
+          >
+            <Link href="/production/operators">
+              <Users2Icon className="mr-2 h-4 w-4" />
+              {t("production.main.subnav.operators")}
+            </Link>
+          </Button>
+        </div>
+      </BottomSheet>
+
+      <div
+        className={`fixed inset-x-4 bottom-[calc(2.75rem+env(safe-area-inset-bottom))] z-30 transition-all duration-200 md:hidden ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
+        <div className="flex items-end justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-12 w-12 rounded-full bg-card shadow-lg"
+              onClick={() => setIsFiltersOpen(true)}
+              aria-label={t("production.main.ready.filters")}
+            >
+              <SlidersHorizontalIcon className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-12 w-12 rounded-full bg-card shadow-lg"
+              onClick={openMobileSearch}
+              aria-label={t("production.main.common.search")}
+            >
+              <SearchIcon className="h-5 w-5" />
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="h-12 rounded-full bg-card px-4 shadow-lg"
+              onClick={() => setIsMobileNavOpen(true)}
+            >
+              <Layers3Icon className="mr-2 h-4 w-4" />
+              {t("production.main.common.actions")}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }

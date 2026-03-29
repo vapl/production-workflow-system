@@ -1,21 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowLeftIcon,
   ArrowRightIcon,
-  ChevronRightIcon,
+  SearchIcon,
   UserCircle2Icon,
+  XIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { OperatorManagementModal } from "@/components/production/OperatorManagementModal";
 import { ProductionStatCard } from "@/components/production/ProductionStatCard";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 import {
   buildOperatorSummaryRows,
   formatLaborCost,
@@ -25,6 +29,10 @@ import {
   type OperatorProfileRow,
   type OperatorStationRow,
 } from "@/lib/domain/productionOperators";
+import {
+  parseWorkingCalendar,
+  type WorkingCalendar,
+} from "@/lib/domain/workingCalendar";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabaseClient";
 import type {
@@ -69,6 +77,7 @@ export default function ProductionOperatorsPage() {
   const [dataError, setDataError] = useState("");
   const [search, setSearch] = useState("");
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [profiles, setProfiles] = useState<OperatorProfileRow[]>([]);
   const [operatorConfigs, setOperatorConfigs] = useState<OperatorConfigRow[]>(
@@ -81,6 +90,13 @@ export default function ProductionOperatorsPage() {
   const [productionItems, setProductionItems] = useState<ProductionItemRow[]>(
     [],
   );
+  const [workingCalendar, setWorkingCalendar] = useState<WorkingCalendar>({
+    workdays: [1, 2, 3, 4, 5],
+    shifts: [{ start: "08:00", end: "17:00" }],
+    overtimeEnabled: false,
+  });
+  const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const hideMobileFloatingControls = useHideMobileFloatingControls();
 
   useEffect(() => {
     const sb = supabase;
@@ -96,6 +112,7 @@ export default function ProductionOperatorsPage() {
         configsResult,
         assignmentsResult,
         stationsResult,
+        settingsResult,
         eventsResult,
         batchRunsResult,
         itemsResult,
@@ -122,6 +139,11 @@ export default function ProductionOperatorsPage() {
           .eq("tenant_id", user.tenantId)
           .eq("is_active", true)
           .order("sort_order", { ascending: true }),
+        sb
+          .from("tenant_settings")
+          .select("workday_start, workday_end, workdays, work_shifts")
+          .eq("tenant_id", user.tenantId)
+          .maybeSingle(),
         sb
           .from("production_status_events")
           .select(
@@ -154,6 +176,7 @@ export default function ProductionOperatorsPage() {
         configsResult.error ||
         assignmentsResult.error ||
         stationsResult.error ||
+        settingsResult.error ||
         eventsResult.error ||
         batchRunsResult.error ||
         itemsResult.error
@@ -167,6 +190,9 @@ export default function ProductionOperatorsPage() {
       setOperatorConfigs((configsResult.data ?? []) as OperatorConfigRow[]);
       setAssignments((assignmentsResult.data ?? []) as OperatorAssignmentRow[]);
       setStations((stationsResult.data ?? []) as OperatorStationRow[]);
+      if (settingsResult.data) {
+        setWorkingCalendar(parseWorkingCalendar(settingsResult.data));
+      }
       setEvents((eventsResult.data ?? []) as ProductionStatusEventRow[]);
       setBatchRuns(
         ((batchRunsResult.data ?? []) as Array<Record<string, unknown>>).map(
@@ -203,6 +229,9 @@ export default function ProductionOperatorsPage() {
         events,
         batchRuns,
         productionItems,
+        filter: {
+          calendar: workingCalendar,
+        },
       }),
     [
       profiles,
@@ -212,6 +241,7 @@ export default function ProductionOperatorsPage() {
       events,
       batchRuns,
       productionItems,
+      workingCalendar,
     ],
   );
 
@@ -257,6 +287,8 @@ export default function ProductionOperatorsPage() {
       filteredRows.reduce(
         (acc, row) => {
           acc.workedMinutes += row.workedMinutes;
+          acc.regularMinutes += row.regularMinutes;
+          acc.overtimeMinutes += row.overtimeMinutes;
           acc.completedItems += row.completedItems;
           acc.completedQty += row.completedQty;
           acc.completedOrders += row.completedOrders;
@@ -265,6 +297,8 @@ export default function ProductionOperatorsPage() {
         },
         {
           workedMinutes: 0,
+          regularMinutes: 0,
+          overtimeMinutes: 0,
           completedItems: 0,
           completedQty: 0,
           completedOrders: 0,
@@ -274,18 +308,36 @@ export default function ProductionOperatorsPage() {
     [filteredRows],
   );
 
+  const backToReadyButton = (
+    <Tooltip content={t("production.main.operators.backToReady")} side="bottom">
+      <Button asChild variant="outline" size="icon" className="rounded-full">
+        <Link
+          href="/production/ready"
+          aria-label={t("production.main.operators.backToReady")}
+        >
+          <ArrowLeftIcon className="h-4 w-4" />
+        </Link>
+      </Button>
+    </Tooltip>
+  );
+
+  const closeMobileSearch = useCallback(() => {
+    setIsMobileSearchOpen(false);
+  }, []);
+
+  const openMobileSearch = useCallback(() => {
+    setIsMobileSearchOpen(true);
+    window.setTimeout(() => {
+      mobileSearchInputRef.current?.focus();
+    }, 50);
+  }, []);
+
   return (
-    <div className="space-y-4">
+    <section className="relative space-y-4 pb-24 md:pb-0">
       <DesktopPageHeader
         title={
-          <span className="flex items-center gap-2 text-xl">
-            <Link
-              href="/production/ready"
-              className="font-medium text-muted-foreground hover:text-foreground"
-            >
-              {t("production.main.operators.readyBreadcrumb")}
-            </Link>
-            <ChevronRightIcon className="h-5 w-5 text-muted-foreground" />
+          <span className="flex items-center gap-3 text-xl">
+            {backToReadyButton}
             <span>{t("production.main.operators.title")}</span>
           </span>
         }
@@ -296,6 +348,8 @@ export default function ProductionOperatorsPage() {
         title={t("production.main.operators.title")}
         subtitle={t("production.main.operators.mobileSubtitle")}
         showCompact={false}
+        className="pt-6 pb-6"
+        rightAction={backToReadyButton}
       />
 
       {dataError ? (
@@ -304,7 +358,7 @@ export default function ProductionOperatorsPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
         <ProductionStatCard
           label={t("production.main.operators.operators")}
           value={filteredRows.length}
@@ -314,6 +368,14 @@ export default function ProductionOperatorsPage() {
           label={t("production.main.operators.workedHours")}
           value={formatWorkedHours(totals.workedMinutes)}
           hint={t("production.main.operators.workedHoursHint")}
+        />
+        <ProductionStatCard
+          label={t("production.main.operatorDetail.regularHours")}
+          value={formatWorkedHours(totals.regularMinutes)}
+        />
+        <ProductionStatCard
+          label={t("production.main.operatorDetail.overtimeHours")}
+          value={formatWorkedHours(totals.overtimeMinutes)}
         />
         <ProductionStatCard
           label={t("production.main.operators.completedQty")}
@@ -351,7 +413,7 @@ export default function ProductionOperatorsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <label className="block space-y-1 text-xs text-muted-foreground">
+          <label className="hidden space-y-1 text-xs text-muted-foreground md:block">
             {t("production.main.common.search")}
             <Input
               icon="search"
@@ -453,6 +515,69 @@ export default function ProductionOperatorsPage() {
         </CardContent>
       </Card>
 
+      {isMobileSearchOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/45 backdrop-blur-[1.5px] md:hidden">
+          <div className="w-full px-4 pb-[calc(env(safe-area-inset-bottom)-2px)]">
+            <div className="flex items-center gap-2">
+              <Input
+                ref={mobileSearchInputRef}
+                type="search"
+                autoFocus
+                icon="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("production.main.operators.searchPlaceholder")}
+                enterKeyHint="search"
+                className="h-12 text-[16px]"
+                wrapperClassName="rounded-full border-border bg-background shadow-lg"
+              />
+              <button
+                type="button"
+                onClick={closeMobileSearch}
+                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg"
+                aria-label={t("production.main.common.close")}
+              >
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="fixed inset-0 -z-10 h-full w-full"
+            aria-label={t("production.main.common.close")}
+            onClick={closeMobileSearch}
+          />
+        </div>
+      ) : null}
+
+      <div
+        className={`fixed inset-x-4 bottom-[calc(2.75rem+env(safe-area-inset-bottom))] z-30 transition-all duration-200 md:hidden ${
+          hideMobileFloatingControls
+            ? "translate-y-16 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-12 w-12 rounded-full bg-card shadow-lg"
+            onClick={openMobileSearch}
+            aria-label={t("production.main.common.search")}
+          >
+            <SearchIcon className="h-5 w-5" />
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-12 rounded-full bg-card px-4 shadow-lg"
+            onClick={() => setIsManageModalOpen(true)}
+          >
+            {t("production.main.operators.manageTitle")}
+          </Button>
+        </div>
+      </div>
+
       <OperatorManagementModal
         open={isManageModalOpen}
         onClose={() => setIsManageModalOpen(false)}
@@ -463,6 +588,6 @@ export default function ProductionOperatorsPage() {
         stations={stations}
         t={t}
       />
-    </div>
+    </section>
   );
 }

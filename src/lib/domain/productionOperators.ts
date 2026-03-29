@@ -1,14 +1,20 @@
 import {
-  summarizeWorkedMinutesByItem,
-  summarizeWorkedMinutesByRun,
+  buildWorkedBreakdownByItem,
+  buildWorkedBreakdownByItemInRange,
+  buildWorkedBreakdownByRun,
+  buildWorkedBreakdownByRunInRange,
   getProductionItemWorkedMinutes,
   getBatchRunWorkedMinutes,
   buildWorkedMinutesByItem,
   buildWorkedMinutesByRun,
   buildWorkedMinutesByItemInRange,
   buildWorkedMinutesByRunInRange,
+  summarizeWorkedBreakdownByItem,
+  summarizeWorkedBreakdownByRun,
   type WorkedMinutesRange,
+  type WorkedTimeBreakdown,
 } from "@/lib/domain/productionDurations";
+import type { WorkingCalendar } from "@/lib/domain/workingCalendar";
 import type {
   BatchRunRow,
   ProductionItemRow,
@@ -53,6 +59,8 @@ export type OperatorSummaryRow = {
   hourlyRate: number | null;
   overtimeRate: number | null;
   workedMinutes: number;
+  regularMinutes: number;
+  overtimeMinutes: number;
   laborCost: number | null;
   completedItems: number;
   completedQty: number;
@@ -94,7 +102,27 @@ export type OperatorStationBreakdownRow = {
 export type OperatorMetricsFilter = {
   range?: WorkedMinutesRange | null;
   search?: string | null;
+  calendar?: WorkingCalendar | null;
 };
+
+function zeroBreakdown(): WorkedTimeBreakdown {
+  return {
+    totalMinutes: 0,
+    regularMinutes: 0,
+    overtimeMinutes: 0,
+  };
+}
+
+function addBreakdown(
+  current: WorkedTimeBreakdown,
+  next: WorkedTimeBreakdown,
+): WorkedTimeBreakdown {
+  return {
+    totalMinutes: current.totalMinutes + next.totalMinutes,
+    regularMinutes: current.regularMinutes + next.regularMinutes,
+    overtimeMinutes: current.overtimeMinutes + next.overtimeMinutes,
+  };
+}
 
 function uniqueCompletedItemsByActor(
   actorUserId: string,
@@ -231,6 +259,7 @@ export function buildOperatorSummaryRows(params: {
     operatorConfigs.map((config) => [normalizeOperatorName(config.name), config]),
   );
   const search = normalizeSearch(filter?.search);
+  const calendar = filter?.calendar ?? null;
 
   return profiles
     .filter((profile) => profile.is_active ?? true)
@@ -247,27 +276,48 @@ export function buildOperatorSummaryRows(params: {
         events,
         batchRuns,
       );
+      const workedBreakdownByItem = filter?.range
+        ? buildWorkedBreakdownByItemInRange(actorEvents, filter.range, calendar)
+        : buildWorkedBreakdownByItem(actorEvents, calendar);
+      const workedBreakdownByRun = filter?.range
+        ? buildWorkedBreakdownByRunInRange(
+            actorRunOnlyEvents,
+            filter.range,
+            calendar,
+          )
+        : buildWorkedBreakdownByRun(actorRunOnlyEvents, calendar);
       const workedMinutesByItem = filter?.range
         ? buildWorkedMinutesByItemInRange(actorEvents, filter.range)
         : buildWorkedMinutesByItem(actorEvents);
       const workedMinutesByRun = filter?.range
         ? buildWorkedMinutesByRunInRange(actorRunOnlyEvents, filter.range)
         : buildWorkedMinutesByRun(actorRunOnlyEvents);
-      const workedMinutes =
-        filter?.range
-          ? Array.from(workedMinutesByItem.values()).reduce(
-              (sum, value) => sum + value,
-              0,
-            ) +
-            Array.from(workedMinutesByRun.values()).reduce(
-              (sum, value) => sum + value,
-              0,
-            )
-          : summarizeWorkedMinutesByItem(actorEvents, getTodayIsoLocal()).totalMinutes +
-            summarizeWorkedMinutesByRun(
+      const totalBreakdown = filter?.range
+        ? Array.from(workedBreakdownByItem.values()).reduce(
+            addBreakdown,
+            zeroBreakdown(),
+          )
+        : addBreakdown(
+            summarizeWorkedBreakdownByItem(
+              actorEvents,
+              getTodayIsoLocal(),
+              calendar,
+            ).total,
+            summarizeWorkedBreakdownByRun(
               actorRunOnlyEvents,
               getTodayIsoLocal(),
-            ).totalMinutes;
+              calendar,
+            ).total,
+          );
+      if (filter?.range) {
+        const runTotals = Array.from(workedBreakdownByRun.values()).reduce(
+          addBreakdown,
+          zeroBreakdown(),
+        );
+        totalBreakdown.totalMinutes += runTotals.totalMinutes;
+        totalBreakdown.regularMinutes += runTotals.regularMinutes;
+        totalBreakdown.overtimeMinutes += runTotals.overtimeMinutes;
+      }
       const touchedItems = filterTouchedItems(productionItems, workedMinutesByItem);
       const touchedRuns = filterTouchedRuns(batchRuns, workedMinutesByRun);
       const filteredTouchedItems = touchedItems.filter((item) => {
@@ -299,6 +349,26 @@ export function buildOperatorSummaryRows(params: {
           (sum, run) => sum + (workedMinutesByRun.get(run.id) ?? 0),
           0,
         );
+      const filteredBreakdown = filteredTouchedItems.reduce(
+        (sum, item) =>
+          addBreakdown(
+            sum,
+            workedBreakdownByItem.get(item.id) ?? zeroBreakdown(),
+          ),
+        zeroBreakdown(),
+      );
+      const filteredRunBreakdown = filteredTouchedRuns.reduce(
+        (sum, run) =>
+          addBreakdown(
+            sum,
+            workedBreakdownByRun.get(run.id) ?? zeroBreakdown(),
+          ),
+        zeroBreakdown(),
+      );
+      const visibleBreakdown = addBreakdown(
+        filteredBreakdown,
+        filteredRunBreakdown,
+      );
       const filteredCompletedItems = completedItems.filter((item) =>
         filteredTouchedItems.some((touchedItem) => touchedItem.id === item.id),
       );
@@ -321,18 +391,32 @@ export function buildOperatorSummaryRows(params: {
         .filter((assignment) => assignment.user_id === profile.id && assignment.is_active)
         .map((assignment) => stationNameById.get(assignment.station_id) ?? assignment.station_id)
         .sort((a, b) => a.localeCompare(b));
+      const finalWorkedMinutes = search
+        ? filteredWorkedMinutes
+        : totalBreakdown.totalMinutes;
+      const finalRegularMinutes = search
+        ? visibleBreakdown.regularMinutes
+        : totalBreakdown.regularMinutes;
+      const finalOvertimeMinutes = search
+        ? visibleBreakdown.overtimeMinutes
+        : totalBreakdown.overtimeMinutes;
+      const hourlyRate = config?.hourly_rate ?? null;
+      const overtimeRate = config?.overtime_rate ?? config?.hourly_rate ?? null;
       return {
         userId: profile.id,
         name: profile.full_name?.trim() || "Unknown user",
         role: profile.role?.trim() || "Operator",
         stations: Array.from(new Set(stationNames)),
-        hourlyRate: config?.hourly_rate ?? null,
-        overtimeRate: config?.overtime_rate ?? null,
-        workedMinutes: search ? filteredWorkedMinutes : workedMinutes,
+        hourlyRate,
+        overtimeRate,
+        workedMinutes: finalWorkedMinutes,
+        regularMinutes: finalRegularMinutes,
+        overtimeMinutes: finalOvertimeMinutes,
         laborCost:
-          config?.hourly_rate != null
-            ? ((search ? filteredWorkedMinutes : workedMinutes) / 60) *
-              Number(config.hourly_rate)
+          hourlyRate != null
+            ? (finalRegularMinutes / 60) * Number(hourlyRate) +
+              (finalOvertimeMinutes / 60) *
+                Number(overtimeRate ?? hourlyRate)
             : null,
         completedItems: filteredCompletedItems.length + filteredCompletedRuns.length,
         completedQty,

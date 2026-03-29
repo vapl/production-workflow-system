@@ -4,6 +4,7 @@ import { Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { InputField } from "@/components/ui/InputField";
+import { SwitchField } from "@/components/ui/SwitchField";
 import type { WorkShift } from "@/lib/domain/workingCalendar";
 
 type TranslationFn = (
@@ -22,11 +23,13 @@ type OperationsWorkingHoursCardProps = {
   weekdayOptions: WeekdayOption[];
   workdays: number[];
   toggleWorkday: (day: number) => void;
+  overtimeEnabled: boolean;
+  toggleOvertimeEnabled: (enabled: boolean) => void;
   workShifts: WorkShift[];
   handleAddShift: () => void;
   handleWorkShiftChange: (
     index: number,
-    field: "start" | "end",
+    field: "start" | "end" | "overtimeStart" | "overtimeEnd",
     value: string,
   ) => void;
   handleRemoveShift: (index: number) => void;
@@ -45,6 +48,8 @@ export function OperationsWorkingHoursCard(
     weekdayOptions,
     workdays,
     toggleWorkday,
+    overtimeEnabled,
+    toggleOvertimeEnabled,
     workShifts,
     handleAddShift,
     handleWorkShiftChange,
@@ -99,13 +104,23 @@ export function OperationsWorkingHoursCard(
               {t("settings.operations.addShift")}
             </Button>
           </div>
+          <SwitchField
+            checked={overtimeEnabled}
+            onCheckedChange={toggleOvertimeEnabled}
+            label={t("settings.operations.overtimeEnabled")}
+            description={t("settings.operations.overtimeEnabledHint")}
+          />
           {workShifts.map((shift, index) => (
             <div
-              key={`${index}-${shift.start}-${shift.end}`}
-              className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
+              key={`shift-${index}`}
+              className={`grid min-w-0 gap-3 md:items-end ${
+                overtimeEnabled
+                  ? "md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                  : "md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+              }`}
             >
               <InputField
-                label={`Shift ${index + 1} start`}
+                label={t("settings.operations.shiftStart", { index: index + 1 })}
                 type="text"
                 inputMode="numeric"
                 pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
@@ -120,7 +135,7 @@ export function OperationsWorkingHoursCard(
                 labelClassName="text-xs font-medium text-muted-foreground"
               />
               <InputField
-                label={`Shift ${index + 1} end`}
+                label={t("settings.operations.shiftEnd", { index: index + 1 })}
                 type="text"
                 inputMode="numeric"
                 pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
@@ -134,6 +149,44 @@ export function OperationsWorkingHoursCard(
                 }`}
                 labelClassName="text-xs font-medium text-muted-foreground"
               />
+              {overtimeEnabled ? (
+                <>
+                  <InputField
+                    label={t("settings.operations.overtimeStart", { index: index + 1 })}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                    value={shift.overtimeStart ?? shift.start}
+                    onChange={(event) =>
+                      handleWorkShiftChange(index, "overtimeStart", event.target.value)
+                    }
+                    placeholder={shift.start}
+                    className={`h-10 w-full text-sm ${
+                      isValidWorkTime(shift.overtimeStart ?? shift.start)
+                        ? ""
+                        : "border-destructive"
+                    }`}
+                    labelClassName="text-xs font-medium text-muted-foreground"
+                  />
+                  <InputField
+                    label={t("settings.operations.overtimeEnd", { index: index + 1 })}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                    value={shift.overtimeEnd ?? shift.end}
+                    onChange={(event) =>
+                      handleWorkShiftChange(index, "overtimeEnd", event.target.value)
+                    }
+                    placeholder={shift.end}
+                    className={`h-10 w-full text-sm ${
+                      isValidWorkTime(shift.overtimeEnd ?? shift.end)
+                        ? ""
+                        : "border-destructive"
+                    }`}
+                    labelClassName="text-xs font-medium text-muted-foreground"
+                  />
+                </>
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"
@@ -146,10 +199,20 @@ export function OperationsWorkingHoursCard(
               </Button>
             </div>
           ))}
-          <div className="text-xs text-muted-foreground">
-            {t("settings.operations.overnightShiftHint")}
-          </div>
+        <div className="text-xs text-muted-foreground">
+          {t("settings.operations.overnightShiftHint")}
         </div>
+        {overtimeEnabled ? (
+          <>
+            <div className="text-xs text-muted-foreground">
+              {t("settings.operations.overtimeStartHint")}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t("settings.operations.overtimeEndHint")}
+            </div>
+          </>
+        ) : null}
+      </div>
         {workdayError ? (
           <div className="text-xs text-destructive">{workdayError}</div>
         ) : null}

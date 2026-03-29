@@ -25,6 +25,7 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { KpiCard } from "@/components/ui/KpiCard";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import {
   Select,
@@ -144,14 +145,6 @@ import {
   canEditOrderInlineField,
   canEditOrderInputs as canEditOrderInputsByRole,
 } from "@/lib/domain/orderPermissions";
-
-const ORDER_DETAIL_TAB_VALUES = [
-  "overview",
-  "files",
-  "details",
-  "external",
-  "history",
-] as const;
 
 function getFileExtension(fileName: string) {
   const dotIndex = fileName.lastIndexOf(".");
@@ -611,33 +604,9 @@ export default function OrderDetailPage() {
   const [isAttachmentCategoryManual, setIsAttachmentCategoryManual] =
     useState(false);
   const [activeTab, setActiveTab] = useState("overview");
-  const orderTabStorageKey = useMemo(
-    () => `order-detail-active-tab:${decodedOrderId || "unknown"}`,
-    [decodedOrderId],
-  );
-
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const saved = window.localStorage.getItem(orderTabStorageKey);
-    if (
-      saved &&
-      (ORDER_DETAIL_TAB_VALUES as readonly string[]).includes(saved)
-    ) {
-      setActiveTab(saved);
-    }
-  }, [orderTabStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    if (!(ORDER_DETAIL_TAB_VALUES as readonly string[]).includes(activeTab)) {
-      return;
-    }
-    window.localStorage.setItem(orderTabStorageKey, activeTab);
-  }, [activeTab, orderTabStorageKey]);
+    setActiveTab("overview");
+  }, [decodedOrderId]);
   const [commentMessage, setCommentMessage] = useState("");
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
   const [showNotFound, setShowNotFound] = useState(false);
@@ -5862,19 +5831,20 @@ export default function OrderDetailPage() {
               : displayStatus === "ready_for_engineering"
                 ? 15
                 : 0;
-  const productionSummary = productionCompletionProgress
-    ? `${productionCompletionProgress.done} / ${productionCompletionProgress.total} ${
-        productionCompletionProgress.mode === "stations"
-          ? t("orders.detail.productionCompletion.stations")
-          : productionCompletionProgress.mode === "steps"
-            ? t("orders.detail.productionCompletion.steps")
-          : t("orders.detail.productionCompletion.items")
-      }`
+  const productionSummaryValue = productionCompletionProgress
+    ? `${productionCompletionProgress.done} / ${productionCompletionProgress.total}`
     : displayStatus === "done"
       ? t("orders.detail.hero.completed")
       : displayStatus === "in_production"
         ? t("orders.detail.hero.inProgress")
         : t("orders.detail.hero.notStarted");
+  const productionSummaryMeta = productionCompletionProgress
+    ? productionCompletionProgress.mode === "stations"
+      ? t("orders.detail.productionCompletion.stations")
+      : productionCompletionProgress.mode === "steps"
+        ? t("orders.detail.productionCompletion.steps")
+        : t("orders.detail.productionCompletion.items")
+    : t("orders.detail.productionCompletion.steps");
   const customFieldRows = [
     ...activeLevels.map((level) => {
       const valueId = orderState.orderFieldValues?.[level.id];
@@ -5932,15 +5902,16 @@ export default function OrderDetailPage() {
       key: "progress",
       title: t("orders.detail.hero.progress"),
       value: `${progressPercent}%`,
-      className: "border-border bg-muted/20",
+      className: "border-border bg-card",
       valueClassName: "text-xl font-semibold md:text-2xl",
       titleClassName: "text-muted-foreground",
     },
     {
       key: "production",
       title: t("orders.detail.hero.production"),
-      value: productionSummary,
-      className: "border-border bg-muted/20",
+      value: productionSummaryValue,
+      meta: productionSummaryMeta,
+      className: "border-border bg-card",
       valueClassName: "text-lg font-semibold md:text-xl",
       titleClassName: "text-muted-foreground",
     },
@@ -5950,7 +5921,7 @@ export default function OrderDetailPage() {
             key: "external-cost",
             title: t("orders.detail.hero.externalCost"),
             value: externalCostLabel,
-            className: "border-border bg-muted/20",
+            className: "border-border bg-card",
             valueClassName: "text-xl font-semibold md:text-2xl",
             titleClassName: "text-muted-foreground",
           },
@@ -9802,29 +9773,17 @@ export default function OrderDetailPage() {
               className={`grid grid-cols-2 gap-3 sm:grid-cols-2 ${heroKpiGridClass}`}
             >
               {heroKpis.map((kpi) => (
-                <Card key={kpi.key} className="h-full">
-                  <div
-                    className={`flex h-full min-h-24 flex-col justify-start rounded-xl px-3 py-2.5 md:min-h-30 md:px-3.5 md:py-3 ${kpi.className}`}
-                  >
-                    <div
-                      className={`text-[11px] md:text-xs ${kpi.titleClassName}`}
-                    >
-                      {kpi.title}
-                    </div>
-                    <div className="flex h-full flex-col justify-between">
-                      <div
-                        className={`mt-2 flex flex-1 items-center ${kpi.valueClassName}`}
-                      >
-                        {kpi.value}
-                      </div>
-                      <div
-                        className={`mt-2 min-h-4 text-[10px] md:text-[11px] ${kpi.className ?? "text-muted-foreground"}`}
-                      >
-                        {"meta" in kpi && kpi.meta ? kpi.meta : null}
-                      </div>
-                    </div>
-                  </div>
-                </Card>
+                <KpiCard
+                  key={kpi.key}
+                  label={kpi.title}
+                  value={kpi.value}
+                  hint={"meta" in kpi ? kpi.meta : undefined}
+                  className={`h-full ${kpi.className}`.trim()}
+                  contentClassName="flex h-full min-h-24 flex-col justify-start px-3 py-2.5 md:min-h-30 md:px-3.5 md:py-3"
+                  labelClassName={`text-[11px] md:text-xs normal-case tracking-[0.12em] ${kpi.titleClassName}`.trim()}
+                  valueClassName={kpi.valueClassName}
+                  hintClassName={`min-h-4 text-[10px] md:text-[11px] ${kpi.className ?? "text-muted-foreground"}`.trim()}
+                />
               ))}
             </div>
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.9fr)]">

@@ -34,7 +34,7 @@ export function TabsNav() {
   const mainTabs = [
     {
       value: "dashboard",
-      href: "/",
+      href: "/dashboard",
       label: t("appShell.dashboard"),
       icon: LayoutDashboardIcon,
     },
@@ -226,7 +226,9 @@ export function TabsNav() {
       if (t.value === "production") {
         return pathname.startsWith("/production");
       }
-      return t.href === "/" ? pathname === "/" : pathname.startsWith(t.href);
+      return t.href === "/dashboard"
+        ? pathname === "/" || pathname.startsWith("/dashboard")
+        : pathname.startsWith(t.href);
     })?.value ??
     visibleMainTabs[0]?.value ??
     settingsTab.value;
@@ -284,8 +286,8 @@ export function TabsNav() {
                   ? pathname.startsWith("/warehouse")
                   : value === "production"
                     ? pathname.startsWith("/production")
-                  : href === "/"
-                    ? pathname === "/"
+                  : href === "/dashboard"
+                    ? pathname === "/" || pathname.startsWith("/dashboard")
                     : pathname.startsWith(href);
               return (
                 <li key={value}>

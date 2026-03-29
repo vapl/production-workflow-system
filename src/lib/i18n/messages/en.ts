@@ -1478,6 +1478,7 @@
         jobs: "Work orders",
       },
       queues: {
+        backToReady: "Back to Ready for production",
         title: "Station queues",
         subtitle:
           "Dedicated planner view for backlog, due dates, and station queue cards.",
@@ -1523,6 +1524,7 @@
         loading: "Loading...",
         noQueuedWork: "No work queued",
         time: "Time",
+        overtime: "OT",
         replanRows: "Replan rows",
         jobDetail: "Job detail",
         lockedStarted: "Already started on the floor.",
@@ -1560,6 +1562,10 @@
         queueStepsHint: "Scheduled production steps.",
         actualTime: "Actual time",
         actualTimeHint: "Accumulated execution time.",
+        regularTime: "Regular time",
+        regularTimeHint: "Worked time within regular shifts.",
+        overtimeTime: "Overtime",
+        overtimeTimeHint: "Worked time within the overtime window.",
         dueStatus: "Due status",
         dueNow: "Due now",
         onTrack: "On track",
@@ -1670,6 +1676,7 @@
         },
       operators: {
         readyBreadcrumb: "Ready for production",
+        backToReady: "Back to Ready for production",
         title: "Operators",
         subtitle: "Productivity, time, and completed units by operator.",
         mobileSubtitle: "View for productivity, time, and labor cost.",
@@ -1753,6 +1760,7 @@
         openProfile: "Open profile",
       },
       operatorDetail: {
+        backToOperators: "Back to Operators",
         operatorsBreadcrumb: "Operators",
         subtitle: "Operator detail",
         mobileSubtitle: "Detailed operator view with KPIs and rates.",
@@ -1763,6 +1771,8 @@
         payRates: "Pay rates",
         hourlyRate: "Hourly rate",
         overtimeRate: "Overtime rate",
+        regularHours: "Regular hours",
+        overtimeHours: "Overtime hours",
         currentLaborCost: "Current labor cost",
         saveRates: "Save rates",
         filters: "Payroll filters",
@@ -2062,9 +2072,20 @@
         "Choose who receives system notifications about blocked and resumed work.",
       workdays: "Workdays",
       shifts: "Shifts",
+      overtimeEnabled: "Enable overtime",
+      overtimeEnabledHint:
+        "When disabled, time is counted only within the shift and overtime fields are hidden.",
+      shiftStart: "Shift {index} start",
+      shiftEnd: "Shift {index} end",
+      overtimeStart: "Shift {index} overtime start",
+      overtimeEnd: "Shift {index} overtime end",
       addShift: "Add shift",
       overnightShiftHint:
         "Overnight shift is supported, for example 22:00 to 06:00.",
+      overtimeStartHint:
+        "Before the shift starts, work from this time counts as overtime.",
+      overtimeEndHint:
+        "After the shift ends, time counts as overtime until this time. After that, the timer stops.",
       saveHours: "Save hours",
       stationName: "Station name",
       stationNamePlaceholder: "Cutting",

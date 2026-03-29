@@ -102,7 +102,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         : ([
             canViewDashboard
               ? {
-                  href: "/",
+                  href: "/dashboard",
                   label: t("appShell.dashboard"),
                   icon: LayoutDashboardIcon,
                 }
@@ -425,8 +425,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       isOwner: user.isOwner,
     };
     const route =
-      pathname === "/"
-        ? "/"
+      pathname === "/" || pathname.startsWith("/dashboard")
+        ? "/dashboard"
         : pathname.startsWith("/settings")
           ? "/settings"
           : pathname.startsWith("/qr/")
@@ -659,8 +659,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="space-y-1">
                 {drawerNavItems.map(({ href, label, icon: Icon }) => {
                   const isActive =
-                    href === "/"
-                      ? pathname === "/"
+                    href === "/dashboard"
+                      ? pathname === "/" || pathname?.startsWith("/dashboard")
                       : pathname?.startsWith(href);
                   return (
                     <Link

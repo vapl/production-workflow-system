@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
+  ArrowLeftIcon,
   CalendarIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/Popover";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { ProductionStatCard } from "@/components/production/ProductionStatCard";
@@ -30,6 +32,10 @@ import {
   type OperatorProfileRow,
   type OperatorStationRow,
 } from "@/lib/domain/productionOperators";
+import {
+  parseWorkingCalendar,
+  type WorkingCalendar,
+} from "@/lib/domain/workingCalendar";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabaseClient";
 import type {
@@ -115,6 +121,11 @@ export default function ProductionOperatorDetailPage() {
   const [productionItems, setProductionItems] = useState<ProductionItemRow[]>(
     [],
   );
+  const [workingCalendar, setWorkingCalendar] = useState<WorkingCalendar>({
+    workdays: [1, 2, 3, 4, 5],
+    shifts: [{ start: "08:00", end: "17:00" }],
+    overtimeEnabled: false,
+  });
   const [hourlyRateInput, setHourlyRateInput] = useState<string | null>(null);
   const [overtimeRateInput, setOvertimeRateInput] = useState<string | null>(
     null,
@@ -132,7 +143,7 @@ export default function ProductionOperatorDetailPage() {
       return;
     }
     let isMounted = true;
-    const loadData = async () => {
+  const loadData = async () => {
       setIsLoading(true);
       setDataError("");
       const [
@@ -140,6 +151,7 @@ export default function ProductionOperatorDetailPage() {
         configsResult,
         assignmentsResult,
         stationsResult,
+        settingsResult,
         eventsResult,
         batchRunsResult,
         itemsResult,
@@ -164,6 +176,11 @@ export default function ProductionOperatorDetailPage() {
           .select("id, name")
           .eq("tenant_id", user.tenantId)
           .eq("is_active", true),
+        sb
+          .from("tenant_settings")
+          .select("workday_start, workday_end, workdays, work_shifts")
+          .eq("tenant_id", user.tenantId)
+          .maybeSingle(),
         sb
           .from("production_status_events")
           .select(
@@ -197,6 +214,7 @@ export default function ProductionOperatorDetailPage() {
         configsResult.error ||
         assignmentsResult.error ||
         stationsResult.error ||
+        settingsResult.error ||
         eventsResult.error ||
         batchRunsResult.error ||
         itemsResult.error
@@ -210,6 +228,9 @@ export default function ProductionOperatorDetailPage() {
       setOperatorConfigs((configsResult.data ?? []) as OperatorConfigRow[]);
       setAssignments((assignmentsResult.data ?? []) as OperatorAssignmentRow[]);
       setStations((stationsResult.data ?? []) as OperatorStationRow[]);
+      if (settingsResult.data) {
+        setWorkingCalendar(parseWorkingCalendar(settingsResult.data));
+      }
       setEvents((eventsResult.data ?? []) as ProductionStatusEventRow[]);
       setBatchRuns(
         ((batchRunsResult.data ?? []) as Array<Record<string, unknown>>).map(
@@ -279,6 +300,7 @@ export default function ProductionOperatorDetailPage() {
         filter: {
           range: selectedRange,
           search: orderSearch,
+          calendar: workingCalendar,
         },
       })[0] ?? null,
     [
@@ -291,6 +313,7 @@ export default function ProductionOperatorDetailPage() {
       productionItems,
       selectedRange,
       orderSearch,
+      workingCalendar,
     ],
   );
 
@@ -424,18 +447,28 @@ export default function ProductionOperatorDetailPage() {
     setOvertimeRateInput(overtimeRate != null ? String(overtimeRate) : "");
   };
 
+  const backToOperatorsButton = (
+    <Tooltip
+      content={t("production.main.operatorDetail.backToOperators")}
+      side="bottom"
+    >
+      <Button asChild variant="outline" size="icon" className="rounded-full">
+        <Link
+          href="/production/operators"
+          aria-label={t("production.main.operatorDetail.backToOperators")}
+        >
+          <ArrowLeftIcon className="h-4 w-4" />
+        </Link>
+      </Button>
+    </Tooltip>
+  );
+
   return (
     <div className="space-y-4">
       <DesktopPageHeader
         title={
-          <span className="flex items-center gap-2 text-xl">
-            <Link
-              href="/production/operators"
-              className="font-medium text-muted-foreground hover:text-foreground"
-            >
-              {t("production.main.operatorDetail.operatorsBreadcrumb")}
-            </Link>
-            <ChevronRightIcon className="h-5 w-5 text-muted-foreground" />
+          <span className="flex items-center gap-3 text-xl">
+            {backToOperatorsButton}
             <span>{summary?.name ?? t("production.main.operators.title")}</span>
           </span>
         }
@@ -446,6 +479,7 @@ export default function ProductionOperatorDetailPage() {
         title={summary?.name ?? t("production.main.operators.title")}
         subtitle={t("production.main.operatorDetail.mobileSubtitle")}
         showCompact={false}
+        rightAction={backToOperatorsButton}
       />
 
       {dataError ? (
@@ -454,10 +488,18 @@ export default function ProductionOperatorDetailPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <ProductionStatCard
           label={t("production.main.operators.workedHours")}
           value={formatWorkedHours(summary?.workedMinutes ?? 0)}
+        />
+        <ProductionStatCard
+          label={t("production.main.operatorDetail.regularHours")}
+          value={formatWorkedHours(summary?.regularMinutes ?? 0)}
+        />
+        <ProductionStatCard
+          label={t("production.main.operatorDetail.overtimeHours")}
+          value={formatWorkedHours(summary?.overtimeMinutes ?? 0)}
         />
         <ProductionStatCard
           label={t("production.main.operators.completedQty")}

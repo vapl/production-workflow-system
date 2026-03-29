@@ -732,11 +732,12 @@ export default function SettingsPage() {
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
   const [dragStationId, setDragStationId] = useState<string | null>(null);
   const [isStationOrderSaving, setIsStationOrderSaving] = useState(false);
-  const [workdays, setWorkdays] = useState<number[]>([...DEFAULT_WORKDAYS]);
-  const [workShifts, setWorkShifts] = useState<WorkShift[]>([
-    ...DEFAULT_WORK_SHIFTS,
-  ]);
-  const [workdayError, setWorkdayError] = useState<string | null>(null);
+    const [workdays, setWorkdays] = useState<number[]>([...DEFAULT_WORKDAYS]);
+    const [workShifts, setWorkShifts] = useState<WorkShift[]>([
+      ...DEFAULT_WORK_SHIFTS,
+    ]);
+    const [overtimeEnabled, setOvertimeEnabled] = useState(false);
+    const [workdayError, setWorkdayError] = useState<string | null>(null);
   const [isWorkdaySaving, setIsWorkdaySaving] = useState(false);
   const [orderFieldLabel, setOrderFieldLabel] = useState("");
   const [orderFieldKey, setOrderFieldKey] = useState("");
@@ -916,11 +917,11 @@ export default function SettingsPage() {
     const loadWorkHours = async () => {
       setIsTenantSettingsLoading(true);
       try {
-        const { data, error } = await sb
-          .from("tenant_settings")
-          .select(
-            "workday_start, workday_end, workdays, work_shifts, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles, external_price_reconciliation_enabled, external_table_columns",
-          )
+          const { data, error } = await sb
+            .from("tenant_settings")
+            .select(
+              "workday_start, workday_end, workdays, work_shifts, overtime_enabled, qr_enabled_sizes, qr_default_size, qr_content_fields, notification_roles, external_price_reconciliation_enabled, external_table_columns",
+            )
           .eq("tenant_id", currentUser.tenantId)
           .maybeSingle();
         if (!isMounted) {
@@ -929,9 +930,10 @@ export default function SettingsPage() {
         if (error || !data) {
           return;
         }
-        const calendar = parseWorkingCalendar(data);
-        setWorkdays(calendar.workdays);
-        setWorkShifts(calendar.shifts);
+          const calendar = parseWorkingCalendar(data);
+          setWorkdays(calendar.workdays);
+          setWorkShifts(calendar.shifts);
+          setOvertimeEnabled(calendar.overtimeEnabled);
         if (Array.isArray(data.qr_enabled_sizes)) {
           setQrEnabledSizes(
             data.qr_enabled_sizes.filter(
@@ -2544,6 +2546,14 @@ export default function SettingsPage() {
     const normalizedShifts = workShifts.map((shift) => ({
       start: normalizeWorkTime(shift.start, ""),
       end: normalizeWorkTime(shift.end, ""),
+      overtimeStart: normalizeWorkTime(
+        overtimeEnabled ? shift.overtimeStart ?? shift.start : shift.start,
+        normalizeWorkTime(shift.start, ""),
+      ),
+      overtimeEnd: normalizeWorkTime(
+        overtimeEnabled ? shift.overtimeEnd ?? shift.end : shift.end,
+        normalizeWorkTime(shift.end, ""),
+      ),
     }));
     const validationError = validateWorkingCalendar(workdays, normalizedShifts);
     if (validationError) {
@@ -2556,11 +2566,12 @@ export default function SettingsPage() {
     setIsWorkdaySaving(true);
     const { error } = await supabase.from("tenant_settings").upsert({
       tenant_id: currentUser.tenantId,
-      workday_start: primaryShift.start,
-      workday_end: primaryShift.end,
-      workdays,
-      work_shifts: normalizedShifts,
-    });
+        workday_start: primaryShift.start,
+        workday_end: primaryShift.end,
+        workdays,
+        overtime_enabled: overtimeEnabled,
+        work_shifts: normalizedShifts,
+      });
     if (error) {
       setWorkdayError(error.message);
     } else {
@@ -2591,7 +2602,15 @@ export default function SettingsPage() {
   }
 
   function handleAddShift() {
-    setWorkShifts((prev) => [...prev, { start: "17:00", end: "21:00" }]);
+    setWorkShifts((prev) => [
+      ...prev,
+      {
+        start: "17:00",
+        end: "21:00",
+        overtimeStart: "17:00",
+        overtimeEnd: "21:00",
+      },
+    ]);
   }
 
   function handleRemoveShift(index: number) {
@@ -3916,10 +3935,12 @@ export default function SettingsPage() {
               <OperationsWorkingHoursCard
                 t={t}
                 optionLabel={optionLabel}
-                weekdayOptions={weekdayOptions}
-                workdays={workdays}
-                toggleWorkday={toggleWorkday}
-                workShifts={workShifts}
+                  weekdayOptions={weekdayOptions}
+                  workdays={workdays}
+                  toggleWorkday={toggleWorkday}
+                  overtimeEnabled={overtimeEnabled}
+                  toggleOvertimeEnabled={setOvertimeEnabled}
+                  workShifts={workShifts}
                 handleAddShift={handleAddShift}
                 handleWorkShiftChange={handleWorkShiftChange}
                 handleRemoveShift={handleRemoveShift}
@@ -3928,47 +3949,6 @@ export default function SettingsPage() {
                 handleSaveWorkHours={handleSaveWorkHours}
                 isWorkdaySaving={isWorkdaySaving}
               />
-              {showLegacyProductionRoutingSettings ? (
-                <OperationsWorkstationsCard
-                  t={t}
-                  optionLabel={optionLabel}
-                  stationName={stationName}
-                  setStationName={setStationName}
-                  stationDescription={stationDescription}
-                  setStationDescription={setStationDescription}
-                  stationTrackingMode={stationTrackingMode}
-                  setStationTrackingMode={setStationTrackingMode}
-                  stationTrackingModeOptions={stationTrackingModeOptions}
-                  handleSaveStation={handleSaveStation}
-                  editingStationId={editingStationId}
-                  resetStationForm={resetStationForm}
-                  selectedWorkStationIds={selectedWorkStationIds}
-                  setSelectedWorkStationIds={setSelectedWorkStationIds}
-                  displayStations={displayStations}
-                  handleDeleteSelectedWorkStations={
-                    handleDeleteSelectedWorkStations
-                  }
-                  setDragStationId={setDragStationId}
-                  handleStationDrop={handleStationDrop}
-                  updateWorkStation={updateWorkStation}
-                  handleEditStation={handleEditStation}
-                  handleCopyWorkStation={handleCopyWorkStation}
-                  confirmRemove={confirmRemove}
-                  removeWorkStation={removeWorkStation}
-                />
-              ) : (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{t("settings.operations.routingMovedTitle")}</CardTitle>
-                    <CardDescription>
-                      {t("settings.operations.routingMovedDescription")}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    {t("settings.operations.routingMovedHint")}
-                  </CardContent>
-                </Card>
-              )}
 
               <OperationsQrSettingsCard
                 t={t}

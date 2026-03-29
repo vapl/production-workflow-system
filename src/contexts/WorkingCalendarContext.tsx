@@ -13,6 +13,7 @@ import {
 type WorkingCalendarState = {
   workdays: number[];
   shifts: WorkShift[];
+  overtimeEnabled: boolean;
   isLoading: boolean;
   refresh: () => Promise<void>;
 };
@@ -20,6 +21,7 @@ type WorkingCalendarState = {
 const defaultState: WorkingCalendarState = {
   workdays: [...DEFAULT_WORKDAYS],
   shifts: [...DEFAULT_WORK_SHIFTS],
+  overtimeEnabled: false,
   isLoading: false,
   refresh: async () => undefined,
 };
@@ -35,6 +37,7 @@ export function WorkingCalendarProvider({
   const [state, setState] = useState<Omit<WorkingCalendarState, "refresh">>({
     workdays: [...DEFAULT_WORKDAYS],
     shifts: [...DEFAULT_WORK_SHIFTS],
+    overtimeEnabled: false,
     isLoading: false,
   });
 
@@ -44,6 +47,7 @@ export function WorkingCalendarProvider({
         ...prev,
         workdays: [...DEFAULT_WORKDAYS],
         shifts: [...DEFAULT_WORK_SHIFTS],
+        overtimeEnabled: false,
       }));
       return;
     }
@@ -52,13 +56,14 @@ export function WorkingCalendarProvider({
     }
     const { data } = await supabase
       .from("tenant_settings")
-      .select("workday_start, workday_end, workdays, work_shifts")
+      .select("workday_start, workday_end, workdays, work_shifts, overtime_enabled")
       .eq("tenant_id", user.tenantId)
       .maybeSingle();
     const parsed = parseWorkingCalendar(data ?? {});
     setState({
       workdays: parsed.workdays,
       shifts: parsed.shifts,
+      overtimeEnabled: parsed.overtimeEnabled,
       isLoading: false,
     });
   }, [user.isAuthenticated, user.tenantId]);

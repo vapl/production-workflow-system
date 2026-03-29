@@ -15,7 +15,7 @@ export function MarketingHeader() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4 md:px-10">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 pb-4 pt-[calc(env(safe-area-inset-top)+1rem)] md:px-10 md:py-4">
         <Link href={withLang("/", lang)} className="text-sm font-bold tracking-[0.22em] text-blue-700">
           PWS
         </Link>
