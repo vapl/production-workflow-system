@@ -160,6 +160,26 @@ export function computeWorkingMinutes(
   endIso: string | null | undefined,
   calendar: WorkingCalendar,
 ) {
+  return Math.floor(
+    computeWorkingDurationMs(startIso, endIso, calendar) / 60000,
+  );
+}
+
+export function computeWorkingSeconds(
+  startIso: string | null | undefined,
+  endIso: string | null | undefined,
+  calendar: WorkingCalendar,
+) {
+  return Math.floor(
+    computeWorkingDurationMs(startIso, endIso, calendar) / 1000,
+  );
+}
+
+function computeWorkingDurationMs(
+  startIso: string | null | undefined,
+  endIso: string | null | undefined,
+  calendar: WorkingCalendar,
+) {
   if (!startIso) return 0;
   const start = new Date(startIso);
   const end = endIso ? new Date(endIso) : new Date();
@@ -195,7 +215,7 @@ export function computeWorkingMinutes(
       const rangeStart = shiftStart > start ? shiftStart : start;
       const rangeEnd = shiftEnd < end ? shiftEnd : end;
       if (rangeEnd > rangeStart) {
-        totalMinutes += Math.floor((rangeEnd.getTime() - rangeStart.getTime()) / 60000);
+        totalMinutes += rangeEnd.getTime() - rangeStart.getTime();
       }
     }
   }

@@ -29,7 +29,6 @@ import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate } from "@/lib/domain/formatters";
 import { filterProductionAttachments } from "@/lib/domain/productionAttachments";
 import {
-  getQueueGroupWorkedMinutes,
   summarizeWorkedMinutesByItem,
   summarizeWorkedMinutesByRun,
 } from "@/lib/domain/productionDurations";
@@ -42,6 +41,7 @@ import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus"
 import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
 import {
   computeWorkingMinutes,
+  computeWorkingSeconds,
   parseWorkingCalendar,
   type WorkingCalendar,
 } from "@/lib/domain/workingCalendar";
@@ -253,15 +253,14 @@ function formatLiveDuration(
   startedAt: string | null | undefined,
   doneAt: string | null | undefined,
   nowMs: number,
+  calendar: WorkingCalendar,
 ) {
   if (!startedAt) return "0s";
-  const startMs = Date.parse(startedAt);
-  if (!Number.isFinite(startMs)) {
-    return "0s";
-  }
-  const endMs = doneAt ? Date.parse(doneAt) : nowMs;
-  const safeEndMs = Number.isFinite(endMs) ? endMs : nowMs;
-  const totalSeconds = Math.max(0, Math.floor((safeEndMs - startMs) / 1000));
+  const totalSeconds = computeWorkingSeconds(
+    startedAt,
+    doneAt ?? new Date(nowMs).toISOString(),
+    calendar,
+  );
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
@@ -625,8 +624,6 @@ export default function OperatorProductionPage() {
         .order("created_at", { ascending: false });
       if (orderFilter) {
         runsQuery = runsQuery.eq("order_id", orderFilter);
-      } else {
-        runsQuery = runsQuery.eq("planned_date", selectedDate);
       }
 
       const [stationsResult, runsResult, depsResult] = await Promise.all([
@@ -826,10 +823,15 @@ export default function OperatorProductionPage() {
         setWeekWorkedMinutes(0);
         return;
       }
-      const itemSummary = summarizeWorkedMinutesByItem(events, today);
+      const itemSummary = summarizeWorkedMinutesByItem(
+        events,
+        today,
+        workingCalendar,
+      );
       const runSummary = summarizeWorkedMinutesByRun(
         events.filter((event) => !event.production_item_id),
         today,
+        workingCalendar,
       );
       setTodayWorkedMinutes(itemSummary.todayMinutes + runSummary.todayMinutes);
       setWeekWorkedMinutes(itemSummary.totalMinutes + runSummary.totalMinutes);
@@ -838,7 +840,7 @@ export default function OperatorProductionPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentUser.id, today]);
+  }, [currentUser.id, today, workingCalendar]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1210,11 +1212,51 @@ export default function OperatorProductionPage() {
         .filter((value): value is string => Boolean(value))
         .sort()
         .at(-1) ?? null;
-      const durationMinutes = getQueueGroupWorkedMinutes({
-        trackingMode,
-        runs,
-        items: dedupedItems,
-      });
+      const getWorkedMinutes = (
+        startedAtValue: string | null | undefined,
+        doneAtValue: string | null | undefined,
+        storedMinutes: number | null | undefined,
+      ) => {
+        if (startedAtValue) {
+          return computeWorkingMinutes(
+            startedAtValue,
+            doneAtValue ?? null,
+            workingCalendar,
+          );
+        }
+        return Number(storedMinutes ?? 0);
+      };
+      const durationMinutes =
+        trackingMode === "construction_level"
+          ? dedupedItems.length > 0
+            ? dedupedItems.reduce(
+                (sum, item) =>
+                  sum +
+                  getWorkedMinutes(
+                    item.started_at,
+                    item.done_at,
+                    item.duration_minutes,
+                  ),
+                0,
+              )
+            : runs.reduce(
+                (sum, run) =>
+                  sum +
+                  getWorkedMinutes(
+                    run.started_at,
+                    run.done_at,
+                    run.duration_minutes,
+                  ),
+                0,
+              )
+          : runs.reduce((maxMinutes, run) => {
+              const runMinutes = getWorkedMinutes(
+                run.started_at,
+                run.done_at,
+                run.duration_minutes,
+              );
+              return Math.max(maxMinutes, runMinutes);
+            }, 0);
       const statusOrder: BatchRunRow["status"][] = [
         "blocked",
         "paused",
@@ -1307,7 +1349,14 @@ export default function OperatorProductionPage() {
       map.set(stationId, filteredItems);
     });
     return map;
-  }, [attachmentsByOrder, batchRuns, productionItems, t, visibleStations]);
+  }, [
+    attachmentsByOrder,
+    batchRuns,
+    productionItems,
+    t,
+    visibleStations,
+    workingCalendar,
+  ]);
 
   const filteredQueueByStation = useMemo(() => {
     const map = new Map<string, QueueItem[]>();
@@ -1316,6 +1365,9 @@ export default function OperatorProductionPage() {
       const list = queueByStation.get(station.id) ?? [];
       const filtered = list.filter((item) => {
         if (orderFilter && item.orderId !== orderFilter) {
+          return false;
+        }
+        if (!orderFilter && item.plannedDate && item.plannedDate > selectedDate) {
           return false;
         }
         if (statusFilter !== "all" && item.status !== statusFilter) {
@@ -1350,6 +1402,7 @@ export default function OperatorProductionPage() {
     priorityFilter,
     onlyBlocked,
     orderFilter,
+    selectedDate,
   ]);
 
   const queueItemByOrderId = useMemo(() => {
@@ -2832,6 +2885,7 @@ export default function OperatorProductionPage() {
                                 item.startedAt,
                                 item.doneAt ?? null,
                                 liveNowMs,
+                                workingCalendar,
                               )
                             : formatDuration(elapsedMinutes)
                           : null;
@@ -4157,5 +4211,3 @@ export default function OperatorProductionPage() {
     </section>
   );
 }
-
-

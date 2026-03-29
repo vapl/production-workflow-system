@@ -25,14 +25,6 @@ import { Checkbox } from "@/components/ui/Checkbox";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
 import { Input } from "@/components/ui/Input";
-import { SelectField } from "@/components/ui/SelectField";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/Select";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import {
@@ -115,6 +107,28 @@ function formatDateInput(value: string | null | undefined) {
   return `${day}.${month}.${year}`;
 }
 
+function getLocalDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysToInputDate(value: string, days: number) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, (month ?? 1) - 1, day ?? 1);
+  date.setDate(date.getDate() + days);
+  return getLocalDateInputValue(date);
+}
+
+type QueueQuickFilter =
+  | "none"
+  | "today"
+  | "days7"
+  | "late"
+  | "blocked"
+  | "in_progress";
+
 function formatQueueGroupDate(
   value: string | null | undefined,
   t: ReturnType<typeof useI18n>["t"],
@@ -137,6 +151,7 @@ function formatQueueGroupDate(
 export default function ProductionQueuesPage() {
   const { t } = useI18n();
   const user = useCurrentUser();
+  const today = useMemo(() => getLocalDateInputValue(), []);
   const [isLoading, setIsLoading] = useState(false);
   const [dataError, setDataError] = useState("");
   const [stations, setStations] = useState<ProductionStation[]>([]);
@@ -145,12 +160,11 @@ export default function ProductionQueuesPage() {
   );
   const [orderItems, setOrderItems] = useState<ProductionJobOrderItem[]>([]);
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
-  const [viewDate, setViewDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
-  const [plannedRangeDays, setPlannedRangeDays] = useState(7);
+  const [quickFilter, setQuickFilter] = useState<QueueQuickFilter>("none");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [queueActionDate, setQueueActionDate] = useState(
-    new Date().toISOString().slice(0, 10),
+    getLocalDateInputValue(),
   );
   const [selectedQueueRunIds, setSelectedQueueRunIds] = useState<string[]>([]);
   const [isQueueBulkApplying, setIsQueueBulkApplying] = useState(false);
@@ -259,6 +273,23 @@ export default function ProductionQueuesPage() {
     );
     setIsLoading(false);
   }, [t]);
+
+  const { normalizedDateFrom, normalizedDateTo } = useMemo(() => {
+    const fallbackStart = "2000-01-01";
+    const fallbackEnd = addDaysToInputDate(today, 3650);
+
+    if (dateFrom || dateTo) {
+      return {
+        normalizedDateFrom: dateFrom || fallbackStart,
+        normalizedDateTo: dateTo || fallbackEnd,
+      };
+    }
+
+    return {
+      normalizedDateFrom: "",
+      normalizedDateTo: "",
+    };
+  }, [dateFrom, dateTo, today]);
 
   useEffect(() => {
     void loadData();
@@ -390,36 +421,77 @@ export default function ProductionQueuesPage() {
         productionItems,
         orderItems,
         stations,
-        viewDate,
-        plannedRangeDays,
+        viewDate: "2000-01-01",
+        plannedRangeDays: 36500,
         includeDone: queueViewMode !== "active",
       }),
     [
       batchRuns,
       orderItems,
-      plannedRangeDays,
       productionItems,
       queueViewMode,
       stations,
-      viewDate,
     ],
   );
 
   const filteredQueueByStation = useMemo(() => {
     const query = search.trim().toLowerCase();
+    const matchesQuickFilter = (item: ProductionQueueItem) => {
+      const itemDate = item.plannedDate?.slice(0, 10) ?? "";
+
+      if (
+        normalizedDateFrom &&
+        itemDate &&
+        itemDate < normalizedDateFrom
+      ) {
+        return false;
+      }
+
+      if (normalizedDateTo && itemDate && itemDate > normalizedDateTo) {
+        return false;
+      }
+
+      if ((dateFrom || dateTo) && !itemDate) {
+        return false;
+      }
+
+      if (quickFilter === "today") {
+        return itemDate === today;
+      }
+
+      if (quickFilter === "days7") {
+        return Boolean(itemDate) && itemDate >= today && itemDate <= addDaysToInputDate(today, 6);
+      }
+
+      if (quickFilter === "late") {
+        const comparisonDate = itemDate || item.dueDate?.slice(0, 10) || "";
+        return Boolean(comparisonDate) && comparisonDate < today && item.status !== "done";
+      }
+
+      if (quickFilter === "blocked") {
+        return item.status === "blocked";
+      }
+
+      if (quickFilter === "in_progress") {
+        return item.status === "in_progress";
+      }
+
+      return true;
+    };
+
     if (!query) {
       const next = new Map(queueByStation);
       next.forEach((queue, stationId) => {
         next.set(
           stationId,
           queue.filter((item) => {
-            if (queueViewMode === "completed") {
-              return item.status === "done";
-            }
-            if (queueViewMode === "active") {
-              return item.status !== "done";
-            }
-            return true;
+            const matchesMode =
+              queueViewMode === "completed"
+                ? item.status === "done"
+                : queueViewMode === "active"
+                  ? item.status !== "done"
+                  : true;
+            return matchesMode && matchesQuickFilter(item);
           }),
         );
       });
@@ -439,6 +511,9 @@ export default function ProductionQueuesPage() {
           if (!matchesMode) {
             return false;
           }
+          if (!matchesQuickFilter(item)) {
+            return false;
+          }
           return (
             item.orderNumber.toLowerCase().includes(query) ||
             item.customerName.toLowerCase().includes(query) ||
@@ -452,7 +527,17 @@ export default function ProductionQueuesPage() {
       );
     });
     return next;
-  }, [queueByStation, queueViewMode, search]);
+  }, [
+    dateFrom,
+    dateTo,
+    normalizedDateFrom,
+    normalizedDateTo,
+    queueByStation,
+    queueViewMode,
+    quickFilter,
+    search,
+    today,
+  ]);
 
   const metricsByStation = useMemo(
     () =>
@@ -551,6 +636,118 @@ export default function ProductionQueuesPage() {
 
   const canManageQueue =
     user.isAdmin || user.isOwner || user.role === "Production planner";
+
+  const hasAdvancedDateFilter = Boolean(dateFrom || dateTo);
+
+  const quickFilterOptions = useMemo<
+    Array<{
+      value: QueueQuickFilter;
+      label: string;
+    }>
+  >(
+    () => [
+      { value: "today", label: t("production.main.queues.quickFilters.today") },
+      { value: "days7", label: t("production.main.queues.quickFilters.days7") },
+      { value: "late", label: t("production.main.queues.quickFilters.late") },
+      {
+        value: "blocked",
+        label: t("production.main.queues.quickFilters.blocked"),
+      },
+      {
+        value: "in_progress",
+        label: t("production.main.queues.quickFilters.inProgress"),
+      },
+    ],
+    [t],
+  );
+
+  const quickFilterCounts = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const allItems = Array.from(queueByStation.values()).flat();
+    const countMap = new Map<QueueQuickFilter, number>();
+
+    const matchesMode = (item: ProductionQueueItem) =>
+      queueViewMode === "completed"
+        ? item.status === "done"
+        : queueViewMode === "active"
+          ? item.status !== "done"
+          : true;
+
+    const matchesAdvancedDateFilter = (item: ProductionQueueItem) => {
+      const itemDate = item.plannedDate?.slice(0, 10) ?? "";
+      if (normalizedDateFrom && itemDate && itemDate < normalizedDateFrom) {
+        return false;
+      }
+      if (normalizedDateTo && itemDate && itemDate > normalizedDateTo) {
+        return false;
+      }
+      if ((dateFrom || dateTo) && !itemDate) {
+        return false;
+      }
+      return true;
+    };
+
+    const matchesSearch = (item: ProductionQueueItem) =>
+      !query ||
+      item.orderNumber.toLowerCase().includes(query) ||
+      item.customerName.toLowerCase().includes(query) ||
+      item.batchCode.toLowerCase().includes(query) ||
+      item.material.toLowerCase().includes(query) ||
+      item.items.some((row) => row.item_name.toLowerCase().includes(query));
+
+    const matchesQuick = (item: ProductionQueueItem, filter: QueueQuickFilter) => {
+      const itemDate = item.plannedDate?.slice(0, 10) ?? "";
+      if (filter === "today") {
+        return itemDate === today;
+      }
+      if (filter === "days7") {
+        return (
+          Boolean(itemDate) &&
+          itemDate >= today &&
+          itemDate <= addDaysToInputDate(today, 6)
+        );
+      }
+      if (filter === "late") {
+        const comparisonDate = itemDate || item.dueDate?.slice(0, 10) || "";
+        return Boolean(comparisonDate) && comparisonDate < today && item.status !== "done";
+      }
+      if (filter === "blocked") {
+        return item.status === "blocked";
+      }
+      if (filter === "in_progress") {
+        return item.status === "in_progress";
+      }
+      return true;
+    };
+
+    const baseItems = allItems.filter(
+      (item) => matchesMode(item) && matchesAdvancedDateFilter(item) && matchesSearch(item),
+    );
+
+    quickFilterOptions.forEach((filter) => {
+      countMap.set(
+        filter.value,
+        baseItems.filter((item) => matchesQuick(item, filter.value)).length,
+      );
+    });
+
+    return countMap;
+  }, [
+    dateFrom,
+    dateTo,
+    normalizedDateFrom,
+    normalizedDateTo,
+    queueByStation,
+    queueViewMode,
+    quickFilterOptions,
+    search,
+    today,
+  ]);
+
+  const resetAdvancedFilters = () => {
+    setDateFrom("");
+    setDateTo("");
+  };
 
   const handleMoveSelectedQueueDate = async () => {
     if (!supabase || selectedBatchRunIds.length === 0) {
@@ -932,48 +1129,63 @@ export default function ProductionQueuesPage() {
                   {t("production.main.queues.viewMode.all")}
                 </Button>
               </div>
-              <FiltersDropdown contentClassName="w-[360px] p-4">
+              <FiltersDropdown
+                label={t("production.main.queues.advancedFilters.trigger")}
+                contentClassName="w-[360px] p-4"
+              >
                 <div className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {t("production.main.queues.advancedFilters.quickFiltersLabel")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {quickFilterOptions.map((filter) => (
+                        <Button
+                          key={filter.value}
+                          variant={quickFilter === filter.value ? "default" : "outline"}
+                          size="sm"
+                          className="h-8 rounded-full px-3"
+                          onClick={() =>
+                            setQuickFilter((prev) =>
+                              prev === filter.value ? "none" : filter.value,
+                            )
+                          }
+                        >
+                          {filter.label} {quickFilterCounts.get(filter.value) ?? 0}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="h-px bg-border/70" />
                   <DatePicker
-                    label={t("production.main.queue.viewDate")}
-                    value={viewDate}
-                    onChange={setViewDate}
+                    label={t("production.main.queues.advancedFilters.fromDate")}
+                    value={dateFrom}
+                    onChange={(value) => setDateFrom(value || "")}
                     className="space-y-1 text-xs text-muted-foreground"
                   />
-                  <div className="h-px bg-border/70" />
-                  <SelectField
-                    label={t("production.main.common.range")}
-                    labelClassName="text-xs text-muted-foreground"
-                    value={String(plannedRangeDays)}
-                    onValueChange={(value) =>
-                      setPlannedRangeDays(Number(value))
-                    }
-                  >
-                    <Select
-                      value={String(plannedRangeDays)}
-                      onValueChange={(value) =>
-                        setPlannedRangeDays(Number(value))
-                      }
+                  <DatePicker
+                    label={t("production.main.queues.advancedFilters.toDate")}
+                    value={dateTo}
+                    onChange={(value) => setDateTo(value || "")}
+                    className="space-y-1 text-xs text-muted-foreground"
+                  />
+                  <div className="flex items-center justify-between border-t border-border/70 pt-3">
+                    <p className="text-xs text-muted-foreground">
+                      {t("production.main.queues.advancedFilters.historyHint")}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-3"
+                      onClick={() => {
+                        setQuickFilter("none");
+                        resetAdvancedFilters();
+                      }}
+                      disabled={quickFilter === "none" && !hasAdvancedDateFilter}
                     >
-                      <SelectTrigger className="h-10 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">
-                          {t("production.main.range.today")}
-                        </SelectItem>
-                        <SelectItem value="3">
-                          {t("production.main.range.days3")}
-                        </SelectItem>
-                        <SelectItem value="7">
-                          {t("production.main.range.days7")}
-                        </SelectItem>
-                        <SelectItem value="14">
-                          {t("production.main.range.days14")}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </SelectField>
+                      {t("production.main.queues.advancedFilters.reset")}
+                    </Button>
+                  </div>
                 </div>
               </FiltersDropdown>
               <FiltersDropdown
@@ -1094,43 +1306,6 @@ export default function ProductionQueuesPage() {
               placeholder={t("production.main.queues.searchPlaceholder")}
               className="h-10"
             />
-            <div className="grid gap-3 sm:grid-cols-3">
-              <DatePicker
-                label={t("production.main.queue.viewDate")}
-                value={viewDate}
-                onChange={setViewDate}
-                className="space-y-1 text-xs text-muted-foreground"
-              />
-              <SelectField
-                label={t("production.main.common.range")}
-                labelClassName="text-xs text-muted-foreground"
-                value={String(plannedRangeDays)}
-                onValueChange={(value) => setPlannedRangeDays(Number(value))}
-              >
-                <Select
-                  value={String(plannedRangeDays)}
-                  onValueChange={(value) => setPlannedRangeDays(Number(value))}
-                >
-                  <SelectTrigger className="h-10 w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">
-                      {t("production.main.range.today")}
-                    </SelectItem>
-                    <SelectItem value="3">
-                      {t("production.main.range.days3")}
-                    </SelectItem>
-                    <SelectItem value="7">
-                      {t("production.main.range.days7")}
-                    </SelectItem>
-                    <SelectItem value="14">
-                      {t("production.main.range.days14")}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </SelectField>
-            </div>
           </div>
 
           <div className="mt-3 flex flex-col gap-2 md:hidden">
@@ -1156,6 +1331,59 @@ export default function ProductionQueuesPage() {
               >
                 {t("production.main.queues.viewMode.all")}
               </Button>
+              <FiltersDropdown
+                contentClassName="w-[320px] p-4"
+                label={t("production.main.queues.advancedFilters.trigger")}
+              >
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {t("production.main.queues.advancedFilters.quickFiltersLabel")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {quickFilterOptions.map((filter) => (
+                        <Button
+                          key={filter.value}
+                          variant={quickFilter === filter.value ? "default" : "outline"}
+                          size="sm"
+                          className="h-8 rounded-full px-3"
+                          onClick={() =>
+                            setQuickFilter((prev) =>
+                              prev === filter.value ? "none" : filter.value,
+                            )
+                          }
+                        >
+                          {filter.label} {quickFilterCounts.get(filter.value) ?? 0}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="h-px bg-border/70" />
+                  <DatePicker
+                    label={t("production.main.queues.advancedFilters.fromDate")}
+                    value={dateFrom}
+                    onChange={(value) => setDateFrom(value || "")}
+                    className="space-y-1 text-xs text-muted-foreground"
+                  />
+                  <DatePicker
+                    label={t("production.main.queues.advancedFilters.toDate")}
+                    value={dateTo}
+                    onChange={(value) => setDateTo(value || "")}
+                    className="space-y-1 text-xs text-muted-foreground"
+                  />
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      setQuickFilter("none");
+                      resetAdvancedFilters();
+                    }}
+                    disabled={quickFilter === "none" && !hasAdvancedDateFilter}
+                  >
+                    {t("production.main.queues.advancedFilters.reset")}
+                  </Button>
+                </div>
+              </FiltersDropdown>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <FiltersDropdown

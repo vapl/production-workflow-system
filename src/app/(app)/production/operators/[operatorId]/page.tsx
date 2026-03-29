@@ -3,11 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChevronRightIcon } from "lucide-react";
+import {
+  CalendarIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/Popover";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { ProductionStatCard } from "@/components/production/ProductionStatCard";
@@ -33,6 +38,36 @@ import type {
   ProductionItemRow,
   ProductionStatusEventRow,
 } from "@/types/production";
+
+function getCurrentMonthDateValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}-01`;
+}
+
+function buildMonthRange(dateValue: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    return null;
+  }
+  const [yearValue, monthPart] = dateValue.split("-");
+  const year = Number(yearValue);
+  const monthIndex = Number(monthPart) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
+    return null;
+  }
+  const start = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+  const end = new Date(year, monthIndex + 1, 1, 0, 0, 0, 0);
+  return {
+    startAt: start.toISOString(),
+    endAt: end.toISOString(),
+  };
+}
+
+function buildMonthDateValue(year: number, monthIndex: number) {
+  const month = String(monthIndex + 1).padStart(2, "0");
+  return `${year}-${month}-01`;
+}
 
 function normalizeJoinedOrder(value: unknown): JoinedProductionOrder | null {
   const item = Array.isArray(value) ? (value[0] ?? null) : value;
@@ -63,7 +98,7 @@ function normalizeJoinedOrder(value: unknown): JoinedProductionOrder | null {
 }
 
 export default function ProductionOperatorDetailPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const user = useCurrentUser();
   const params = useParams<{ operatorId?: string }>();
   const operatorId = params?.operatorId ?? "";
@@ -85,6 +120,11 @@ export default function ProductionOperatorDetailPage() {
     null,
   );
   const [isSavingRates, setIsSavingRates] = useState(false);
+  const [selectedMonthDate, setSelectedMonthDate] = useState(
+    getCurrentMonthDateValue,
+  );
+  const [orderSearch, setOrderSearch] = useState("");
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
 
   useEffect(() => {
     const sb = supabase;
@@ -195,6 +235,37 @@ export default function ProductionOperatorDetailPage() {
     };
   }, [operatorId, t, user.tenantId]);
 
+  const selectedRange = useMemo(
+    () => buildMonthRange(selectedMonthDate),
+    [selectedMonthDate],
+  );
+  const selectedMonthLabel = useMemo(() => {
+    const parsed = new Date(selectedMonthDate);
+    if (Number.isNaN(parsed.getTime())) {
+      return "";
+    }
+    return new Intl.DateTimeFormat(locale, {
+      month: "long",
+      year: "numeric",
+    }).format(parsed);
+  }, [locale, selectedMonthDate]);
+  const selectedMonthValue = useMemo(() => {
+    const parsed = new Date(selectedMonthDate);
+    if (Number.isNaN(parsed.getTime())) {
+      return { year: new Date().getFullYear(), monthIndex: new Date().getMonth() };
+    }
+    return { year: parsed.getFullYear(), monthIndex: parsed.getMonth() };
+  }, [selectedMonthDate]);
+  const [monthPickerYear, setMonthPickerYear] = useState(selectedMonthValue.year);
+
+  const monthOptions = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat(locale, { month: "long" });
+    return Array.from({ length: 12 }, (_, monthIndex) => ({
+      monthIndex,
+      label: formatter.format(new Date(2026, monthIndex, 1)),
+    }));
+  }, [locale]);
+
   const summary = useMemo(
     () =>
       buildOperatorSummaryRows({
@@ -205,6 +276,10 @@ export default function ProductionOperatorDetailPage() {
         events,
         batchRuns,
         productionItems,
+        filter: {
+          range: selectedRange,
+          search: orderSearch,
+        },
       })[0] ?? null,
     [
       profiles,
@@ -214,6 +289,8 @@ export default function ProductionOperatorDetailPage() {
       events,
       batchRuns,
       productionItems,
+      selectedRange,
+      orderSearch,
     ],
   );
 
@@ -244,8 +321,12 @@ export default function ProductionOperatorDetailPage() {
         events,
         batchRuns,
         productionItems,
+        filter: {
+          range: selectedRange,
+          search: orderSearch,
+        },
       }),
-    [operatorId, events, batchRuns, productionItems],
+    [operatorId, events, batchRuns, productionItems, selectedRange, orderSearch],
   );
 
   const unitBreakdown = useMemo(
@@ -254,8 +335,12 @@ export default function ProductionOperatorDetailPage() {
         actorUserId: operatorId,
         events,
         productionItems,
+        filter: {
+          range: selectedRange,
+          search: orderSearch,
+        },
       }),
-    [operatorId, events, productionItems],
+    [operatorId, events, productionItems, selectedRange, orderSearch],
   );
 
   const stationBreakdown = useMemo(
@@ -266,8 +351,20 @@ export default function ProductionOperatorDetailPage() {
         productionItems,
         stations,
         batchRuns,
+        filter: {
+          range: selectedRange,
+          search: orderSearch,
+        },
       }),
-    [operatorId, events, productionItems, stations, batchRuns],
+    [
+      operatorId,
+      events,
+      productionItems,
+      stations,
+      batchRuns,
+      selectedRange,
+      orderSearch,
+    ],
   );
 
   const handleSaveRates = async () => {
@@ -375,6 +472,99 @@ export default function ProductionOperatorDetailPage() {
           value={formatLaborCost(summary?.laborCost)}
         />
       </div>
+
+      <Card className="border-border/80 shadow-sm">
+        <CardHeader>
+          <CardTitle>{t("production.main.operatorDetail.filters")}</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          <label className="block space-y-1 text-xs text-muted-foreground">
+            {t("production.main.operatorDetail.month")}
+            <Popover
+              open={monthPickerOpen}
+              onOpenChange={(open) => {
+                setMonthPickerOpen(open);
+                if (open) {
+                  setMonthPickerYear(selectedMonthValue.year);
+                }
+              }}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="ui-control relative flex w-full items-center justify-between rounded-lg border border-border bg-input-background px-3 pr-9 text-left text-sm text-foreground"
+                >
+                  <span
+                    className={
+                      selectedMonthLabel ? "text-foreground" : "text-muted-foreground"
+                    }
+                  >
+                    {selectedMonthLabel || t("production.main.operatorDetail.month")}
+                  </span>
+                  <CalendarIcon className="absolute right-3 h-4 w-4 text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[320px] p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setMonthPickerYear((current) => current - 1)}
+                    aria-label="Previous year"
+                  >
+                    <ChevronLeftIcon className="h-4 w-4" />
+                  </Button>
+                  <div className="text-sm font-semibold text-foreground">
+                    {monthPickerYear}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setMonthPickerYear((current) => current + 1)}
+                    aria-label="Next year"
+                  >
+                    <ChevronRightIcon className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {monthOptions.map((month) => {
+                    const isSelected =
+                      monthPickerYear === selectedMonthValue.year &&
+                      month.monthIndex === selectedMonthValue.monthIndex;
+                    return (
+                      <Button
+                        key={month.monthIndex}
+                        type="button"
+                        variant={isSelected ? "default" : "outline"}
+                        className="justify-center"
+                        onClick={() => {
+                          setSelectedMonthDate(
+                            buildMonthDateValue(monthPickerYear, month.monthIndex),
+                          );
+                          setMonthPickerOpen(false);
+                        }}
+                      >
+                        {month.label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </label>
+          <label className="block space-y-1 text-xs text-muted-foreground">
+            {t("production.main.operatorDetail.orderSearch")}
+            <Input
+              value={orderSearch}
+              onChange={(event) => setOrderSearch(event.target.value)}
+              placeholder={t("production.main.operatorDetail.orderSearchPlaceholder")}
+              icon="search"
+            />
+          </label>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="space-y-4">
@@ -495,7 +685,7 @@ export default function ProductionOperatorDetailPage() {
             <CardContent className="space-y-2">
               {orderBreakdown.length === 0 ? (
                 <div className="text-sm text-muted-foreground">
-                  {t("production.main.operatorDetail.noCompletedRecords")}
+                  {t("production.main.operatorDetail.noRecordsForFilters")}
                 </div>
               ) : null}
               {orderBreakdown.map((row) => (
@@ -526,7 +716,7 @@ export default function ProductionOperatorDetailPage() {
             <CardContent className="space-y-2">
               {unitBreakdown.length === 0 ? (
                 <div className="text-sm text-muted-foreground">
-                  {t("production.main.operatorDetail.noCompletedUnits")}
+                  {t("production.main.operatorDetail.noUnitsForFilters")}
                 </div>
               ) : null}
               {unitBreakdown.map((row) => (

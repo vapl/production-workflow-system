@@ -101,6 +101,11 @@ export function buildReadyBatchGroups(params: {
   const { productionItems, readyOrders, batchRuns } = params;
   const groups = new Map<string, ReadyBatchGroupLike>();
   const readyOrderById = new Map(readyOrders.map((order) => [order.id, order]));
+  const releasedOrderIds = new Set(
+    batchRuns
+      .filter((run) => run.status !== "pending")
+      .map((run) => run.order_id),
+  );
   const releasedKeys = new Set(
     batchRuns
       .filter((run) => run.status !== "pending")
@@ -121,7 +126,12 @@ export function buildReadyBatchGroups(params: {
     const representativeRun = [...runs].sort(
       (a, b) => batchCodeSortValue(b.batch_code) - batchCodeSortValue(a.batch_code),
     )[0];
-    if (!representativeRun || groups.has(key) || releasedKeys.has(key)) {
+    if (
+      !representativeRun ||
+      groups.has(key) ||
+      releasedKeys.has(key) ||
+      releasedOrderIds.has(representativeRun.order_id)
+    ) {
       return;
     }
     const relatedOrder = readyOrderById.get(representativeRun.order_id);
@@ -189,7 +199,7 @@ export function buildReadyBatchGroups(params: {
     const priority = item.orders?.priority ?? "normal";
     const batchCode = item.batch_code || "B1";
     const key = fallbackReadyKey(item.order_id, batchCode);
-    if (releasedKeys.has(key)) {
+    if (releasedKeys.has(key) || releasedOrderIds.has(item.order_id)) {
       return;
     }
     const existing = groups.get(key);
@@ -214,7 +224,11 @@ export function buildReadyBatchGroups(params: {
   readyOrders.forEach((order) => {
     const batchCode = "B1";
     const key = fallbackReadyKey(order.id, batchCode);
-    if (groups.has(key) || releasedKeys.has(key)) {
+    if (
+      groups.has(key) ||
+      releasedKeys.has(key) ||
+      releasedOrderIds.has(order.id)
+    ) {
       return;
     }
     groups.set(key, {

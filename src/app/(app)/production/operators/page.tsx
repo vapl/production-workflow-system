@@ -244,6 +244,14 @@ export default function ProductionOperatorsPage() {
     });
   }, [search, visibleOperatorRows]);
 
+  const loginCodeByUserId = useMemo(
+    () =>
+      new Map(
+        profiles.map((profile) => [profile.id, profile.login_code?.trim() ?? ""]),
+      ),
+    [profiles],
+  );
+
   const totals = useMemo(
     () =>
       filteredRows.reduce(
@@ -376,6 +384,14 @@ export default function ProductionOperatorsPage() {
                       <div className="text-sm text-muted-foreground">
                         {row.role}
                       </div>
+                      {loginCodeByUserId.get(row.userId) ? (
+                        <div className="text-xs text-muted-foreground">
+                          {t("production.main.operators.manageCodeLabel")}:{" "}
+                          <span className="font-medium text-foreground">
+                            {loginCodeByUserId.get(row.userId)}
+                          </span>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 text-sm">
