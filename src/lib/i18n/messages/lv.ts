@@ -1377,6 +1377,7 @@
         route: "Maršruts",
         save: "Saglabāt",
         search: "Meklēt",
+        actions: "Darbības",
         selectAll: "Atlasīt visu",
         selected: "atlasīts",
         station: "Stacija",

@@ -82,7 +82,9 @@ export function ResponsiveModal({
                 </Button>
               </div>
             ) : null}
-            <div className={cn("min-h-0 flex-1", desktopBodyClassName)}>{children}</div>
+            <div className={cn("min-h-0 flex-1", desktopBodyClassName)}>
+              {children}
+            </div>
           </div>
         </div>
       ) : null}

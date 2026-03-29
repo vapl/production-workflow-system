@@ -331,7 +331,7 @@ export function OperatorManagementModal({
   };
 
   const renderListPane = () => (
-    <div className="flex h-full min-h-0 flex-col border-b border-border p-4 md:border-b-0 md:border-r md:p-5">
+    <div className="flex h-full min-h-0 flex-1 flex-col p-4 md:border-b-0 md:border-r md:p-5">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">
@@ -358,7 +358,7 @@ export function OperatorManagementModal({
         />
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
         {filteredRows.map((row) => (
           <button
             key={row.userId}
@@ -673,6 +673,7 @@ export function OperatorManagementModal({
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <div
           className={cn(
+            "flex-1 overflow-y-auto",
             "md:flex md:min-w-[380px] md:max-w-[440px] md:flex-col",
             mobileMode === "editor" ? "hidden md:flex" : "flex",
           )}
@@ -691,4 +692,3 @@ export function OperatorManagementModal({
     </ResponsiveModal>
   );
 }
-
