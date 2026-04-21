@@ -279,7 +279,11 @@ export default function OrdersPage() {
         string,
         Array<{ status: string; stationId: string | null }>
       >();
-      const sourceRows = (runData?.length ?? 0) > 0 ? runData : (itemData ?? []);
+      const sourceRows: Array<{
+        order_id: string;
+        station_id: string | null;
+        status: string;
+      }> = (runData?.length ?? 0) > 0 ? (runData ?? []) : (itemData ?? []);
       sourceRows.forEach((item) => {
         const entry = counts.get(item.order_id) ?? [];
         entry.push({

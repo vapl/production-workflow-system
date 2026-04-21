@@ -242,17 +242,19 @@ export function useDashboard(): UseDashboardResult {
             run.status !== "done",
         );
       })
-      .map((run) => ({
-        id: run.id,
-        label: run.batch_code || run.orders?.order_number || run.id,
-        orderNumber: run.orders?.order_number ?? run.order_id,
-        stationName: run.station_id
-          ? (stationNameById.get(run.station_id) ?? run.station_id)
-          : "-",
-        durationMinutes: Math.max(0, Number(run.duration_minutes ?? 0)),
-        plannedDate: run.planned_date ?? null,
-        status: run.status === "blocked" ? "blocked" : "late",
-      }))
+      .map(
+        (run): DashboardBottleneck => ({
+          id: run.id,
+          label: run.batch_code || run.orders?.order_number || run.id,
+          orderNumber: run.orders?.order_number ?? run.order_id,
+          stationName: run.station_id
+            ? (stationNameById.get(run.station_id) ?? run.station_id)
+            : "-",
+          durationMinutes: Math.max(0, Number(run.duration_minutes ?? 0)),
+          plannedDate: run.planned_date ?? null,
+          status: run.status === "blocked" ? "blocked" : "late",
+        }),
+      )
       .sort((a, b) => b.durationMinutes - a.durationMinutes)
       .slice(0, 5);
   }, [batchRuns, stationNameById, todayIso]);
@@ -292,24 +294,18 @@ export function useDashboard(): UseDashboardResult {
       return Boolean(dueDate) && dueDate! < todayIso;
     }).length;
 
-    const completedOrders = effectiveOrders
-      .map((order) => {
-        const status = order.statusDisplay ?? order.status;
-        if (status !== "done") {
-          return null;
-        }
-        const doneAt = getOrderDoneAt(order, batchRuns);
-        const dueAt = safeDate(order.dueDate);
-        if (!doneAt || !dueAt) {
-          return null;
-        }
-        return { order, doneAt, dueAt };
-      })
-      .filter(
-        (
-          value,
-        ): value is { order: Order; doneAt: Date; dueAt: Date } => value !== null,
-      );
+    const completedOrders = effectiveOrders.flatMap((order) => {
+      const status = order.statusDisplay ?? order.status;
+      if (status !== "done") {
+        return [];
+      }
+      const doneAt = getOrderDoneAt(order, batchRuns);
+      const dueAt = safeDate(order.dueDate);
+      if (!doneAt || !dueAt) {
+        return [];
+      }
+      return [{ order, doneAt, dueAt }];
+    });
 
     const onTimeCount = completedOrders.filter(
       ({ doneAt, dueAt }) => doneAt.getTime() <= dueAt.getTime(),
@@ -385,34 +381,35 @@ export function useDashboard(): UseDashboardResult {
 
   const activities = useMemo<Activity[]>(() => {
     return events
-      .map((event) => {
+      .flatMap((event) => {
         const status = mapActivityStatus(event.to_status);
         if (!status || !event.created_at) {
-          return null;
+          return [];
         }
         const relatedRun = event.batch_run_id
           ? batchRuns.find((run) => run.id === event.batch_run_id)
           : null;
         const order = effectiveOrders.find((item) => item.id === event.order_id);
-        return {
-          id: event.id,
-          title:
-            status === "completed"
-              ? "Batch completed"
-              : status === "blocked"
-                ? "Batch blocked"
-                : "Batch started",
-          timestamp: event.created_at,
-          status,
-          orderNumber:
-            relatedRun?.orders?.order_number ?? order?.orderNumber ?? undefined,
-          workStation:
-            relatedRun?.station_id
-              ? (stationNameById.get(relatedRun.station_id) ?? relatedRun.station_id)
-              : undefined,
-        } satisfies Activity;
+        return [
+          {
+            id: event.id,
+            title:
+              status === "completed"
+                ? "Batch completed"
+                : status === "blocked"
+                  ? "Batch blocked"
+                  : "Batch started",
+            timestamp: event.created_at,
+            status,
+            orderNumber:
+              relatedRun?.orders?.order_number ?? order?.orderNumber ?? undefined,
+            workStation:
+              relatedRun?.station_id
+                ? (stationNameById.get(relatedRun.station_id) ?? relatedRun.station_id)
+                : undefined,
+          } satisfies Activity,
+        ];
       })
-      .filter((value): value is Activity => value !== null)
       .slice(0, 5);
   }, [batchRuns, effectiveOrders, events, stationNameById]);
 

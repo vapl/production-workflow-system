@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
@@ -89,13 +90,11 @@ async function resolveSignedUrl(url: string | null | undefined, bucket: string) 
   return data.signedUrl;
 }
 
-export default function QrTokenPage({
-  params,
-}: {
-  params: { token: string };
-}) {
+export default function QrTokenPage() {
   const { t } = useI18n();
   const user = useCurrentUser();
+  const params = useParams<{ token?: string }>();
+  const token = typeof params?.token === "string" ? params.token : "";
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [qrRow, setQrRow] = useState<QrRow | null>(null);
@@ -111,7 +110,7 @@ export default function QrTokenPage({
 
   useEffect(() => {
     const sb = supabase;
-    if (!sb || !params.token) {
+    if (!sb || !token) {
       return;
     }
     if (!user.isAuthenticated) {
@@ -128,7 +127,7 @@ export default function QrTokenPage({
         const { data: qrData, error: qrError } = await sb
           .from("production_qr_codes")
           .select("order_id, field_id, row_index, source_row_id, token")
-          .eq("token", params.token)
+          .eq("token", token)
           .maybeSingle();
         if (!isMounted) {
           return;
@@ -266,7 +265,7 @@ export default function QrTokenPage({
     return () => {
       isMounted = false;
     };
-  }, [params.token, t, user.id, user.isAuthenticated]);
+  }, [t, token, user.id, user.isAuthenticated]);
 
   useEffect(() => {
     if (!attachments.length) {
