@@ -23,7 +23,7 @@ import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingCont
 import {
   buildOperatorSummaryRows,
   formatLaborCost,
-  formatWorkedHours,
+  formatWorkedDuration,
   type OperatorAssignmentRow,
   type OperatorConfigRow,
   type OperatorProfileRow,
@@ -366,16 +366,16 @@ export default function ProductionOperatorsPage() {
         />
         <ProductionStatCard
           label={t("production.main.operators.workedHours")}
-          value={formatWorkedHours(totals.workedMinutes)}
+          value={formatWorkedDuration(totals.workedMinutes)}
           hint={t("production.main.operators.workedHoursHint")}
         />
         <ProductionStatCard
           label={t("production.main.operatorDetail.regularHours")}
-          value={formatWorkedHours(totals.regularMinutes)}
+          value={formatWorkedDuration(totals.regularMinutes)}
         />
         <ProductionStatCard
           label={t("production.main.operatorDetail.overtimeHours")}
-          value={formatWorkedHours(totals.overtimeMinutes)}
+          value={formatWorkedDuration(totals.overtimeMinutes)}
         />
         <ProductionStatCard
           label={t("production.main.operators.completedQty")}
@@ -458,7 +458,7 @@ export default function ProductionOperatorsPage() {
                   </div>
                   <div className="flex flex-wrap gap-2 text-sm">
                     <span className="rounded-full border border-border px-2 py-1">
-                      {formatWorkedHours(row.workedMinutes)}h
+                      {formatWorkedDuration(row.workedMinutes)}
                     </span>
                     <span className="rounded-full border border-border px-2 py-1">
                       {t("production.main.operators.itemsShort")}{" "}

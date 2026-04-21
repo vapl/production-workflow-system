@@ -54,8 +54,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const hasAdminAccess = isAdminLike(user);
   const isWarehouseUser = user.role === "Warehouse" && !hasAdminAccess;
   const isOrderDetailRoute = /^\/orders\/[^/]+$/.test(pathname ?? "");
-  const isProductionJobDetailRoute =
-    /^\/production\/jobs\/[^/]+$/.test(pathname ?? "");
+  const isProductionJobDetailRoute = /^\/production\/jobs\/[^/]+$/.test(
+    pathname ?? "",
+  );
   const isProductionQueuesRoute = pathname?.startsWith("/production/queues");
   const hideTabsNav =
     isExternalJobRespondRoute ||

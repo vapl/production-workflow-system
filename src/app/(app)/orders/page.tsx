@@ -261,18 +261,26 @@ export default function OrdersPage() {
       if (orderIds.length === 0) {
         return rows;
       }
-      const { data, error: prodError } = await supabase
-        .from("production_items")
-        .select("order_id, station_id, status")
-        .in("order_id", orderIds);
-      if (prodError || !data) {
+      const [{ data: runData, error: runError }, { data: itemData, error: itemError }] =
+        await Promise.all([
+          supabase
+            .from("batch_runs")
+            .select("order_id, station_id, status")
+            .in("order_id", orderIds),
+          supabase
+            .from("production_items")
+            .select("order_id, station_id, status")
+            .in("order_id", orderIds),
+        ]);
+      if ((runError && itemError) || (!runData && !itemData)) {
         return rows;
       }
       const counts = new Map<
         string,
         Array<{ status: string; stationId: string | null }>
       >();
-      data.forEach((item) => {
+      const sourceRows = (runData?.length ?? 0) > 0 ? runData : (itemData ?? []);
+      sourceRows.forEach((item) => {
         const entry = counts.get(item.order_id) ?? [];
         entry.push({
           status: item.status,
@@ -715,9 +723,11 @@ export default function OrdersPage() {
         if (user.tenantId) {
           query.eq("tenant_id", user.tenantId);
         }
-        if (statusFilter === "in_production") {
-          query.in("status", ["ready_for_production", "in_production"]);
-        } else if (statusFilter !== "all") {
+        if (
+          statusFilter !== "all" &&
+          statusFilter !== "in_production" &&
+          statusFilter !== "done"
+        ) {
           query.eq("status", statusFilter);
         }
         if (isEngineeringUser && blockedOnly) {
@@ -1399,12 +1409,11 @@ export default function OrdersPage() {
                     if (user.tenantId) {
                       query.eq("tenant_id", user.tenantId);
                     }
-                    if (statusFilter === "in_production") {
-                      query.in("status", [
-                        "ready_for_production",
-                        "in_production",
-                      ]);
-                    } else if (statusFilter !== "all") {
+                    if (
+                      statusFilter !== "all" &&
+                      statusFilter !== "in_production" &&
+                      statusFilter !== "done"
+                    ) {
                       query.eq("status", statusFilter);
                     }
                     if (isEngineeringUser && blockedOnly) {

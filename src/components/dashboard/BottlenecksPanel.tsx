@@ -1,9 +1,10 @@
-import type { Batch } from "@/types/batch";
+import type { DashboardBottleneck } from "@/types/dashboard";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/Card";
 import { AlertTriangleIcon } from "lucide-react";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { formatWorkedDuration } from "@/lib/domain/productionOperators";
 
-export function BottlenecksPanel({ batches }: { batches: Batch[] }) {
+export function BottlenecksPanel({ batches }: { batches: DashboardBottleneck[] }) {
   const { t } = useI18n();
 
   if (batches.length === 0) {
@@ -27,18 +28,22 @@ export function BottlenecksPanel({ batches }: { batches: Batch[] }) {
               className="flex items-center justify-between rounded-lg bg-amber-50 p-3 text-slate-900"
             >
               <div className="flex-1">
-                <div className="font-medium">{batch.name}</div>
+                <div className="font-medium">{batch.label}</div>
                 <div className="text-sm text-slate-600">
-                  {t("dashboard.bottlenecksPanel.station")}: {batch.workstation}
+                  {batch.orderNumber} / {batch.stationName}
                 </div>
               </div>
 
               <div className="text-right">
                 <div className="text-sm font-medium text-amber-700">
-                  {batch.actualHours ?? 0}h / {batch.estimatedHours}h
+                  {formatWorkedDuration(batch.durationMinutes)}
                 </div>
                 <div className="text-xs text-slate-600">
-                  {t("dashboard.bottlenecksPanel.overEstimate")}
+                  {batch.status === "blocked"
+                    ? t("dashboard.bottlenecksPanel.title")
+                    : batch.plannedDate
+                      ? `${t("dashboard.bottlenecksPanel.station")}: ${batch.plannedDate}`
+                      : t("dashboard.bottlenecksPanel.overEstimate")}
                 </div>
               </div>
             </div>

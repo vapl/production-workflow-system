@@ -1,10 +1,35 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Batch } from "@/types/batch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
+import { useCurrentUser } from "@/contexts/UserContext";
+import {
+  buildOperatorSummaryRows,
+  formatWorkedDuration,
+  type OperatorAssignmentRow,
+  type OperatorConfigRow,
+  type OperatorProfileRow,
+  type OperatorStationRow,
+} from "@/lib/domain/productionOperators";
+import {
+  parseWorkingCalendar,
+  type WorkingCalendar,
+} from "@/lib/domain/workingCalendar";
 import { useI18n } from "@/lib/i18n/useI18n";
+import { supabase } from "@/lib/supabaseClient";
+import type {
+  BatchRunRow,
+  JoinedProductionOrder,
+  ProductionItemRow,
+  ProductionStatusEventRow,
+} from "@/types/production";
 
 type PeriodKey = "7d" | "30d" | "90d" | "all";
 
@@ -22,139 +47,324 @@ const periodDaysMap: Record<Exclude<PeriodKey, "all">, number> = {
   "90d": 90,
 };
 
-function toDate(value?: string): Date | null {
-  if (!value) {
+function normalizeJoinedOrder(value: unknown): JoinedProductionOrder | null {
+  const item = Array.isArray(value) ? (value[0] ?? null) : value;
+  if (!item || typeof item !== "object") {
     return null;
   }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const row = item as Record<string, unknown>;
+  const priority =
+    row.priority === "low" ||
+    row.priority === "normal" ||
+    row.priority === "high" ||
+    row.priority === "urgent"
+      ? row.priority
+      : null;
+  return {
+    order_number:
+      typeof row.order_number === "string" ? row.order_number : null,
+    due_date: typeof row.due_date === "string" ? row.due_date : null,
+    production_due_date:
+      typeof row.production_due_date === "string"
+        ? row.production_due_date
+        : null,
+    priority,
+    customer_name:
+      typeof row.customer_name === "string" ? row.customer_name : null,
+    status: typeof row.status === "string" ? row.status : null,
+  };
 }
 
-export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
+function buildPeriodRange(period: PeriodKey) {
+  if (period === "all") {
+    return null;
+  }
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setDate(start.getDate() - (periodDaysMap[period] - 1));
+  start.setHours(0, 0, 0, 0);
+  return {
+    startAt: start.toISOString(),
+    endAt: end.toISOString(),
+  };
+}
+
+function buildDayRange(dayOffset: number) {
+  const start = new Date();
+  start.setDate(start.getDate() - dayOffset);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return {
+    key: start.toISOString().slice(0, 10),
+    label: start.toLocaleDateString(undefined, {
+      day: "2-digit",
+      month: "2-digit",
+    }),
+    range: {
+      startAt: start.toISOString(),
+      endAt: end.toISOString(),
+    },
+  };
+}
+
+export function OperatorPerformancePanel() {
   const { t } = useI18n();
+  const user = useCurrentUser();
   const [period, setPeriod] = useState<PeriodKey>("30d");
   const [station, setStation] = useState("all");
   const [operator, setOperator] = useState("all");
-
-  const stationOptions = useMemo(() => {
-    const values = Array.from(
-      new Set(
-        batches
-          .map((batch) => batch.workstation?.trim())
-          .filter((value): value is string => Boolean(value)),
-      ),
-    ).sort((a, b) => a.localeCompare(b));
-    return values;
-  }, [batches]);
-
-  const operatorOptions = useMemo(() => {
-    const values = Array.from(
-      new Set(
-        batches
-          .filter((batch) => batch.status === "completed")
-          .filter((batch) => station === "all" || batch.workstation === station)
-          .map(
-            (batch) =>
-              batch.operator?.trim() ||
-              t("dashboard.operatorPerformance.unassigned"),
-          )
-          .filter((value): value is string => Boolean(value)),
-      ),
-    ).sort((a, b) => a.localeCompare(b));
-    return values;
-  }, [batches, station, t]);
+  const [profiles, setProfiles] = useState<OperatorProfileRow[]>([]);
+  const [operatorConfigs, setOperatorConfigs] = useState<OperatorConfigRow[]>([]);
+  const [assignments, setAssignments] = useState<OperatorAssignmentRow[]>([]);
+  const [stations, setStations] = useState<OperatorStationRow[]>([]);
+  const [events, setEvents] = useState<ProductionStatusEventRow[]>([]);
+  const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
+  const [productionItems, setProductionItems] = useState<ProductionItemRow[]>([]);
+  const [workingCalendar, setWorkingCalendar] = useState<WorkingCalendar>({
+    workdays: [1, 2, 3, 4, 5],
+    shifts: [{ start: "08:00", end: "17:00" }],
+    overtimeEnabled: false,
+  });
 
   useEffect(() => {
-    if (operator === "all") {
+    const sb = supabase;
+    if (!sb || !user.tenantId) {
       return;
     }
-    if (!operatorOptions.includes(operator)) {
-      setOperator("all");
-    }
-  }, [operator, operatorOptions]);
+    let isMounted = true;
 
-  const completedFilteredBatches = useMemo(() => {
-    const now = new Date();
-    const periodStart =
-      period === "all"
-        ? null
-        : new Date(now.getTime() - periodDaysMap[period] * 24 * 60 * 60 * 1000);
+    const loadData = async () => {
+      const [
+        profilesResult,
+        configsResult,
+        assignmentsResult,
+        stationsResult,
+        settingsResult,
+        eventsResult,
+        batchRunsResult,
+        itemsResult,
+      ] = await Promise.all([
+        sb
+          .from("profiles")
+          .select("id, full_name, role, login_code, auth_mode, is_active")
+          .eq("tenant_id", user.tenantId)
+          .in("role", ["Operator", "Production planner", "Admin"]),
+        sb
+          .from("operators")
+          .select(
+            "id, user_id, name, role, hourly_rate, overtime_rate, is_active",
+          )
+          .eq("tenant_id", user.tenantId)
+          .order("updated_at", { ascending: false }),
+        sb
+          .from("operator_station_assignments")
+          .select("user_id, station_id, is_active")
+          .eq("tenant_id", user.tenantId),
+        sb
+          .from("workstations")
+          .select("id, name")
+          .eq("tenant_id", user.tenantId)
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true }),
+        sb
+          .from("tenant_settings")
+          .select("workday_start, workday_end, workdays, work_shifts")
+          .eq("tenant_id", user.tenantId)
+          .maybeSingle(),
+        sb
+          .from("production_status_events")
+          .select(
+            "id, production_item_id, order_id, batch_run_id, from_status, to_status, reason, created_at, actor_user_id",
+          )
+          .eq("tenant_id", user.tenantId)
+          .order("created_at", { ascending: false })
+          .limit(5000),
+        sb
+          .from("batch_runs")
+          .select(
+            "id, order_id, batch_code, station_id, route_key, step_index, status, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, production_due_date, priority, customer_name, status)",
+          )
+          .eq("tenant_id", user.tenantId),
+        sb
+          .from("production_items")
+          .select(
+            "id, order_id, batch_code, item_name, qty, material, status, station_id, duration_minutes, done_at, orders (order_number, due_date, production_due_date, priority, customer_name, status)",
+          )
+          .eq("tenant_id", user.tenantId)
+          .order("done_at", { ascending: false }),
+      ]);
 
-    return batches.filter((batch) => {
-      if (batch.status !== "completed") {
-        return false;
+      if (!isMounted) {
+        return;
       }
-      if (station !== "all" && batch.workstation !== station) {
-        return false;
+
+      setProfiles((profilesResult.data ?? []) as OperatorProfileRow[]);
+      setOperatorConfigs((configsResult.data ?? []) as OperatorConfigRow[]);
+      setAssignments((assignmentsResult.data ?? []) as OperatorAssignmentRow[]);
+      setStations((stationsResult.data ?? []) as OperatorStationRow[]);
+      if (settingsResult.data) {
+        setWorkingCalendar(parseWorkingCalendar(settingsResult.data));
       }
-      const batchOperator =
-        batch.operator?.trim() || t("dashboard.operatorPerformance.unassigned");
-      if (operator !== "all" && batchOperator !== operator) {
-        return false;
-      }
-      if (!periodStart) {
-        return true;
-      }
-      const completedAt = toDate(batch.completedAt);
-      if (!completedAt) {
-        return false;
-      }
-      return completedAt >= periodStart;
-    });
-  }, [batches, operator, period, station, t]);
+      setEvents((eventsResult.data ?? []) as ProductionStatusEventRow[]);
+      setBatchRuns(
+        ((batchRunsResult.data ?? []) as Array<Record<string, unknown>>).map(
+          (row) => ({
+            ...(row as Omit<BatchRunRow, "orders">),
+            orders: normalizeJoinedOrder(row.orders),
+          }),
+        ),
+      );
+      setProductionItems(
+        ((itemsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+          ...(row as Omit<ProductionItemRow, "orders">),
+          orders: normalizeJoinedOrder(row.orders),
+        })),
+      );
+    };
+
+    void loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, [user.tenantId]);
+
+  const periodRange = useMemo(() => buildPeriodRange(period), [period]);
+
+  const baseRows = useMemo(
+    () =>
+      buildOperatorSummaryRows({
+        profiles,
+        operatorConfigs,
+        assignments,
+        stations,
+        events,
+        batchRuns,
+        productionItems,
+        filter: {
+          range: periodRange,
+          calendar: workingCalendar,
+        },
+      }).filter(
+        (row) =>
+          row.role.trim().toLowerCase() === "operator" ||
+          profiles.some(
+            (profile) =>
+              profile.id === row.userId &&
+              ((profile.role?.trim().toLowerCase() === "operator") ||
+                profile.auth_mode === "pin"),
+          ),
+      ),
+    [
+      assignments,
+      batchRuns,
+      events,
+      operatorConfigs,
+      periodRange,
+      productionItems,
+      profiles,
+      stations,
+      workingCalendar,
+    ],
+  );
+
+  const stationOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(baseRows.flatMap((row) => row.stations).filter(Boolean)),
+      ).sort((a, b) => a.localeCompare(b)),
+    [baseRows],
+  );
+
+  const stationFilteredRows = useMemo(
+    () =>
+      baseRows.filter((row) =>
+        station === "all" ? true : row.stations.includes(station),
+      ),
+    [baseRows, station],
+  );
+
+  const operatorOptions = useMemo(
+    () => stationFilteredRows.map((row) => row.name).sort((a, b) => a.localeCompare(b)),
+    [stationFilteredRows],
+  );
+
+  const selectedOperator =
+    operator === "all" || operatorOptions.includes(operator) ? operator : "all";
+
+  const visibleRows = useMemo(
+    () =>
+      stationFilteredRows.filter((row) =>
+        selectedOperator === "all" ? true : row.name === selectedOperator,
+      ),
+    [selectedOperator, stationFilteredRows],
+  );
+
+  const operatorRows = useMemo<OperatorRow[]>(
+    () =>
+      visibleRows.map((row) => ({
+        operator: row.name,
+        hours: row.workedMinutes / 60,
+        constructions: row.completedItems,
+        orders: row.completedOrders,
+        stations: row.stations,
+      })),
+    [visibleRows],
+  );
+
+  const totals = useMemo(() => {
+    return {
+      hours: operatorRows.reduce((sum, row) => sum + row.hours, 0),
+      constructions: operatorRows.reduce(
+        (sum, row) => sum + row.constructions,
+        0,
+      ),
+      orders: operatorRows.reduce((sum, row) => sum + row.orders, 0),
+    };
+  }, [operatorRows]);
 
   const hoursTrend30d = useMemo(() => {
-    const now = new Date();
-    const days = Array.from({ length: 30 }, (_, index) => {
-      const date = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate() - (29 - index),
+    const days = Array.from({ length: 30 }, (_, index) => buildDayRange(29 - index));
+    return days.map((day) => {
+      const rows = buildOperatorSummaryRows({
+        profiles,
+        operatorConfigs,
+        assignments,
+        stations,
+        events,
+        batchRuns,
+        productionItems,
+        filter: {
+          range: day.range,
+          calendar: workingCalendar,
+        },
+      }).filter((row) =>
+        station === "all" ? true : row.stations.includes(station),
       );
-      const key = date.toISOString().slice(0, 10);
+      const selectedRows = rows.filter((row) =>
+        selectedOperator === "all" ? true : row.name === selectedOperator,
+      );
+      const value =
+        selectedRows.reduce((sum, row) => sum + row.workedMinutes, 0) / 60;
       return {
-        key,
-        label: date.toLocaleDateString(undefined, {
-          day: "2-digit",
-          month: "2-digit",
-        }),
-        value: 0,
+        key: day.key,
+        label: day.label,
+        value: Math.round(value * 10) / 10,
       };
     });
-    const byDay = new Map(days.map((day) => [day.key, 0]));
-
-    batches
-      .filter((batch) => batch.status === "completed")
-      .filter((batch) => station === "all" || batch.workstation === station)
-      .filter((batch) => {
-        const batchOperator =
-          batch.operator?.trim() || t("dashboard.operatorPerformance.unassigned");
-        return operator === "all" || batchOperator === operator;
-      })
-      .forEach((batch) => {
-        const completedAt = toDate(batch.completedAt);
-        if (!completedAt) {
-          return;
-        }
-        const dayKey = completedAt.toISOString().slice(0, 10);
-        if (!byDay.has(dayKey)) {
-          return;
-        }
-        const durationHours =
-          typeof batch.actualHours === "number" && batch.actualHours > 0
-            ? batch.actualHours
-            : batch.estimatedHours;
-        if (!Number.isFinite(durationHours) || durationHours <= 0) {
-          return;
-        }
-        byDay.set(dayKey, (byDay.get(dayKey) ?? 0) + durationHours);
-      });
-
-    return days.map((day) => ({
-      ...day,
-      value: Math.round((byDay.get(day.key) ?? 0) * 10) / 10,
-    }));
-  }, [batches, operator, station, t]);
+  }, [
+    assignments,
+    batchRuns,
+    events,
+    selectedOperator,
+    operatorConfigs,
+    productionItems,
+    profiles,
+    station,
+    stations,
+    workingCalendar,
+  ]);
 
   const chartConfig = useMemo(() => {
     const width = 760;
@@ -162,11 +372,7 @@ export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
     const padding = { top: 20, right: 16, bottom: 32, left: 40 };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
-    const maxValue = Math.max(
-      1,
-      ...hoursTrend30d.map((point) => point.value),
-    );
-
+    const maxValue = Math.max(1, ...hoursTrend30d.map((point) => point.value));
     const points = hoursTrend30d.map((point, index) => {
       const x =
         padding.left +
@@ -178,10 +384,6 @@ export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
       return { x, y, value: point.value, label: point.label };
     });
 
-    const linePath = points
-      .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
-      .join(" ");
-
     return {
       width,
       height,
@@ -189,66 +391,11 @@ export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
       chartHeight,
       maxValue,
       points,
-      linePath,
+      linePath: points
+        .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+        .join(" "),
     };
   }, [hoursTrend30d]);
-
-  const operatorRows = useMemo<OperatorRow[]>(() => {
-    const map = new Map<
-      string,
-      {
-        hours: number;
-        constructions: number;
-        orderIds: Set<string>;
-        stations: Set<string>;
-      }
-    >();
-
-    completedFilteredBatches.forEach((batch) => {
-      const operator = batch.operator?.trim() || t("dashboard.operatorPerformance.unassigned");
-      const entry = map.get(operator) ?? {
-        hours: 0,
-        constructions: 0,
-        orderIds: new Set<string>(),
-        stations: new Set<string>(),
-      };
-      const durationHours =
-        typeof batch.actualHours === "number" && batch.actualHours > 0
-          ? batch.actualHours
-          : batch.estimatedHours;
-      if (Number.isFinite(durationHours) && durationHours > 0) {
-        entry.hours += durationHours;
-      }
-      entry.constructions += 1;
-      entry.orderIds.add(batch.orderId);
-      if (batch.workstation) {
-        entry.stations.add(batch.workstation);
-      }
-      map.set(operator, entry);
-    });
-
-    return Array.from(map.entries())
-      .map(([operator, entry]) => ({
-        operator,
-        hours: entry.hours,
-        constructions: entry.constructions,
-        orders: entry.orderIds.size,
-        stations: Array.from(entry.stations).sort((a, b) => a.localeCompare(b)),
-      }))
-      .sort((a, b) => b.hours - a.hours);
-  }, [completedFilteredBatches, t]);
-
-  const totals = useMemo(() => {
-    const hours = operatorRows.reduce((sum, row) => sum + row.hours, 0);
-    const constructions = operatorRows.reduce(
-      (sum, row) => sum + row.constructions,
-      0,
-    );
-    const orders = new Set(
-      completedFilteredBatches.map((batch) => batch.orderId).filter(Boolean),
-    ).size;
-    return { hours, constructions, orders };
-  }, [completedFilteredBatches, operatorRows]);
 
   return (
     <Card>
@@ -261,10 +408,7 @@ export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={period}
-              onValueChange={(value) => setPeriod(value as PeriodKey)}
-            >
+            <Select value={period} onValueChange={(value) => setPeriod(value as PeriodKey)}>
               <SelectTrigger className="h-9 w-34">
                 <SelectValue />
               </SelectTrigger>
@@ -288,7 +432,7 @@ export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={operator} onValueChange={setOperator}>
+            <Select value={selectedOperator} onValueChange={setOperator}>
               <SelectTrigger className="h-9 w-46">
                 <SelectValue />
               </SelectTrigger>
@@ -312,7 +456,7 @@ export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
               {t("dashboard.operatorPerformance.totalHours")}
             </div>
             <div className="text-2xl font-semibold">
-              {Math.round(totals.hours * 10) / 10}h
+              {formatWorkedDuration(Math.round(totals.hours * 60))}
             </div>
           </div>
           <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
@@ -371,12 +515,7 @@ export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
               />
               {chartConfig.points.map((point, index) => (
                 <g key={`${point.label}-${index}`}>
-                  <circle
-                    cx={point.x}
-                    cy={point.y}
-                    r="3"
-                    fill="var(--color-chart-1)"
-                  />
+                  <circle cx={point.x} cy={point.y} r="3" fill="var(--color-chart-1)" />
                   {(index === 0 ||
                     index === chartConfig.points.length - 1 ||
                     index % 7 === 0) && (
@@ -435,10 +574,7 @@ export function OperatorPerformancePanel({ batches }: { batches: Batch[] }) {
             <tbody>
               {operatorRows.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={5}
-                    className="px-4 py-6 text-center text-muted-foreground"
-                  >
+                  <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
                     {t("dashboard.operatorPerformance.empty")}
                   </td>
                 </tr>

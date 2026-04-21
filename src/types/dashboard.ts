@@ -13,3 +13,13 @@ export interface DashboardKpis {
   slowestStationMedianHours: number | null;
   slowestStationSampleSize: number;
 }
+
+export interface DashboardBottleneck {
+  id: string;
+  label: string;
+  orderNumber: string;
+  stationName: string;
+  durationMinutes: number;
+  plannedDate: string | null;
+  status: "blocked" | "late";
+}

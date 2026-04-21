@@ -26,7 +26,7 @@ import {
   buildOperatorSummaryRows,
   buildOperatorUnitBreakdown,
   formatLaborCost,
-  formatWorkedHours,
+  formatWorkedDuration,
   type OperatorAssignmentRow,
   type OperatorConfigRow,
   type OperatorProfileRow,
@@ -187,9 +187,8 @@ export default function ProductionOperatorDetailPage() {
             "id, production_item_id, order_id, batch_run_id, from_status, to_status, reason, created_at, actor_user_id",
           )
           .eq("tenant_id", user.tenantId)
-          .eq("actor_user_id", operatorId)
           .order("created_at", { ascending: false })
-          .limit(1000),
+          .limit(5000),
         sb
           .from("batch_runs")
           .select(
@@ -328,6 +327,14 @@ export default function ProductionOperatorDetailPage() {
     );
   }, [operatorConfigs, operatorId, summary?.name]);
 
+  const assignedStationIds = useMemo(
+    () =>
+      assignments
+        .filter((assignment) => assignment.user_id === operatorId && assignment.is_active)
+        .map((assignment) => assignment.station_id),
+    [assignments, operatorId],
+  );
+
   const displayedHourlyRate =
     hourlyRateInput ??
     (activeConfig?.hourly_rate != null ? String(activeConfig.hourly_rate) : "");
@@ -347,9 +354,20 @@ export default function ProductionOperatorDetailPage() {
         filter: {
           range: selectedRange,
           search: orderSearch,
+          calendar: workingCalendar,
+          assignedStationIds,
         },
       }),
-    [operatorId, events, batchRuns, productionItems, selectedRange, orderSearch],
+    [
+      operatorId,
+      events,
+      batchRuns,
+      productionItems,
+      selectedRange,
+      orderSearch,
+      workingCalendar,
+      assignedStationIds,
+    ],
   );
 
   const unitBreakdown = useMemo(
@@ -361,9 +379,19 @@ export default function ProductionOperatorDetailPage() {
         filter: {
           range: selectedRange,
           search: orderSearch,
+          calendar: workingCalendar,
+          assignedStationIds,
         },
       }),
-    [operatorId, events, productionItems, selectedRange, orderSearch],
+    [
+      operatorId,
+      events,
+      productionItems,
+      selectedRange,
+      orderSearch,
+      workingCalendar,
+      assignedStationIds,
+    ],
   );
 
   const stationBreakdown = useMemo(
@@ -377,6 +405,8 @@ export default function ProductionOperatorDetailPage() {
         filter: {
           range: selectedRange,
           search: orderSearch,
+          calendar: workingCalendar,
+          assignedStationIds,
         },
       }),
     [
@@ -387,6 +417,8 @@ export default function ProductionOperatorDetailPage() {
       batchRuns,
       selectedRange,
       orderSearch,
+      workingCalendar,
+      assignedStationIds,
     ],
   );
 
@@ -491,15 +523,15 @@ export default function ProductionOperatorDetailPage() {
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <ProductionStatCard
           label={t("production.main.operators.workedHours")}
-          value={formatWorkedHours(summary?.workedMinutes ?? 0)}
+          value={formatWorkedDuration(summary?.workedMinutes ?? 0)}
         />
         <ProductionStatCard
           label={t("production.main.operatorDetail.regularHours")}
-          value={formatWorkedHours(summary?.regularMinutes ?? 0)}
+          value={formatWorkedDuration(summary?.regularMinutes ?? 0)}
         />
         <ProductionStatCard
           label={t("production.main.operatorDetail.overtimeHours")}
-          value={formatWorkedHours(summary?.overtimeMinutes ?? 0)}
+          value={formatWorkedDuration(summary?.overtimeMinutes ?? 0)}
         />
         <ProductionStatCard
           label={t("production.main.operators.completedQty")}
@@ -707,7 +739,7 @@ export default function ProductionOperatorDetailPage() {
                 >
                   <div className="font-medium">{row.stationName}</div>
                   <div className="mt-1 text-muted-foreground">
-                    {formatWorkedHours(row.workedMinutes)}h |{" "}
+                    {formatWorkedDuration(row.workedMinutes)} |{" "}
                     {t("production.main.operators.itemsShort")}{" "}
                     {row.completedItems}
                   </div>
@@ -740,7 +772,7 @@ export default function ProductionOperatorDetailPage() {
                     {row.customerName ? ` - ${row.customerName}` : ""}
                   </div>
                   <div className="mt-1 text-muted-foreground">
-                    {formatWorkedHours(row.workedMinutes)}h |{" "}
+                    {formatWorkedDuration(row.workedMinutes)} |{" "}
                     {t("production.main.operators.itemsShort")}{" "}
                     {row.completedItems}
                   </div>
@@ -775,7 +807,7 @@ export default function ProductionOperatorDetailPage() {
                     {t("production.main.common.qty")} {row.qty}
                   </div>
                   <div className="mt-1 text-muted-foreground">
-                    {formatWorkedHours(row.workedMinutes)}h |{" "}
+                    {formatWorkedDuration(row.workedMinutes)} |{" "}
                     {t("production.main.operatorDetail.done")}{" "}
                     {formatProductionDate(row.doneAt)}
                   </div>
