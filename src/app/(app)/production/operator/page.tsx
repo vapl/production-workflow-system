@@ -143,6 +143,11 @@ type OrderItemLinkRow = {
   id: string;
   source_row_id: string;
 };
+type PendingQuickAction = {
+  orderId: string;
+  rowKey: string | null;
+  rowIndex: number | null;
+};
 type PendingRunAction = {
   runId: string;
   action: "in_progress" | "done" | "paused" | "blocked";
@@ -376,6 +381,8 @@ export default function OperatorProductionPage() {
     null,
   );
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
+  const [pendingQuickAction, setPendingQuickAction] =
+    useState<PendingQuickAction | null>(null);
   const [scannerError, setScannerError] = useState("");
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const hideMobileFloatingControls = useHideMobileFloatingControls();
@@ -438,6 +445,7 @@ export default function OperatorProductionPage() {
     "Owner",
   ]);
   const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const quickActionCloseGuardUntilRef = useRef(0);
   const statusOptions: Array<{ value: QueueStatusFilter; label: string }> = [
     { value: "all", label: t("production.operator.status.all") },
     { value: "queued", label: t("production.operator.status.queued") },
@@ -2276,11 +2284,15 @@ export default function OperatorProductionPage() {
   };
 
   const closeQuickAction = () => {
+    if (Date.now() < quickActionCloseGuardUntilRef.current) {
+      return;
+    }
     setIsQuickActionOpen(false);
     setQuickActionOrderId(null);
     setQuickActionItemId(null);
     setQuickActionRowKey(null);
     setQuickActionRowIndex(null);
+    setPendingQuickAction(null);
   };
 
   const applyFiltersToUrl = (next?: {
@@ -2331,6 +2343,29 @@ export default function OperatorProductionPage() {
     });
     setIsQuickActionOpen(true);
   }, [quickActionOrderId, quickActionItem]);
+
+  useEffect(() => {
+    if (isScannerOpen || !pendingQuickAction) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setQuickActionOrderId(pendingQuickAction.orderId);
+      setQuickActionRowKey(pendingQuickAction.rowKey);
+      setQuickActionRowIndex(pendingQuickAction.rowIndex);
+      if (
+        pendingQuickAction.rowKey == null &&
+        pendingQuickAction.rowIndex == null
+      ) {
+        setQuickActionItemId(null);
+      }
+      quickActionCloseGuardUntilRef.current = Date.now() + 400;
+      setIsQuickActionOpen(true);
+      setPendingQuickAction(null);
+    }, 260);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isScannerOpen, pendingQuickAction]);
 
   useEffect(() => {
     if (!quickActionOrderId) {
@@ -2417,15 +2452,11 @@ export default function OperatorProductionPage() {
         result.sourceRowId && result.fieldId
           ? `${result.orderId}:${result.fieldId}:${result.sourceRowId}`
           : null;
-      setQuickActionOrderId(result.orderId);
-      setQuickActionRowKey(rowKey);
-      setQuickActionRowIndex(rowIndex);
-      if (rowKey == null && rowIndex == null) {
-        setQuickActionItemId(null);
-      }
-      window.setTimeout(() => {
-        setIsQuickActionOpen(true);
-      }, 220);
+      setPendingQuickAction({
+        orderId: result.orderId,
+        rowKey,
+        rowIndex,
+      });
       setQueryParams({
         date: selectedDate,
         status: statusFilter === "all" ? null : statusFilter,
