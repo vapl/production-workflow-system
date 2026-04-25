@@ -2027,6 +2027,8 @@
         show: "Rādīt failus",
         openPrimary: "Atvērt failu",
         loading: "Ielādē failus...",
+        none: "Nav failu",
+        count: "{count} faili",
       },
       blocked: {
         reasonTemplate: "Iemesla šablons",

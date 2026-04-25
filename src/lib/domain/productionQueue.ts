@@ -93,6 +93,7 @@ export function buildQueueByStation(params: {
   orderItems?: OrderItemLike[];
   activityEvents?: ProductionStatusEventRow[];
   calendar?: WorkingCalendar | null;
+  nowMs?: number;
   stations: StationLike[];
   viewDate: string;
   plannedRangeDays: number;
@@ -104,6 +105,7 @@ export function buildQueueByStation(params: {
     orderItems = [],
     activityEvents = [],
     calendar,
+    nowMs,
     stations,
     viewDate,
     plannedRangeDays,
@@ -130,10 +132,12 @@ export function buildQueueByStation(params: {
   const workedBreakdownByItem = buildWorkedBreakdownByItem(
     activityEvents,
     calendar,
+    nowMs,
   );
   const workedBreakdownByRun = buildWorkedBreakdownByRun(
     activityEvents,
     calendar,
+    nowMs,
   );
 
   batchRuns.forEach((run) => {

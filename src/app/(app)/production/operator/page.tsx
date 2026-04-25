@@ -27,6 +27,7 @@ import { QrScannerModal } from "@/components/qr/QrScannerModal";
 import { useAuthActions, useCurrentUser } from "@/contexts/UserContext";
 import { useWorkflowRules } from "@/contexts/WorkflowContext";
 import { formatDate } from "@/lib/domain/formatters";
+import type { ProductionJobItemDocument } from "@/lib/domain/productionJobDetail";
 import { filterProductionAttachments } from "@/lib/domain/productionAttachments";
 import {
   summarizeWorkedBreakdownByItem,
@@ -137,6 +138,10 @@ function UserAvatar({
 type PendingAction = {
   itemId: string;
   action: "in_progress" | "done" | "paused" | "blocked";
+};
+type OrderItemLinkRow = {
+  id: string;
+  source_row_id: string;
 };
 type PendingRunAction = {
   runId: string;
@@ -316,6 +321,21 @@ function renderAttachmentIcon(attachment: OrderAttachmentRow) {
   );
 }
 
+function mergeAttachments(...lists: OrderAttachmentRow[][]) {
+  const merged: OrderAttachmentRow[] = [];
+  const seen = new Set<string>();
+  lists.forEach((list) => {
+    list.forEach((attachment) => {
+      if (seen.has(attachment.id)) {
+        return;
+      }
+      seen.add(attachment.id);
+      merged.push(attachment);
+    });
+  });
+  return merged;
+}
+
 export default function OperatorProductionPage() {
   const { t } = useI18n();
   const currentUser = useCurrentUser();
@@ -373,6 +393,10 @@ export default function OperatorProductionPage() {
     [],
   );
   const [attachments, setAttachments] = useState<OrderAttachmentRow[]>([]);
+  const [itemDocuments, setItemDocuments] = useState<
+    ProductionJobItemDocument[]
+  >([]);
+  const [orderItemLinks, setOrderItemLinks] = useState<OrderItemLinkRow[]>([]);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
   const [signingJobs, setSigningJobs] = useState<Set<string>>(new Set());
@@ -552,6 +576,8 @@ export default function OperatorProductionPage() {
             stationDependencies: StationDependencyRow[];
             productionItems: ProductionItemRow[];
             attachments: OrderAttachmentRow[];
+            itemDocuments?: ProductionJobItemDocument[];
+            orderItemLinks?: OrderItemLinkRow[];
             tenantId?: string | null;
             date?: string;
           };
@@ -573,6 +599,8 @@ export default function OperatorProductionPage() {
             setStationDependencies(cached.stationDependencies ?? []);
             setProductionItems(cached.productionItems ?? []);
             setAttachments(cached.attachments ?? []);
+            setItemDocuments(cached.itemDocuments ?? []);
+            setOrderItemLinks(cached.orderItemLinks ?? []);
             usedCache = true;
             setIsLoading(false);
           }
@@ -717,8 +745,70 @@ export default function OperatorProductionPage() {
       setBatchRuns(runs);
       setStationDependencies((depsResult.data ?? []) as StationDependencyRow[]);
       const allItems = (itemsResult.data ?? []) as ProductionItemRow[];
+      const sourceRowIds = Array.from(
+        new Set(
+          allItems
+            .map((item) => getProductionItemSourceKey(item))
+            .filter(
+              (value): value is string =>
+                typeof value === "string" && value.trim().length > 0,
+            ),
+        ),
+      );
+      const orderItemLinksResult =
+        sourceRowIds.length === 0
+          ? {
+              data: [] as OrderItemLinkRow[],
+              error: null,
+            }
+          : await sb
+              .from("order_items")
+              .select("id, source_row_id")
+              .in("order_id", orderIds)
+              .in("source_row_id", sourceRowIds);
+      if (!isMounted) {
+        return;
+      }
+      if (orderItemLinksResult.error) {
+        setDataError("Failed to load production details.");
+        if (!usedCache) {
+          setIsLoading(false);
+        }
+        return;
+      }
+      const orderItemIds = Array.from(
+        new Set(
+          ((orderItemLinksResult.data ?? []) as OrderItemLinkRow[]).map((row) => row.id),
+        ),
+      );
+      const itemDocumentsResult =
+        orderItemIds.length === 0
+          ? {
+              data: [] as ProductionJobItemDocument[],
+              error: null,
+            }
+          : await sb
+              .from("order_item_documents")
+              .select("order_item_id, order_attachment_id, role, sort_order")
+              .in("order_item_id", orderItemIds)
+              .eq("role", "production")
+              .order("sort_order", { ascending: true });
+      if (!isMounted) {
+        return;
+      }
+      if (itemDocumentsResult.error) {
+        setDataError("Failed to load production details.");
+        if (!usedCache) {
+          setIsLoading(false);
+        }
+        return;
+      }
       setProductionItems(allItems);
       setAttachments((attachmentsResult.data ?? []) as OrderAttachmentRow[]);
+      setItemDocuments(
+        (itemDocumentsResult.data ?? []) as ProductionJobItemDocument[],
+      );
+      setOrderItemLinks((orderItemLinksResult.data ?? []) as OrderItemLinkRow[]);
       if (!usedCache) {
         setIsLoading(false);
       }
@@ -733,6 +823,8 @@ export default function OperatorProductionPage() {
               stationDependencies: depsResult.data ?? [],
               productionItems: allItems,
               attachments: attachmentsResult.data ?? [],
+              itemDocuments: itemDocumentsResult.data ?? [],
+              orderItemLinks: orderItemLinksResult.data ?? [],
               tenantId: currentUser.tenantId ?? null,
               date: selectedDate,
             }),
@@ -1046,6 +1138,35 @@ export default function OperatorProductionPage() {
     return map;
   }, [attachments]);
 
+  const attachmentById = useMemo(
+    () => new Map(attachments.map((attachment) => [attachment.id, attachment])),
+    [attachments],
+  );
+
+  const productionAttachmentsByItemId = useMemo(() => {
+    const map = new Map<string, OrderAttachmentRow[]>();
+    itemDocuments.forEach((document) => {
+      const attachment = attachmentById.get(document.order_attachment_id);
+      if (!attachment) {
+        return;
+      }
+      const current = map.get(document.order_item_id) ?? [];
+      current.push(attachment);
+      map.set(document.order_item_id, current);
+    });
+    return map;
+  }, [attachmentById, itemDocuments]);
+
+  const orderItemIdsBySourceKey = useMemo(() => {
+    const map = new Map<string, string[]>();
+    orderItemLinks.forEach((row) => {
+      const current = map.get(row.source_row_id) ?? [];
+      current.push(row.id);
+      map.set(row.source_row_id, current);
+    });
+    return map;
+  }, [orderItemLinks]);
+
   const stationsById = useMemo(() => {
     return new Map(stations.map((station) => [station.id, station.name]));
   }, [stations]);
@@ -1287,7 +1408,21 @@ export default function OperatorProductionPage() {
         batchCode: representativeRun.batch_code,
         totalQty,
         material,
-        attachments: attachmentsByOrder.get(representativeRun.order_id) ?? [],
+        attachments: mergeAttachments(
+          attachmentsByOrder.get(representativeRun.order_id) ?? [],
+          ...dedupedItems.map(
+            (item) => {
+              const sourceKey = getProductionItemSourceKey(item) ?? "";
+              const linkedOrderItemIds = orderItemIdsBySourceKey.get(sourceKey) ?? [];
+              return mergeAttachments(
+                ...linkedOrderItemIds.map(
+                  (orderItemId) =>
+                    productionAttachmentsByItemId.get(orderItemId) ?? [],
+                ),
+              );
+            },
+          ),
+        ),
         startedAt,
         doneAt,
         durationMinutes,
@@ -1357,6 +1492,8 @@ export default function OperatorProductionPage() {
   }, [
     attachmentsByOrder,
     batchRuns,
+    orderItemIdsBySourceKey,
+    productionAttachmentsByItemId,
     productionItems,
     t,
     visibleStations,
@@ -3381,110 +3518,119 @@ export default function OperatorProductionPage() {
                                 ) : null}
                               </div>
                             ) : null}
-                            {item.attachments.length > 0 ? (
-                              <div className="mt-3 space-y-2">
-                                <div className="flex flex-wrap gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 gap-2 text-xs"
-                                    onClick={() => void openPrimaryAttachment(item)}
-                                  >
-                                    {signingJobs.has(item.id) ? (
-                                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                    ) : (
-                                      <FileTextIcon className="h-3.5 w-3.5" />
-                                    )}
-                                    {t("production.operator.files.openPrimary")}
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 gap-2 text-xs"
-                                    onClick={async () => {
-                                      const next = new Set(expandedJobs);
-                                      if (next.has(item.id)) {
-                                        next.delete(item.id);
-                                        setExpandedJobs(next);
-                                        return;
-                                      }
-                                      next.add(item.id);
-                                      setExpandedJobs(next);
-                                      if (!signingJobs.has(item.id)) {
-                                        setSigningJobs((prev) => {
-                                          const updated = new Set(prev);
-                                          updated.add(item.id);
-                                          return updated;
-                                        });
-                                        await signAttachments(
-                                          item.attachments.filter(
-                                            (attachment) =>
-                                              !signedUrls[attachment.id],
-                                          ),
-                                        );
-                                        setSigningJobs((prev) => {
-                                          const updated = new Set(prev);
-                                          updated.delete(item.id);
-                                          return updated;
-                                        });
-                                      }
-                                    }}
-                                  >
-                                    {signingJobs.has(item.id) ? (
-                                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                    ) : expandedJobs.has(item.id) ? (
-                                      <ChevronUpIcon className="h-3.5 w-3.5" />
-                                    ) : (
-                                      <ChevronDownIcon className="h-3.5 w-3.5" />
-                                    )}
-                                    {expandedJobs.has(item.id)
-                                      ? t("production.operator.files.hide")
-                                      : t("production.operator.files.show")}
-                                  </Button>
-                                </div>
-                                {expandedJobs.has(item.id) ? (
-                                  <div className="space-y-2">
-                                    {signingJobs.has(item.id) ? (
-                                      <div className="text-xs text-muted-foreground">
-                                        {t("production.operator.files.loading")}
-                                      </div>
-                                    ) : null}
-                                    {item.attachments.map((attachment) => {
-                                      const signedUrl =
-                                        signedUrls[attachment.id];
-                                      return (
-                                        <a
-                                          key={attachment.id}
-                                          href={
-                                            signedUrl ?? attachment.url ?? "#"
-                                          }
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="flex items-center gap-3 rounded-md border border-border px-2 py-2 text-xs hover:bg-muted/30"
-                                        >
-                                          {renderAttachmentIcon(attachment)}
-                                          <div className="flex-1 min-w-0">
-                                            <div className="font-medium truncate">
-                                              {attachment.name}
-                                            </div>
-                                            <div className="text-[11px] text-muted-foreground">
-                                              {attachment.created_at
-                                                ? formatDate(
-                                                    attachment.created_at.slice(
-                                                      0,
-                                                      10,
-                                                    ),
-                                                  )
-                                                : ""}
-                                            </div>
-                                          </div>
-                                        </a>
-                                      );
-                                    })}
-                                  </div>
-                                ) : null}
+                            <div className="mt-3 space-y-2">
+                              <div className="text-xs text-muted-foreground">
+                                {item.attachments.length > 0
+                                  ? t("production.operator.files.count", {
+                                      count: item.attachments.length,
+                                    })
+                                  : t("production.operator.files.none")}
                               </div>
-                            ) : null}
+                              {item.attachments.length > 0 ? (
+                                <div className="space-y-2">
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 gap-2 text-xs"
+                                      onClick={() => void openPrimaryAttachment(item)}
+                                    >
+                                      {signingJobs.has(item.id) ? (
+                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                      ) : (
+                                        <FileTextIcon className="h-3.5 w-3.5" />
+                                      )}
+                                      {t("production.operator.files.openPrimary")}
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 gap-2 text-xs"
+                                      onClick={async () => {
+                                        const next = new Set(expandedJobs);
+                                        if (next.has(item.id)) {
+                                          next.delete(item.id);
+                                          setExpandedJobs(next);
+                                          return;
+                                        }
+                                        next.add(item.id);
+                                        setExpandedJobs(next);
+                                        if (!signingJobs.has(item.id)) {
+                                          setSigningJobs((prev) => {
+                                            const updated = new Set(prev);
+                                            updated.add(item.id);
+                                            return updated;
+                                          });
+                                          await signAttachments(
+                                            item.attachments.filter(
+                                              (attachment) =>
+                                                !signedUrls[attachment.id],
+                                            ),
+                                          );
+                                          setSigningJobs((prev) => {
+                                            const updated = new Set(prev);
+                                            updated.delete(item.id);
+                                            return updated;
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      {signingJobs.has(item.id) ? (
+                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                      ) : expandedJobs.has(item.id) ? (
+                                        <ChevronUpIcon className="h-3.5 w-3.5" />
+                                      ) : (
+                                        <ChevronDownIcon className="h-3.5 w-3.5" />
+                                      )}
+                                      {expandedJobs.has(item.id)
+                                        ? t("production.operator.files.hide")
+                                        : t("production.operator.files.show")}
+                                    </Button>
+                                  </div>
+                                  {expandedJobs.has(item.id) ? (
+                                    <div className="space-y-2">
+                                      {signingJobs.has(item.id) ? (
+                                        <div className="text-xs text-muted-foreground">
+                                          {t("production.operator.files.loading")}
+                                        </div>
+                                      ) : null}
+                                      {item.attachments.map((attachment) => {
+                                        const signedUrl =
+                                          signedUrls[attachment.id];
+                                        return (
+                                          <a
+                                            key={attachment.id}
+                                            href={
+                                              signedUrl ?? attachment.url ?? "#"
+                                            }
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="flex items-center gap-3 rounded-md border border-border px-2 py-2 text-xs hover:bg-muted/30"
+                                          >
+                                            {renderAttachmentIcon(attachment)}
+                                            <div className="flex-1 min-w-0">
+                                              <div className="font-medium truncate">
+                                                {attachment.name}
+                                              </div>
+                                              <div className="text-[11px] text-muted-foreground">
+                                                {attachment.created_at
+                                                  ? formatDate(
+                                                      attachment.created_at.slice(
+                                                        0,
+                                                        10,
+                                                      ),
+                                                    )
+                                                  : ""}
+                                              </div>
+                                            </div>
+                                          </a>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
                           </>
                         );
                       })()}
@@ -3677,6 +3823,112 @@ export default function OperatorProductionPage() {
                       })}`
                     : ""}
                 </div>
+              </div>
+              <div className="rounded-md border border-border bg-background px-3 py-2">
+                <div className="text-xs text-muted-foreground">
+                  {quickActionItem.attachments.length > 0
+                    ? t("production.operator.files.count", {
+                        count: quickActionItem.attachments.length,
+                      })
+                    : t("production.operator.files.none")}
+                </div>
+                {quickActionItem.attachments.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-2 text-xs"
+                        onClick={() => void openPrimaryAttachment(quickActionItem)}
+                      >
+                        {signingJobs.has(quickActionItem.id) ? (
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                        ) : (
+                          <FileTextIcon className="h-3.5 w-3.5" />
+                        )}
+                        {t("production.operator.files.openPrimary")}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-2 text-xs"
+                        onClick={async () => {
+                          const next = new Set(expandedJobs);
+                          if (next.has(quickActionItem.id)) {
+                            next.delete(quickActionItem.id);
+                            setExpandedJobs(next);
+                            return;
+                          }
+                          next.add(quickActionItem.id);
+                          setExpandedJobs(next);
+                          if (!signingJobs.has(quickActionItem.id)) {
+                            setSigningJobs((prev) => {
+                              const updated = new Set(prev);
+                              updated.add(quickActionItem.id);
+                              return updated;
+                            });
+                            await signAttachments(
+                              quickActionItem.attachments.filter(
+                                (attachment) => !signedUrls[attachment.id],
+                              ),
+                            );
+                            setSigningJobs((prev) => {
+                              const updated = new Set(prev);
+                              updated.delete(quickActionItem.id);
+                              return updated;
+                            });
+                          }
+                        }}
+                      >
+                        {signingJobs.has(quickActionItem.id) ? (
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                        ) : expandedJobs.has(quickActionItem.id) ? (
+                          <ChevronUpIcon className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronDownIcon className="h-3.5 w-3.5" />
+                        )}
+                        {expandedJobs.has(quickActionItem.id)
+                          ? t("production.operator.files.hide")
+                          : t("production.operator.files.show")}
+                      </Button>
+                    </div>
+                    {expandedJobs.has(quickActionItem.id) ? (
+                      <div className="space-y-2">
+                        {signingJobs.has(quickActionItem.id) ? (
+                          <div className="text-xs text-muted-foreground">
+                            {t("production.operator.files.loading")}
+                          </div>
+                        ) : null}
+                        {quickActionItem.attachments.map((attachment) => {
+                          const signedUrl = signedUrls[attachment.id];
+                          return (
+                            <a
+                              key={attachment.id}
+                              href={signedUrl ?? attachment.url ?? "#"}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-3 rounded-md border border-border px-2 py-2 text-xs hover:bg-muted/30"
+                            >
+                              {renderAttachmentIcon(attachment)}
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate font-medium">
+                                  {attachment.name}
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  {attachment.created_at
+                                    ? formatDate(
+                                        attachment.created_at.slice(0, 10),
+                                      )
+                                    : ""}
+                                </div>
+                              </div>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               {quickActionItem.trackingMode !== "construction_level" ? (
                 <div className="rounded-md border border-border bg-background px-3 py-2">

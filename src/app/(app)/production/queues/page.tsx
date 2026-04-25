@@ -53,6 +53,7 @@ import {
   rowKeyForProductionItem,
 } from "@/lib/domain/productionSplitActions";
 import type { ProductionJobOrderItem } from "@/lib/domain/productionJobDetail";
+import { computeWorkedSecondsBreakdown } from "@/lib/domain/workingCalendar";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabaseClient";
 import type {
@@ -156,6 +157,37 @@ function formatQueueGroupDate(
   }).format(parsed);
 }
 
+function formatLiveQueueDuration(
+  startedAt: string | null | undefined,
+  doneAt: string | null | undefined,
+  nowMs: number,
+  calendar: {
+    workdays: number[];
+    shifts: Array<{ start: string; end: string }>;
+    overtimeEnabled: boolean;
+  },
+) {
+  if (!startedAt) {
+    return "0s";
+  }
+  const totalSeconds = computeWorkedSecondsBreakdown(
+    startedAt,
+    doneAt ?? new Date(nowMs).toISOString(),
+    calendar,
+  ).totalSeconds;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  }
+  return `${seconds}s`;
+}
+
 export default function ProductionQueuesPage() {
   const { t } = useI18n();
   const { workdays, shifts, overtimeEnabled } = useWorkingCalendar();
@@ -199,6 +231,7 @@ export default function ProductionQueuesPage() {
   const [queueViewMode, setQueueViewMode] = useState<
     "active" | "completed" | "all"
   >("active");
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [showLeftFade, setShowLeftFade] = useState(false);
@@ -220,6 +253,21 @@ export default function ProductionQueuesPage() {
       window.clearTimeout(timeoutId);
     };
   }, [dataError]);
+
+  useEffect(() => {
+    const hasActiveRuns = batchRuns.some(
+      (run) => run.status === "in_progress" && Boolean(run.started_at),
+    );
+    if (!hasActiveRuns) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [batchRuns]);
 
   const closeMobileSearch = useCallback(() => {
     setIsMobileSearchOpen(false);
@@ -460,6 +508,7 @@ export default function ProductionQueuesPage() {
         orderItems,
         activityEvents,
         calendar: { workdays, shifts, overtimeEnabled },
+        nowMs: liveNowMs,
         stations,
         viewDate: "2000-01-01",
         plannedRangeDays: 36500,
@@ -468,6 +517,7 @@ export default function ProductionQueuesPage() {
     [
       batchRuns,
       activityEvents,
+      liveNowMs,
       orderItems,
       productionItems,
       queueViewMode,
@@ -1696,7 +1746,17 @@ export default function ProductionQueuesPage() {
                                     {t("production.main.common.qty")}{" "}
                                     {item.totalQty} |{" "}
                                     {t("production.main.queues.time")}{" "}
-                                    {formatQueueDuration(Number(item.durationMinutes ?? 0))}
+                                    {item.status === "in_progress" &&
+                                    item.startedAt
+                                      ? formatLiveQueueDuration(
+                                          item.startedAt,
+                                          item.doneAt ?? null,
+                                          liveNowMs,
+                                          { workdays, shifts, overtimeEnabled },
+                                        )
+                                      : formatQueueDuration(
+                                          Number(item.durationMinutes ?? 0),
+                                        )}
                                     {Number(item.overtimeMinutes ?? 0) > 0
                                       ? ` | ${t("production.main.queues.overtime")} ${formatQueueDuration(
                                           Number(item.overtimeMinutes ?? 0),

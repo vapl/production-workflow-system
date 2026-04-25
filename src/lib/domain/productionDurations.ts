@@ -179,6 +179,7 @@ function buildWorkedBreakdownByKey(
   getKey: (event: ProductionStatusEventRow) => string | null,
   range?: WorkedMinutesRange | null,
   calendar?: WorkingCalendar | null,
+  nowMs?: number,
 ) {
   const eventsByKey = new Map<string, ProductionStatusEventRow[]>();
 
@@ -193,7 +194,7 @@ function buildWorkedBreakdownByKey(
   });
 
   const result = new Map<string, WorkedTimeBreakdown>();
-  const now = Date.now();
+  const now = nowMs ?? Date.now();
   const resolvedRange = resolveRange(range);
 
   eventsByKey.forEach((entityEvents, key) => {
@@ -509,12 +510,14 @@ export function summarizeWorkedMinutesByRun(
 export function buildWorkedBreakdownByItem(
   events: ProductionStatusEventRow[],
   calendar?: WorkingCalendar | null,
+  nowMs?: number,
 ) {
   return buildWorkedBreakdownByKey(
     events,
     (event) => event.production_item_id ?? null,
     undefined,
     calendar,
+    nowMs,
   );
 }
 
@@ -534,12 +537,14 @@ export function buildWorkedBreakdownByItemInRange(
 export function buildWorkedBreakdownByRun(
   events: ProductionStatusEventRow[],
   calendar?: WorkingCalendar | null,
+  nowMs?: number,
 ) {
   return buildWorkedBreakdownByKey(
     events,
     (event) => event.batch_run_id ?? null,
     undefined,
     calendar,
+    nowMs,
   );
 }
 

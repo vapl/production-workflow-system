@@ -1947,6 +1947,8 @@
         show: "Show files",
         openPrimary: "Open file",
         loading: "Loading files...",
+        none: "No files",
+        count: "{count} files",
       },
       blocked: {
         reasonTemplate: "Reason template",

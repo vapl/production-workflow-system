@@ -2002,6 +2002,8 @@
         show: "Показать файлы",
         openPrimary: "Открыть файл",
         loading: "Загрузка файлов...",
+        none: "Нет файлов",
+        count: "{count} файлов",
       },
       blocked: {
         reasonTemplate: "Шаблон причины",
