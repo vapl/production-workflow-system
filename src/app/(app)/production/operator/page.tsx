@@ -2417,13 +2417,16 @@ export default function OperatorProductionPage() {
         result.sourceRowId && result.fieldId
           ? `${result.orderId}:${result.fieldId}:${result.sourceRowId}`
           : null;
-      setQuickActionOrderId(result.orderId);
-      setQuickActionRowKey(rowKey);
-      setQuickActionRowIndex(rowIndex);
-      if (rowKey == null && rowIndex == null) {
-        setQuickActionItemId(null);
-      }
-      setIsQuickActionOpen(true);
+      setIsScannerOpen(false);
+      window.setTimeout(() => {
+        setQuickActionOrderId(result.orderId);
+        setQuickActionRowKey(rowKey);
+        setQuickActionRowIndex(rowIndex);
+        if (rowKey == null && rowIndex == null) {
+          setQuickActionItemId(null);
+        }
+        setIsQuickActionOpen(true);
+      }, 180);
       setQueryParams({
         date: selectedDate,
         status: statusFilter === "all" ? null : statusFilter,
@@ -2433,7 +2436,7 @@ export default function OperatorProductionPage() {
         order: result.orderId,
         station: stationFilter ?? null,
       });
-      return true;
+      return false;
     }
     router.push(targetRoute);
     return true;
