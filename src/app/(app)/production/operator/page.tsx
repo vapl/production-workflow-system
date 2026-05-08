@@ -10,6 +10,11 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Input } from "@/components/ui/Input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/Popover";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -37,6 +42,12 @@ import {
   collectRunItemIds,
   publishProductionLiveEvent,
 } from "@/lib/domain/productionLive";
+import {
+  getProductionItemCompletedQty,
+  getProductionItemQuantity,
+  getProductionItemRemainingQty,
+  getProductionItemsProgress,
+} from "@/lib/domain/productionUnitProgress";
 import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus";
 import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
@@ -142,6 +153,7 @@ type PendingAction = {
 type OrderItemLinkRow = {
   id: string;
   source_row_id: string;
+  qty?: number | null;
 };
 type PendingQuickAction = {
   orderId: string;
@@ -211,13 +223,13 @@ function matchesProductionItemToRun(
   if (item.order_id !== run.order_id) {
     return false;
   }
-  if (item.station_id !== run.station_id) {
-    return false;
-  }
   const itemSourceKey = getProductionItemSourceKey(item);
   const runSourceKey = getBatchRunSourceKey(run);
   if (itemSourceKey && runSourceKey) {
     return itemSourceKey === runSourceKey;
+  }
+  if (item.station_id && item.station_id !== run.station_id) {
+    return false;
   }
   return item.batch_code === run.batch_code;
 }
@@ -383,6 +395,9 @@ export default function OperatorProductionPage() {
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
   const [pendingQuickAction, setPendingQuickAction] =
     useState<PendingQuickAction | null>(null);
+  const [completeMultipleQtyByItem, setCompleteMultipleQtyByItem] = useState<
+    Record<string, string>
+  >({});
   const [scannerError, setScannerError] = useState("");
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const hideMobileFloatingControls = useHideMobileFloatingControls();
@@ -771,7 +786,7 @@ export default function OperatorProductionPage() {
             }
           : await sb
               .from("order_items")
-              .select("id, source_row_id")
+              .select("id, source_row_id, qty")
               .in("order_id", orderIds)
               .in("source_row_id", sourceRowIds);
       if (!isMounted) {
@@ -1175,6 +1190,18 @@ export default function OperatorProductionPage() {
     return map;
   }, [orderItemLinks]);
 
+  const orderItemQtyBySourceKey = useMemo(() => {
+    const map = new Map<string, number>();
+    orderItemLinks.forEach((row) => {
+      const qty = Number(row.qty ?? 0);
+      if (Number.isFinite(qty) && qty > 0) {
+        map.set(row.id, qty);
+        map.set(row.source_row_id, qty);
+      }
+    });
+    return map;
+  }, [orderItemLinks]);
+
   const stationsById = useMemo(() => {
     return new Map(stations.map((station) => [station.id, station.name]));
   }, [stations]);
@@ -1279,15 +1306,18 @@ export default function OperatorProductionPage() {
         if (item.order_id !== representativeRun.order_id) {
           return false;
         }
-        if (item.station_id !== stationId) {
-          return false;
-        }
         if (trackingMode === "construction_level") {
           const sourceKey = getProductionItemSourceKey(item);
           if (sourceKey && routeKeys.size > 0) {
             return routeKeys.has(sourceKey);
           }
+          if (item.station_id && item.station_id !== stationId) {
+            return false;
+          }
           return batchCodes.has(item.batch_code);
+        }
+        if (item.station_id && item.station_id !== stationId) {
+          return false;
         }
         return true;
       });
@@ -1298,10 +1328,25 @@ export default function OperatorProductionPage() {
         latestByGroup.set(key, pickLatestItem(existing, row));
       });
       const dedupedItems = Array.from(latestByGroup.values());
-      const totalQtyFromItems = dedupedItems.reduce(
-        (sum, item) => sum + Number(item.qty ?? 0),
-        0,
-      );
+      const effectiveDedupedItems = dedupedItems.map((item) => {
+        const sourceKey = getProductionItemSourceKey(item);
+        const linkedQty = sourceKey
+          ? orderItemQtyBySourceKey.get(sourceKey)
+          : undefined;
+        return linkedQty ? { ...item, qty: linkedQty } : item;
+      });
+      const itemProgress = getProductionItemsProgress(effectiveDedupedItems);
+      const itemCountProgress = {
+        totalQty: effectiveDedupedItems.length,
+        completedQty: effectiveDedupedItems.filter(
+          (item) => item.status === "done",
+        ).length,
+      };
+      const progress =
+        trackingMode === "construction_level"
+          ? itemProgress
+          : itemCountProgress;
+      const totalQtyFromItems = progress.totalQty;
       const totalQty =
         trackingMode === "construction_level"
           ? totalQtyFromItems
@@ -1415,6 +1460,7 @@ export default function OperatorProductionPage() {
         plannedDate,
         batchCode: representativeRun.batch_code,
         totalQty,
+        completedQty: progress.completedQty,
         material,
         attachments: mergeAttachments(
           attachmentsByOrder.get(representativeRun.order_id) ?? [],
@@ -1434,7 +1480,7 @@ export default function OperatorProductionPage() {
         startedAt,
         doneAt,
         durationMinutes,
-        items: dedupedItems,
+        items: effectiveDedupedItems,
         trackingMode,
         unitType,
         unitName,
@@ -1501,6 +1547,7 @@ export default function OperatorProductionPage() {
     attachmentsByOrder,
     batchRuns,
     orderItemIdsBySourceKey,
+    orderItemQtyBySourceKey,
     productionAttachmentsByItemId,
     productionItems,
     t,
@@ -1804,12 +1851,24 @@ export default function OperatorProductionPage() {
       ),
     );
     const nextItems = productionItems.map((item) =>
-      item.order_id === run.order_id &&
-      item.batch_code === run.batch_code &&
-      item.station_id === run.station_id
+      matchesProductionItemToRun(item, run)
         ? {
             ...item,
+            qty:
+              orderItemQtyBySourceKey.get(
+                getProductionItemSourceKey(item) ?? "",
+              ) ?? item.qty,
             status: appliedStatus,
+            meta:
+              appliedStatus === "done"
+                ? {
+                    ...((item.meta as Record<string, unknown> | null) ?? {}),
+                    completedQty:
+                      orderItemQtyBySourceKey.get(
+                        getProductionItemSourceKey(item) ?? "",
+                      ) ?? getProductionItemQuantity(item),
+                  }
+                : item.meta,
             started_at:
               appliedStatus === "in_progress"
                 ? (nextRunStartedAt ?? now)
@@ -1902,6 +1961,129 @@ export default function OperatorProductionPage() {
     setPendingAction({ itemId, action: status });
     try {
       await updateItemStatus(itemId, runId, status, extra);
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const updateProductionItemCompletedQty = async (
+    item: ProductionItemRow,
+    completedQty: number,
+  ) => {
+    const sb = supabase;
+    if (!sb) {
+      return false;
+    }
+    const quantity = getProductionItemQuantity(item);
+    const nextCompletedQty = Math.min(Math.max(completedQty, 0), quantity);
+    const now = new Date().toISOString();
+    const nextMeta = {
+      ...((item.meta as Record<string, unknown> | null) ?? {}),
+      completedQty: nextCompletedQty,
+      lastCompletedQtyAt: now,
+      lastCompletedQtyBy: currentUser.id,
+    };
+    const nextStatus = "in_progress" as const;
+    const nextStartedAt = item.started_at ?? now;
+
+    const { error } = await sb
+      .from("production_items")
+      .update({
+        meta: nextMeta,
+        status: nextStatus,
+        started_at: nextStartedAt,
+        done_at: null,
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      setDataError(error.message ?? "Failed to update completed quantity.");
+      return false;
+    }
+
+    setProductionItems((prev) =>
+      prev.map((row) =>
+        row.id === item.id
+          ? {
+              ...row,
+              qty: quantity,
+              meta: nextMeta,
+              status: nextStatus,
+              started_at: nextStartedAt,
+              done_at: null,
+            }
+          : row,
+      ),
+    );
+    return true;
+  };
+
+  const handleCompleteItemUnits = async (
+    itemId: string,
+    runId: string,
+    unitsToComplete: number,
+  ) => {
+    if (pendingAction) {
+      return;
+    }
+    const targetItemRaw = productionItems.find((item) => item.id === itemId);
+    if (!targetItemRaw) {
+      return;
+    }
+    const linkedQty = orderItemQtyBySourceKey.get(
+      getProductionItemSourceKey(targetItemRaw) ?? "",
+    );
+    const targetItem = linkedQty
+      ? { ...targetItemRaw, qty: linkedQty }
+      : targetItemRaw;
+    const remainingQty = getProductionItemRemainingQty(targetItem);
+    if (
+      remainingQty <= 0 ||
+      targetItem.status === "blocked" ||
+      targetItem.status === "paused"
+    ) {
+      return;
+    }
+    const safeUnits = Math.min(
+      Math.max(Math.floor(Number(unitsToComplete) || 1), 1),
+      remainingQty,
+    );
+    const quantity = getProductionItemQuantity(targetItem);
+    const nextCompletedQty =
+      getProductionItemCompletedQty(targetItem) + safeUnits;
+    setPendingAction({ itemId, action: "done" });
+    try {
+      const saved = await updateProductionItemCompletedQty(
+        targetItem,
+        nextCompletedQty,
+      );
+      if (!saved) {
+        return;
+      }
+      setCompleteMultipleQtyByItem((prev) => ({
+        ...prev,
+        [itemId]: "1",
+      }));
+      if (nextCompletedQty >= quantity) {
+        await updateItemStatus(itemId, runId, "done");
+      } else {
+        const run = batchRuns.find((item) => item.id === runId);
+        if (run) {
+          publishProductionLiveEvent({
+            type: "status-changed",
+            runId,
+            orderId: run.order_id,
+            batchCode: run.batch_code,
+            stationId: run.station_id,
+            status: run.status === "queued" ? "in_progress" : run.status,
+            startedAt: targetItem.started_at ?? new Date().toISOString(),
+            doneAt: null,
+            durationMinutes: run.duration_minutes ?? null,
+            itemIds: [targetItem.id],
+            changedAt: new Date().toISOString(),
+          });
+        }
+      }
     } finally {
       setPendingAction(null);
     }
@@ -3017,6 +3199,8 @@ export default function OperatorProductionPage() {
                         const isBatchBlocked = item.status === "blocked";
                         const isBatchPaused = item.status === "paused";
                         const isBatchDone = item.status === "done";
+                        const completedQty = item.completedQty ?? 0;
+                        const progressTotalQty = Math.max(item.totalQty, 1);
                         const batchStartLockedByDate =
                           !hasBatchStarted &&
                           !isBatchBlocked &&
@@ -3100,12 +3284,7 @@ export default function OperatorProductionPage() {
                           </div>
                               <div className="flex items-center gap-2">
                                 <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                                  {
-                                    item.items.filter(
-                                      (row) => row.status === "done",
-                                    ).length
-                                  }
-                                  /{item.items.length}
+                                  {completedQty}/{progressTotalQty}
                                 </span>
                                 <Badge variant={priorityBadge(item.priority)}>
                                   {priorityLabel(item.priority)}
@@ -3233,6 +3412,12 @@ export default function OperatorProductionPage() {
                                         prodItem.started_at
                                           ? formatDuration(itemElapsedMinutes)
                                           : null;
+                                      const itemQuantity =
+                                        getProductionItemQuantity(prodItem);
+                                      const itemCompletedQty =
+                                        getProductionItemCompletedQty(prodItem);
+                                      const itemRemainingQty =
+                                        getProductionItemRemainingQty(prodItem);
                                       return (
                                         <div
                                           key={prodItem.id}
@@ -3256,6 +3441,10 @@ export default function OperatorProductionPage() {
                                             {t("production.operator.queue.qty", {
                                               qty: prodItem.qty,
                                             })}
+                                            {` - ${t("production.operator.queue.readyProgress", {
+                                              completed: itemCompletedQty,
+                                              total: itemQuantity,
+                                            })}`}
                                             {prodItem.material
                                               ? ` - ${prodItem.material}`
                                               : ""}
@@ -3387,30 +3576,135 @@ export default function OperatorProductionPage() {
                                                       )}
                                                     </span>
                                                   ) : null}
-                                                  <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="gap-2"
-                                                    disabled={
-                                                      !hasStarted ||
-                                                      isDone ||
-                                                      isBlocked ||
-                                                      isPaused ||
-                                                      isCompleting
-                                                    }
-                                                    onClick={() =>
-                                                      handleUserStatusUpdate(
-                                                        prodItem.id,
-                                                        item.id,
-                                                        "done",
-                                                      )
-                                                    }
-                                                  >
-                                                    {isCompleting ? (
-                                                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                                    ) : null}
-                                                    {t("production.operator.actions.done")}
-                                                  </Button>
+                                                  {itemRemainingQty > 1 ? (
+                                                    <Popover>
+                                                      <PopoverTrigger asChild>
+                                                        <Button
+                                                          variant="outline"
+                                                          size="sm"
+                                                          className="gap-2"
+                                                          disabled={
+                                                            !hasStarted ||
+                                                            isDone ||
+                                                            isBlocked ||
+                                                            isPaused ||
+                                                            isCompleting
+                                                          }
+                                                        >
+                                                          {isCompleting ? (
+                                                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                                          ) : null}
+                                                          {t("production.operator.actions.done")}
+                                                          <ChevronDownIcon className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                      </PopoverTrigger>
+                                                      <PopoverContent className="w-56 p-2">
+                                                        <div className="space-y-2">
+                                                          <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="w-full justify-start"
+                                                            onClick={() =>
+                                                              handleCompleteItemUnits(
+                                                                prodItem.id,
+                                                                item.id,
+                                                                1,
+                                                              )
+                                                            }
+                                                          >
+                                                            {t(
+                                                              "production.operator.actions.completeOne",
+                                                            )}
+                                                          </Button>
+                                                          <div className="rounded-md border border-border p-2">
+                                                            <div className="mb-2 text-[11px] text-muted-foreground">
+                                                              {t(
+                                                                "production.operator.queue.remainingQty",
+                                                                {
+                                                                  count:
+                                                                    itemRemainingQty,
+                                                                },
+                                                              )}
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                              <Input
+                                                                type="number"
+                                                                min={1}
+                                                                max={
+                                                                  itemRemainingQty
+                                                                }
+                                                                value={
+                                                                  completeMultipleQtyByItem[
+                                                                    prodItem.id
+                                                                  ] ?? "1"
+                                                                }
+                                                                onChange={(
+                                                                  event,
+                                                                ) =>
+                                                                  setCompleteMultipleQtyByItem(
+                                                                    (prev) => ({
+                                                                      ...prev,
+                                                                      [prodItem.id]:
+                                                                        event
+                                                                          .target
+                                                                          .value,
+                                                                    }),
+                                                                  )
+                                                                }
+                                                                className="h-8"
+                                                              />
+                                                              <Button
+                                                                size="sm"
+                                                                onClick={() =>
+                                                                  handleCompleteItemUnits(
+                                                                    prodItem.id,
+                                                                    item.id,
+                                                                    Number(
+                                                                      completeMultipleQtyByItem[
+                                                                        prodItem
+                                                                          .id
+                                                                      ] ?? 1,
+                                                                    ),
+                                                                  )
+                                                                }
+                                                              >
+                                                                {t(
+                                                                  "production.operator.actions.completeMany",
+                                                                )}
+                                                              </Button>
+                                                            </div>
+                                                          </div>
+                                                        </div>
+                                                      </PopoverContent>
+                                                    </Popover>
+                                                  ) : (
+                                                    <Button
+                                                      variant="outline"
+                                                      size="sm"
+                                                      className="gap-2"
+                                                      disabled={
+                                                        !hasStarted ||
+                                                        isDone ||
+                                                        isBlocked ||
+                                                        isPaused ||
+                                                        isCompleting
+                                                      }
+                                                      onClick={() =>
+                                                        handleCompleteItemUnits(
+                                                          prodItem.id,
+                                                          item.id,
+                                                          1,
+                                                        )
+                                                      }
+                                                    >
+                                                      {isCompleting ? (
+                                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                                                      ) : null}
+                                                      {t(
+                                                        "production.operator.actions.done",
+                                                      )}
+                                                    </Button>
+                                                  )}
                                                   <Button
                                                     variant="ghost"
                                                     size="sm"
@@ -4071,6 +4365,11 @@ export default function OperatorProductionPage() {
                       "in_progress",
                     );
                     const isCompleting = isActionLoading(prodItem.id, "done");
+                    const itemQuantity = getProductionItemQuantity(prodItem);
+                    const itemCompletedQty =
+                      getProductionItemCompletedQty(prodItem);
+                    const itemRemainingQty =
+                      getProductionItemRemainingQty(prodItem);
                     return (
                       <div
                         key={prodItem.id}
@@ -4088,6 +4387,10 @@ export default function OperatorProductionPage() {
                           {t("production.operator.queue.qty", {
                             qty: prodItem.qty,
                           })}
+                          {` - ${t("production.operator.queue.readyProgress", {
+                            completed: itemCompletedQty,
+                            total: itemQuantity,
+                          })}`}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
@@ -4112,26 +4415,118 @@ export default function OperatorProductionPage() {
                               ? t("production.operator.actions.resume")
                               : t("production.operator.actions.start")}
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={
-                              !hasStarted ||
-                              isDone ||
-                              isBlocked ||
-                              isPaused ||
-                              isCompleting
-                            }
-                            onClick={() =>
-                              handleUserStatusUpdate(
-                                prodItem.id,
-                                quickActionItem.id,
-                                "done",
-                              )
-                            }
-                          >
-                            {t("production.operator.actions.done")}
-                          </Button>
+                          {itemRemainingQty > 1 ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="gap-2"
+                                  disabled={
+                                    !hasStarted ||
+                                    isDone ||
+                                    isBlocked ||
+                                    isPaused ||
+                                    isCompleting
+                                  }
+                                >
+                                  {t("production.operator.actions.done")}
+                                  <ChevronDownIcon className="h-3.5 w-3.5" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-56 p-2">
+                                <div className="space-y-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="w-full justify-start"
+                                    onClick={() =>
+                                      handleCompleteItemUnits(
+                                        prodItem.id,
+                                        quickActionItem.id,
+                                        1,
+                                      )
+                                    }
+                                  >
+                                    {t(
+                                      "production.operator.actions.completeOne",
+                                    )}
+                                  </Button>
+                                  <div className="rounded-md border border-border p-2">
+                                    <div className="mb-2 text-[11px] text-muted-foreground">
+                                      {t(
+                                        "production.operator.queue.remainingQty",
+                                        {
+                                          count: itemRemainingQty,
+                                        },
+                                      )}
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <Input
+                                        type="number"
+                                        min={1}
+                                        max={itemRemainingQty}
+                                        value={
+                                          completeMultipleQtyByItem[
+                                            prodItem.id
+                                          ] ?? "1"
+                                        }
+                                        onChange={(event) =>
+                                          setCompleteMultipleQtyByItem(
+                                            (prev) => ({
+                                              ...prev,
+                                              [prodItem.id]:
+                                                event.target.value,
+                                            }),
+                                          )
+                                        }
+                                        className="h-8"
+                                      />
+                                      <Button
+                                        size="sm"
+                                        onClick={() =>
+                                          handleCompleteItemUnits(
+                                            prodItem.id,
+                                            quickActionItem.id,
+                                            Number(
+                                              completeMultipleQtyByItem[
+                                                prodItem.id
+                                              ] ?? 1,
+                                            ),
+                                          )
+                                        }
+                                      >
+                                        {t(
+                                          "production.operator.actions.completeMany",
+                                        )}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={
+                                !hasStarted ||
+                                isDone ||
+                                isBlocked ||
+                                isPaused ||
+                                isCompleting
+                              }
+                              onClick={() =>
+                                handleCompleteItemUnits(
+                                  prodItem.id,
+                                  quickActionItem.id,
+                                  1,
+                                )
+                              }
+                            >
+                              {t("production.operator.actions.done")}
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"

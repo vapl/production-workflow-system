@@ -94,17 +94,6 @@ export async function applyProductionSplitPlan(
   });
 
   const usedCodesByOrder = new Map<string, Set<string>>();
-  const registerCode = (orderId: string, code: string) => {
-    if (!usedCodesByOrder.has(orderId)) {
-      usedCodesByOrder.set(orderId, new Set());
-    }
-    usedCodesByOrder.get(orderId)?.add(code);
-  };
-
-  batchRuns.forEach((run) => registerCode(run.order_id, run.batch_code));
-  productionItems.forEach((item) =>
-    registerCode(item.order_id, item.batch_code || "B1"),
-  );
 
   const nextBatchCode = (orderId: string, preferred?: string) => {
     const used = usedCodesByOrder.get(orderId) ?? new Set<string>();
@@ -115,14 +104,7 @@ export async function applyProductionSplitPlan(
       used.add(preferred);
       return preferred;
     }
-    let max = 0;
-    used.forEach((code) => {
-      const match = /^B(\d+)$/i.exec(code.trim());
-      if (match?.[1]) {
-        max = Math.max(max, Number(match[1]));
-      }
-    });
-    const generated = `B${Math.max(1, max + 1)}`;
+    const generated = `B${used.size + 1}`;
     used.add(generated);
     return generated;
   };
@@ -145,14 +127,10 @@ export async function applyProductionSplitPlan(
     ).sort();
     orderRows.sort((a, b) => a.id.localeCompare(b.id));
 
-    uniqueDates.forEach((date, index) => {
-      const firstRow = orderRows.find(
-        (row) => (effectiveDatesByRow.get(row.id) ?? fallbackPlannedDate) === date,
-      );
-      const preferred = mode === "release" && index === 0 ? firstRow?.batchCode : undefined;
+    uniqueDates.forEach((date) => {
       batchCodeByOrderDate.set(
         `${orderId}:${date}`,
-        nextBatchCode(orderId, preferred),
+        nextBatchCode(orderId),
       );
     });
   });

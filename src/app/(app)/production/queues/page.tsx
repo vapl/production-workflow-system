@@ -130,6 +130,11 @@ function addDaysToInputDate(value: string, days: number) {
   return getLocalDateInputValue(date);
 }
 
+function batchCodeSortValue(batchCode: string) {
+  const match = /^B(\d+)$/i.exec(batchCode.trim());
+  return match?.[1] ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
 type QueueQuickFilter =
   | "none"
   | "today"
@@ -304,7 +309,7 @@ export default function ProductionQueuesPage() {
           .order("created_at", { ascending: false }),
         sb
           .from("order_items")
-          .select("id, order_id, item_name, item_type")
+          .select("id, order_id, item_name, item_type, qty, source_row_id")
           .order("created_at", { ascending: true }),
         sb
           .from("batch_runs")
@@ -347,7 +352,9 @@ export default function ProductionQueuesPage() {
         orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
       })),
     );
-    setOrderItems((orderItemsResult.data ?? []) as ProductionJobOrderItem[]);
+    setOrderItems(
+      (orderItemsResult.data ?? []) as unknown as ProductionJobOrderItem[],
+    );
     setBatchRuns(
       (runsResult.data ?? []).map((row) => ({
         ...(row as Omit<BatchRunRow, "orders">),
@@ -632,6 +639,33 @@ export default function ProductionQueuesPage() {
     search,
     today,
   ]);
+
+  const displayBatchCodeByOrderBatch = useMemo(() => {
+    const byOrder = new Map<string, Set<string>>();
+    Array.from(queueByStation.values())
+      .flat()
+      .forEach((item) => {
+        if (item.trackingMode !== "construction_level") {
+          return;
+        }
+        const current = byOrder.get(item.orderId) ?? new Set<string>();
+        current.add(item.batchCode);
+        byOrder.set(item.orderId, current);
+      });
+
+    const map = new Map<string, string>();
+    byOrder.forEach((codes, orderId) => {
+      Array.from(codes)
+        .sort((a, b) => {
+          const diff = batchCodeSortValue(a) - batchCodeSortValue(b);
+          return diff !== 0 ? diff : a.localeCompare(b);
+        })
+        .forEach((code, index) => {
+          map.set(`${orderId}:${code}`, `B${index + 1}`);
+        });
+    });
+    return map;
+  }, [queueByStation]);
 
   const metricsByStation = useMemo(
     () =>
@@ -1741,10 +1775,21 @@ export default function ProductionQueuesPage() {
                                     {formatQueueGroupDate(item.plannedDate, t)}
                                   </div>
                                   <div className="text-[12px] leading-5 text-muted-foreground">
-                                    {t("production.main.common.group")}{" "}
-                                    {item.batchCode} |{" "}
+                                    {item.trackingMode ===
+                                    "construction_level"
+                                      ? `${t("production.main.common.group")} ${
+                                          displayBatchCodeByOrderBatch.get(
+                                            `${item.orderId}:${item.batchCode}`,
+                                          ) ?? item.batchCode
+                                        } | `
+                                      : ""}
                                     {t("production.main.common.qty")}{" "}
                                     {item.totalQty} |{" "}
+                                    {t("production.main.queues.readyProgress", {
+                                      completed: item.completedQty ?? 0,
+                                      total: item.totalQty,
+                                    })}{" "}
+                                    |{" "}
                                     {t("production.main.queues.time")}{" "}
                                     {item.status === "in_progress" &&
                                     item.startedAt

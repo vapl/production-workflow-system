@@ -105,6 +105,7 @@ export type OperatorQueueItem = {
   plannedDate: string | null;
   batchCode: string;
   totalQty: number;
+  completedQty?: number;
   material: string;
   attachments: OrderAttachmentRow[];
   startedAt?: string | null;

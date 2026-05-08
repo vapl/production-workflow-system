@@ -12,6 +12,7 @@ import {
   buildWorkedBreakdownByRun,
   getQueueGroupWorkedBreakdown,
 } from "@/lib/domain/productionDurations";
+import { getProductionItemsProgress } from "@/lib/domain/productionUnitProgress";
 import type { WorkingCalendar } from "@/lib/domain/workingCalendar";
 
 type StationLike = Pick<ProductionStation, "id" | "trackingMode">;
@@ -52,6 +53,9 @@ type OrderItemLike = {
   order_id: string;
   item_name: string;
   item_type?: string | null;
+  qty?: number | null;
+  sourceRowId?: string | null;
+  source_row_id?: string | null;
 };
 
 export type ProductionQueueItem = {
@@ -64,6 +68,7 @@ export type ProductionQueueItem = {
   status: ProductionStatus;
   batchCode: string;
   totalQty: number;
+  completedQty: number;
   material: string;
   plannedDate?: string | null;
   startedAt?: string | null;
@@ -78,6 +83,26 @@ export type ProductionQueueItem = {
   unitType?: string | null;
   unitName?: string | null;
 };
+
+function getProductionItemSourceKey(item: ProductionItemLike) {
+  const meta = item.meta as Record<string, unknown> | null;
+  const sourceRowId =
+    meta && typeof meta.sourceRowId === "string"
+      ? meta.sourceRowId
+      : undefined;
+  const rowKey =
+    meta && typeof meta.rowKey === "string" ? meta.rowKey : undefined;
+  return sourceRowId ?? rowKey ?? null;
+}
+
+function getOrderItemSourceKey(item: OrderItemLike) {
+  return item.sourceRowId ?? item.source_row_id ?? null;
+}
+
+function getOrderItemQuantity(item: OrderItemLike | undefined) {
+  const parsed = Number(item?.qty ?? 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 type ReadyBatchGroupLike = {
   orderNumber: string;
@@ -129,6 +154,13 @@ export function buildQueueByStation(params: {
     }
   >();
   const orderItemById = new Map(orderItems.map((item) => [item.id, item]));
+  const orderItemBySourceKey = new Map<string, OrderItemLike>();
+  orderItems.forEach((item) => {
+    const key = getOrderItemSourceKey(item);
+    if (key) {
+      orderItemBySourceKey.set(`${item.order_id}:${key}`, item);
+    }
+  });
   const workedBreakdownByItem = buildWorkedBreakdownByItem(
     activityEvents,
     calendar,
@@ -193,23 +225,60 @@ export function buildQueueByStation(params: {
     }
 
     const batchCodes = new Set(runs.map((run) => run.batch_code));
+    const routeKeys = new Set(
+      runs
+        .map((run) => run.route_key)
+        .filter((value): value is string => Boolean(value && value !== "default")),
+    );
     const items = productionItems.filter((item) => {
       if (item.order_id !== representativeRun.order_id) {
         return false;
       }
-      if (item.station_id !== stationId) {
-        return false;
-      }
       if (trackingMode === "construction_level") {
+        const sourceKey = getProductionItemSourceKey(item);
+        if (sourceKey && routeKeys.size > 0) {
+          return routeKeys.has(sourceKey);
+        }
+        if (item.station_id && item.station_id !== stationId) {
+          return false;
+        }
         return batchCodes.has(item.batch_code);
+      }
+      if (item.station_id && item.station_id !== stationId) {
+        return false;
       }
       return true;
     });
 
-    const totalQtyFromItems = items.reduce(
-      (sum, item) => sum + Number(item.qty ?? 0),
-      0,
+    const logicalItems = Array.from(
+      items
+        .reduce((map, item) => {
+          const sourceKey = getProductionItemSourceKey(item);
+          const key = sourceKey ? `${item.order_id}:${sourceKey}` : item.id;
+          if (!map.has(key)) {
+            map.set(key, item);
+          }
+          return map;
+        }, new Map<string, ProductionItemLike>())
+        .values(),
     );
+    const effectiveItems = logicalItems.map((item) => {
+      const sourceKey = getProductionItemSourceKey(item);
+      const orderItem = sourceKey
+        ? (orderItemById.get(sourceKey) ??
+          orderItemBySourceKey.get(`${item.order_id}:${sourceKey}`))
+        : undefined;
+      const quantity = getOrderItemQuantity(orderItem) ?? item.qty;
+      return { ...item, qty: quantity };
+    });
+    const itemProgress = getProductionItemsProgress(effectiveItems);
+    const itemCountProgress = {
+      totalQty: effectiveItems.length,
+      completedQty: effectiveItems.filter((item) => item.status === "done").length,
+    };
+    const effectiveProgress =
+      trackingMode === "construction_level" ? itemProgress : itemCountProgress;
+    const totalQtyFromItems = effectiveProgress.totalQty;
     const uniqueLogicalUnits = new Set(
       runs
         .map((run) => run.route_key?.trim())
@@ -252,7 +321,7 @@ export function buildQueueByStation(params: {
     const workedBreakdown = getQueueGroupWorkedBreakdown({
       trackingMode,
       runs,
-      items,
+      items: effectiveItems,
       workedBreakdownByItem,
       workedBreakdownByRun,
     });
@@ -273,6 +342,15 @@ export function buildQueueByStation(params: {
           ? representativeRun.batch_code
           : representativeRun.batch_code || "B1",
       totalQty,
+      completedQty:
+        effectiveItems.length > 0
+          ? effectiveProgress.completedQty
+          : representativeRun.status === "done"
+            ? totalQty
+            : runs.reduce(
+                (sum, run) => sum + (run.status === "done" ? 1 : 0),
+                0,
+              ),
       material: material ?? "",
       plannedDate: sortedPlannedDates[0] ?? null,
       startedAt: sortedStartedAt[0] ?? null,
@@ -283,10 +361,10 @@ export function buildQueueByStation(params: {
       stationId,
       runIds: runs.map((run) => run.id),
       trackingMode,
-      items,
+      items: effectiveItems,
       unitType:
         trackingMode === "construction_level"
-          ? (items.find(
+          ? (effectiveItems.find(
               (item) =>
                 typeof item.meta?.fieldLabel === "string" &&
                 item.meta.fieldLabel.trim().length > 0,
@@ -296,7 +374,7 @@ export function buildQueueByStation(params: {
           : null,
       unitName:
         trackingMode === "construction_level"
-          ? items.find(
+          ? effectiveItems.find(
               (item) =>
                 typeof item.item_name === "string" &&
                 item.item_name.trim().length > 0,

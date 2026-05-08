@@ -60,20 +60,34 @@ function resolveRowQty(field: OrderInputField, row: Record<string, unknown>) {
     if (value === null || value === undefined || value === "") {
       return null;
     }
-    const parsed = Number(value);
+    const parsed = Number(String(value).replace(",", "."));
     return Number.isNaN(parsed) ? null : parsed;
+  };
+  const normalizedLabel = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  const isQuantityLabel = (value: string) => {
+    const label = normalizedLabel(value);
+    return (
+      label.includes("skaits") ||
+      label.includes("daudzums") ||
+      label.includes("qty") ||
+      label.includes("quantity") ||
+      label.includes("count") ||
+      label.includes("gab") ||
+      label.includes("количество") ||
+      label.includes("кол-во") ||
+      label.includes("шт")
+    );
   };
   const columns = field.columns ?? [];
   for (const column of columns) {
-    const label = column.label.toLowerCase();
+    const label = column.label;
+    const key = column.key;
     const unit = (column.unit ?? "").toLowerCase();
-    if (
-      label.includes("skaits") ||
-      label.includes("qty") ||
-      label.includes("quantity") ||
-      unit === "pcs" ||
-      unit === "gab"
-    ) {
+    if (isQuantityLabel(label) || isQuantityLabel(key) || unit === "pcs" || unit === "gab") {
       const value = numericValue(row[column.key]);
       if (value !== null) {
         return value;
