@@ -2026,6 +2026,7 @@
         markAsPaused: "Поставить на паузу",
         closeDialog: "Закрыть диалог паузы",
         reasonRequired: "Для паузы требуется причина.",
+        autoShiftEnded: "Смена закончилась",
       },
       quickActions: {
         aria: "Быстрые действия по заказу",

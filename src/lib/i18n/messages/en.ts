@@ -1971,6 +1971,7 @@
         markAsPaused: "Pause work",
         closeDialog: "Close pause dialog",
         reasonRequired: "Pause reason is required.",
+        autoShiftEnded: "Shift ended",
       },
       quickActions: {
         aria: "Quick order actions",

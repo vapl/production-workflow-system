@@ -52,8 +52,10 @@ import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus";
 import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
 import {
+  computeWorkedMinutesBreakdown,
   computeWorkedSecondsBreakdown,
   computeWorkingMinutes,
+  isWithinWorkingSchedule,
   parseWorkingCalendar,
   type WorkingCalendar,
 } from "@/lib/domain/workingCalendar";
@@ -72,15 +74,19 @@ import type {
   StationTrackingMode,
 } from "@/types/production";
 import {
+  BanIcon,
   FileIcon,
   FileTextIcon,
   ImageIcon,
   LogOutIcon,
+  PauseIcon,
+  PlayIcon,
   QrCodeIcon,
   SearchIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
   UserCircle2Icon,
+  CheckCheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   Clock3Icon,
@@ -296,6 +302,55 @@ function formatLiveDuration(
   return `${seconds}s`;
 }
 
+const operatorPrimaryActionClass =
+  "h-11 min-w-0 shrink basis-0 grow-[1.15] rounded-xl px-2.5 text-[13px] font-semibold shadow-sm sm:px-4 sm:text-sm";
+const operatorSuccessActionClass =
+  "h-11 min-w-0 shrink basis-0 grow rounded-xl border-emerald-200 bg-emerald-50 px-2.5 text-[13px] font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100 hover:text-emerald-800 sm:px-4 sm:text-sm";
+const operatorWarningIconActionClass =
+  "size-10 shrink-0 rounded-xl border-amber-200 bg-amber-50 text-amber-700 shadow-sm hover:bg-amber-100 hover:text-amber-800 sm:size-11";
+
+function isSameDayIso(value: string | null | undefined, dayIso: string) {
+  return Boolean(value) && String(value).slice(0, 10) === dayIso;
+}
+
+function getOverlapWorkedMinutes(params: {
+  startIso: string | null | undefined;
+  endIso: string | null | undefined;
+  rangeStartIso: string;
+  rangeEndIso: string;
+  calendar: WorkingCalendar;
+  nowMs: number;
+}) {
+  const { startIso, endIso, rangeStartIso, rangeEndIso, calendar, nowMs } =
+    params;
+  if (!startIso) {
+    return 0;
+  }
+  const startMs = Date.parse(startIso);
+  const effectiveEndIso = endIso ?? new Date(nowMs).toISOString();
+  const endMs = Date.parse(effectiveEndIso);
+  const rangeStartMs = Date.parse(rangeStartIso);
+  const rangeEndMs = Date.parse(rangeEndIso);
+  if (
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endMs) ||
+    !Number.isFinite(rangeStartMs) ||
+    !Number.isFinite(rangeEndMs)
+  ) {
+    return 0;
+  }
+  const overlapStartMs = Math.max(startMs, rangeStartMs);
+  const overlapEndMs = Math.min(endMs, rangeEndMs);
+  if (overlapEndMs <= overlapStartMs) {
+    return 0;
+  }
+  return computeWorkedMinutesBreakdown(
+    new Date(overlapStartMs).toISOString(),
+    new Date(overlapEndMs).toISOString(),
+    calendar,
+  ).totalMinutes;
+}
+
 function getStoragePathFromUrl(url: string, bucket: string) {
   const marker = `/storage/v1/object/public/${bucket}/`;
   const index = url.indexOf(marker);
@@ -461,6 +516,16 @@ export default function OperatorProductionPage() {
   ]);
   const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
   const quickActionCloseGuardUntilRef = useRef(0);
+  const handleRunStatusUpdateRef = useRef<
+    | ((
+        runId: string,
+        status: PendingRunAction["action"],
+        extra?: { reason?: string | null; reasonId?: string | null },
+      ) => Promise<void>)
+    | null
+  >(null);
+  const autoPausedRunIdsRef = useRef<Set<string>>(new Set());
+  const autoPauseInFlightRunIdsRef = useRef<Set<string>>(new Set());
   const statusOptions: Array<{ value: QueueStatusFilter; label: string }> = [
     { value: "all", label: t("production.operator.status.all") },
     { value: "queued", label: t("production.operator.status.queued") },
@@ -1206,6 +1271,48 @@ export default function OperatorProductionPage() {
     return new Map(stations.map((station) => [station.id, station.name]));
   }, [stations]);
 
+  const latestProductionItems = useMemo(() => {
+    const map = new Map<string, ProductionItemRow>();
+    productionItems.forEach((item) => {
+      const key = `${item.station_id ?? ""}:${getItemGroupKey(item)}`;
+      const existing = map.get(key);
+      map.set(key, pickLatestItem(existing, item));
+    });
+    return Array.from(map.values());
+  }, [productionItems]);
+
+  const latestWorkEntries = useMemo(() => {
+    return latestProductionItems.map((item) => {
+      const matchedRun =
+        batchRuns.find((run) => matchesProductionItemToRun(item, run)) ?? null;
+      const effectiveStartedAt = item.started_at ?? matchedRun?.started_at ?? null;
+      const effectiveDoneAt = item.done_at ?? matchedRun?.done_at ?? null;
+      const effectiveStatus =
+        item.status === "queued" || item.status === "pending"
+          ? (matchedRun?.status ?? item.status)
+          : item.status;
+      return {
+        kind: "item" as const,
+        id: item.id,
+        startedAt: effectiveStartedAt,
+        doneAt: effectiveDoneAt,
+        status: effectiveStatus,
+        matchedRunId: matchedRun?.id ?? null,
+      };
+    });
+  }, [batchRuns, latestProductionItems]);
+
+  const unmatchedBatchRuns = useMemo(() => {
+    const matchedRunIds = new Set(
+      latestWorkEntries
+        .map((entry) => entry.matchedRunId)
+        .filter((value): value is string => Boolean(value)),
+    );
+    return batchRuns.filter(
+      (run) => !matchedRunIds.has(run.id),
+    );
+  }, [batchRuns, latestWorkEntries]);
+
   const dependenciesByStation = useMemo(() => {
     const map = new Map<string, string[]>();
     stationDependencies.forEach((row) => {
@@ -1652,32 +1759,162 @@ export default function OperatorProductionPage() {
   }, [quickActionItem, dependenciesByStation, itemsByGroupAndStation]);
 
   const activitySummary = useMemo(() => {
+    const todayStartIso = `${today}T00:00:00`;
+    const tomorrow = new Date(`${today}T00:00:00`);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowIso = tomorrow.toISOString();
     const todayEvents = activityEvents.filter(
       (row) => String(row.created_at ?? "").slice(0, 10) === today,
     );
-    const started = todayEvents.filter(
+    const eventStarted = todayEvents.filter(
       (row) => row.to_status === "in_progress",
     ).length;
-    const done = todayEvents.filter((row) => row.to_status === "done").length;
-    const blocked = todayEvents.filter(
+    const eventDone = todayEvents.filter((row) => row.to_status === "done").length;
+    const eventBlocked = todayEvents.filter(
       (row) => row.to_status === "blocked",
     ).length;
-    const minutes = todayWorkedMinutes;
-    return { started, done, blocked, minutes };
-  }, [activityEvents, today, todayWorkedMinutes]);
+    const rawStarted =
+      latestWorkEntries.filter(
+        (entry) =>
+          isSameDayIso(entry.startedAt, today) &&
+          entry.status !== "queued" &&
+          entry.status !== "pending",
+      ).length +
+      unmatchedBatchRuns.filter(
+        (run) =>
+          isSameDayIso(run.started_at ?? null, today) &&
+          run.status !== "queued" &&
+          run.status !== "pending",
+      ).length;
+    const rawDone =
+      latestWorkEntries.filter((entry) => isSameDayIso(entry.doneAt, today)).length +
+      unmatchedBatchRuns.filter((run) => isSameDayIso(run.done_at ?? null, today))
+        .length;
+    const rawBlocked =
+      latestWorkEntries.filter((entry) => entry.status === "blocked").length +
+      unmatchedBatchRuns.filter((run) => run.status === "blocked").length;
+    const rawMinutes =
+      latestWorkEntries.reduce(
+        (sum, entry) =>
+          sum +
+          getOverlapWorkedMinutes({
+            startIso: entry.startedAt,
+            endIso: entry.doneAt,
+            rangeStartIso: todayStartIso,
+            rangeEndIso: tomorrowIso,
+            calendar: workingCalendar,
+            nowMs: liveNowMs,
+          }),
+        0,
+      ) +
+      unmatchedBatchRuns.reduce(
+        (sum, run) =>
+          sum +
+          getOverlapWorkedMinutes({
+            startIso: run.started_at ?? null,
+            endIso: run.done_at ?? null,
+            rangeStartIso: todayStartIso,
+            rangeEndIso: tomorrowIso,
+            calendar: workingCalendar,
+            nowMs: liveNowMs,
+          }),
+        0,
+      );
+
+    return {
+      started: Math.max(eventStarted, rawStarted),
+      done: Math.max(eventDone, rawDone),
+      blocked: Math.max(eventBlocked, rawBlocked),
+      minutes: Math.max(todayWorkedMinutes, rawMinutes),
+    };
+  }, [
+    activityEvents,
+    latestWorkEntries,
+    liveNowMs,
+    today,
+    todayWorkedMinutes,
+    unmatchedBatchRuns,
+    workingCalendar,
+  ]);
 
   const weeklySummary = useMemo(() => {
-    const started = activityEvents.filter(
+    const weekStart = new Date(`${today}T00:00:00`);
+    weekStart.setDate(weekStart.getDate() - 6);
+    const weekStartIso = weekStart.toISOString();
+    const weekEnd = new Date(`${today}T00:00:00`);
+    weekEnd.setDate(weekEnd.getDate() + 1);
+    const weekEndIso = weekEnd.toISOString();
+    const eventStarted = activityEvents.filter(
       (row) => row.to_status === "in_progress",
     ).length;
-    const done = activityEvents.filter(
+    const eventDone = activityEvents.filter(
       (row) => row.to_status === "done",
     ).length;
-    const blocked = activityEvents.filter(
+    const eventBlocked = activityEvents.filter(
       (row) => row.to_status === "blocked",
     ).length;
-    return { started, done, blocked, minutes: weekWorkedMinutes };
-  }, [activityEvents, weekWorkedMinutes]);
+    const isInWeek = (value: string | null | undefined) => {
+      if (!value) {
+        return false;
+      }
+      const time = Date.parse(value);
+      return (
+        Number.isFinite(time) &&
+        time >= Date.parse(weekStartIso) &&
+        time < Date.parse(weekEndIso)
+      );
+    };
+    const rawStarted =
+      latestWorkEntries.filter((entry) => isInWeek(entry.startedAt)).length +
+      unmatchedBatchRuns.filter((run) => isInWeek(run.started_at ?? null)).length;
+    const rawDone =
+      latestWorkEntries.filter((entry) => isInWeek(entry.doneAt)).length +
+      unmatchedBatchRuns.filter((run) => isInWeek(run.done_at ?? null)).length;
+    const rawBlocked =
+      latestWorkEntries.filter((entry) => entry.status === "blocked").length +
+      unmatchedBatchRuns.filter((run) => run.status === "blocked").length;
+    const rawMinutes =
+      latestWorkEntries.reduce(
+        (sum, entry) =>
+          sum +
+          getOverlapWorkedMinutes({
+            startIso: entry.startedAt,
+            endIso: entry.doneAt,
+            rangeStartIso: weekStartIso,
+            rangeEndIso: weekEndIso,
+            calendar: workingCalendar,
+            nowMs: liveNowMs,
+          }),
+        0,
+      ) +
+      unmatchedBatchRuns.reduce(
+        (sum, run) =>
+          sum +
+          getOverlapWorkedMinutes({
+            startIso: run.started_at ?? null,
+            endIso: run.done_at ?? null,
+            rangeStartIso: weekStartIso,
+            rangeEndIso: weekEndIso,
+            calendar: workingCalendar,
+            nowMs: liveNowMs,
+          }),
+        0,
+      );
+    return {
+      started: Math.max(eventStarted, rawStarted),
+      done: Math.max(eventDone, rawDone),
+      blocked: Math.max(eventBlocked, rawBlocked),
+      minutes: Math.max(weekWorkedMinutes, rawMinutes),
+    };
+  }, [
+    activityEvents,
+    latestWorkEntries,
+    liveNowMs,
+    today,
+    unmatchedBatchRuns,
+    weekWorkedMinutes,
+    workingCalendar,
+  ]);
 
   const filteredItemsCount = useMemo(
     () =>
@@ -2324,6 +2561,84 @@ export default function OperatorProductionPage() {
     runId: string,
     action: PendingRunAction["action"],
   ) => pendingRunAction?.runId === runId && pendingRunAction.action === action;
+  handleRunStatusUpdateRef.current = handleRunStatusUpdate;
+
+  useEffect(() => {
+    const now = new Date(liveNowMs);
+    if (stations.length === 0 || Number.isNaN(now.getTime())) {
+      autoPausedRunIdsRef.current.clear();
+      autoPauseInFlightRunIdsRef.current.clear();
+      return;
+    }
+    if (isWithinWorkingSchedule(now, workingCalendar)) {
+      autoPausedRunIdsRef.current.clear();
+      autoPauseInFlightRunIdsRef.current.clear();
+      return;
+    }
+    if (pendingAction || pendingRunAction) {
+      return;
+    }
+
+    const assignedStationIds = new Set(stations.map((station) => station.id));
+    const activeRunIds = batchRuns
+      .filter(
+        (run) =>
+          run.station_id &&
+          assignedStationIds.has(run.station_id) &&
+          run.status === "in_progress",
+      )
+      .map((run) => run.id);
+    const runIdsToPause = activeRunIds.filter(
+      (runId) =>
+        !autoPausedRunIdsRef.current.has(runId) &&
+        !autoPauseInFlightRunIdsRef.current.has(runId),
+    );
+
+    if (runIdsToPause.length === 0) {
+      return;
+    }
+
+    const autoPauseReason = t("production.operator.paused.autoShiftEnded");
+    let cancelled = false;
+
+    const pauseActiveRuns = async () => {
+      const runStatusUpdate = handleRunStatusUpdateRef.current;
+      if (!runStatusUpdate) {
+        return;
+      }
+      for (const runId of runIdsToPause) {
+        if (cancelled) {
+          return;
+        }
+        autoPauseInFlightRunIdsRef.current.add(runId);
+        try {
+          await runStatusUpdate(runId, "paused", {
+            reason: autoPauseReason,
+            reasonId: null,
+          });
+          if (!cancelled) {
+            autoPausedRunIdsRef.current.add(runId);
+          }
+        } finally {
+          autoPauseInFlightRunIdsRef.current.delete(runId);
+        }
+      }
+    };
+
+    void pauseActiveRuns();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    batchRuns,
+    liveNowMs,
+    pendingAction,
+    pendingRunAction,
+    stations,
+    t,
+    workingCalendar,
+  ]);
 
   useEffect(() => {
     if (!supabase || productionItems.length === 0) {
@@ -3223,10 +3538,6 @@ export default function OperatorProductionPage() {
                             });
                           },
                         );
-                        const isBatchStarting = isRunActionLoading(
-                          item.id,
-                          "in_progress",
-                        );
                         const isBatchCompleting = isRunActionLoading(
                           item.id,
                           "done",
@@ -3759,37 +4070,55 @@ export default function OperatorProductionPage() {
                                       ? t("production.operator.queue.receiptAction")
                                       : t("production.operator.queue.batchActions")}
                                   </div>
-                                  <div className="flex flex-wrap gap-2">
+                                  <div className="flex items-stretch gap-2">
                                     {!isReceiptOnlyTracking ? (
                                       <Button
-                                        variant="outline"
+                                        variant={
+                                          item.status === "in_progress"
+                                            ? "secondary"
+                                            : "default"
+                                        }
                                         size="sm"
-                                        className="gap-2"
+                                        className={operatorPrimaryActionClass}
                                         disabled={
                                           isBatchDone ||
-                                          (hasBatchStarted &&
-                                            !isBatchBlocked &&
-                                            !isBatchPaused) ||
                                           batchStartLockedByDate ||
                                           hasBlockingDependenciesForBatch ||
-                                          isBatchStarting
+                                          (item.status === "in_progress"
+                                            ? isRunActionLoading(item.id, "paused")
+                                            : isRunActionLoading(item.id, "in_progress"))
                                         }
                                         onClick={() =>
                                           handleRunStatusUpdate(
                                             item.id,
-                                            "in_progress",
+                                            item.status === "in_progress"
+                                              ? "paused"
+                                              : "in_progress",
                                           )
                                         }
                                       >
+                                        {item.status === "in_progress" ? (
+                                          isRunActionLoading(item.id, "paused") ? (
+                                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                          ) : (
+                                            <PauseIcon className="h-4 w-4" />
+                                          )
+                                        ) : isRunActionLoading(item.id, "in_progress") ? (
+                                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                        ) : (
+                                          <PlayIcon className="h-4 w-4" />
+                                        )}
                                         {isBatchBlocked || isBatchPaused
                                           ? t("production.operator.actions.resume")
-                                          : t("production.operator.actions.start")}
+                                          : item.status === "in_progress"
+                                            ? t("production.operator.actions.pause")
+                                            : t("production.operator.actions.start")}
                                       </Button>
                                     ) : null}
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      className="gap-2"
+                                      className={operatorSuccessActionClass}
                                       disabled={
                                         (!isReceiptOnlyTracking &&
                                           (!hasBatchStarted ||
@@ -3806,32 +4135,26 @@ export default function OperatorProductionPage() {
                                         handleRunStatusUpdate(item.id, "done")
                                       }
                                     >
+                                      {isBatchCompleting ? (
+                                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                      ) : (
+                                        <CheckCheckIcon className="h-4 w-4" />
+                                      )}
                                       {isReceiptOnlyTracking
                                         ? t("production.operator.actions.received")
                                         : t("production.operator.actions.done")}
                                     </Button>
                                     {!isReceiptOnlyTracking ? (
                                       <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={
-                                          isBatchDone ||
-                                          isBatchPaused ||
-                                          item.status !== "in_progress"
-                                        }
-                                        onClick={() => handleOpenPaused(item.id)}
-                                      >
-                                        {t("production.operator.actions.pause")}
-                                      </Button>
-                                    ) : null}
-                                    {!isReceiptOnlyTracking ? (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
+                                        variant="outline"
+                                        size="icon"
+                                        className={operatorWarningIconActionClass}
                                         disabled={isBatchDone}
+                                        aria-label={t("production.operator.actions.blocked")}
+                                        title={t("production.operator.actions.blocked")}
                                         onClick={() => handleOpenBlocked(item.id)}
                                       >
-                                        {t("production.operator.actions.blocked")}
+                                        <BanIcon className="h-4 w-4" />
                                       </Button>
                                     ) : null}
                                   </div>
@@ -4269,31 +4592,55 @@ export default function OperatorProductionPage() {
                       {runStatusLabel(quickActionItem.status ?? "queued")}
                     </Badge>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 flex items-stretch gap-2">
                     {quickActionItem.trackingMode !== "receipt_only" ? (
                       <Button
-                        variant="outline"
+                        variant={
+                          quickActionItem.status === "in_progress"
+                            ? "secondary"
+                            : "default"
+                        }
                         size="sm"
-                        className="gap-2"
+                        className={operatorPrimaryActionClass}
                         disabled={
                           quickActionItem.status === "done" ||
-                          quickActionItem.status === "in_progress" ||
                           isFuturePlannedDate(quickActionItem.plannedDate) ||
-                          isRunActionLoading(quickActionItem.id, "in_progress")
+                          (quickActionItem.status === "in_progress"
+                            ? isRunActionLoading(quickActionItem.id, "paused")
+                            : isRunActionLoading(quickActionItem.id, "in_progress"))
                         }
                         onClick={() =>
-                          handleRunStatusUpdate(quickActionItem.id, "in_progress")
+                          handleRunStatusUpdate(
+                            quickActionItem.id,
+                            quickActionItem.status === "in_progress"
+                              ? "paused"
+                              : "in_progress",
+                          )
                         }
                       >
+                        {quickActionItem.status === "in_progress" ? (
+                          isRunActionLoading(quickActionItem.id, "paused") ? (
+                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                          ) : (
+                            <PauseIcon className="h-4 w-4" />
+                          )
+                        ) : isRunActionLoading(quickActionItem.id, "in_progress") ? (
+                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                        ) : (
+                          <PlayIcon className="h-4 w-4" />
+                        )}
                         {quickActionItem.status === "blocked" ||
                         quickActionItem.status === "paused"
                           ? t("production.operator.actions.resume")
-                          : t("production.operator.actions.start")}
+                          : quickActionItem.status === "in_progress"
+                            ? t("production.operator.actions.pause")
+                            : t("production.operator.actions.start")}
                       </Button>
                     ) : null}
                     <Button
                       variant="outline"
                       size="sm"
+                      className={operatorSuccessActionClass}
                       disabled={
                         (quickActionItem.trackingMode !== "receipt_only" &&
                           (quickActionItem.status === "done" ||
@@ -4308,32 +4655,26 @@ export default function OperatorProductionPage() {
                         handleRunStatusUpdate(quickActionItem.id, "done")
                       }
                     >
+                      {isRunActionLoading(quickActionItem.id, "done") ? (
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                      ) : (
+                        <CheckCheckIcon className="h-4 w-4" />
+                      )}
                       {quickActionItem.trackingMode === "receipt_only"
                         ? t("production.operator.actions.received")
                         : t("production.operator.actions.done")}
                     </Button>
                     {quickActionItem.trackingMode !== "receipt_only" ? (
                       <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={
-                          quickActionItem.status === "done" ||
-                          quickActionItem.status === "paused" ||
-                          quickActionItem.status !== "in_progress"
-                        }
-                        onClick={() => handleOpenPaused(quickActionItem.id)}
-                      >
-                        {t("production.operator.actions.pause")}
-                      </Button>
-                    ) : null}
-                    {quickActionItem.trackingMode !== "receipt_only" ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
+                        variant="outline"
+                        size="icon"
+                        className={operatorWarningIconActionClass}
                         disabled={quickActionItem.status === "done"}
+                        aria-label={t("production.operator.actions.blocked")}
+                        title={t("production.operator.actions.blocked")}
                         onClick={() => handleOpenBlocked(quickActionItem.id)}
                       >
-                        {t("production.operator.actions.blocked")}
+                        <BanIcon className="h-4 w-4" />
                       </Button>
                     ) : null}
                   </div>

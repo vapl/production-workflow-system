@@ -366,6 +366,41 @@ export function computeWorkedSecondsBreakdown(
   };
 }
 
+export function isWithinWorkingSchedule(
+  at: Date,
+  calendar: WorkingCalendar,
+) {
+  if (Number.isNaN(at.getTime())) {
+    return false;
+  }
+
+  const normalized = {
+    workdays: normalizeWorkdays(calendar.workdays),
+    shifts: normalizeWorkShifts(calendar.shifts),
+    overtimeEnabled: calendar.overtimeEnabled ?? false,
+  };
+
+  const currentDay = new Date(at.getFullYear(), at.getMonth(), at.getDate());
+  const previousDay = new Date(currentDay);
+  previousDay.setDate(previousDay.getDate() - 1);
+
+  return [previousDay, currentDay].some((day) => {
+    if (!normalized.workdays.includes(day.getDay())) {
+      return false;
+    }
+    return normalized.shifts.some((shift) => {
+      const boundaries = buildShiftBoundaries(day, shift);
+      const windowStart = normalized.overtimeEnabled
+        ? boundaries.overtimeStart
+        : boundaries.regularStart;
+      const windowEnd = normalized.overtimeEnabled
+        ? boundaries.overtimeEnd
+        : boundaries.regularEnd;
+      return at >= windowStart && at < windowEnd;
+    });
+  });
+}
+
 function computeElapsedDurationMs(
   startIso: string | null | undefined,
   endIso: string | null | undefined,

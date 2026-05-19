@@ -2051,6 +2051,7 @@
         markAsPaused: "Atzīmēt pauzi",
         closeDialog: "Aizvērt pauzes dialogu",
         reasonRequired: "Pauzei ir obligāts iemesls.",
+        autoShiftEnded: "Darba laiks beidzās",
       },
       quickActions: {
         aria: "Ātrās pasūtījuma darbības",
