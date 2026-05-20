@@ -4121,7 +4121,7 @@ export default function OperatorProductionPage() {
                                       ? t("production.operator.queue.receiptAction")
                                       : t("production.operator.queue.batchActions")}
                                   </div>
-                                  <div className="flex items-stretch gap-2">
+                                  <div className="flex w-full items-stretch gap-2">
                                     {!isReceiptOnlyTracking ? (
                                       <Button
                                         variant={
@@ -4643,7 +4643,7 @@ export default function OperatorProductionPage() {
                       {runStatusLabel(quickActionItem.status ?? "queued")}
                     </Badge>
                   </div>
-                  <div className="mt-3 flex items-stretch gap-2">
+                  <div className="mt-3 flex w-full items-stretch gap-2">
                     {quickActionItem.trackingMode !== "receipt_only" ? (
                       <Button
                         variant={
