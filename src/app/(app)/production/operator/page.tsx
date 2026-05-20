@@ -240,6 +240,32 @@ function matchesProductionItemToRun(
   return item.batch_code === run.batch_code;
 }
 
+function resolveConstructionItemState(
+  item: ProductionItemRow,
+  queueItem: Pick<QueueItem, "runIds" | "startedAt" | "doneAt">,
+  batchRuns: BatchRunRow[],
+) {
+  const matchedRun =
+    queueItem.runIds
+      .map((runId) => batchRuns.find((run) => run.id === runId))
+      .filter((run): run is BatchRunRow => Boolean(run))
+      .find((run) => matchesProductionItemToRun(item, run)) ?? null;
+  const effectiveStatus =
+    item.status === "queued" || item.status === "pending"
+      ? (matchedRun?.status ?? item.status)
+      : item.status;
+  const effectiveStartedAt =
+    item.started_at ?? matchedRun?.started_at ?? queueItem.startedAt ?? null;
+  const effectiveDoneAt =
+    item.done_at ?? matchedRun?.done_at ?? queueItem.doneAt ?? null;
+  return {
+    matchedRun,
+    effectiveStatus,
+    effectiveStartedAt,
+    effectiveDoneAt,
+  };
+}
+
 function getItemGroupKey(item: ProductionItemRow) {
   const meta = item.meta as Record<string, unknown> | null;
   const sourceKey = getProductionItemSourceKey(item);
@@ -477,9 +503,6 @@ export default function OperatorProductionPage() {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
   const [signingJobs, setSigningJobs] = useState<Set<string>>(new Set());
-  const [expandedOrderItems, setExpandedOrderItems] = useState<Set<string>>(
-    new Set(),
-  );
   const [workingCalendar, setWorkingCalendar] = useState<WorkingCalendar>({
     workdays: [1, 2, 3, 4, 5],
     shifts: [{ start: "08:00", end: "17:00" }],
@@ -1462,6 +1485,10 @@ export default function OperatorProductionPage() {
               dedupedItems.length,
               1,
             );
+      const totalPiecesQty = effectiveDedupedItems.reduce(
+        (sum, item) => sum + getProductionItemQuantity(item),
+        0,
+      );
       const material = items.find((item) => item.material)?.material ?? "";
       const primaryConstructionItem = dedupedItems[0] ?? items[0] ?? null;
       const unitType =
@@ -1568,6 +1595,9 @@ export default function OperatorProductionPage() {
         batchCode: representativeRun.batch_code,
         totalQty,
         completedQty: progress.completedQty,
+        constructionCount: itemCountProgress.totalQty,
+        completedConstructionCount: itemCountProgress.completedQty,
+        totalPiecesQty,
         material,
         attachments: mergeAttachments(
           attachmentsByOrder.get(representativeRun.order_id) ?? [],
@@ -2214,22 +2244,17 @@ export default function OperatorProductionPage() {
     const quantity = getProductionItemQuantity(item);
     const nextCompletedQty = Math.min(Math.max(completedQty, 0), quantity);
     const now = new Date().toISOString();
-    const nextMeta = {
-      ...((item.meta as Record<string, unknown> | null) ?? {}),
-      completedQty: nextCompletedQty,
-      lastCompletedQtyAt: now,
-      lastCompletedQtyBy: currentUser.id,
-    };
-    const nextStatus = "in_progress" as const;
-    const nextStartedAt = item.started_at ?? now;
+  const nextMeta = {
+    ...((item.meta as Record<string, unknown> | null) ?? {}),
+    completedQty: nextCompletedQty,
+    lastCompletedQtyAt: now,
+    lastCompletedQtyBy: currentUser.id,
+  };
 
-    const { error } = await sb
+  const { error } = await sb
       .from("production_items")
       .update({
         meta: nextMeta,
-        status: nextStatus,
-        started_at: nextStartedAt,
-        done_at: null,
       })
       .eq("id", item.id);
 
@@ -2245,9 +2270,6 @@ export default function OperatorProductionPage() {
               ...row,
               qty: quantity,
               meta: nextMeta,
-              status: nextStatus,
-              started_at: nextStartedAt,
-              done_at: null,
             }
           : row,
       ),
@@ -2833,11 +2855,6 @@ export default function OperatorProductionPage() {
     if (!quickActionOrderId || !quickActionItem) {
       return;
     }
-    setExpandedOrderItems((prev) => {
-      const next = new Set(prev);
-      next.add(quickActionItem.id);
-      return next;
-    });
     setIsQuickActionOpen(true);
   }, [quickActionOrderId, quickActionItem]);
 
@@ -3452,17 +3469,21 @@ export default function OperatorProductionPage() {
             (sum, item) => sum + Number(item.durationMinutes ?? 0),
             0,
           );
+          const stationCardCountLabel =
+            station.trackingMode === "construction_level"
+              ? t("production.operator.queue.constructionCardsCount", {
+                  count: queue.length,
+                })
+              : t("production.operator.queue.orderCardsCount", {
+                  count: queue.length,
+                });
           return (
             <Card key={station.id} className="min-h-60">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">{station.name}</CardTitle>
                   <div className="text-right text-xs text-muted-foreground">
-                    <div>
-                      {t("production.operator.queue.itemsCount", {
-                        count: queue.length,
-                      })}
-                    </div>
+                    <div>{stationCardCountLabel}</div>
                     {stationTotalMinutes > 0 ? (
                       <div>{formatDuration(stationTotalMinutes)}</div>
                     ) : null}
@@ -3481,8 +3502,26 @@ export default function OperatorProductionPage() {
                       className="rounded-lg border border-border bg-background px-3 py-2 text-xs shadow-sm"
                     >
                       {(() => {
+                        const isConstructionTracking =
+                          item.trackingMode === "construction_level";
+                        const isReceiptOnlyTracking =
+                          item.trackingMode === "receipt_only";
                         const metaParts: string[] = [];
-                        if (item.totalQty > 0) {
+                        if (!isConstructionTracking && (item.constructionCount ?? 0) > 0) {
+                          metaParts.push(
+                            t("production.operator.queue.constructionEntries", {
+                              count: item.constructionCount ?? 0,
+                            }),
+                          );
+                        }
+                        if (!isConstructionTracking && (item.totalPiecesQty ?? 0) > 0) {
+                          metaParts.push(
+                            t("production.operator.queue.totalPieces", {
+                              count: item.totalPiecesQty ?? 0,
+                            }),
+                          );
+                        }
+                        if (isConstructionTracking && item.totalQty > 0) {
                           metaParts.push(
                             t("production.operator.queue.pieces", {
                               count: item.totalQty,
@@ -3497,10 +3536,6 @@ export default function OperatorProductionPage() {
                           );
                         }
                         const metaLine = metaParts.join(" - ");
-                        const isConstructionTracking =
-                          item.trackingMode === "construction_level";
-                        const isReceiptOnlyTracking =
-                          item.trackingMode === "receipt_only";
                         const stationDurationMinutes = isConstructionTracking
                           ? Number(item.durationMinutes ?? 0)
                           : 0;
@@ -3580,11 +3615,13 @@ export default function OperatorProductionPage() {
                             {isConstructionTracking &&
                             (item.unitType || item.unitName) ? (
                               <div className="mt-1.5 space-y-0.5 text-[12px] leading-5">
-                                {item.unitType ? (
-                                  <div className="text-muted-foreground">
-                                    {item.unitType}
-                                  </div>
-                                ) : null}
+                                <div>
+                                  <span className="inline-flex rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                    {t(
+                                      "production.operator.queue.constructionModeBadge",
+                                    )}
+                                  </span>
+                                </div>
                                 {item.unitName ? (
                                   <div className="font-medium text-foreground">
                                     {item.unitName}
@@ -3594,9 +3631,11 @@ export default function OperatorProductionPage() {
                             ) : null}
                           </div>
                               <div className="flex items-center gap-2">
-                                <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                                  {completedQty}/{progressTotalQty}
-                                </span>
+                                {!isConstructionTracking ? (
+                                  <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                                    {`${completedQty}/${progressTotalQty}`}
+                                  </span>
+                                ) : null}
                                 <Badge variant={priorityBadge(item.priority)}>
                                   {priorityLabel(item.priority)}
                                 </Badge>
@@ -3638,35 +3677,8 @@ export default function OperatorProductionPage() {
                             ) : null}
                             {item.items.length > 0 && isConstructionTracking ? (
                               <div className="mt-3">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 gap-2 text-xs"
-                                  onClick={() =>
-                                    setExpandedOrderItems((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(item.id)) {
-                                        next.delete(item.id);
-                                      } else {
-                                        next.add(item.id);
-                                      }
-                                      return next;
-                                    })
-                                  }
-                                >
-                                  {expandedOrderItems.has(item.id) ? (
-                                    <ChevronUpIcon className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ChevronDownIcon className="h-3.5 w-3.5" />
-                                  )}
-                                  {expandedOrderItems.has(item.id)
-                                    ? t("production.operator.queue.hideConstructions")
-                                    : t("production.operator.queue.showConstructions")}
-                                </Button>
-                                {expandedOrderItems.has(item.id) ? (
-                                  <div className="mt-2 space-y-2">
-                                    {item.items.map((prodItem) => {
+                                <div className="space-y-2">
+                                  {item.items.map((prodItem) => {
                                       const blockedReason =
                                         (
                                           prodItem.meta as Record<
@@ -3711,16 +3723,25 @@ export default function OperatorProductionPage() {
                                         }>;
                                       const hasBlockingDependencies =
                                         blockingDependencies.length > 0;
+                                      const {
+                                        effectiveStatus,
+                                        effectiveStartedAt,
+                                        effectiveDoneAt,
+                                      } = resolveConstructionItemState(
+                                        prodItem,
+                                        item,
+                                        batchRuns,
+                                      );
                                       const itemElapsedMinutes =
-                                        prodItem.started_at
+                                        effectiveStartedAt
                                           ? computeWorkingMinutes(
-                                              prodItem.started_at,
-                                              prodItem.done_at ?? null,
+                                              effectiveStartedAt,
+                                              effectiveDoneAt ?? null,
                                               workingCalendar,
                                             )
                                           : 0;
                                       const itemElapsedLabel =
-                                        prodItem.started_at
+                                        effectiveStartedAt
                                           ? formatDuration(itemElapsedMinutes)
                                           : null;
                                       const itemQuantity =
@@ -3740,25 +3761,35 @@ export default function OperatorProductionPage() {
                                             </div>
                                             <Badge
                                               variant={statusBadge(
-                                                prodItem.status,
+                                                effectiveStatus,
                                               )}
                                             >
                                               {runStatusLabel(
-                                                prodItem.status ?? "queued",
+                                                effectiveStatus ?? "queued",
                                               )}
                                             </Badge>
                                           </div>
-                                          <div className="mt-1 text-[11px] text-muted-foreground">
-                                            {t("production.operator.queue.qty", {
-                                              qty: prodItem.qty,
-                                            })}
-                                            {` - ${t("production.operator.queue.readyProgress", {
-                                              completed: itemCompletedQty,
-                                              total: itemQuantity,
-                                            })}`}
-                                            {prodItem.material
-                                              ? ` - ${prodItem.material}`
-                                              : ""}
+                                          <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
+                                            <div>
+                                              {t(
+                                                "production.operator.queue.constructionUnits",
+                                                {
+                                                  qty: prodItem.qty,
+                                                },
+                                              )}
+                                            </div>
+                                            <div>
+                                              {t(
+                                                "production.operator.queue.constructionReadyProgress",
+                                                {
+                                                  completed: itemCompletedQty,
+                                                  total: itemQuantity,
+                                                },
+                                              )}
+                                            </div>
+                                            {prodItem.material ? (
+                                              <div>{prodItem.material}</div>
+                                            ) : null}
                                           </div>
                                           {hasBlockingDependencies ? (
                                             <div className="mt-2 space-y-1">
@@ -3814,16 +3845,24 @@ export default function OperatorProductionPage() {
                                               })}
                                             </div>
                                           ) : null}
-                                          <div className="mt-2 flex flex-wrap gap-2">
+                                          <div className="mt-2 flex items-stretch gap-2">
                                             {(() => {
+                                              const {
+                                                effectiveStatus,
+                                                effectiveStartedAt,
+                                              } = resolveConstructionItemState(
+                                                prodItem,
+                                                item,
+                                                batchRuns,
+                                              );
                                               const hasStarted =
-                                                Boolean(prodItem.started_at) ||
-                                                prodItem.status === "in_progress" ||
-                                                prodItem.status === "paused";
+                                                Boolean(effectiveStartedAt) ||
+                                                effectiveStatus === "in_progress" ||
+                                                effectiveStatus === "paused";
                                               const isBlocked =
-                                                prodItem.status === "blocked";
+                                                effectiveStatus === "blocked";
                                               const isPaused =
-                                                prodItem.status === "paused";
+                                                effectiveStatus === "paused";
                                               const startLockedByDate =
                                                 !hasStarted &&
                                                 !isBlocked &&
@@ -3831,11 +3870,16 @@ export default function OperatorProductionPage() {
                                                   item.plannedDate,
                                                 );
                                               const isDone =
-                                                prodItem.status === "done";
+                                                effectiveStatus === "done";
                                               const isStarting =
                                                 isActionLoading(
                                                   prodItem.id,
                                                   "in_progress",
+                                                );
+                                              const isPausing =
+                                                isActionLoading(
+                                                  prodItem.id,
+                                                  "paused",
                                                 );
                                               const isCompleting =
                                                 isActionLoading(
@@ -3845,33 +3889,51 @@ export default function OperatorProductionPage() {
                                               return (
                                                 <>
                                                   <Button
-                                                    variant="outline"
+                                                    variant={
+                                                      effectiveStatus === "in_progress"
+                                                        ? "secondary"
+                                                        : "default"
+                                                    }
                                                     size="sm"
-                                                    className="gap-2"
+                                                    className={operatorPrimaryActionClass}
                                                     disabled={
                                                       isDone ||
-                                                      (hasStarted &&
-                                                        !isBlocked &&
-                                                        !isPaused) ||
                                                       startLockedByDate ||
                                                       (!isBlocked &&
                                                         !isPaused &&
                                                         hasBlockingDependencies) ||
-                                                      isStarting
+                                                      (effectiveStatus === "in_progress"
+                                                        ? isPausing
+                                                        : isStarting)
                                                     }
                                                     onClick={() =>
-                                                      handleUserStatusUpdate(
-                                                        prodItem.id,
-                                                        item.id,
-                                                        "in_progress",
-                                                      )
+                                                      effectiveStatus === "in_progress"
+                                                        ? handleOpenPaused(
+                                                            item.id,
+                                                            prodItem.id,
+                                                          )
+                                                        : handleUserStatusUpdate(
+                                                            prodItem.id,
+                                                            item.id,
+                                                            "in_progress",
+                                                          )
                                                     }
                                                   >
-                                                    {isStarting ? (
-                                                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                                    ) : null}
+                                                    {effectiveStatus === "in_progress" ? (
+                                                      isPausing ? (
+                                                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                                      ) : (
+                                                        <PauseIcon className="h-4 w-4" />
+                                                      )
+                                                    ) : isStarting ? (
+                                                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                                    ) : (
+                                                      <PlayIcon className="h-4 w-4" />
+                                                    )}
                                                     {isBlocked || isPaused
                                                       ? t("production.operator.actions.resume")
+                                                      : effectiveStatus === "in_progress"
+                                                        ? t("production.operator.actions.pause")
                                                       : t("production.operator.actions.start")}
                                                   </Button>
                                                   {startLockedByDate &&
@@ -3893,7 +3955,7 @@ export default function OperatorProductionPage() {
                                                         <Button
                                                           variant="outline"
                                                           size="sm"
-                                                          className="gap-2"
+                                                          className={`${operatorSuccessActionClass} justify-between`}
                                                           disabled={
                                                             !hasStarted ||
                                                             isDone ||
@@ -3903,18 +3965,20 @@ export default function OperatorProductionPage() {
                                                           }
                                                         >
                                                           {isCompleting ? (
-                                                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                                          ) : null}
+                                                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                                          ) : (
+                                                            <CheckCheckIcon className="h-4 w-4" />
+                                                          )}
                                                           {t("production.operator.actions.done")}
                                                           <ChevronDownIcon className="h-3.5 w-3.5" />
                                                         </Button>
                                                       </PopoverTrigger>
-                                                      <PopoverContent className="w-56 p-2">
-                                                        <div className="space-y-2">
+                                                      <PopoverContent className="w-64 p-3">
+                                                        <div className="space-y-3">
                                                           <Button
-                                                            variant="ghost"
+                                                            variant="default"
                                                             size="sm"
-                                                            className="w-full justify-start"
+                                                            className="h-10 w-full justify-start rounded-lg px-3 text-left font-semibold"
                                                             onClick={() =>
                                                               handleCompleteItemUnits(
                                                                 prodItem.id,
@@ -3928,7 +3992,7 @@ export default function OperatorProductionPage() {
                                                             )}
                                                           </Button>
                                                           <div className="rounded-md border border-border p-2">
-                                                            <div className="mb-2 text-[11px] text-muted-foreground">
+                                                            <div className="mb-2 text-[11px] font-medium text-muted-foreground">
                                                               {t(
                                                                 "production.operator.queue.remainingQty",
                                                                 {
@@ -3937,7 +4001,7 @@ export default function OperatorProductionPage() {
                                                                 },
                                                               )}
                                                             </div>
-                                                            <div className="flex gap-2">
+                                                            <div className="space-y-2">
                                                               <Input
                                                                 type="number"
                                                                 min={1}
@@ -3962,10 +4026,11 @@ export default function OperatorProductionPage() {
                                                                     }),
                                                                   )
                                                                 }
-                                                                className="h-8"
+                                                                className="h-10"
                                                               />
                                                               <Button
                                                                 size="sm"
+                                                                className="h-10 w-full"
                                                                 onClick={() =>
                                                                   handleCompleteItemUnits(
                                                                     prodItem.id,
@@ -3992,7 +4057,7 @@ export default function OperatorProductionPage() {
                                                     <Button
                                                       variant="outline"
                                                       size="sm"
-                                                      className="gap-2"
+                                                      className={operatorSuccessActionClass}
                                                       disabled={
                                                         !hasStarted ||
                                                         isDone ||
@@ -4009,35 +4074,22 @@ export default function OperatorProductionPage() {
                                                       }
                                                     >
                                                       {isCompleting ? (
-                                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                                      ) : null}
+                                                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                                      ) : (
+                                                        <CheckCheckIcon className="h-4 w-4" />
+                                                      )}
                                                       {t(
                                                         "production.operator.actions.done",
                                                       )}
                                                     </Button>
                                                   )}
                                                   <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    disabled={
-                                                      isDone ||
-                                                      isPaused ||
-                                                      prodItem.status !==
-                                                        "in_progress"
-                                                    }
-                                                    onClick={() =>
-                                                      handleOpenPaused(
-                                                        item.id,
-                                                        prodItem.id,
-                                                      )
-                                                    }
-                                                  >
-                                                    {t("production.operator.actions.pause")}
-                                                  </Button>
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="sm"
+                                                    variant="outline"
+                                                    size="icon"
+                                                    className={operatorWarningIconActionClass}
                                                     disabled={isDone}
+                                                    aria-label={t("production.operator.actions.blocked")}
+                                                    title={t("production.operator.actions.blocked")}
                                                     onClick={() =>
                                                       handleOpenBlocked(
                                                         item.id,
@@ -4045,7 +4097,7 @@ export default function OperatorProductionPage() {
                                                       )
                                                     }
                                                   >
-                                                    {t("production.operator.actions.blocked")}
+                                                    <BanIcon className="h-4 w-4" />
                                                   </Button>
                                                 </>
                                               );
@@ -4054,8 +4106,7 @@ export default function OperatorProductionPage() {
                                         </div>
                                       );
                                     })}
-                                  </div>
-                                ) : null}
+                                </div>
                               </div>
                             ) : null}
                             {!isConstructionTracking ||
@@ -4690,13 +4741,21 @@ export default function OperatorProductionPage() {
               ) : null}
               {quickActionItem.trackingMode === "construction_level"
                 ? quickActionVisibleItems.map((prodItem) => {
+                    const {
+                      effectiveStatus,
+                      effectiveStartedAt,
+                    } = resolveConstructionItemState(
+                      prodItem,
+                      quickActionItem,
+                      batchRuns,
+                    );
                     const hasStarted =
-                      Boolean(prodItem.started_at) ||
-                      prodItem.status === "in_progress" ||
-                      prodItem.status === "paused";
-                    const isBlocked = prodItem.status === "blocked";
-                    const isPaused = prodItem.status === "paused";
-                    const isDone = prodItem.status === "done";
+                      Boolean(effectiveStartedAt) ||
+                      effectiveStatus === "in_progress" ||
+                      effectiveStatus === "paused";
+                    const isBlocked = effectiveStatus === "blocked";
+                    const isPaused = effectiveStatus === "paused";
+                    const isDone = effectiveStatus === "done";
                     const startLockedByDate =
                       !hasStarted &&
                       !isBlocked &&
@@ -4720,40 +4779,70 @@ export default function OperatorProductionPage() {
                           <div className="text-xs text-muted-foreground">
                             {prodItem.item_name}
                           </div>
-                          <Badge variant={statusBadge(prodItem.status)}>
-                            {runStatusLabel(prodItem.status ?? "queued")}
+                          <Badge variant={statusBadge(effectiveStatus)}>
+                            {runStatusLabel(effectiveStatus ?? "queued")}
                           </Badge>
                         </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {t("production.operator.queue.qty", {
-                            qty: prodItem.qty,
-                          })}
-                          {` - ${t("production.operator.queue.readyProgress", {
-                            completed: itemCompletedQty,
-                            total: itemQuantity,
-                          })}`}
+                        <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                          <div>
+                            {t("production.operator.queue.constructionUnits", {
+                              qty: prodItem.qty,
+                            })}
+                          </div>
+                          <div>
+                            {t(
+                              "production.operator.queue.constructionReadyProgress",
+                              {
+                                completed: itemCompletedQty,
+                                total: itemQuantity,
+                              },
+                            )}
+                          </div>
                         </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        <div className="mt-3 flex items-stretch gap-2">
                           <Button
-                            variant="outline"
+                            variant={
+                              effectiveStatus === "in_progress"
+                                ? "secondary"
+                                : "default"
+                            }
                             size="sm"
-                            className="gap-2"
+                            className={operatorPrimaryActionClass}
                             disabled={
                               isDone ||
-                              (hasStarted && !isBlocked && !isPaused) ||
                               startLockedByDate ||
-                              isStarting
+                              (effectiveStatus === "in_progress"
+                                ? isActionLoading(prodItem.id, "paused")
+                                : isStarting)
                             }
                             onClick={() =>
-                              handleUserStatusUpdate(
-                                prodItem.id,
-                                quickActionItem.id,
-                                "in_progress",
-                              )
+                              effectiveStatus === "in_progress"
+                                ? handleOpenPaused(
+                                    quickActionItem.id,
+                                    prodItem.id,
+                                  )
+                                : handleUserStatusUpdate(
+                                    prodItem.id,
+                                    quickActionItem.id,
+                                    "in_progress",
+                                  )
                             }
                           >
+                            {effectiveStatus === "in_progress" ? (
+                              isActionLoading(prodItem.id, "paused") ? (
+                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                              ) : (
+                                <PauseIcon className="h-4 w-4" />
+                              )
+                            ) : isStarting ? (
+                              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                            ) : (
+                              <PlayIcon className="h-4 w-4" />
+                            )}
                             {isBlocked || isPaused
                               ? t("production.operator.actions.resume")
+                              : effectiveStatus === "in_progress"
+                                ? t("production.operator.actions.pause")
                               : t("production.operator.actions.start")}
                           </Button>
                           {itemRemainingQty > 1 ? (
@@ -4762,7 +4851,7 @@ export default function OperatorProductionPage() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  className="gap-2"
+                                  className={`${operatorSuccessActionClass} justify-between`}
                                   disabled={
                                     !hasStarted ||
                                     isDone ||
@@ -4771,16 +4860,21 @@ export default function OperatorProductionPage() {
                                     isCompleting
                                   }
                                 >
+                                  {isCompleting ? (
+                                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                  ) : (
+                                    <CheckCheckIcon className="h-4 w-4" />
+                                  )}
                                   {t("production.operator.actions.done")}
                                   <ChevronDownIcon className="h-3.5 w-3.5" />
                                 </Button>
                               </PopoverTrigger>
-                              <PopoverContent className="w-56 p-2">
-                                <div className="space-y-2">
+                              <PopoverContent className="w-64 p-3">
+                                <div className="space-y-3">
                                   <Button
-                                    variant="ghost"
+                                    variant="default"
                                     size="sm"
-                                    className="w-full justify-start"
+                                    className="h-10 w-full justify-start rounded-lg px-3 text-left font-semibold"
                                     onClick={() =>
                                       handleCompleteItemUnits(
                                         prodItem.id,
@@ -4794,7 +4888,7 @@ export default function OperatorProductionPage() {
                                     )}
                                   </Button>
                                   <div className="rounded-md border border-border p-2">
-                                    <div className="mb-2 text-[11px] text-muted-foreground">
+                                    <div className="mb-2 text-[11px] font-medium text-muted-foreground">
                                       {t(
                                         "production.operator.queue.remainingQty",
                                         {
@@ -4802,7 +4896,7 @@ export default function OperatorProductionPage() {
                                         },
                                       )}
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="space-y-2">
                                       <Input
                                         type="number"
                                         min={1}
@@ -4821,10 +4915,11 @@ export default function OperatorProductionPage() {
                                             }),
                                           )
                                         }
-                                        className="h-8"
+                                        className="h-10"
                                       />
                                       <Button
                                         size="sm"
+                                        className="h-10 w-full"
                                         onClick={() =>
                                           handleCompleteItemUnits(
                                             prodItem.id,
@@ -4850,6 +4945,7 @@ export default function OperatorProductionPage() {
                             <Button
                               variant="outline"
                               size="sm"
+                              className={operatorSuccessActionClass}
                               disabled={
                                 !hasStarted ||
                                 isDone ||
@@ -4865,32 +4961,26 @@ export default function OperatorProductionPage() {
                                 )
                               }
                             >
+                              {isCompleting ? (
+                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                              ) : (
+                                <CheckCheckIcon className="h-4 w-4" />
+                              )}
                               {t("production.operator.actions.done")}
                             </Button>
                           )}
                           <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={
-                              isDone ||
-                              isPaused ||
-                              prodItem.status !== "in_progress"
-                            }
-                            onClick={() =>
-                              handleOpenPaused(quickActionItem.id, prodItem.id)
-                            }
-                          >
-                            {t("production.operator.actions.pause")}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                            variant="outline"
+                            size="icon"
+                            className={operatorWarningIconActionClass}
                             disabled={isDone}
+                            aria-label={t("production.operator.actions.blocked")}
+                            title={t("production.operator.actions.blocked")}
                             onClick={() =>
                               handleOpenBlocked(quickActionItem.id, prodItem.id)
                             }
                           >
-                            {t("production.operator.actions.blocked")}
+                            <BanIcon className="h-4 w-4" />
                           </Button>
                         </div>
                         {startLockedByDate && quickActionItem.plannedDate ? (

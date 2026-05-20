@@ -1998,8 +1998,13 @@
       },
       queue: {
         itemsCount: "{count} vien.",
+        orderCardsCount: "{count} pasūt.",
+        constructionCardsCount: "{count} konstrukc.",
         noWorkQueued: "Nav rindā ieplānota darba",
         pieces: "{count} gab.",
+        constructionEntries: "{count} konstrukc.",
+        totalPieces: "Kopā {count} gab.",
+        constructionModeBadge: "Konstrukcija",
         dueDate: "Termiņš {date}",
         stationTime: "Stacijas laiks:",
         orderTime: "Pasūtījuma laiks:",
@@ -2008,6 +2013,9 @@
         showConstructions: "Rādīt konstrukcijas",
         qty: "Daudzums: {qty}",
         readyProgress: "{completed}/{total} gatavs",
+        constructionUnits: "Šajā konstrukcijā: {qty} gab.",
+        constructionReadyProgress:
+          "Gatavs šajā konstrukcijā: {completed}/{total}",
         remainingQty: "Atlikums: {count} gab.",
         waitingFor: "Gaida uz",
         stationFallback: "Stacija",

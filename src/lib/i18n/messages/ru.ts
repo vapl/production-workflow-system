@@ -1973,8 +1973,13 @@
       },
       queue: {
         itemsCount: "{count} шт.",
+        orderCardsCount: "{count} заказ.",
+        constructionCardsCount: "{count} конструкц.",
         noWorkQueued: "В очереди нет работ",
         pieces: "{count} шт.",
+        constructionEntries: "{count} конструкц.",
+        totalPieces: "Всего {count} шт.",
+        constructionModeBadge: "Конструкция",
         dueDate: "Срок {date}",
         stationTime: "Время станции:",
         orderTime: "Время заказа:",
@@ -1983,6 +1988,9 @@
         showConstructions: "Показать конструкции",
         qty: "Кол-во: {qty}",
         readyProgress: "{completed}/{total} готово",
+        constructionUnits: "В этой конструкции: {qty} шт.",
+        constructionReadyProgress:
+          "Готово по этой конструкции: {completed}/{total}",
         remainingQty: "Осталось: {count} шт.",
         waitingFor: "Ожидание",
         stationFallback: "Станция",

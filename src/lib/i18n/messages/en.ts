@@ -1918,8 +1918,13 @@
       },
       queue: {
         itemsCount: "{count} items",
+        orderCardsCount: "{count} orders",
+        constructionCardsCount: "{count} constructions",
         noWorkQueued: "No work queued",
         pieces: "{count} pcs",
+        constructionEntries: "{count} constructions",
+        totalPieces: "{count} pcs total",
+        constructionModeBadge: "Construction",
         dueDate: "Due {date}",
         stationTime: "Station time:",
         orderTime: "Order time:",
@@ -1928,6 +1933,9 @@
         showConstructions: "Show constructions",
         qty: "Qty: {qty}",
         readyProgress: "{completed}/{total} done",
+        constructionUnits: "In this construction: {qty} pcs",
+        constructionReadyProgress:
+          "Done in this construction: {completed}/{total}",
         remainingQty: "Remaining: {count} pcs",
         waitingFor: "Waiting for",
         stationFallback: "Station",

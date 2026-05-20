@@ -106,6 +106,9 @@ export type OperatorQueueItem = {
   batchCode: string;
   totalQty: number;
   completedQty?: number;
+  constructionCount?: number;
+  completedConstructionCount?: number;
+  totalPiecesQty?: number;
   material: string;
   attachments: OrderAttachmentRow[];
   startedAt?: string | null;
