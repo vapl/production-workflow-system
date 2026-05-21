@@ -35,6 +35,7 @@ import { ProductionRoutingSettingsModal } from "@/components/production/Producti
 import { ProductionStationCatalogModal } from "@/components/production/ProductionStationCatalogModal";
 import { ProductionStatCard } from "@/components/production/ProductionStatCard";
 import { cn } from "@/components/ui/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
 import { useWorkingCalendar } from "@/contexts/WorkingCalendarContext";
 import { useI18n } from "@/lib/i18n/useI18n";
 import {
@@ -55,6 +56,10 @@ import {
   buildWorkedBreakdownByRun,
   getQueueGroupWorkedBreakdown,
 } from "@/lib/domain/productionDurations";
+import {
+  getProductionItemCompletedQty,
+  getProductionItemQuantity,
+} from "@/lib/domain/productionUnitProgress";
 import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus";
 import { supabase, supabaseBucket } from "@/lib/supabaseClient";
 import type {
@@ -166,6 +171,7 @@ function buildDefaultBatchCode(itemIndex: number) {
 export default function ProductionJobDetailPage() {
   const { t } = useI18n();
   const { workdays, shifts, overtimeEnabled } = useWorkingCalendar();
+  const currentUser = useCurrentUser();
   const params = useParams<{ jobId?: string }>();
   const jobId = params?.jobId ?? "";
 
@@ -211,9 +217,58 @@ export default function ProductionJobDetailPage() {
   const [savingInlineReorderItemId, setSavingInlineReorderItemId] = useState<
     string | null
   >(null);
+  const [reopeningRunId, setReopeningRunId] = useState<string | null>(null);
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
     : "";
+  const canReopenCompletedProduction =
+    currentUser.isOwner ||
+    currentUser.isAdmin ||
+    currentUser.role === "Production planner";
+
+  const reloadExecutionState = async () => {
+    if (!supabase || !jobId) {
+      return false;
+    }
+    const [productionItemsResult, batchRunsResult] = await Promise.all([
+      supabase
+        .from("production_items")
+        .select(
+          "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, started_at, done_at, duration_minutes, created_at, orders (order_number, due_date, production_due_date, priority, customer_name, status)",
+        )
+        .eq("order_id", jobId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("batch_runs")
+        .select(
+          "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, production_due_date, priority, customer_name, status)",
+        )
+        .eq("order_id", jobId)
+        .order("step_index", { ascending: true })
+        .order("planned_date", { ascending: true }),
+    ]);
+    if (productionItemsResult.error || batchRunsResult.error) {
+      setDataError(
+        productionItemsResult.error?.message ??
+          batchRunsResult.error?.message ??
+          t("production.main.jobs.failedReopenCompleted"),
+      );
+      return false;
+    }
+    setProductionItems(
+      (productionItemsResult.data ?? []).map((row) => ({
+        ...(row as Omit<ProductionItemRow, "orders">),
+        orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
+      })),
+    );
+    setBatchRuns(
+      (batchRunsResult.data ?? []).map((row) => ({
+        ...(row as Omit<BatchRunRow, "orders">),
+        orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
+      })),
+    );
+    return true;
+  };
 
   useEffect(() => {
     if (!supabase || !jobId) {
@@ -1062,6 +1117,102 @@ export default function ProductionJobDetailPage() {
 
     setOrder((prev) => (prev ? { ...prev, production_due_date: value } : prev));
     setIsSavingOverview(false);
+  };
+
+  const handleReopenCompletedRun = async (
+    sourceOrderItemId: string,
+    run: BatchRunRow,
+  ) => {
+    if (
+      !supabase ||
+      !canReopenCompletedProduction ||
+      !currentUser.id ||
+      run.status !== "done"
+    ) {
+      return;
+    }
+
+    setReopeningRunId(run.id);
+    setDataError("");
+    setActionNotice("");
+
+    try {
+      const stationTrackingMode =
+        workstations.find((station) => station.id === run.station_id)?.trackingMode ??
+        "construction_level";
+      const relatedItems =
+        (productionItemsBySourceRowId.get(sourceOrderItemId) ?? []).filter(
+          (item) =>
+            item.batch_code === run.batch_code &&
+            (!run.station_id || item.station_id === run.station_id),
+        );
+
+      if (
+        stationTrackingMode === "construction_level" &&
+        relatedItems.length > 0
+      ) {
+        for (const item of relatedItems) {
+          const quantity = getProductionItemQuantity(item);
+          const currentCompletedQty = getProductionItemCompletedQty(item);
+          const nextCompletedQty = Math.max(currentCompletedQty - 1, 0);
+          const nextMeta = {
+            ...((item.meta as Record<string, unknown> | null) ?? {}),
+            completedQty: nextCompletedQty,
+            reopenedAt: new Date().toISOString(),
+            reopenedBy: currentUser.id,
+          };
+
+          const { error: updateItemError } = await supabase
+            .from("production_items")
+            .update({ meta: nextMeta })
+            .eq("id", item.id);
+          if (updateItemError) {
+            throw new Error(updateItemError.message);
+          }
+
+          const { error: transitionError } = await transitionBatchRunStatus(
+            supabase,
+            {
+              batchRunId: run.id,
+              toStatus: nextCompletedQty > 0 && quantity > 1 ? "paused" : "queued",
+              productionItemId: item.id,
+              actorUserId: currentUser.id,
+              reason: t("production.main.jobs.reopenReason"),
+            },
+          );
+          if (transitionError) {
+            throw new Error(transitionError.message);
+          }
+        }
+      } else {
+        const { error: transitionError } = await transitionBatchRunStatus(
+          supabase,
+          {
+            batchRunId: run.id,
+            toStatus: "queued",
+            actorUserId: currentUser.id,
+            reason: t("production.main.jobs.reopenReason"),
+          },
+        );
+        if (transitionError) {
+          throw new Error(transitionError.message);
+        }
+      }
+
+      const reloaded = await reloadExecutionState();
+      if (!reloaded) {
+        return;
+      }
+      setActionNotice(t("production.main.jobs.reopenedForCorrection"));
+    } catch (error) {
+      setDataError(
+        error instanceof Error
+          ? error.message
+          : t("production.main.jobs.failedReopenCompleted"),
+      );
+    } finally {
+      setReopeningRunId(null);
+    }
   };
 
   const handlePrintQr = async () => {
@@ -2492,6 +2643,28 @@ export default function ProductionJobDetailPage() {
                                                   )}
                                             </span>
                                           </button>
+                                          {canReopenCompletedProduction &&
+                                          run.status === "done" ? (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                void handleReopenCompletedRun(
+                                                  item.id,
+                                                  run,
+                                                )
+                                              }
+                                              disabled={reopeningRunId === run.id}
+                                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white text-foreground transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                              aria-label={t(
+                                                "production.main.jobs.reopenCompletedAction",
+                                              )}
+                                              title={t(
+                                                "production.main.jobs.reopenCompletedAction",
+                                              )}
+                                            >
+                                              <TimerResetIcon className="h-3.5 w-3.5" />
+                                            </button>
+                                          ) : null}
                                           {index === relatedRuns.length - 1 ? (
                                             <button
                                               type="button"

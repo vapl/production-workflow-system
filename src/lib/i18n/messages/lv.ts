@@ -1657,6 +1657,11 @@
           "Visiem maršruta soļiem jābūt piesaistītām stacijām.",
         failedReleaseToQueues: "Neizdevās palaist darbu staciju rindās.",
         failedUpdateOverview: "Neizdevās atjaunināt pārskata laukus.",
+        reopenCompletedAction: "Atvērt atpakaļ labošanai",
+        reopenedForCorrection: "Pabeigtais darbs tika atvērts atpakaļ labošanai.",
+        failedReopenCompleted:
+          "Neizdevās atvērt pabeigto darbu atpakaļ labošanai.",
+        reopenReason: "Atvērts atpakaļ labošanai",
         loading: "Ielādē...",
         customer: "Klients",
         dueDate: "Termiņš",
@@ -1958,6 +1963,8 @@
         close: "Aizvērt filtrus",
         searchPlaceholder: "Meklēt pasūtījumu, partiju vai klientu",
         date: "Datums",
+        week: "Nedēļa",
+        weekHint: "Atlasot dienu, tiek parādīta visa attiecīgā nedēļa.",
         status: "Statuss",
         priority: "Prioritāte",
         blockedOnly: "Tikai bloķētie",
@@ -2034,6 +2041,18 @@
         completeMany: "Pabeigt vairākus",
         blocked: "Bloķēts",
         received: "Saņemts",
+      },
+      doneConfirm: {
+        title: "Apstiprināt pabeigšanu?",
+        description:
+          "Vai tiešām vēlaties atzīmēt šo darbu kā pabeigtu?",
+        itemDescription:
+          "Vai tiešām vēlaties atzīmēt \"{label}\" kā pabeigtu?",
+        unitsDescription:
+          "Vai tiešām vēlaties atzīmēt {count} gab. no \"{label}\" kā pabeigtus?",
+        runDescription:
+          "Vai tiešām vēlaties atzīmēt pasūtījumu \"{label}\" kā pabeigtu šajā stacijā?",
+        confirm: "Jā, pabeigt",
       },
       files: {
         hide: "Paslēpt failus",

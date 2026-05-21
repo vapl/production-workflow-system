@@ -1549,7 +1549,7 @@ begin
     when 'blocked' then
       v_transition_allowed := p_to_status in ('queued', 'pending', 'in_progress');
     when 'done' then
-      v_transition_allowed := false;
+      v_transition_allowed := p_to_status in ('queued', 'paused');
   end case;
 
   if not v_transition_allowed then
@@ -1578,16 +1578,23 @@ begin
   elsif p_to_status in ('queued', 'pending') then
     v_started_at := null;
     v_done_at := null;
-    v_duration := null;
-  elsif p_to_status in ('paused', 'blocked') then
-    if v_run.started_at is not null then
-      v_duration := coalesce(v_run.duration_minutes, 0) + greatest(
-        1,
-        round(extract(epoch from (v_now - v_run.started_at)) / 60.0)::integer
-      );
+    if v_run.status <> 'done' then
+      v_duration := null;
     end if;
-    v_started_at := null;
-    v_done_at := null;
+  elsif p_to_status in ('paused', 'blocked') then
+    if v_run.status = 'done' then
+      v_started_at := null;
+      v_done_at := null;
+    else
+      if v_run.started_at is not null then
+        v_duration := coalesce(v_run.duration_minutes, 0) + greatest(
+          1,
+          round(extract(epoch from (v_now - v_run.started_at)) / 60.0)::integer
+        );
+      end if;
+      v_started_at := null;
+      v_done_at := null;
+    end if;
   end if;
 
   perform set_config('app.allow_status_transition', 'on', true);

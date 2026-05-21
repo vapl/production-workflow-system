@@ -19,6 +19,7 @@ import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { SideDrawer } from "@/components/ui/SideDrawer";
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SelectField } from "@/components/ui/SelectField";
 import { TextAreaField } from "@/components/ui/TextAreaField";
 import {
@@ -160,6 +161,11 @@ type OrderItemLinkRow = {
   id: string;
   source_row_id: string;
   qty?: number | null;
+};
+type ProductionDisplayFieldConfig = {
+  key: string;
+  label: string;
+  sortOrder: number;
 };
 type PendingQuickAction = {
   orderId: string;
@@ -328,6 +334,33 @@ function formatLiveDuration(
   return `${seconds}s`;
 }
 
+function toIsoDateLocal(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getWeekRangeForDate(dateIso: string) {
+  const [year, month, day] = dateIso.split("-").map(Number);
+  const baseDate = new Date(year, (month ?? 1) - 1, day ?? 1);
+  if (Number.isNaN(baseDate.getTime())) {
+    const fallback = new Date();
+    const todayIso = toIsoDateLocal(fallback);
+    return { weekStart: todayIso, weekEnd: todayIso };
+  }
+  const dayOfWeek = baseDate.getDay();
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const weekStartDate = new Date(baseDate);
+  weekStartDate.setDate(baseDate.getDate() + diffToMonday);
+  const weekEndDate = new Date(weekStartDate);
+  weekEndDate.setDate(weekStartDate.getDate() + 6);
+  return {
+    weekStart: toIsoDateLocal(weekStartDate),
+    weekEnd: toIsoDateLocal(weekEndDate),
+  };
+}
+
 const operatorPrimaryActionClass =
   "h-11 min-w-0 shrink basis-0 grow-[1.15] rounded-xl px-2.5 text-[13px] font-semibold shadow-sm sm:px-4 sm:text-sm";
 const operatorSuccessActionClass =
@@ -386,6 +419,93 @@ function getStoragePathFromUrl(url: string, bucket: string) {
   return url.slice(index + marker.length);
 }
 
+function getProductionItemMetaRow(item: ProductionItemRow) {
+  if (!item.meta || typeof item.meta !== "object") {
+    return null;
+  }
+  const rawRow = (item.meta as Record<string, unknown>).row;
+  return rawRow && typeof rawRow === "object"
+    ? (rawRow as Record<string, unknown>)
+    : null;
+}
+
+function formatProductionDisplayValue(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : null;
+  }
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  if (Array.isArray(value)) {
+    const values = value
+      .map((entry) => formatProductionDisplayValue(entry))
+      .filter((entry): entry is string => Boolean(entry));
+    return values.length > 0 ? values.join(", ") : null;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return (
+      formatProductionDisplayValue(record.label) ??
+      formatProductionDisplayValue(record.name) ??
+      formatProductionDisplayValue(record.value)
+    );
+  }
+  return null;
+}
+
+function buildProductionDisplayEntries(
+  items: ProductionItemRow[],
+  fields: ProductionDisplayFieldConfig[],
+  options?: { limit?: number; excludeValues?: string[] },
+) {
+  if (fields.length === 0 || items.length === 0) {
+    return [] as Array<{ label: string; value: string }>;
+  }
+  const rows = items
+    .map((item) => getProductionItemMetaRow(item))
+    .filter((row): row is Record<string, unknown> => Boolean(row));
+  if (rows.length === 0) {
+    return [] as Array<{ label: string; value: string }>;
+  }
+  const excluded = new Set(
+    (options?.excludeValues ?? [])
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const entries = fields.flatMap((field) => {
+    const values = Array.from(
+      new Set(
+        rows
+          .map((row) => formatProductionDisplayValue(row[field.key]))
+          .filter((value): value is string => Boolean(value))
+          .filter((value) => !excluded.has(value.trim().toLowerCase())),
+      ),
+    );
+    if (values.length === 0) {
+      return [];
+    }
+    return [
+      {
+        label: field.label,
+        value:
+          values.length <= 2
+            ? values.join(", ")
+            : `${values.slice(0, 2).join(", ")} +${values.length - 2}`,
+      },
+    ];
+  });
+  return (options?.limit ? entries.slice(0, options.limit) : entries).filter(
+    (entry) => entry.value.trim().length > 0,
+  );
+}
+
 function renderAttachmentIcon(attachment: OrderAttachmentRow) {
   const name = (attachment.name ?? "").toLowerCase();
   const isPdf = name.endsWith(".pdf");
@@ -436,6 +556,7 @@ function mergeAttachments(...lists: OrderAttachmentRow[][]) {
 
 export default function OperatorProductionPage() {
   const { t } = useI18n();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const currentUser = useCurrentUser();
   const { rules } = useWorkflowRules();
   const { signOut } = useAuthActions();
@@ -483,9 +604,13 @@ export default function OperatorProductionPage() {
   const [showCompactMobileTitle, setShowCompactMobileTitle] = useState(false);
   const hideMobileFloatingControls = useHideMobileFloatingControls();
   const isWarehouseQueueView = pathname.startsWith("/warehouse");
+  const { weekStart: selectedWeekStart, weekEnd: selectedWeekEnd } = useMemo(
+    () => getWeekRangeForDate(selectedDate),
+    [selectedDate],
+  );
   const cacheKey =
     currentUser.id && selectedDate && !orderFilter
-      ? `pws_operator_cache_${currentUser.id}_${selectedDate}`
+      ? `pws_operator_cache_${currentUser.id}_${selectedWeekStart}_${selectedWeekEnd}`
       : "";
   const [stations, setStations] = useState<Station[]>([]);
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
@@ -500,6 +625,9 @@ export default function OperatorProductionPage() {
     ProductionJobItemDocument[]
   >([]);
   const [orderItemLinks, setOrderItemLinks] = useState<OrderItemLinkRow[]>([]);
+  const [productionDisplayFields, setProductionDisplayFields] = useState<
+    ProductionDisplayFieldConfig[]
+  >([]);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
   const [signingJobs, setSigningJobs] = useState<Set<string>>(new Set());
@@ -691,12 +819,16 @@ export default function OperatorProductionPage() {
             orderItemLinks?: OrderItemLinkRow[];
             tenantId?: string | null;
             date?: string;
+            weekStart?: string;
+            weekEnd?: string;
           };
           if (
             cached &&
             Date.now() - cached.cachedAt < 15000 &&
             cached.tenantId === currentUser.tenantId &&
-            cached.date === selectedDate
+            cached.date === selectedDate &&
+            cached.weekStart === selectedWeekStart &&
+            cached.weekEnd === selectedWeekEnd
           ) {
             setStations(
               (cached.stations ?? []).map((station) => ({
@@ -938,6 +1070,8 @@ export default function OperatorProductionPage() {
               orderItemLinks: orderItemLinksResult.data ?? [],
               tenantId: currentUser.tenantId ?? null,
               date: selectedDate,
+              weekStart: selectedWeekStart,
+              weekEnd: selectedWeekEnd,
             }),
           );
         } catch {
@@ -954,6 +1088,8 @@ export default function OperatorProductionPage() {
     currentUser.tenantId,
     cacheKey,
     selectedDate,
+    selectedWeekEnd,
+    selectedWeekStart,
     orderFilter,
   ]);
 
@@ -1159,6 +1295,39 @@ export default function OperatorProductionPage() {
       setWorkingCalendar(parseWorkingCalendar(data));
     };
     void loadWorkHours();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.tenantId]);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb || !currentUser.tenantId) {
+      return;
+    }
+    let isMounted = true;
+    const loadProductionDisplayFields = async () => {
+      const { data, error } = await sb
+        .from("order_input_fields")
+        .select("key, label, sort_order")
+        .eq("is_active", true)
+        .eq("show_in_production", true)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (!isMounted || error) {
+        return;
+      }
+      setProductionDisplayFields(
+        (data ?? [])
+          .map((row) => ({
+            key: String((row as { key?: unknown }).key ?? "").trim(),
+            label: String((row as { label?: unknown }).label ?? "").trim(),
+            sortOrder: Number((row as { sort_order?: unknown }).sort_order ?? 0),
+          }))
+          .filter((row) => row.key.length > 0 && row.label.length > 0),
+      );
+    };
+    void loadProductionDisplayFields();
     return () => {
       isMounted = false;
     };
@@ -1701,8 +1870,14 @@ export default function OperatorProductionPage() {
         if (orderFilter && item.orderId !== orderFilter) {
           return false;
         }
-        if (!orderFilter && item.plannedDate && item.plannedDate > selectedDate) {
-          return false;
+        if (!orderFilter) {
+          const filterDate = item.plannedDate ?? item.dueDate ?? null;
+          if (
+            filterDate &&
+            (filterDate < selectedWeekStart || filterDate > selectedWeekEnd)
+          ) {
+            return false;
+          }
         }
         if (statusFilter !== "all" && item.status !== statusFilter) {
           return false;
@@ -1736,7 +1911,8 @@ export default function OperatorProductionPage() {
     priorityFilter,
     onlyBlocked,
     orderFilter,
-    selectedDate,
+    selectedWeekEnd,
+    selectedWeekStart,
   ]);
 
   const queueItemByOrderId = useMemo(() => {
@@ -2346,6 +2522,70 @@ export default function OperatorProductionPage() {
     } finally {
       setPendingAction(null);
     }
+  };
+
+  const confirmDoneAction = async (options?: {
+    title?: string | null;
+    description?: string | null;
+    confirmLabel?: string | null;
+  }) => {
+    return confirm({
+      title:
+        options?.title?.trim() ||
+        t("production.operator.doneConfirm.title"),
+      description:
+        options?.description?.trim() ||
+        t("production.operator.doneConfirm.description"),
+      confirmLabel:
+        options?.confirmLabel?.trim() ||
+        t("production.operator.doneConfirm.confirm"),
+      cancelLabel: t("production.operator.common.cancel"),
+      destructive: false,
+    });
+  };
+
+  const handleConfirmedRunDone = async (
+    runId: string,
+    label?: string | null,
+  ) => {
+    const confirmed = await confirmDoneAction({
+      description: label
+        ? t("production.operator.doneConfirm.runDescription", {
+            label,
+          })
+        : t("production.operator.doneConfirm.description"),
+    });
+    if (!confirmed) {
+      return;
+    }
+    await handleRunStatusUpdate(runId, "done");
+  };
+
+  const handleConfirmedCompleteItemUnits = async (
+    itemId: string,
+    runId: string,
+    unitsToComplete: number,
+    label?: string | null,
+  ) => {
+    const confirmed = await confirmDoneAction({
+      description:
+        unitsToComplete > 1
+          ? t("production.operator.doneConfirm.unitsDescription", {
+              count: unitsToComplete,
+              label:
+                label?.trim() ||
+                t("production.main.jobs.fallbackConstructionLabel"),
+            })
+          : label
+            ? t("production.operator.doneConfirm.itemDescription", {
+                label,
+              })
+            : t("production.operator.doneConfirm.description"),
+    });
+    if (!confirmed) {
+      return;
+    }
+    await handleCompleteItemUnits(itemId, runId, unitsToComplete);
   };
 
   const handleRunOnlyStatusUpdate = async (
@@ -3005,8 +3245,11 @@ export default function OperatorProductionPage() {
   }
 
   const headerSubtitle = t("production.operator.header.subtitle", {
-    date: formatDate(selectedDate),
+    date: `${formatDate(selectedWeekStart)} - ${formatDate(selectedWeekEnd)}`,
   });
+  const selectedWeekLabel = `${formatDate(selectedWeekStart)} - ${formatDate(
+    selectedWeekEnd,
+  )}`;
   const closeBlockedDialog = () => {
     setBlockedRunId(null);
     setBlockedItemId(null);
@@ -3267,8 +3510,10 @@ export default function OperatorProductionPage() {
 
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
           <DatePicker
-            label={t("production.operator.filters.date")}
+            label={t("production.operator.filters.week")}
             value={selectedDate}
+            displayValue={selectedWeekLabel}
+            description={t("production.operator.filters.weekHint")}
             onChange={(value) => applyFiltersToUrl({ date: value || today })}
           />
 
@@ -3602,6 +3847,18 @@ export default function OperatorProductionPage() {
                             customerName.toLowerCase() &&
                           materialName.toLowerCase() !==
                             item.orderNumber.toLowerCase();
+                        const displayFields = buildProductionDisplayEntries(
+                          item.items,
+                          productionDisplayFields,
+                          {
+                            limit: isConstructionTracking ? 2 : 3,
+                            excludeValues: [
+                              item.orderNumber,
+                              item.customerName,
+                              item.unitName ?? "",
+                            ],
+                          },
+                        );
                         return (
                           <>
                             <div className="flex items-start justify-between gap-2">
@@ -3627,6 +3884,18 @@ export default function OperatorProductionPage() {
                                     {item.unitName}
                                   </div>
                                 ) : null}
+                              </div>
+                            ) : null}
+                            {displayFields.length > 0 ? (
+                              <div className="mt-1.5 space-y-0.5 text-[11px] leading-5 text-muted-foreground">
+                                {displayFields.map((entry) => (
+                                  <div key={`${item.id}:${entry.label}`}>
+                                    <span className="font-medium text-foreground">
+                                      {entry.label}:
+                                    </span>{" "}
+                                    <span>{entry.value}</span>
+                                  </div>
+                                ))}
                               </div>
                             ) : null}
                           </div>
@@ -3980,10 +4249,11 @@ export default function OperatorProductionPage() {
                                                             size="sm"
                                                             className="h-10 w-full justify-start rounded-lg px-3 text-left font-semibold"
                                                             onClick={() =>
-                                                              handleCompleteItemUnits(
+                                                              void handleConfirmedCompleteItemUnits(
                                                                 prodItem.id,
                                                                 item.id,
                                                                 1,
+                                                                prodItem.item_name,
                                                               )
                                                             }
                                                           >
@@ -4032,7 +4302,7 @@ export default function OperatorProductionPage() {
                                                                 size="sm"
                                                                 className="h-10 w-full"
                                                                 onClick={() =>
-                                                                  handleCompleteItemUnits(
+                                                                  void handleConfirmedCompleteItemUnits(
                                                                     prodItem.id,
                                                                     item.id,
                                                                     Number(
@@ -4041,6 +4311,7 @@ export default function OperatorProductionPage() {
                                                                           .id
                                                                       ] ?? 1,
                                                                     ),
+                                                                    prodItem.item_name,
                                                                   )
                                                                 }
                                                               >
@@ -4066,10 +4337,11 @@ export default function OperatorProductionPage() {
                                                         isCompleting
                                                       }
                                                       onClick={() =>
-                                                        handleCompleteItemUnits(
+                                                        void handleConfirmedCompleteItemUnits(
                                                           prodItem.id,
                                                           item.id,
                                                           1,
+                                                          prodItem.item_name,
                                                         )
                                                       }
                                                     >
@@ -4140,12 +4412,12 @@ export default function OperatorProductionPage() {
                                             : isRunActionLoading(item.id, "in_progress"))
                                         }
                                         onClick={() =>
-                                          handleRunStatusUpdate(
-                                            item.id,
-                                            item.status === "in_progress"
-                                              ? "paused"
-                                              : "in_progress",
-                                          )
+                                          item.status === "in_progress"
+                                            ? handleOpenPaused(item.id)
+                                            : handleRunStatusUpdate(
+                                                item.id,
+                                                "in_progress",
+                                              )
                                         }
                                       >
                                         {item.status === "in_progress" ? (
@@ -4183,7 +4455,10 @@ export default function OperatorProductionPage() {
                                         isBatchCompleting
                                       }
                                       onClick={() =>
-                                        handleRunStatusUpdate(item.id, "done")
+                                        void handleConfirmedRunDone(
+                                          item.id,
+                                          item.orderNumber,
+                                        )
                                       }
                                     >
                                       {isBatchCompleting ? (
@@ -4396,8 +4671,10 @@ export default function OperatorProductionPage() {
       >
         <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3">
           <DatePicker
-            label={t("production.operator.filters.date")}
+            label={t("production.operator.filters.week")}
             value={selectedDate}
+            displayValue={selectedWeekLabel}
+            description={t("production.operator.filters.weekHint")}
             onChange={(value) => applyFiltersToUrl({ date: value || today })}
           />
           <SelectField
@@ -4661,12 +4938,12 @@ export default function OperatorProductionPage() {
                             : isRunActionLoading(quickActionItem.id, "in_progress"))
                         }
                         onClick={() =>
-                          handleRunStatusUpdate(
-                            quickActionItem.id,
-                            quickActionItem.status === "in_progress"
-                              ? "paused"
-                              : "in_progress",
-                          )
+                          quickActionItem.status === "in_progress"
+                            ? handleOpenPaused(quickActionItem.id)
+                            : handleRunStatusUpdate(
+                                quickActionItem.id,
+                                "in_progress",
+                              )
                         }
                       >
                         {quickActionItem.status === "in_progress" ? (
@@ -4703,7 +4980,10 @@ export default function OperatorProductionPage() {
                         isRunActionLoading(quickActionItem.id, "done")
                       }
                       onClick={() =>
-                        handleRunStatusUpdate(quickActionItem.id, "done")
+                        void handleConfirmedRunDone(
+                          quickActionItem.id,
+                          quickActionItem.orderNumber,
+                        )
                       }
                     >
                       {isRunActionLoading(quickActionItem.id, "done") ? (
@@ -4876,10 +5156,11 @@ export default function OperatorProductionPage() {
                                     size="sm"
                                     className="h-10 w-full justify-start rounded-lg px-3 text-left font-semibold"
                                     onClick={() =>
-                                      handleCompleteItemUnits(
+                                      void handleConfirmedCompleteItemUnits(
                                         prodItem.id,
                                         quickActionItem.id,
                                         1,
+                                        prodItem.item_name,
                                       )
                                     }
                                   >
@@ -4921,7 +5202,7 @@ export default function OperatorProductionPage() {
                                         size="sm"
                                         className="h-10 w-full"
                                         onClick={() =>
-                                          handleCompleteItemUnits(
+                                          void handleConfirmedCompleteItemUnits(
                                             prodItem.id,
                                             quickActionItem.id,
                                             Number(
@@ -4929,6 +5210,7 @@ export default function OperatorProductionPage() {
                                                 prodItem.id
                                               ] ?? 1,
                                             ),
+                                            prodItem.item_name,
                                           )
                                         }
                                       >
@@ -4954,10 +5236,11 @@ export default function OperatorProductionPage() {
                                 isCompleting
                               }
                               onClick={() =>
-                                handleCompleteItemUnits(
+                                void handleConfirmedCompleteItemUnits(
                                   prodItem.id,
                                   quickActionItem.id,
                                   1,
+                                  prodItem.item_name,
                                 )
                               }
                             >
@@ -5258,6 +5541,8 @@ export default function OperatorProductionPage() {
           </Button>
         </div>
       </div>
+
+      {confirmDialog}
 
       <BottomSheet
         open={Boolean(blockedRunId)}

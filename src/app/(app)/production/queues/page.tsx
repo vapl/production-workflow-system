@@ -143,6 +143,101 @@ type QueueQuickFilter =
   | "blocked"
   | "in_progress";
 
+type ProductionDisplayFieldConfig = {
+  key: string;
+  label: string;
+  sortOrder: number;
+};
+
+function getProductionItemMetaRow(item: ProductionItemRow) {
+  const meta = item.meta;
+  if (!meta || typeof meta !== "object") {
+    return null;
+  }
+  const rawRow = (meta as Record<string, unknown>).row;
+  if (!rawRow || typeof rawRow !== "object" || Array.isArray(rawRow)) {
+    return null;
+  }
+  return rawRow as Record<string, unknown>;
+}
+
+function formatProductionDisplayValue(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : null;
+  }
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => formatProductionDisplayValue(entry))
+      .filter((entry): entry is string => Boolean(entry));
+    return parts.length > 0 ? parts.join(", ") : null;
+  }
+  return null;
+}
+
+function buildProductionDisplayEntries(
+  items: ProductionItemRow[],
+  fields: ProductionDisplayFieldConfig[],
+  options?: {
+    limit?: number;
+    excludeValues?: string[];
+  },
+) {
+  const excludeValues = new Set(
+    (options?.excludeValues ?? [])
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => value.length > 0),
+  );
+
+  const entries = fields
+    .map((field) => {
+      for (const item of items) {
+        const row = getProductionItemMetaRow(item);
+        if (!row || !(field.key in row)) {
+          continue;
+        }
+        const formattedValue = formatProductionDisplayValue(row[field.key]);
+        if (!formattedValue) {
+          continue;
+        }
+        if (excludeValues.has(formattedValue.trim().toLowerCase())) {
+          continue;
+        }
+        return {
+          key: field.key,
+          label: field.label,
+          value: formattedValue,
+          sortOrder: field.sortOrder,
+        };
+      }
+      return null;
+    })
+    .filter(
+      (
+        entry,
+      ): entry is {
+        key: string;
+        label: string;
+        value: string;
+        sortOrder: number;
+      } => Boolean(entry),
+    )
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+
+  return typeof options?.limit === "number"
+    ? entries.slice(0, options.limit)
+    : entries;
+}
+
 function formatQueueGroupDate(
   value: string | null | undefined,
   t: ReturnType<typeof useI18n>["t"],
@@ -236,6 +331,9 @@ export default function ProductionQueuesPage() {
   const [queueViewMode, setQueueViewMode] = useState<
     "active" | "completed" | "all"
   >("active");
+  const [productionDisplayFields, setProductionDisplayFields] = useState<
+    ProductionDisplayFieldConfig[]
+  >([]);
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -273,6 +371,44 @@ export default function ProductionQueuesPage() {
       window.clearInterval(intervalId);
     };
   }, [batchRuns]);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadProductionDisplayFields = async () => {
+      const { data, error } = await sb
+        .from("order_input_fields")
+        .select("key, label, sort_order, created_at")
+        .eq("is_active", true)
+        .eq("show_in_production", true)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (error || !isMounted) {
+        return;
+      }
+
+      setProductionDisplayFields(
+        (data ?? []).map((field) => ({
+          key: String(field.key ?? ""),
+          label: String(field.label ?? field.key ?? ""),
+          sortOrder:
+            typeof field.sort_order === "number" ? field.sort_order : 0,
+        })),
+      );
+    };
+
+    void loadProductionDisplayFields();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const closeMobileSearch = useCallback(() => {
     setIsMobileSearchOpen(false);
@@ -1758,6 +1894,43 @@ export default function ProductionQueuesPage() {
                                       ) : null}
                                     </div>
                                   ) : null}
+                                  {(() => {
+                                    const displayFields =
+                                      buildProductionDisplayEntries(
+                                        item.items,
+                                        productionDisplayFields,
+                                        {
+                                          limit:
+                                            item.trackingMode ===
+                                            "construction_level"
+                                              ? 2
+                                              : 3,
+                                          excludeValues: [
+                                            item.orderNumber,
+                                            item.customerName,
+                                            item.unitName ?? "",
+                                            item.unitType ?? "",
+                                          ],
+                                        },
+                                      );
+
+                                    if (displayFields.length === 0) {
+                                      return null;
+                                    }
+
+                                    return (
+                                      <div className="mt-1.5 space-y-0.5 text-[11px] leading-5 text-muted-foreground">
+                                        {displayFields.map((entry) => (
+                                          <div key={`${item.id}:${entry.key}`}>
+                                            <span className="font-medium text-foreground">
+                                              {entry.label}:
+                                            </span>{" "}
+                                            <span>{entry.value}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  })()}
                                   <div className="mt-1.5">
                                     <Badge
                                       variant={statusBadge(item.status)}

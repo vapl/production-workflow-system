@@ -17,6 +17,8 @@ type DatePickerProps = {
   value: string;
   onChange: (value: string) => void;
   label?: string;
+  description?: string;
+  displayValue?: string;
   className?: string;
   labelClassName?: string;
   triggerClassName?: string;
@@ -29,6 +31,8 @@ export function DatePicker({
   value,
   onChange,
   label,
+  description,
+  displayValue,
   className,
   labelClassName,
   triggerClassName,
@@ -50,7 +54,7 @@ export function DatePicker({
     return isValid(parsed) ? parsed : undefined;
   }, [min]);
 
-  const formatted = selectedDate ? format(selectedDate, "dd.MM.yyyy") : "";
+  const formatted = displayValue ?? (selectedDate ? format(selectedDate, "dd.MM.yyyy") : "");
 
   return (
     <label className={cn("flex flex-col", className)}>
@@ -109,6 +113,11 @@ export function DatePicker({
           />
         </PopoverContent>
       </Popover>
+      {description ? (
+        <span className="mt-1 text-xs text-muted-foreground">
+          {description}
+        </span>
+      ) : null}
     </label>
   );
 }

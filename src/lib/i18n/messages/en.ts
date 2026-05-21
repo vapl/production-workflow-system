@@ -1588,6 +1588,12 @@
         failedReleaseToQueues:
           "Failed to release the job to station queues.",
         failedUpdateOverview: "Failed to update overview fields.",
+        reopenCompletedAction: "Reopen for correction",
+        reopenedForCorrection:
+          "Completed work was reopened for correction.",
+        failedReopenCompleted:
+          "Failed to reopen completed work for correction.",
+        reopenReason: "Reopened for correction",
         loading: "Loading...",
         customer: "Customer",
         dueDate: "Due date",
@@ -1879,6 +1885,8 @@
         close: "Close filters",
         searchPlaceholder: "Search order, batch or customer",
         date: "Date",
+        week: "Week",
+        weekHint: "Choosing a day shows the full corresponding week.",
         status: "Status",
         priority: "Priority",
         blockedOnly: "Blocked only",
@@ -1954,6 +1962,17 @@
         completeMany: "Complete many",
         blocked: "Blocked",
         received: "Received",
+      },
+      doneConfirm: {
+        title: "Confirm completion?",
+        description: "Are you sure you want to mark this work as done?",
+        itemDescription:
+          "Are you sure you want to mark \"{label}\" as done?",
+        unitsDescription:
+          "Are you sure you want to mark {count} pcs of \"{label}\" as done?",
+        runDescription:
+          "Are you sure you want to mark order \"{label}\" as done at this station?",
+        confirm: "Yes, mark done",
       },
       files: {
         hide: "Hide files",
