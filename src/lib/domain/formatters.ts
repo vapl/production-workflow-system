@@ -23,13 +23,28 @@ type AppWeekInfo = {
 
 const weekInfoCache = new Map<AppLocale, AppWeekInfo>();
 
+type IntlLocaleWithWeekInfo = Intl.Locale & {
+  getWeekInfo?: () => {
+    firstDay: number;
+    weekend?: number[];
+    minimalDays?: number;
+  };
+  weekInfo?: {
+    firstDay?: number;
+    weekend?: number[];
+    minimalDays?: number;
+  };
+};
+
 function getWeekInfo(locale: AppLocale): AppWeekInfo {
   const existing = weekInfoCache.get(locale);
   if (existing) {
     return existing;
   }
 
-  const intlLocale = new Intl.Locale(toIntlLocale(locale));
+  const intlLocale = new Intl.Locale(
+    toIntlLocale(locale),
+  ) as IntlLocaleWithWeekInfo;
 
   let firstDay = 1;
   let minimalDays = 4;
