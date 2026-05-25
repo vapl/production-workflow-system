@@ -5,6 +5,7 @@ import type {
   ProductionStation,
   ProductionStatus,
   ProductionStatusEventRow,
+  ProductionWorkSessionRow,
   StationTrackingMode,
 } from "@/types/production";
 import {
@@ -51,6 +52,7 @@ type BatchRunLike = Pick<
 type OrderItemLike = {
   id: string;
   order_id: string;
+  position?: string | null;
   item_name: string;
   item_type?: string | null;
   qty?: number | null;
@@ -76,12 +78,18 @@ export type ProductionQueueItem = {
   durationMinutes?: number | null;
   regularMinutes?: number | null;
   overtimeMinutes?: number | null;
+  durationSeconds?: number | null;
+  involvedOperatorIds?: string[];
+  workingOperatorIds?: string[];
+  pausedOperatorIds?: string[];
+  blockedOperatorIds?: string[];
   stationId: string;
   runIds: string[];
   trackingMode: StationTrackingMode;
   items: ProductionItemLike[];
   unitType?: string | null;
   unitName?: string | null;
+  unitPosition?: string | null;
 };
 
 function getProductionItemSourceKey(item: ProductionItemLike) {
@@ -104,6 +112,17 @@ function getOrderItemQuantity(item: OrderItemLike | undefined) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function getProductionItemMetaRowValue(item: ProductionItemLike, key: string) {
+  const meta = item.meta as Record<string, unknown> | null;
+  const row = meta && typeof meta.row === "object" && meta.row !== null
+    ? (meta.row as Record<string, unknown>)
+    : null;
+  const value = row?.[key] ?? meta?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
 type ReadyBatchGroupLike = {
   orderNumber: string;
   customerName: string;
@@ -117,6 +136,7 @@ export function buildQueueByStation(params: {
   productionItems: ProductionItemLike[];
   orderItems?: OrderItemLike[];
   activityEvents?: ProductionStatusEventRow[];
+  workSessions?: ProductionWorkSessionRow[];
   calendar?: WorkingCalendar | null;
   nowMs?: number;
   stations: StationLike[];
@@ -129,6 +149,7 @@ export function buildQueueByStation(params: {
     productionItems,
     orderItems = [],
     activityEvents = [],
+    workSessions = [],
     calendar,
     nowMs,
     stations,
@@ -171,6 +192,103 @@ export function buildQueueByStation(params: {
     calendar,
     nowMs,
   );
+
+  const workSessionsByScope = new Map<string, ProductionWorkSessionRow[]>();
+  workSessions.forEach((session) => {
+    const key = `${session.batch_run_id}::${session.production_item_id ?? "*"}`;
+    const list = workSessionsByScope.get(key) ?? [];
+    list.push(session);
+    workSessionsByScope.set(key, list);
+  });
+
+  const getElapsedSecondsForSessions = (sessions: ProductionWorkSessionRow[]) => {
+    const intervals = sessions
+      .map((session) => {
+        const startMs = Date.parse(session.started_at);
+        const endIso =
+          session.stopped_at ??
+          (session.is_active
+            ? new Date(nowMs ?? Date.now()).toISOString()
+            : null);
+        const endMs = endIso ? Date.parse(endIso) : NaN;
+        if (
+          !Number.isFinite(startMs) ||
+          !Number.isFinite(endMs) ||
+          endMs <= startMs
+        ) {
+          return null;
+        }
+        return { startMs, endMs };
+      })
+      .filter((interval): interval is { startMs: number; endMs: number } =>
+        Boolean(interval),
+      )
+      .sort((a, b) => a.startMs - b.startMs);
+
+    let totalSeconds = 0;
+    let currentStart: number | null = null;
+    let currentEnd: number | null = null;
+    intervals.forEach((interval) => {
+      if (currentStart === null || currentEnd === null) {
+        currentStart = interval.startMs;
+        currentEnd = interval.endMs;
+        return;
+      }
+      if (interval.startMs <= currentEnd) {
+        currentEnd = Math.max(currentEnd, interval.endMs);
+        return;
+      }
+      totalSeconds += Math.floor((currentEnd - currentStart) / 1000);
+      currentStart = interval.startMs;
+      currentEnd = interval.endMs;
+    });
+    if (currentStart !== null && currentEnd !== null) {
+      totalSeconds += Math.floor((currentEnd - currentStart) / 1000);
+    }
+    return totalSeconds;
+  };
+
+  const getOperatorGroupsForSessions = (
+    sessions: ProductionWorkSessionRow[],
+  ) => {
+    const latestByOperator = new Map<string, ProductionWorkSessionRow>();
+    sessions.forEach((session) => {
+      const existing = latestByOperator.get(session.operator_user_id);
+      const existingTime = Date.parse(
+        existing?.updated_at ??
+          existing?.stopped_at ??
+          existing?.started_at ??
+          "1970-01-01T00:00:00.000Z",
+      );
+      const nextTime = Date.parse(
+        session.updated_at ??
+          session.stopped_at ??
+          session.started_at ??
+          "1970-01-01T00:00:00.000Z",
+      );
+      if (!existing || nextTime >= existingTime) {
+        latestByOperator.set(session.operator_user_id, session);
+      }
+    });
+
+    const working = new Set<string>();
+    const paused = new Set<string>();
+    const blocked = new Set<string>();
+    latestByOperator.forEach((session) => {
+      const status = session.is_active
+        ? "in_progress"
+        : ((session.ended_status as ProductionStatus | null) ?? null);
+      if (status === "in_progress") {
+        working.add(session.operator_user_id);
+      } else if (status === "paused") {
+        paused.add(session.operator_user_id);
+      } else if (status === "blocked") {
+        blocked.add(session.operator_user_id);
+      }
+    });
+    const involved = new Set([...working, ...paused, ...blocked]);
+    return { involved, working, paused, blocked };
+  };
 
   batchRuns.forEach((run) => {
     if (seenRuns.has(run.id)) {
@@ -325,6 +443,33 @@ export function buildQueueByStation(params: {
       workedBreakdownByItem,
       workedBreakdownByRun,
     });
+    const sessionScopes =
+      trackingMode === "construction_level"
+        ? effectiveItems.flatMap((item) => {
+            const sourceKey = getProductionItemSourceKey(item);
+            const matchedRuns = runs.filter((run) => {
+              const runSourceKey =
+                run.route_key && run.route_key !== "default"
+                  ? run.route_key
+                  : null;
+              if (sourceKey && runSourceKey) {
+                return sourceKey === runSourceKey;
+              }
+              if (item.station_id && item.station_id !== run.station_id) {
+                return false;
+              }
+              return item.batch_code === run.batch_code;
+            });
+            const targetRuns =
+              matchedRuns.length > 0 ? matchedRuns : [representativeRun];
+            return targetRuns.map((run) => `${run.id}::${item.id}`);
+          })
+        : runs.map((run) => `${run.id}::*`);
+    const scopeSessions = Array.from(new Set(sessionScopes)).flatMap(
+      (scopeKey) => workSessionsByScope.get(scopeKey) ?? [],
+    );
+    const sessionElapsedSeconds = getElapsedSecondsForSessions(scopeSessions);
+    const operatorGroups = getOperatorGroupsForSessions(scopeSessions);
 
     const queueItem = {
       id: representativeRun.id,
@@ -355,7 +500,15 @@ export function buildQueueByStation(params: {
       plannedDate: sortedPlannedDates[0] ?? null,
       startedAt: sortedStartedAt[0] ?? null,
       doneAt: sortedDoneAt.at(-1) ?? null,
-      durationMinutes: workedBreakdown.totalMinutes,
+      durationMinutes:
+        sessionElapsedSeconds > 0
+          ? Math.round(sessionElapsedSeconds / 60)
+          : workedBreakdown.totalMinutes,
+      durationSeconds: sessionElapsedSeconds > 0 ? sessionElapsedSeconds : null,
+      involvedOperatorIds: Array.from(operatorGroups.involved),
+      workingOperatorIds: Array.from(operatorGroups.working),
+      pausedOperatorIds: Array.from(operatorGroups.paused),
+      blockedOperatorIds: Array.from(operatorGroups.blocked),
       regularMinutes: workedBreakdown.regularMinutes,
       overtimeMinutes: workedBreakdown.overtimeMinutes,
       stationId,
@@ -381,6 +534,23 @@ export function buildQueueByStation(params: {
             )?.item_name ??
             orderItemById.get(representativeRun.route_key)?.item_name ??
             null
+          : null,
+      unitPosition:
+        trackingMode === "construction_level"
+          ? effectiveItems
+              .map((item) => {
+                const sourceKey = getProductionItemSourceKey(item);
+                const orderItem = sourceKey
+                  ? (orderItemById.get(sourceKey) ??
+                    orderItemBySourceKey.get(`${item.order_id}:${sourceKey}`))
+                  : undefined;
+                return (
+                  getProductionItemMetaRowValue(item, "position") ??
+                  orderItem?.position ??
+                  null
+                );
+              })
+              .find((value): value is string => Boolean(value)) ?? null
           : null,
     } satisfies ProductionQueueItem;
 

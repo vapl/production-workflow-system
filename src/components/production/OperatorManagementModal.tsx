@@ -208,13 +208,52 @@ export function OperatorManagementModal({
     );
   };
 
-  const getAccessToken = async () => {
-    const sessionResult = await supabase?.auth.getSession();
-    const token = sessionResult?.data.session?.access_token ?? "";
+  const getAccessToken = async (options?: { forceRefresh?: boolean }) => {
+    const sb = supabase;
+    if (!sb) {
+      throw new Error(t("production.main.errors.supabaseNotConfigured"));
+    }
+
+    let session = null as Awaited<
+      ReturnType<typeof sb.auth.getSession>
+    >["data"]["session"];
+
+    if (options?.forceRefresh) {
+      const refreshResult = await sb.auth.refreshSession();
+      session = refreshResult.data.session;
+    } else {
+      const sessionResult = await sb.auth.getSession();
+      session = sessionResult.data.session;
+      const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : 0;
+      if (!session?.access_token || (expiresAtMs && expiresAtMs - Date.now() < 60_000)) {
+        const refreshResult = await sb.auth.refreshSession();
+        session = refreshResult.data.session ?? session;
+      }
+    }
+
+    const token = session?.access_token ?? "";
     if (!token) {
       throw new Error(t("production.main.operators.manageSessionExpired"));
     }
     return token;
+  };
+
+  const postWithAuthRetry = async (url: string, body: unknown) => {
+    const makeRequest = async (token: string) =>
+      fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+    let response = await makeRequest(await getAccessToken());
+    if (response.status === 401) {
+      response = await makeRequest(await getAccessToken({ forceRefresh: true }));
+    }
+    return response;
   };
 
   const handleSave = async () => {
@@ -239,14 +278,9 @@ export function OperatorManagementModal({
     setSuccessMessage("");
     setError("");
     try {
-      const token = await getAccessToken();
-      const response = await fetch("/api/production/operators/upsert", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+      const response = await postWithAuthRetry(
+        "/api/production/operators/upsert",
+        {
           userId: selectedUserId || undefined,
           fullName,
           loginCode,
@@ -254,8 +288,8 @@ export function OperatorManagementModal({
           hourlyRate: parseOptionalNumber(hourlyRate),
           overtimeRate: parseOptionalNumber(overtimeRate),
           stationIds: selectedStationIds,
-        }),
-      });
+        },
+      );
       const result = (await response.json().catch(() => ({}))) as {
         error?: string;
         userId?: string;
@@ -299,15 +333,10 @@ export function OperatorManagementModal({
     setSuccessMessage("");
     setError("");
     try {
-      const token = await getAccessToken();
-      const response = await fetch("/api/production/operators/deactivate", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ userId: selectedUserId }),
-      });
+      const response = await postWithAuthRetry(
+        "/api/production/operators/deactivate",
+        { userId: selectedUserId },
+      );
       const result = (await response.json().catch(() => ({}))) as {
         error?: string;
       };

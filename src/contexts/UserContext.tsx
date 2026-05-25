@@ -59,6 +59,8 @@ export function normalizeUserRole(value?: string | null): UserRole {
   return "Sales";
 }
 
+const signedAssetCacheMaxAgeMs = 45 * 60 * 1000;
+
 export interface CurrentUser {
   id: string;
   name: string;
@@ -303,7 +305,17 @@ function readCachedProfile(userId: string) {
     if (!data?.profile) {
       return null;
     }
-    return data.profile;
+    const isSignedAssetExpired =
+      !Number.isFinite(data.cachedAt) ||
+      Date.now() - data.cachedAt > signedAssetCacheMaxAgeMs;
+    if (!isSignedAssetExpired) {
+      return data.profile;
+    }
+    return {
+      ...data.profile,
+      avatarUrl: null,
+      tenantLogoUrl: null,
+    };
   } catch {
     return null;
   }

@@ -279,9 +279,11 @@ function inferValueFromTextBlock(
 
 function extractPositionValue(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
-  const fromPos = normalized.match(/(?:\bpos\b[\s\.:]*)([A-Za-z0-9-]{1,8})/i);
-  if (fromPos?.[1]) {
-    return { value: fromPos[1].trim(), sourceKey: "Pos." };
+  const fromPos = normalized.match(
+    /\bpos\b[\s\.:]*[A-Za-z0-9-]{1,8}/i,
+  );
+  if (fromPos?.[0]) {
+    return { value: cleanPositionDisplayValue(fromPos[0]), sourceKey: "position" };
   }
   const token = normalized.match(/\b([A-Za-z]\d{1,3})\b/);
   if (token?.[1]) {
@@ -293,7 +295,7 @@ function extractPositionValue(text: string) {
 function extractQuantityValue(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
   const qty = normalized.match(
-    /(Quantity|Skaits|Qty|On)\s*[:.]?\s*([0-9]+(?:[.,][0-9]+)?)/i,
+    /(Quantity|Skaits|Qty)\s*[:.]?\s*([0-9]+(?:[.,][0-9]+)?)/i,
   );
   if (qty?.[2]) {
     return { value: qty[2].trim(), sourceKey: qty[1] ?? "Quantity" };
@@ -313,7 +315,7 @@ function extractQuantityValue(text: string) {
 function extractColorValue(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
   const color = normalized.match(
-    /(Profiles colour|Profiles color|Hardware colour|Hardware color|Paint colour|colour|color)\s*[:.]?\s*([A-Za-z0-9 \-]{3,80})/i,
+    /(Profiles code|Profiles colour|Profiles color|Hardware colour|Hardware color|Paint colour|colour|color)\s*[:.]?\s*([A-Za-z0-9 \-]{3,80})/i,
   );
   if (color?.[2]) {
     return { value: color[2].trim(), sourceKey: color[1] ?? "colour" };
@@ -341,6 +343,21 @@ function extractSystemValue(text: string) {
     return { value: posLine[1].trim(), sourceKey: "Pos. line" };
   }
   return { value: "", sourceKey: "" };
+}
+
+function matchPositionHeadingLine(line: string) {
+  return line
+    .trim()
+    .match(
+      /^Pos\.?\s*([A-Za-z]{0,4}\d{1,4}(?:-[A-Za-z0-9]{1,6})?)(?:\b|[\s:.)-])/i,
+    );
+}
+
+function cleanPositionDisplayValue(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/[\s:.)-]+$/g, "")
+    .trim();
 }
 
 function inferValueWithSource(
@@ -434,15 +451,17 @@ function inferValueWithSource(
 function heuristicRowsFromOcrText(text: string, columns: ParseColumn[]) {
   if (!text.trim()) return [];
 
-  // Stabils Pos regex ā€“ bez word boundary
-  const posRegex = /Pos\.?\s*[A-Za-z0-9-]+/gi;
+  const posRegex =
+    /(?:^|[\s(])Pos\.?\s*[A-Za-z]{0,4}\d{1,4}(?:-[A-Za-z0-9]{1,6})?(?=\b|[\s:.)-])/gi;
   const matches = Array.from(text.matchAll(posRegex));
 
   const blocks: string[] = [];
 
   if (matches.length > 0) {
     matches.forEach((match, index) => {
-      const start = match.index ?? 0;
+      const rawStart = match.index ?? 0;
+      const headingOffset = match[0].search(/Pos/i);
+      const start = rawStart + Math.max(0, headingOffset);
       const end =
         index + 1 < matches.length
           ? (matches[index + 1].index ?? text.length)
@@ -557,8 +576,8 @@ function extractPositionAnchors(text: string) {
     /(?:^|[\s(])Pos\.?\s*([A-Za-z]{0,4}\d{1,4}(?:-[A-Za-z0-9]{1,6})?)/gi,
   );
   for (const match of matches) {
-    if (match[1]) {
-      anchors.add(match[1].trim());
+    if (match[0]) {
+      anchors.add(cleanPositionDisplayValue(match[0]));
     }
   }
   return Array.from(anchors);
@@ -688,6 +707,125 @@ type KnownConstructionRow = {
   sourceKeys: Record<string, string>;
 };
 
+function stripInlineDimensionText(value: string) {
+  return value
+    .replace(
+      /\s*\(\s*(?:B|W|A)\s*=?\s*\d[\d\s.,]*[,; ]+\s*(?:H|P|D)\s*=?\s*\d[\d\s.,]*\s*\)/gi,
+      "",
+    )
+    .replace(
+      /\b(?:B|W|A)\s*=?\s*\d[\d\s.,]*[,; ]+\s*(?:H|P|D)\s*=?\s*\d[\d\s.,]*/gi,
+      "",
+    )
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function splitConstructionTypeAndName(value: string) {
+  const cleaned = stripInlineDimensionText(value);
+  if (!cleaned) {
+    return { itemType: "", itemName: "" };
+  }
+
+  const separatorMatch = cleaned.match(/\s+-\s+/);
+  if (!separatorMatch || separatorMatch.index === undefined) {
+    return { itemType: "", itemName: cleaned };
+  }
+
+  const before = cleaned.slice(0, separatorMatch.index).trim();
+  const after = cleaned.slice(separatorMatch.index + separatorMatch[0].length).trim();
+  if (!before || !after) {
+    return { itemType: before || cleaned, itemName: after };
+  }
+
+  const afterWords = after.split(/\s+/).filter(Boolean);
+  if (
+    afterWords.length >= 2 &&
+    /^[A-Z]{1,4}\d*$/i.test(afterWords[0]) &&
+    afterWords.slice(1).some((word) => /^[a-z]/.test(word))
+  ) {
+    return {
+      itemType: `${before} - ${afterWords[0]}`,
+      itemName: afterWords.slice(1).join(" "),
+    };
+  }
+
+  return { itemType: before, itemName: after };
+}
+
+function preferLongerConstructionText(current: string, candidate: string) {
+  const currentText = current.trim();
+  const candidateText = candidate.trim();
+  if (!currentText) {
+    return candidateText;
+  }
+  if (!candidateText) {
+    return currentText;
+  }
+  return candidateText.length > currentText.length ? candidateText : currentText;
+}
+
+function preferConstructionDimensionText(current: string, candidate: string) {
+  const currentText = current.trim();
+  const candidateText = candidate.trim();
+  if (!currentText) {
+    return candidateText;
+  }
+  if (!candidateText) {
+    return currentText;
+  }
+  const hasNamedAxes = (value: string) =>
+    /\b(?:B|W|A)\s*=?\s*\d/i.test(value) &&
+    /\b(?:H|P|D)\s*=?\s*\d/i.test(value);
+  if (hasNamedAxes(candidateText) && !hasNamedAxes(currentText)) {
+    return candidateText;
+  }
+  return candidateText.length < currentText.length ? candidateText : currentText;
+}
+
+function mergeConstructionRowsByPosition(rows: KnownConstructionRow[]) {
+  const mergedRows: KnownConstructionRow[] = [];
+  const byPosition = new Map<string, KnownConstructionRow>();
+
+  rows.forEach((row) => {
+    const positionKey = row.position.trim().toLowerCase();
+    if (!positionKey) {
+      mergedRows.push(row);
+      return;
+    }
+
+    const existing = byPosition.get(positionKey);
+    if (!existing) {
+      byPosition.set(positionKey, { ...row, sourceKeys: { ...row.sourceKeys } });
+      return;
+    }
+
+    existing.system = preferLongerConstructionText(existing.system, row.system);
+    existing.itemName = preferLongerConstructionText(existing.itemName, row.itemName);
+    existing.dimensions = preferConstructionDimensionText(
+      existing.dimensions,
+      row.dimensions,
+    );
+    existing.quantity = existing.quantity.trim() || row.quantity.trim();
+    existing.color = preferLongerConstructionText(existing.color, row.color);
+    Object.entries(row.sourceKeys).forEach(([key, value]) => {
+      if (!existing.sourceKeys[key] && value) {
+        existing.sourceKeys[key] = value;
+      }
+    });
+  });
+
+  return [
+    ...mergedRows,
+    ...Array.from(byPosition.values()).sort((left, right) =>
+      left.position.localeCompare(right.position, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+    ),
+  ];
+}
+
 function detectPositionValuePatterns(
   rows: Record<string, unknown>[],
 ): string[] {
@@ -763,14 +901,38 @@ function extractTypeOrNameFromBlock(
   if (!firstCandidate) {
     return { value: "", sourceKey: "" };
   }
+  const firstCandidateIndex = lines.indexOf(firstCandidate);
+  const headingLines = [firstCandidate];
+  if (/^Pos\.?/i.test(firstCandidate) && firstCandidateIndex >= 0) {
+    for (let index = firstCandidateIndex + 1; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (
+        /^(on|quantity|skaits|qty|description|profiles?\s+(?:code|colou?r)|hardware|fillings?|surface|circuit|total weight|u factor|system)\b/i.test(
+          line,
+        )
+      ) {
+        break;
+      }
+      if (headingLines.join(" ").length > 180) {
+        break;
+      }
+      headingLines.push(line);
+      if (/\)/.test(line)) {
+        break;
+      }
+    }
+  }
 
-  let value = firstCandidate
+  let value = stripInlineDimensionText(
+    headingLines
+    .join(" ")
     .replace(/^(?:Pos\.?\s*[A-Za-z0-9-]+\s*)/i, "")
     .replace(/^[A-Z]{1,3}\d{1,3}\s*[-: ]\s*/i, "")
     .replace(/\b(?:B|W|A)\s*=?\s*\d[\d\s.,]*.*$/i, "")
     .replace(/\b\d[\d\s.,]*\s*(?:x|Ć—)\s*\d[\d\s.,]*(?:\s*(?:x|Ć—)\s*\d[\d\s.,]*)?/i, "")
     .replace(/\s{2,}/g, " ")
-    .trim();
+      .trim(),
+  );
 
   const preferredNameSources =
     parserProfile?.documentHints?.preferredSourceByColumn?.item_name ?? [];
@@ -796,7 +958,7 @@ function buildPdfBlocks(
 
   const posIndexes: number[] = [];
   rawLines.forEach((line, index) => {
-    if (/^Pos\.?/i.test(line)) {
+    if (matchPositionHeadingLine(line)) {
       posIndexes.push(index);
     }
   });
@@ -872,7 +1034,7 @@ function parseConstructionRowsFromPdfText(
       .map((line) => line.trim())
       .filter(Boolean);
     const posLine = block[0] ?? "";
-    const positionMatch = posLine.match(/^Pos\.?\s*([A-Za-z0-9-]+)/i);
+    const positionMatch = matchPositionHeadingLine(posLine);
     const alphaNumericPositionMatch = posLine.match(/^([A-Z]{1,3}\d{1,3})\b/i);
     const systemMatch = posLine.match(
       /^Pos\.?\s*[A-Za-z0-9-]+\s+(.+?)(?:\s*-\s*|\s*\(|\s*,|$)/i,
@@ -880,7 +1042,7 @@ function parseConstructionRowsFromPdfText(
 
     let quantity = "";
     for (let i = 0; i < block.length; i += 1) {
-      if (/^(Quantity|Skaits|Qty|On)\s*[:.]?$/i.test(block[i])) {
+      if (/^(Quantity|Skaits|Qty)\s*[:.]?$/i.test(block[i])) {
         const next = block[i + 1] ?? "";
         const number = next.match(/([0-9]+(?:[.,][0-9]+)?)/);
         if (number?.[1]) {
@@ -889,7 +1051,7 @@ function parseConstructionRowsFromPdfText(
         }
       }
       const inline = block[i].match(
-        /(Quantity|Skaits|Qty|On)\s*[:.]?\s*([0-9]+(?:[.,][0-9]+)?)/i,
+        /(Quantity|Skaits|Qty)\s*[:.]?\s*([0-9]+(?:[.,][0-9]+)?)/i,
       );
       if (inline?.[2]) {
         quantity = inline[2];
@@ -900,7 +1062,7 @@ function parseConstructionRowsFromPdfText(
     let color = "";
     for (let i = 0; i < block.length; i += 1) {
       const colorLine = block[i].match(
-        /^Profiles?\s+colou?r\s*[:.]?\s*(.+)$/i,
+        /^Profiles?\s+(?:code|colou?r)\s*[:.]?\s*(.+)$/i,
       );
       if (colorLine?.[1]) {
         color = colorLine[1].trim();
@@ -914,14 +1076,25 @@ function parseConstructionRowsFromPdfText(
 
     const dimensions = extractDimensionsValue(blockText);
     const typeOrName = extractTypeOrNameFromBlock(blockText, parserProfile);
-    const system = systemMatch?.[1]?.trim() ?? typeOrName.value;
-    const itemName = typeOrName.value || system;
+    const splitHeading = splitConstructionTypeAndName(typeOrName.value);
+    const system = stripInlineDimensionText(
+      systemMatch?.[1]?.trim() || splitHeading.itemType || "",
+    );
+    const itemName =
+      stripInlineDimensionText(splitHeading.itemName) ||
+      stripInlineDimensionText(typeOrName.value) ||
+      system;
+
+    let positionValue = "";
+    if (positionMatch?.[0]) {
+      positionValue = cleanPositionDisplayValue(positionMatch[0]);
+    }
+    if (!positionValue && alphaNumericPositionMatch?.[1]) {
+      positionValue = alphaNumericPositionMatch[1].trim();
+    }
 
     rows.push({
-      position:
-        positionMatch?.[1]?.trim() ??
-        alphaNumericPositionMatch?.[1]?.trim() ??
-        "",
+      position: positionValue,
       system,
       itemName,
       dimensions: dimensions.value,
@@ -938,7 +1111,7 @@ function parseConstructionRowsFromPdfText(
     });
   });
 
-  return rows.filter(
+  const usableRows = rows.filter(
     (row) =>
       row.position.trim().length > 0 ||
       row.system.trim().length > 0 ||
@@ -947,6 +1120,7 @@ function parseConstructionRowsFromPdfText(
       row.quantity.trim().length > 0 ||
       row.color.trim().length > 0,
   );
+  return mergeConstructionRowsByPosition(usableRows);
 }
 
 function mapKnownConstructionRowsToColumns(
@@ -966,17 +1140,32 @@ function mapKnownConstructionRowsToColumns(
         aiKey.includes("position") ||
         key === "pos" ||
         aiKey === "pos";
+      const isItemName =
+        key.includes("name") ||
+        key.includes("item_name") ||
+        label.includes("name") ||
+        label.includes("nazvanie") ||
+        label.includes("nosaukums") ||
+        label.includes("nosaukums") ||
+        aiKey.includes("name");
       const isSystem =
-        key.includes("system") ||
-        label.includes("system") ||
-        aiKey.includes("system") ||
-        aiKey.includes("construction");
+        !isItemName &&
+        (key.includes("system") ||
+          key.includes("item_type") ||
+          label.includes("system") ||
+          label.includes("tip_izdeliya") ||
+          label.includes("tips") ||
+          aiKey.includes("system") ||
+          aiKey.includes("construction"));
       const isQuantity =
         key.includes("quantity") ||
+        key === "qty" ||
         key.includes("skaits") ||
         label.includes("quantity") ||
+        label === "qty" ||
         label.includes("skaits") ||
         aiKey.includes("quantity") ||
+        aiKey === "qty" ||
         aiKey.includes("skaits");
       const isColor =
         key.includes("color") ||
@@ -985,10 +1174,6 @@ function mapKnownConstructionRowsToColumns(
         label.includes("colour") ||
         aiKey.includes("color") ||
         aiKey.includes("colour");
-      const isItemName =
-        key.includes("name") ||
-        label.includes("name") ||
-        aiKey.includes("name");
       const isDimensions =
         key.includes("dimension") ||
         key.includes("size") ||
@@ -1285,6 +1470,39 @@ function normalizeModelRowKeys(row: Record<string, unknown>) {
   return normalized;
 }
 
+function repairConstructionTypeNameRows(rows: Record<string, unknown>[]) {
+  return rows.map((row) => {
+    const next = { ...row };
+    const itemType = String(next.item_type ?? "").trim();
+    const itemName = String(next.item_name ?? "").trim();
+    const typeSplit = splitConstructionTypeAndName(itemType);
+    const nameSplit = splitConstructionTypeAndName(itemName);
+
+    if (typeSplit.itemType && typeSplit.itemName) {
+      next.item_type = typeSplit.itemType;
+      if (!itemName || itemName === itemType || itemName.startsWith(itemType)) {
+        next.item_name = typeSplit.itemName;
+      }
+    }
+
+    const repairedName = String(next.item_name ?? "").trim();
+    if (nameSplit.itemType && nameSplit.itemName && (!itemType || repairedName === itemName)) {
+      if (!String(next.item_type ?? "").trim()) {
+        next.item_type = nameSplit.itemType;
+      }
+      next.item_name = nameSplit.itemName;
+    } else if (repairedName) {
+      next.item_name = stripInlineDimensionText(repairedName);
+    }
+
+    if (String(next.item_type ?? "").trim()) {
+      next.item_type = stripInlineDimensionText(String(next.item_type ?? ""));
+    }
+
+    return next;
+  });
+}
+
 function normalizeRows(rows: unknown[], columns: ParseColumn[]) {
   const sourceUsage = new Map<string, Map<string, number>>();
   const normalizedRows = rows
@@ -1331,7 +1549,7 @@ function normalizeRows(rows: unknown[], columns: ParseColumn[]) {
     };
   });
 
-  return { rows: normalizedRows, mapping };
+  return { rows: repairConstructionTypeNameRows(normalizedRows), mapping };
 }
 
 function buildSuggestedProfileDraftFromRows(args: {
@@ -1436,7 +1654,7 @@ function applyPdfTemplateProfileHints(
     rows.filter((row) => String(row.sku ?? "").trim().length > 0).length >=
     Math.max(1, Math.ceil(rows.length * 0.6));
 
-  return rows.map((row) => {
+  const hintedRows = rows.map((row) => {
     const next = { ...row };
     const preferredNameSources =
       parserProfile.documentHints?.preferredSourceByColumn?.item_name ?? [];
@@ -1467,6 +1685,7 @@ function applyPdfTemplateProfileHints(
 
     return next;
   });
+  return repairConstructionTypeNameRows(hintedRows);
 }
 
 async function runOpenAiParse(
@@ -2230,4 +2449,3 @@ export async function POST(request: Request) {
     parserRawTextPreview: parsed.rawText.slice(0, 300),
   });
 }
-

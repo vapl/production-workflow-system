@@ -5,6 +5,11 @@ import type {
   ReadyOrderRow,
 } from "@/types/production";
 
+type ReadyOrderItemLike = {
+  order_id: string;
+  qty?: number | null;
+};
+
 export type ReadyBatchGroupLike = {
   key: string;
   orderId: string;
@@ -24,24 +29,30 @@ export type ReadyProductionKpis = {
   dueTodayOrEarlier: number;
 };
 
-function normalizeLogicalReadyKey(run: BatchRunRow) {
-  const routeKey = run.route_key?.trim();
-  if (routeKey && routeKey !== "default") {
-    return `${run.order_id}:${routeKey}`;
-  }
-  return `${run.order_id}:${run.batch_code}`;
-}
-
-function fallbackReadyKey(orderId: string, batchCode: string) {
-  return `${orderId}:${batchCode || "B1"}`;
-}
-
 function batchCodeSortValue(batchCode: string) {
   const match = /^B(\d+)$/i.exec(batchCode.trim());
   if (match?.[1]) {
     return Number(match[1]);
   }
   return 0;
+}
+
+function formatBatchCodes(batchCodes: Iterable<string>) {
+  const sortedCodes = Array.from(
+    new Set(Array.from(batchCodes).map((code) => code || "B1")),
+  ).sort((a, b) => batchCodeSortValue(a) - batchCodeSortValue(b));
+  if (sortedCodes.length === 0) {
+    return "B1";
+  }
+  if (sortedCodes.length === 1) {
+    return sortedCodes[0];
+  }
+  return `${sortedCodes[0]}-${sortedCodes[sortedCodes.length - 1]}`;
+}
+
+function getPositiveNumber(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 export function filterReadyBatchGroups<T extends ReadyBatchGroupLike>(
@@ -97,47 +108,76 @@ export function buildReadyBatchGroups(params: {
   productionItems: ProductionItemRow[];
   readyOrders: ReadyOrderRow[];
   batchRuns: BatchRunRow[];
+  orderItems?: ReadyOrderItemLike[];
 }) {
-  const { productionItems, readyOrders, batchRuns } = params;
+  const { productionItems, readyOrders, batchRuns, orderItems = [] } = params;
   const groups = new Map<string, ReadyBatchGroupLike>();
   const readyOrderById = new Map(readyOrders.map((order) => [order.id, order]));
+  const orderItemQtyByOrderId = new Map<string, number>();
+  orderItems.forEach((item) => {
+    const current = orderItemQtyByOrderId.get(item.order_id) ?? 0;
+    orderItemQtyByOrderId.set(
+      item.order_id,
+      current + getPositiveNumber(item.qty),
+    );
+  });
+  const productionItemQtyByOrderId = new Map<string, number>();
+  productionItems.forEach((item) => {
+    if (item.station_id) {
+      return;
+    }
+    const current = productionItemQtyByOrderId.get(item.order_id) ?? 0;
+    productionItemQtyByOrderId.set(
+      item.order_id,
+      current + getPositiveNumber(item.qty),
+    );
+  });
+  const getReadyOrderQty = (
+    orderId: string,
+    order: ReadyOrderRow | undefined,
+  ) => {
+    const orderQty = getPositiveNumber(order?.quantity);
+    if (orderQty > 0) {
+      return orderQty;
+    }
+    const orderItemQty = getPositiveNumber(orderItemQtyByOrderId.get(orderId));
+    if (orderItemQty > 0) {
+      return orderItemQty;
+    }
+    const productionItemQty = getPositiveNumber(
+      productionItemQtyByOrderId.get(orderId),
+    );
+    if (productionItemQty > 0) {
+      return productionItemQty;
+    }
+    return 1;
+  };
   const releasedOrderIds = new Set(
     batchRuns
       .filter((run) => run.status !== "pending")
       .map((run) => run.order_id),
   );
-  const releasedKeys = new Set(
-    batchRuns
-      .filter((run) => run.status !== "pending")
-      .map((run) => normalizeLogicalReadyKey(run)),
-  );
-  const pendingRunsByKey = new Map<string, BatchRunRow[]>();
+  const pendingRunsByOrderId = new Map<string, BatchRunRow[]>();
 
   batchRuns
     .filter((run) => run.status === "pending")
     .forEach((run) => {
-      const key = normalizeLogicalReadyKey(run);
-      const list = pendingRunsByKey.get(key) ?? [];
+      const list = pendingRunsByOrderId.get(run.order_id) ?? [];
       list.push(run);
-      pendingRunsByKey.set(key, list);
+      pendingRunsByOrderId.set(run.order_id, list);
     });
 
-  pendingRunsByKey.forEach((runs, key) => {
+  pendingRunsByOrderId.forEach((runs, orderId) => {
     const representativeRun = [...runs].sort(
       (a, b) => batchCodeSortValue(b.batch_code) - batchCodeSortValue(a.batch_code),
     )[0];
-    if (
-      !representativeRun ||
-      groups.has(key) ||
-      releasedKeys.has(key) ||
-      releasedOrderIds.has(representativeRun.order_id)
-    ) {
+    if (!representativeRun || groups.has(orderId) || releasedOrderIds.has(orderId)) {
       return;
     }
-    const relatedOrder = readyOrderById.get(representativeRun.order_id);
-    groups.set(key, {
-      key,
-      orderId: representativeRun.order_id,
+    const relatedOrder = readyOrderById.get(orderId);
+    groups.set(orderId, {
+      key: orderId,
+      orderId,
       orderNumber:
         representativeRun.orders?.order_number ??
         relatedOrder?.order_number ??
@@ -154,33 +194,9 @@ export function buildReadyBatchGroups(params: {
         "",
       priority:
         representativeRun.orders?.priority ?? relatedOrder?.priority ?? "normal",
-      batchCode: representativeRun.batch_code || "B1",
-      totalQty: Number(relatedOrder?.quantity ?? 0),
+      batchCode: formatBatchCodes(runs.map((run) => run.batch_code)),
+      totalQty: getReadyOrderQty(orderId, relatedOrder),
       material: relatedOrder?.product_name ?? "",
-    });
-  });
-
-  readyOrders.forEach((order) => {
-    if (Number(order.quantity ?? 0) !== 1) {
-      return;
-    }
-
-    const matchingGroups = Array.from(groups.values()).filter(
-      (group) => group.orderId === order.id,
-    );
-
-    if (matchingGroups.length <= 1) {
-      return;
-    }
-
-    const preferredGroup = [...matchingGroups].sort(
-      (a, b) => batchCodeSortValue(b.batchCode) - batchCodeSortValue(a.batchCode),
-    )[0];
-
-    matchingGroups.forEach((group) => {
-      if (group.key !== preferredGroup.key) {
-        groups.delete(group.key);
-      }
     });
   });
 
@@ -197,13 +213,12 @@ export function buildReadyBatchGroups(params: {
     const dueDate =
       item.orders?.production_due_date ?? item.orders?.due_date ?? "";
     const priority = item.orders?.priority ?? "normal";
-    const batchCode = item.batch_code || "B1";
-    const key = fallbackReadyKey(item.order_id, batchCode);
-    if (releasedKeys.has(key) || releasedOrderIds.has(item.order_id)) {
+    const key = item.order_id;
+    if (releasedOrderIds.has(item.order_id)) {
       return;
     }
     const existing = groups.get(key);
-    const qtyValue = Number(item.qty ?? 0);
+    const qtyValue = getPositiveNumber(item.qty);
     if (!existing) {
       groups.set(key, {
         key,
@@ -212,25 +227,36 @@ export function buildReadyBatchGroups(params: {
         customerName,
         dueDate,
         priority,
-        batchCode,
+        batchCode: formatBatchCodes([item.batch_code]),
         totalQty: qtyValue,
         material: item.material ?? "",
       });
     } else {
       existing.totalQty += qtyValue;
+      existing.batchCode = formatBatchCodes([
+        ...existing.batchCode.split("-"),
+        item.batch_code,
+      ]);
     }
   });
 
   readyOrders.forEach((order) => {
-    const batchCode = "B1";
-    const key = fallbackReadyKey(order.id, batchCode);
-    if (
-      groups.has(key) ||
-      releasedKeys.has(key) ||
-      releasedOrderIds.has(order.id)
-    ) {
+    const key = order.id;
+    const existing = groups.get(key);
+    if (existing) {
+      const qty = getReadyOrderQty(order.id, order);
+      if (qty > 0 && getPositiveNumber(existing.totalQty) === 0) {
+        existing.totalQty = qty;
+      }
+      if (!existing.material && order.product_name) {
+        existing.material = order.product_name;
+      }
       return;
     }
+    if (releasedOrderIds.has(order.id)) {
+      return;
+    }
+    const pendingRuns = pendingRunsByOrderId.get(order.id) ?? [];
     groups.set(key, {
       key,
       orderId: order.id,
@@ -238,37 +264,9 @@ export function buildReadyBatchGroups(params: {
       customerName: order.customer_name ?? "Customer",
       dueDate: order.production_due_date ?? order.due_date ?? "",
       priority: order.priority ?? "normal",
-      batchCode,
-      totalQty: order.quantity ?? 0,
+      batchCode: formatBatchCodes(pendingRuns.map((run) => run.batch_code)),
+      totalQty: getReadyOrderQty(order.id, order),
       material: order.product_name ?? "",
-    });
-  });
-
-  readyOrders.forEach((order) => {
-    if (Number(order.quantity ?? 0) !== 1) {
-      return;
-    }
-
-    const matchingGroups = Array.from(groups.values()).filter(
-      (group) => group.orderId === order.id,
-    );
-
-    if (matchingGroups.length <= 1) {
-      return;
-    }
-
-    const preferredGroup = [...matchingGroups].sort((a, b) => {
-      const qtyDiff = Number(b.totalQty ?? 0) - Number(a.totalQty ?? 0);
-      if (qtyDiff !== 0) {
-        return qtyDiff;
-      }
-      return batchCodeSortValue(b.batchCode) - batchCodeSortValue(a.batchCode);
-    })[0];
-
-    matchingGroups.forEach((group) => {
-      if (group.key !== preferredGroup.key) {
-        groups.delete(group.key);
-      }
     });
   });
 

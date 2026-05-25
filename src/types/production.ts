@@ -114,10 +114,19 @@ export type OperatorQueueItem = {
   startedAt?: string | null;
   doneAt?: string | null;
   durationMinutes?: number | null;
+  durationSeconds?: number | null;
+  activeOperatorsCount?: number;
+  activeOperatorIds?: string[];
+  workingOperatorIds?: string[];
+  pausedOperatorIds?: string[];
+  blockedOperatorIds?: string[];
+  hasOperatorActiveSession?: boolean;
+  operatorSessionStatus?: ProductionStatus | null;
   items: ProductionItemRow[];
   trackingMode: StationTrackingMode;
   unitType?: string | null;
   unitName?: string | null;
+  unitPosition?: string | null;
 };
 
 export type ProductionStatusEventRow = {
@@ -131,4 +140,28 @@ export type ProductionStatusEventRow = {
   note?: string | null;
   created_at?: string | null;
   actor_user_id?: string | null;
+};
+
+export type ProductionWorkSessionEndedStatus =
+  | "paused"
+  | "blocked"
+  | "done";
+
+export type ProductionWorkSessionRow = {
+  id: string;
+  tenant_id: string;
+  order_id: string;
+  batch_run_id: string;
+  production_item_id?: string | null;
+  station_id?: string | null;
+  operator_user_id: string;
+  started_at: string;
+  stopped_at?: string | null;
+  ended_status?: ProductionWorkSessionEndedStatus | null;
+  stop_reason?: string | null;
+  stop_reason_id?: string | null;
+  duration_minutes?: number | null;
+  is_active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
 };

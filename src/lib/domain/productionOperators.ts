@@ -14,6 +14,7 @@ import {
   type WorkedMinutesRange,
   type WorkedTimeBreakdown,
 } from "@/lib/domain/productionDurations";
+import { getProductionWorkSessionOverlapMinutes } from "@/lib/domain/productionWorkSessions";
 import {
   computeWorkedMinutesBreakdown,
   type WorkingCalendar,
@@ -22,6 +23,7 @@ import type {
   BatchRunRow,
   ProductionItemRow,
   ProductionStatusEventRow,
+  ProductionWorkSessionRow,
 } from "@/types/production";
 
 export type OperatorProfileRow = {
@@ -738,12 +740,30 @@ function getAttributedRunWorkedMinutes(
   return getBatchRunWorkedMinutes(run, workedMinutesByRun);
 }
 
+function getWorkSessionBreakdown(params: {
+  session: ProductionWorkSessionRow;
+  range?: WorkedMinutesRange | null;
+  calendar?: WorkingCalendar | null;
+}) {
+  const overlap = getProductionWorkSessionOverlapMinutes({
+    session: params.session,
+    range: params.range ?? null,
+    calendar: params.calendar ?? null,
+  });
+  return {
+    totalMinutes: overlap.totalMinutes,
+    regularMinutes: overlap.regularMinutes,
+    overtimeMinutes: overlap.overtimeMinutes,
+  } satisfies WorkedTimeBreakdown;
+}
+
 export function buildOperatorSummaryRows(params: {
   profiles: OperatorProfileRow[];
   operatorConfigs: OperatorConfigRow[];
   assignments: OperatorAssignmentRow[];
   stations: OperatorStationRow[];
   events: ProductionStatusEventRow[];
+  workSessions?: ProductionWorkSessionRow[];
   productionItems: ProductionItemRow[];
   batchRuns: BatchRunRow[];
   filter?: OperatorMetricsFilter;
@@ -754,11 +774,14 @@ export function buildOperatorSummaryRows(params: {
     assignments,
     stations,
     events,
+    workSessions = [],
     productionItems,
     batchRuns,
     filter,
   } = params;
   const stationNameById = new Map(stations.map((station) => [station.id, station.name]));
+  const productionItemById = new Map(productionItems.map((item) => [item.id, item]));
+  const batchRunById = new Map(batchRuns.map((run) => [run.id, run]));
   const configByUserId = new Map(
     operatorConfigs
       .filter((config) => typeof config.user_id === "string" && config.user_id)
@@ -775,6 +798,9 @@ export function buildOperatorSummaryRows(params: {
     .map((profile) => {
       const actorEvents = getActorEvents(profile.id, events);
       const actorRunOnlyEvents = getActorRunOnlyEvents(profile.id, events);
+      const actorSessions = workSessions.filter(
+        (session) => session.operator_user_id === profile.id,
+      );
       const completedItemIds = uniqueCompletedItemIdsByActor(profile.id, events);
       const completedRunIds = uniqueCompletedRunIdsByActor(profile.id, events);
       const completedItems = uniqueCompletedItemsByActor(
@@ -855,6 +881,31 @@ export function buildOperatorSummaryRows(params: {
           )
         );
       });
+      const filteredSessions = actorSessions.filter((session) => {
+        const item = session.production_item_id
+          ? (productionItemById.get(session.production_item_id) ?? null)
+          : null;
+        const run = batchRunById.get(session.batch_run_id) ?? null;
+        return matchesOrderSearch(
+          search,
+          item?.orders?.order_number ?? run?.orders?.order_number,
+          item?.orders?.customer_name ?? run?.orders?.customer_name,
+          item?.order_id ?? run?.order_id ?? session.order_id,
+        );
+      });
+      const visibleSessions = search ? filteredSessions : actorSessions;
+      const sessionBreakdown = visibleSessions.reduce(
+        (sum, session) =>
+          addBreakdown(
+            sum,
+            getWorkSessionBreakdown({
+              session,
+              range: filter?.range,
+              calendar,
+            }),
+          ),
+        zeroBreakdown(),
+      );
       const filteredWorkedMinutes =
         filteredTouchedItems.reduce(
           (sum, item) =>
@@ -932,6 +983,11 @@ export function buildOperatorSummaryRows(params: {
       let finalCompletedItems = filteredCompletedItems.length + filteredCompletedRuns.length;
       let finalCompletedQty = completedQty;
       let finalCompletedOrders = completedOrders;
+      if (actorSessions.length > 0) {
+        finalWorkedMinutes = sessionBreakdown.totalMinutes;
+        finalRegularMinutes = sessionBreakdown.regularMinutes;
+        finalOvertimeMinutes = sessionBreakdown.overtimeMinutes;
+      }
       if (
         finalWorkedMinutes <= 0 &&
         finalCompletedItems <= 0 &&
@@ -980,11 +1036,19 @@ export function buildOperatorSummaryRows(params: {
 export function buildOperatorOrderBreakdown(params: {
   actorUserId: string;
   events: ProductionStatusEventRow[];
+  workSessions?: ProductionWorkSessionRow[];
   productionItems: ProductionItemRow[];
   batchRuns: BatchRunRow[];
   filter?: OperatorMetricsFilter;
 }) {
-  const { actorUserId, events, productionItems, batchRuns, filter } = params;
+  const {
+    actorUserId,
+    events,
+    workSessions = [],
+    productionItems,
+    batchRuns,
+    filter,
+  } = params;
   const workedMinutesByItem = buildAttributedWorkedMinutesByItem(
     events,
     actorUserId,
@@ -1000,7 +1064,51 @@ export function buildOperatorOrderBreakdown(params: {
   const completedItemIds = uniqueCompletedItemIdsByActor(actorUserId, events);
   const completedRunIds = uniqueCompletedRunIdsByActor(actorUserId, events);
   const search = normalizeSearch(filter?.search);
+  const productionItemById = new Map(productionItems.map((item) => [item.id, item]));
+  const batchRunById = new Map(batchRuns.map((run) => [run.id, run]));
   const map = new Map<string, OperatorOrderBreakdownRow>();
+  const actorSessions = workSessions.filter(
+    (session) => session.operator_user_id === actorUserId,
+  );
+  if (actorSessions.length > 0) {
+    actorSessions.forEach((session) => {
+      const item = session.production_item_id
+        ? (productionItemById.get(session.production_item_id) ?? null)
+        : null;
+      const run = batchRunById.get(session.batch_run_id) ?? null;
+      if (
+        !matchesOrderSearch(
+          search,
+          item?.orders?.order_number ?? run?.orders?.order_number,
+          item?.orders?.customer_name ?? run?.orders?.customer_name,
+          item?.order_id ?? run?.order_id ?? session.order_id,
+        )
+      ) {
+        return;
+      }
+      const breakdown = getWorkSessionBreakdown({
+        session,
+        range: filter?.range,
+        calendar: filter?.calendar,
+      });
+      const workedMinutes = breakdown.totalMinutes;
+      const orderId = item?.order_id ?? run?.order_id ?? session.order_id;
+      if (workedMinutes <= 0 || !orderId) {
+        return;
+      }
+      const current = map.get(orderId) ?? {
+        orderId,
+        orderNumber:
+          item?.orders?.order_number ?? run?.orders?.order_number ?? orderId,
+        customerName:
+          item?.orders?.customer_name ?? run?.orders?.customer_name ?? "",
+        workedMinutes: 0,
+        completedItems: 0,
+      };
+      current.workedMinutes += workedMinutes;
+      map.set(orderId, current);
+    });
+  }
   productionItems.forEach((item) => {
     if (
       !matchesOrderSearch(
@@ -1027,7 +1135,9 @@ export function buildOperatorOrderBreakdown(params: {
       workedMinutes: 0,
       completedItems: 0,
     };
-    current.workedMinutes += itemWorkedMinutes;
+    if (actorSessions.length === 0) {
+      current.workedMinutes += itemWorkedMinutes;
+    }
     if (itemCompleted) {
       current.completedItems += 1;
     }
@@ -1056,7 +1166,9 @@ export function buildOperatorOrderBreakdown(params: {
       workedMinutes: 0,
       completedItems: 0,
     };
-    current.workedMinutes += runWorkedMinutes;
+    if (actorSessions.length === 0) {
+      current.workedMinutes += runWorkedMinutes;
+    }
     if (runCompleted) {
       current.completedItems += 1;
     }
@@ -1087,10 +1199,17 @@ export function buildOperatorOrderBreakdown(params: {
 export function buildOperatorUnitBreakdown(params: {
   actorUserId: string;
   events: ProductionStatusEventRow[];
+  workSessions?: ProductionWorkSessionRow[];
   productionItems: ProductionItemRow[];
   filter?: OperatorMetricsFilter;
 }) {
-  const { actorUserId, events, productionItems, filter } = params;
+  const {
+    actorUserId,
+    events,
+    workSessions = [],
+    productionItems,
+    filter,
+  } = params;
   const workedMinutesByItem = buildAttributedWorkedMinutesByItem(
     events,
     actorUserId,
@@ -1098,6 +1217,61 @@ export function buildOperatorUnitBreakdown(params: {
     filter?.calendar,
   );
   const search = normalizeSearch(filter?.search);
+  const actorSessions = workSessions.filter(
+    (session) =>
+      session.operator_user_id === actorUserId && !!session.production_item_id,
+  );
+  if (actorSessions.length > 0) {
+    const workedMinutesBySessionItem = new Map<string, number>();
+    actorSessions.forEach((session) => {
+      const itemId = session.production_item_id;
+      if (!itemId) {
+        return;
+      }
+      const breakdown = getWorkSessionBreakdown({
+        session,
+        range: filter?.range,
+        calendar: filter?.calendar,
+      });
+      if (breakdown.totalMinutes <= 0) {
+        return;
+      }
+      workedMinutesBySessionItem.set(
+        itemId,
+        (workedMinutesBySessionItem.get(itemId) ?? 0) + breakdown.totalMinutes,
+      );
+    });
+    const sessionRows = productionItems
+      .map((item) => {
+        const workedMinutes = workedMinutesBySessionItem.get(item.id) ?? 0;
+        return {
+          productionItemId: item.id,
+          orderId: item.order_id,
+          orderNumber: item.orders?.order_number ?? item.order_id,
+          customerName: item.orders?.customer_name ?? "",
+          batchCode: item.batch_code,
+          itemName: item.item_name,
+          qty: Number(item.qty ?? 0),
+          workedMinutes,
+          stationId: item.station_id,
+          doneAt: item.done_at ?? null,
+        };
+      })
+      .filter(
+        (item) =>
+          item.workedMinutes > 0 &&
+          matchesOrderSearch(
+            search,
+            item.orderNumber,
+            item.customerName,
+            item.orderId,
+          ),
+      )
+      .sort((a, b) => b.workedMinutes - a.workedMinutes);
+    if (sessionRows.length > 0) {
+      return sessionRows;
+    }
+  }
   const rows = productionItems
     .map((item) => {
       const workedMinutes = getAttributedItemWorkedMinutes(
@@ -1146,12 +1320,21 @@ export function buildOperatorUnitBreakdown(params: {
 export function buildOperatorStationBreakdown(params: {
   actorUserId: string;
   events: ProductionStatusEventRow[];
+  workSessions?: ProductionWorkSessionRow[];
   productionItems: ProductionItemRow[];
   stations: OperatorStationRow[];
   batchRuns: BatchRunRow[];
   filter?: OperatorMetricsFilter;
 }) {
-  const { actorUserId, events, productionItems, stations, batchRuns, filter } = params;
+  const {
+    actorUserId,
+    events,
+    workSessions = [],
+    productionItems,
+    stations,
+    batchRuns,
+    filter,
+  } = params;
   const stationNameById = new Map(stations.map((station) => [station.id, station.name]));
   const workedMinutesByItem = buildAttributedWorkedMinutesByItem(
     events,
@@ -1167,6 +1350,47 @@ export function buildOperatorStationBreakdown(params: {
   );
   const search = normalizeSearch(filter?.search);
   const map = new Map<string, OperatorStationBreakdownRow>();
+  const productionItemById = new Map(productionItems.map((item) => [item.id, item]));
+  const batchRunById = new Map(batchRuns.map((run) => [run.id, run]));
+  const actorSessions = workSessions.filter(
+    (session) => session.operator_user_id === actorUserId,
+  );
+  if (actorSessions.length > 0) {
+    actorSessions.forEach((session) => {
+      const item = session.production_item_id
+        ? (productionItemById.get(session.production_item_id) ?? null)
+        : null;
+      const run = batchRunById.get(session.batch_run_id) ?? null;
+      if (
+        !matchesOrderSearch(
+          search,
+          item?.orders?.order_number ?? run?.orders?.order_number,
+          item?.orders?.customer_name ?? run?.orders?.customer_name,
+          item?.order_id ?? run?.order_id ?? session.order_id,
+        )
+      ) {
+        return;
+      }
+      const breakdown = getWorkSessionBreakdown({
+        session,
+        range: filter?.range,
+        calendar: filter?.calendar,
+      });
+      if (breakdown.totalMinutes <= 0) {
+        return;
+      }
+      const stationId =
+        session.station_id ?? item?.station_id ?? run?.station_id ?? "unassigned";
+      const current = map.get(stationId) ?? {
+        stationId,
+        stationName: stationNameById.get(stationId) ?? stationId,
+        workedMinutes: 0,
+        completedItems: 0,
+      };
+      current.workedMinutes += breakdown.totalMinutes;
+      map.set(stationId, current);
+    });
+  }
   productionItems.forEach((item) => {
     const workedMinutes = getAttributedItemWorkedMinutes(
       item,
@@ -1190,7 +1414,9 @@ export function buildOperatorStationBreakdown(params: {
       workedMinutes: 0,
       completedItems: 0,
     };
-    current.workedMinutes += workedMinutes;
+    if (actorSessions.length === 0) {
+      current.workedMinutes += workedMinutes;
+    }
     current.completedItems += 1;
     map.set(stationId, current);
   });
@@ -1214,7 +1440,9 @@ export function buildOperatorStationBreakdown(params: {
       workedMinutes: 0,
       completedItems: 0,
     };
-    current.workedMinutes += workedMinutes;
+    if (actorSessions.length === 0) {
+      current.workedMinutes += workedMinutes;
+    }
     current.completedItems += 1;
     map.set(stationId, current);
   });

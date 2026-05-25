@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -36,18 +36,19 @@ import { formatDate } from "@/lib/domain/formatters";
 import type { ProductionJobItemDocument } from "@/lib/domain/productionJobDetail";
 import { filterProductionAttachments } from "@/lib/domain/productionAttachments";
 import {
-  summarizeWorkedBreakdownByItem,
-  summarizeWorkedBreakdownByRun,
-} from "@/lib/domain/productionDurations";
-import {
   collectRunItemIds,
   publishProductionLiveEvent,
 } from "@/lib/domain/productionLive";
 import {
+  getProductionWorkSessionOverlapMinutes,
+  listActiveProductionWorkSessions,
+  startProductionWorkSession,
+  stopProductionWorkSession,
+  stopProductionWorkSessions,
+} from "@/lib/domain/productionWorkSessions";
+import {
   getProductionItemCompletedQty,
   getProductionItemQuantity,
-  getProductionItemRemainingQty,
-  getProductionItemsProgress,
 } from "@/lib/domain/productionUnitProgress";
 import { isOrderProductionComplete } from "@/lib/domain/productionCompletion";
 import { transitionBatchRunStatus } from "@/lib/domain/transitionBatchRunStatus";
@@ -55,7 +56,6 @@ import { type ResolveScanTargetResult } from "@/lib/qr/resolveScanTarget";
 import {
   computeWorkedMinutesBreakdown,
   computeWorkedSecondsBreakdown,
-  computeWorkingMinutes,
   isWithinWorkingSchedule,
   parseWorkingCalendar,
   type WorkingCalendar,
@@ -70,7 +70,7 @@ import type {
   ProductionItemRow,
   ProductionPriority as Priority,
   ProductionStation as Station,
-  ProductionStatusEventRow as StatusEventRow,
+  ProductionWorkSessionRow,
   StationDependencyRow,
   StationTrackingMode,
 } from "@/types/production";
@@ -137,6 +137,7 @@ function UserAvatar({
           alt={name}
           fill
           sizes="48px"
+          unoptimized
           className="object-cover"
         />
       </div>
@@ -152,7 +153,6 @@ function UserAvatar({
   );
 }
 
-
 type PendingAction = {
   itemId: string;
   action: "in_progress" | "done" | "paused" | "blocked";
@@ -160,12 +160,26 @@ type PendingAction = {
 type OrderItemLinkRow = {
   id: string;
   source_row_id: string;
+  position?: string | null;
   qty?: number | null;
 };
 type ProductionDisplayFieldConfig = {
   key: string;
   label: string;
   sortOrder: number;
+};
+type OperatorProfileNameRow = {
+  id: string;
+  full_name: string | null;
+};
+type OperatorConfigNameRow = {
+  user_id: string | null;
+  name: string | null;
+};
+type OperatorWorkStatusGroups = {
+  working: Set<string>;
+  paused: Set<string>;
+  blocked: Set<string>;
 };
 type PendingQuickAction = {
   orderId: string;
@@ -216,21 +230,122 @@ function isFuturePlannedDate(plannedDate: string | null | undefined) {
 function getProductionItemSourceKey(item: ProductionItemRow) {
   const meta = item.meta as Record<string, unknown> | null;
   const sourceRowId =
-    meta && typeof meta.sourceRowId === "string"
-      ? meta.sourceRowId
-      : undefined;
+    meta && typeof meta.sourceRowId === "string" ? meta.sourceRowId : undefined;
   const rowKey =
     meta && typeof meta.rowKey === "string" ? meta.rowKey : undefined;
   return sourceRowId ?? rowKey ?? null;
+}
+
+function getProductionItemMetaRowValue(item: ProductionItemRow, key: string) {
+  const meta = item.meta as Record<string, unknown> | null;
+  const row =
+    meta && typeof meta.row === "object" && meta.row !== null
+      ? (meta.row as Record<string, unknown>)
+      : null;
+  const value = row?.[key] ?? meta?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function normalizeProductionMetaKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/№/g, "no")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getProductionItemMetaPosition(item: ProductionItemRow) {
+  const direct = getProductionItemMetaRowValue(item, "position");
+  if (direct) {
+    return direct;
+  }
+
+  const meta = item.meta as Record<string, unknown> | null;
+  const row =
+    meta && typeof meta.row === "object" && meta.row !== null
+      ? (meta.row as Record<string, unknown>)
+      : null;
+  const candidates = [row, meta].filter(
+    (value): value is Record<string, unknown> => Boolean(value),
+  );
+  const positionKeys = new Set([
+    "position",
+    "pos",
+    "pozicija",
+    "pozicija",
+    "line_no",
+    "line",
+    "row_no",
+    "rindas_nr",
+    "no_stroki",
+    "stroki",
+  ]);
+
+  for (const source of candidates) {
+    for (const [rawKey, rawValue] of Object.entries(source)) {
+      const key = normalizeProductionMetaKey(rawKey);
+      const isPositionKey =
+        positionKeys.has(key) ||
+        key.includes("position") ||
+        key.includes("pozic") ||
+        key.includes("line_no") ||
+        key.includes("rindas") ||
+        key.includes("stroki");
+      if (!isPositionKey) {
+        continue;
+      }
+      const value = String(rawValue ?? "").trim();
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return null;
 }
 
 function getBatchRunSourceKey(run: Pick<BatchRunRow, "route_key">) {
   return run.route_key && run.route_key !== "default" ? run.route_key : null;
 }
 
+function getOperatorVisibleCompletedQty(item: ProductionItemRow) {
+  const quantity = getProductionItemQuantity(item);
+  const completedQty = getProductionItemCompletedQty(item);
+  if (item.status !== "done" && completedQty >= quantity) {
+    return 0;
+  }
+  return completedQty;
+}
+
+function getOperatorVisibleRemainingQty(item: ProductionItemRow) {
+  return Math.max(
+    0,
+    getProductionItemQuantity(item) - getOperatorVisibleCompletedQty(item),
+  );
+}
+
+function getOperatorVisibleItemsProgress(items: ProductionItemRow[]) {
+  return items.reduce(
+    (acc, item) => {
+      acc.totalQty += getProductionItemQuantity(item);
+      acc.completedQty += getOperatorVisibleCompletedQty(item);
+      return acc;
+    },
+    { completedQty: 0, totalQty: 0 },
+  );
+}
+
 function matchesProductionItemToRun(
   item: ProductionItemRow,
-  run: Pick<BatchRunRow, "order_id" | "station_id" | "batch_code" | "route_key">,
+  run: Pick<
+    BatchRunRow,
+    "order_id" | "station_id" | "batch_code" | "route_key"
+  >,
 ) {
   if (item.order_id !== run.order_id) {
     return false;
@@ -246,26 +361,125 @@ function matchesProductionItemToRun(
   return item.batch_code === run.batch_code;
 }
 
+type WorkSessionScopeSummary = {
+  activeCount: number;
+  totalMinutes: number;
+  totalSeconds: number;
+  elapsedSeconds: number;
+  earliestStartedAt: string | null;
+  latestStoppedAt: string | null;
+  latestStatus: BatchRunRow["status"] | null;
+};
+
+function getWorkSessionScopeKey(
+  batchRunId: string,
+  productionItemId?: string | null,
+) {
+  return `${batchRunId}::${productionItemId ?? "*"}`;
+}
+
+function getWorkSessionSortTime(session: ProductionWorkSessionRow) {
+  return Date.parse(
+    session.updated_at ??
+      session.stopped_at ??
+      session.started_at ??
+      "1970-01-01T00:00:00.000Z",
+  );
+}
+
+function getConstructionWorkSessionLogicalKey(
+  run: Pick<
+    BatchRunRow,
+    "order_id" | "station_id" | "batch_code" | "route_key"
+  >,
+  item: ProductionItemRow,
+) {
+  const runSourceKey = getBatchRunSourceKey(run) ?? "";
+  return [
+    run.order_id,
+    run.station_id ?? "",
+    run.batch_code ?? "",
+    runSourceKey,
+    getItemGroupKey(item),
+  ].join("|");
+}
+
+function createOperatorWorkStatusGroups(): OperatorWorkStatusGroups {
+  return {
+    working: new Set<string>(),
+    paused: new Set<string>(),
+    blocked: new Set<string>(),
+  };
+}
+
+function addOperatorWorkStatus(
+  groups: OperatorWorkStatusGroups,
+  operatorId: string,
+  status: BatchRunRow["status"] | null,
+) {
+  if (status === "in_progress") {
+    groups.working.add(operatorId);
+  } else if (status === "paused") {
+    groups.paused.add(operatorId);
+  } else if (status === "blocked") {
+    groups.blocked.add(operatorId);
+  }
+}
+
+function mergeOperatorWorkStatusGroups(
+  target: OperatorWorkStatusGroups,
+  source: OperatorWorkStatusGroups | null | undefined,
+) {
+  source?.working.forEach((operatorId) => target.working.add(operatorId));
+  source?.paused.forEach((operatorId) => target.paused.add(operatorId));
+  source?.blocked.forEach((operatorId) => target.blocked.add(operatorId));
+}
+
 function resolveConstructionItemState(
   item: ProductionItemRow,
   queueItem: Pick<QueueItem, "runIds" | "startedAt" | "doneAt">,
   batchRuns: BatchRunRow[],
+  workSessionScopeSummaryByKey?: Map<string, WorkSessionScopeSummary>,
 ) {
   const matchedRun =
     queueItem.runIds
       .map((runId) => batchRuns.find((run) => run.id === runId))
       .filter((run): run is BatchRunRow => Boolean(run))
       .find((run) => matchesProductionItemToRun(item, run)) ?? null;
+  const scopeKey = getWorkSessionScopeKey(
+    matchedRun?.id ?? queueItem.runIds[0] ?? "",
+    item.id,
+  );
+  const scopeSummary = workSessionScopeSummaryByKey?.get(scopeKey) ?? null;
   const effectiveStatus =
-    item.status === "queued" || item.status === "pending"
-      ? (matchedRun?.status ?? item.status)
-      : item.status;
+    item.status === "done" || matchedRun?.status === "done"
+      ? "done"
+      : (scopeSummary?.activeCount ?? 0) > 0
+        ? "in_progress"
+        : scopeSummary?.latestStatus === "blocked"
+          ? "blocked"
+          : scopeSummary?.latestStatus === "paused"
+            ? "paused"
+            : item.status === "queued" || item.status === "pending"
+              ? (matchedRun?.status ?? item.status)
+              : item.status;
   const effectiveStartedAt =
-    item.started_at ?? matchedRun?.started_at ?? queueItem.startedAt ?? null;
+    scopeSummary?.earliestStartedAt ??
+    item.started_at ??
+    matchedRun?.started_at ??
+    queueItem.startedAt ??
+    null;
   const effectiveDoneAt =
-    item.done_at ?? matchedRun?.done_at ?? queueItem.doneAt ?? null;
+    (scopeSummary?.activeCount ?? 0) > 0
+      ? null
+      : (scopeSummary?.latestStoppedAt ??
+        item.done_at ??
+        matchedRun?.done_at ??
+        queueItem.doneAt ??
+        null);
   return {
     matchedRun,
+    scopeSummary,
     effectiveStatus,
     effectiveStartedAt,
     effectiveDoneAt,
@@ -309,22 +523,11 @@ function formatDuration(totalMinutes: number) {
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
-function formatLiveDuration(
-  startedAt: string | null | undefined,
-  doneAt: string | null | undefined,
-  nowMs: number,
-  calendar: WorkingCalendar,
-) {
-  if (!startedAt) return "0s";
-  const totalSeconds = computeWorkedSecondsBreakdown(
-    startedAt,
-    doneAt ?? new Date(nowMs).toISOString(),
-    calendar,
-  ).totalSeconds;
+function formatLiveDuration(totalSeconds: number) {
+  if (!totalSeconds || totalSeconds <= 0) return "0s";
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-
   if (hours > 0) {
     return `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
   }
@@ -332,6 +535,46 @@ function formatLiveDuration(
     return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
   }
   return `${seconds}s`;
+}
+
+function getElapsedSeconds(
+  startedAt: string | null | undefined,
+  endedAt: string | null | undefined,
+  nowMs: number,
+) {
+  if (!startedAt) {
+    return 0;
+  }
+  const startMs = Date.parse(startedAt);
+  const endMs = endedAt ? Date.parse(endedAt) : nowMs;
+  if (
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endMs) ||
+    endMs <= startMs
+  ) {
+    return 0;
+  }
+  return Math.floor((endMs - startMs) / 1000);
+}
+
+function getWorkSessionLoadErrorMessage(error: unknown) {
+  const details =
+    error && typeof error === "object"
+      ? (error as { code?: string; message?: string; name?: string })
+      : null;
+  const message = details?.message ?? "";
+  if (
+    details?.name === "AbortError" ||
+    message.toLowerCase().includes("abort")
+  ) {
+    return null;
+  }
+  if (details?.code === "42P01") {
+    return "Production work sessions table is missing. Run the latest Supabase migration.";
+  }
+  return message
+    ? `Failed to load activity sessions: ${message}`
+    : "Failed to load activity sessions.";
 }
 
 function toIsoDateLocal(date: Date) {
@@ -359,6 +602,26 @@ function getWeekRangeForDate(dateIso: string) {
     weekStart: toIsoDateLocal(weekStartDate),
     weekEnd: toIsoDateLocal(weekEndDate),
   };
+}
+
+function getIsoWeekNumber(dateIso: string) {
+  const [year, month, day] = dateIso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1));
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  // ISO: ceturtdiena nosaka nedēļas gadu
+  const dayOfWeek = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayOfWeek);
+
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(
+    ((date.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7,
+  );
+
+  return weekNumber;
 }
 
 const operatorPrimaryActionClass =
@@ -655,10 +918,16 @@ export default function OperatorProductionPage() {
     useState<PendingRunAction | null>(null);
   const [dataError, setDataError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [activityEvents, setActivityEvents] = useState<StatusEventRow[]>([]);
+  const [workSessions, setWorkSessions] = useState<ProductionWorkSessionRow[]>(
+    [],
+  );
+  const [operatorProfiles, setOperatorProfiles] = useState<
+    OperatorProfileNameRow[]
+  >([]);
+  const [operatorConfigs, setOperatorConfigs] = useState<
+    OperatorConfigNameRow[]
+  >([]);
   const [activityError, setActivityError] = useState("");
-  const [todayWorkedMinutes, setTodayWorkedMinutes] = useState(0);
-  const [weekWorkedMinutes, setWeekWorkedMinutes] = useState(0);
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const [notificationRoles, setNotificationRoles] = useState<string[]>([
     "Production planner",
@@ -743,20 +1012,131 @@ export default function OperatorProductionPage() {
     setOnlyBlocked(searchParams.get("blocked") === "1");
   }, [searchParams, selectedDateParam]);
 
-  useEffect(() => {
-    const hasActiveRuns = batchRuns.some(
-      (run) => run.status === "in_progress" && Boolean(run.started_at),
-    );
-    if (!hasActiveRuns) {
+  const refreshWorkSessions = useCallback(async () => {
+    const sb = supabase;
+    if (!sb || !currentUser.id) {
       return;
     }
+    let query = sb
+      .from("production_work_sessions")
+      .select(
+        "id, tenant_id, order_id, batch_run_id, production_item_id, station_id, operator_user_id, started_at, stopped_at, ended_status, stop_reason, stop_reason_id, duration_minutes, is_active, created_at, updated_at",
+      )
+      .order("started_at", { ascending: false })
+      .limit(500);
+    if (currentUser.tenantId) {
+      query = query.eq("tenant_id", currentUser.tenantId);
+    } else {
+      query = query.eq("operator_user_id", currentUser.id);
+    }
+    const { data, error } = await query;
+    if (error) {
+      const message = getWorkSessionLoadErrorMessage(error);
+      if (message) {
+        setActivityError(message);
+      } else {
+        setActivityError("");
+      }
+      return;
+    }
+    setActivityError("");
+    setWorkSessions((data ?? []) as ProductionWorkSessionRow[]);
+  }, [currentUser.id, currentUser.tenantId]);
+
+  const refreshBatchRuns = useCallback(async () => {
+    const sb = supabase;
+    if (!sb || batchRuns.length === 0) {
+      return;
+    }
+    const runIds = Array.from(new Set(batchRuns.map((run) => run.id))).filter(
+      Boolean,
+    );
+    if (runIds.length === 0) {
+      return;
+    }
+    const { data, error } = await sb
+      .from("batch_runs")
+      .select(
+        "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, production_due_date, priority, customer_name)",
+      )
+      .in("id", runIds);
+    if (error) {
+      return;
+    }
+    const rows: BatchRunRow[] = (data ?? []).map((row) => {
+      const relatedOrder = Array.isArray(row.orders)
+        ? (row.orders[0] ?? null)
+        : (row.orders ?? null);
+      return {
+        ...(row as Omit<BatchRunRow, "orders">),
+        orders: relatedOrder
+          ? {
+              order_number: relatedOrder.order_number ?? null,
+              due_date: relatedOrder.due_date ?? null,
+              production_due_date: relatedOrder.production_due_date ?? null,
+              priority: (relatedOrder.priority ?? null) as Priority | null,
+              customer_name: relatedOrder.customer_name ?? null,
+            }
+          : null,
+      };
+    });
+    setBatchRuns((prev) => {
+      const map = new Map(prev.map((run) => [run.id, run]));
+      rows.forEach((run) => {
+        map.set(run.id, { ...(map.get(run.id) ?? run), ...run });
+      });
+      return Array.from(map.values());
+    });
+  }, [batchRuns]);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => {
       setLiveNowMs(Date.now());
     }, 1000);
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [batchRuns]);
+  }, []);
+
+  useEffect(() => {
+    const hasLiveWork =
+      batchRuns.some((run) => run.status === "in_progress") ||
+      workSessions.some((session) => session.is_active);
+    if (!hasLiveWork) {
+      return;
+    }
+    let cancelled = false;
+    const refreshLiveState = async () => {
+      if (cancelled || document.visibilityState === "hidden") {
+        return;
+      }
+      await Promise.all([refreshWorkSessions(), refreshBatchRuns()]);
+    };
+    const intervalId = window.setInterval(() => {
+      void refreshLiveState();
+    }, 2500);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshLiveState();
+      }
+    };
+    const handleFocus = () => {
+      void refreshLiveState();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+    void refreshLiveState();
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [batchRuns, refreshBatchRuns, refreshWorkSessions, workSessions]);
+
+  useEffect(() => {
+    void refreshWorkSessions();
+  }, [refreshWorkSessions]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -893,6 +1273,7 @@ export default function OperatorProductionPage() {
           "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, production_due_date, priority, customer_name)",
         )
         .in("station_id", stationIds)
+        .neq("status", "pending")
         .order("created_at", { ascending: false });
       if (orderFilter) {
         runsQuery = runsQuery.eq("order_id", orderFilter);
@@ -927,15 +1308,14 @@ export default function OperatorProductionPage() {
           : (row.orders ?? null);
         return {
           ...(row as Omit<BatchRunRow, "orders">),
-              orders: relatedOrder
-                ? {
-                    order_number: relatedOrder.order_number ?? null,
-                    due_date: relatedOrder.due_date ?? null,
-                    production_due_date:
-                      relatedOrder.production_due_date ?? null,
-                    priority: (relatedOrder.priority ?? null) as Priority | null,
-                    customer_name: relatedOrder.customer_name ?? null,
-                  }
+          orders: relatedOrder
+            ? {
+                order_number: relatedOrder.order_number ?? null,
+                due_date: relatedOrder.due_date ?? null,
+                production_due_date: relatedOrder.production_due_date ?? null,
+                priority: (relatedOrder.priority ?? null) as Priority | null,
+                customer_name: relatedOrder.customer_name ?? null,
+              }
             : null,
         };
       });
@@ -988,27 +1368,13 @@ export default function OperatorProductionPage() {
       setBatchRuns(runs);
       setStationDependencies((depsResult.data ?? []) as StationDependencyRow[]);
       const allItems = (itemsResult.data ?? []) as ProductionItemRow[];
-      const sourceRowIds = Array.from(
-        new Set(
-          allItems
-            .map((item) => getProductionItemSourceKey(item))
-            .filter(
-              (value): value is string =>
-                typeof value === "string" && value.trim().length > 0,
-            ),
-        ),
-      );
       const orderItemLinksResult =
-        sourceRowIds.length === 0
-          ? {
-              data: [] as OrderItemLinkRow[],
-              error: null,
-            }
+        orderIds.length === 0
+          ? { data: [] as OrderItemLinkRow[], error: null }
           : await sb
               .from("order_items")
-              .select("id, source_row_id, qty")
-              .in("order_id", orderIds)
-              .in("source_row_id", sourceRowIds);
+              .select("id, source_row_id, position, qty")
+              .in("order_id", orderIds);
       if (!isMounted) {
         return;
       }
@@ -1021,7 +1387,9 @@ export default function OperatorProductionPage() {
       }
       const orderItemIds = Array.from(
         new Set(
-          ((orderItemLinksResult.data ?? []) as OrderItemLinkRow[]).map((row) => row.id),
+          ((orderItemLinksResult.data ?? []) as OrderItemLinkRow[]).map(
+            (row) => row.id,
+          ),
         ),
       );
       const itemDocumentsResult =
@@ -1051,7 +1419,9 @@ export default function OperatorProductionPage() {
       setItemDocuments(
         (itemDocumentsResult.data ?? []) as ProductionJobItemDocument[],
       );
-      setOrderItemLinks((orderItemLinksResult.data ?? []) as OrderItemLinkRow[]);
+      setOrderItemLinks(
+        (orderItemLinksResult.data ?? []) as OrderItemLinkRow[],
+      );
       if (!usedCache) {
         setIsLoading(false);
       }
@@ -1096,6 +1466,45 @@ export default function OperatorProductionPage() {
   useEffect(() => {
     const sb = supabase;
     if (!sb || !currentUser.tenantId) {
+      setOperatorProfiles([]);
+      setOperatorConfigs([]);
+      return;
+    }
+    let isMounted = true;
+    const loadOperatorNames = async () => {
+      const [profilesResult, operatorsResult] = await Promise.all([
+        sb
+          .from("profiles")
+          .select("id, full_name")
+          .eq("tenant_id", currentUser.tenantId),
+        sb
+          .from("operators")
+          .select("user_id, name")
+          .eq("tenant_id", currentUser.tenantId),
+      ]);
+      if (!isMounted) {
+        return;
+      }
+      setOperatorProfiles(
+        profilesResult.error
+          ? []
+          : ((profilesResult.data ?? []) as OperatorProfileNameRow[]),
+      );
+      setOperatorConfigs(
+        operatorsResult.error
+          ? []
+          : ((operatorsResult.data ?? []) as OperatorConfigNameRow[]),
+      );
+    };
+    void loadOperatorNames();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.tenantId]);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb || !currentUser.tenantId) {
       return;
     }
     let isMounted = true;
@@ -1123,7 +1532,7 @@ export default function OperatorProductionPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentUser.tenantId]);
+  }, [currentUser.id, currentUser.tenantId]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1133,58 +1542,39 @@ export default function OperatorProductionPage() {
     let isMounted = true;
     const loadActivity = async () => {
       setActivityError("");
-      const weekStart = new Date();
-      weekStart.setDate(weekStart.getDate() - 6);
-      weekStart.setHours(0, 0, 0, 0);
-      const from = weekStart.toISOString();
-      const { data, error } = await sb
-        .from("production_status_events")
+      let query = sb
+        .from("production_work_sessions")
         .select(
-          "id, production_item_id, order_id, batch_run_id, from_status, to_status, reason, created_at",
+          "id, tenant_id, order_id, batch_run_id, production_item_id, station_id, operator_user_id, started_at, stopped_at, ended_status, stop_reason, stop_reason_id, duration_minutes, is_active, created_at, updated_at",
         )
-        .eq("actor_user_id", currentUser.id)
-        .gte("created_at", from)
-        .order("created_at", { ascending: false })
-        .limit(40);
+        .order("started_at", { ascending: false })
+        .limit(500);
+      if (currentUser.tenantId) {
+        query = query.eq("tenant_id", currentUser.tenantId);
+      } else {
+        query = query.eq("operator_user_id", currentUser.id);
+      }
+      const { data, error } = await query;
       if (!isMounted) {
         return;
       }
       if (error) {
-        setActivityEvents([]);
-        if (error.code !== "42P01") {
-          setActivityError("Failed to load activity history.");
+        setWorkSessions([]);
+        const message = getWorkSessionLoadErrorMessage(error);
+        if (message) {
+          setActivityError(message);
+        } else {
+          setActivityError("");
         }
         return;
       }
-      const events = (data ?? []) as StatusEventRow[];
-      setActivityEvents(events);
-      if (events.length === 0) {
-        setTodayWorkedMinutes(0);
-        setWeekWorkedMinutes(0);
-        return;
-      }
-      const itemSummary = summarizeWorkedBreakdownByItem(
-        events,
-        today,
-        workingCalendar,
-      );
-      const runSummary = summarizeWorkedBreakdownByRun(
-        events.filter((event) => !event.production_item_id),
-        today,
-        workingCalendar,
-      );
-      setTodayWorkedMinutes(
-        itemSummary.today.totalMinutes + runSummary.today.totalMinutes,
-      );
-      setWeekWorkedMinutes(
-        itemSummary.total.totalMinutes + runSummary.total.totalMinutes,
-      );
+      setWorkSessions((data ?? []) as ProductionWorkSessionRow[]);
     };
     void loadActivity();
     return () => {
       isMounted = false;
     };
-  }, [currentUser.id, today, workingCalendar]);
+  }, [currentUser.id, currentUser.tenantId]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1241,12 +1631,36 @@ export default function OperatorProductionPage() {
           });
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "production_work_sessions",
+          filter: `tenant_id=eq.${currentUser.tenantId}`,
+        },
+        (payload) => {
+          const next = payload.new as ProductionWorkSessionRow | undefined;
+          if (!next) {
+            return;
+          }
+          setWorkSessions((prev) => {
+            const idx = prev.findIndex((item) => item.id === next.id);
+            if (idx === -1) {
+              return [next, ...prev];
+            }
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...next };
+            return copy;
+          });
+        },
+      )
       .subscribe();
 
     return () => {
       sb.removeChannel(channel);
     };
-  }, [currentUser.tenantId]);
+  }, [currentUser.id, currentUser.tenantId]);
 
   useEffect(() => {
     const sb = supabase;
@@ -1322,7 +1736,9 @@ export default function OperatorProductionPage() {
           .map((row) => ({
             key: String((row as { key?: unknown }).key ?? "").trim(),
             label: String((row as { label?: unknown }).label ?? "").trim(),
-            sortOrder: Number((row as { sort_order?: unknown }).sort_order ?? 0),
+            sortOrder: Number(
+              (row as { sort_order?: unknown }).sort_order ?? 0,
+            ),
           }))
           .filter((row) => row.key.length > 0 && row.label.length > 0),
       );
@@ -1374,37 +1790,6 @@ export default function OperatorProductionPage() {
       return next;
     });
     return generatedUrls;
-  };
-
-  const openPrimaryAttachment = async (item: QueueItem) => {
-    const primaryAttachment = item.attachments[0];
-    if (!primaryAttachment) {
-      return;
-    }
-    let targetUrl = signedUrls[primaryAttachment.id] ?? primaryAttachment.url;
-    if (!signedUrls[primaryAttachment.id]) {
-      setSigningJobs((prev) => {
-        const updated = new Set(prev);
-        updated.add(item.id);
-        return updated;
-      });
-      try {
-        const generatedUrls = await signAttachments([primaryAttachment]);
-        targetUrl =
-          generatedUrls[primaryAttachment.id] ??
-          signedUrls[primaryAttachment.id] ??
-          primaryAttachment.url;
-      } finally {
-        setSigningJobs((prev) => {
-          const updated = new Set(prev);
-          updated.delete(item.id);
-          return updated;
-        });
-      }
-    }
-    if (targetUrl) {
-      window.open(targetUrl, "_blank", "noopener,noreferrer");
-    }
   };
 
   const attachmentsByOrder = useMemo(() => {
@@ -1459,9 +1844,31 @@ export default function OperatorProductionPage() {
     return map;
   }, [orderItemLinks]);
 
+  const orderItemPositionBySourceKey = useMemo(() => {
+    const map = new Map<string, string>();
+    orderItemLinks.forEach((row) => {
+      const position = row.position?.trim();
+      if (position) {
+        map.set(row.id, position);
+        map.set(row.source_row_id, position);
+      }
+    });
+    return map;
+  }, [orderItemLinks]);
+
   const stationsById = useMemo(() => {
     return new Map(stations.map((station) => [station.id, station.name]));
   }, [stations]);
+
+  const batchRunById = useMemo(
+    () => new Map(batchRuns.map((run) => [run.id, run])),
+    [batchRuns],
+  );
+
+  const productionItemById = useMemo(
+    () => new Map(productionItems.map((item) => [item.id, item])),
+    [productionItems],
+  );
 
   const latestProductionItems = useMemo(() => {
     const map = new Map<string, ProductionItemRow>();
@@ -1477,7 +1884,8 @@ export default function OperatorProductionPage() {
     return latestProductionItems.map((item) => {
       const matchedRun =
         batchRuns.find((run) => matchesProductionItemToRun(item, run)) ?? null;
-      const effectiveStartedAt = item.started_at ?? matchedRun?.started_at ?? null;
+      const effectiveStartedAt =
+        item.started_at ?? matchedRun?.started_at ?? null;
       const effectiveDoneAt = item.done_at ?? matchedRun?.done_at ?? null;
       const effectiveStatus =
         item.status === "queued" || item.status === "pending"
@@ -1500,9 +1908,7 @@ export default function OperatorProductionPage() {
         .map((entry) => entry.matchedRunId)
         .filter((value): value is string => Boolean(value)),
     );
-    return batchRuns.filter(
-      (run) => !matchedRunIds.has(run.id),
-    );
+    return batchRuns.filter((run) => !matchedRunIds.has(run.id));
   }, [batchRuns, latestWorkEntries]);
 
   const dependenciesByStation = useMemo(() => {
@@ -1536,6 +1942,591 @@ export default function OperatorProductionPage() {
     }
     return stations.filter((station) => station.id === stationFilter);
   }, [stations, stationFilter]);
+  const operatorNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    operatorConfigs.forEach((operator) => {
+      const userId = operator.user_id;
+      const name = operator.name?.trim();
+      if (userId && name) {
+        map.set(userId, name);
+      }
+    });
+    operatorProfiles.forEach((profile) => {
+      const name = profile.full_name?.trim();
+      if (name) {
+        map.set(profile.id, name);
+      }
+    });
+    if (currentUser.name.trim()) {
+      map.set(currentUser.id, currentUser.name.trim());
+    }
+    return map;
+  }, [currentUser.id, currentUser.name, operatorConfigs, operatorProfiles]);
+  const getActiveOperatorNames = useCallback(
+    (operatorIds: Iterable<string>) =>
+      Array.from(new Set(operatorIds))
+        .map((operatorId) => operatorNameById.get(operatorId) ?? null)
+        .filter((name): name is string => Boolean(name))
+        .sort((a, b) => a.localeCompare(b)),
+    [operatorNameById],
+  );
+  const ownActiveWorkSessionRunIds = useMemo(
+    () =>
+      new Set(
+        workSessions
+          .filter(
+            (session) =>
+              session.is_active &&
+              !session.production_item_id &&
+              session.operator_user_id === currentUser.id,
+          )
+          .map((session) => session.batch_run_id),
+      ),
+    [currentUser.id, workSessions],
+  );
+  const activeOperatorIdsByScope = useMemo(() => {
+    const latestByScopeAndOperator = new Map<
+      string,
+      Map<string, ProductionWorkSessionRow>
+    >();
+    workSessions.forEach((session) => {
+      const key = getWorkSessionScopeKey(
+        session.batch_run_id,
+        session.production_item_id,
+      );
+      const latestByOperator =
+        latestByScopeAndOperator.get(key) ??
+        new Map<string, ProductionWorkSessionRow>();
+      const existing = latestByOperator.get(session.operator_user_id);
+      if (
+        !existing ||
+        getWorkSessionSortTime(session) >= getWorkSessionSortTime(existing)
+      ) {
+        latestByOperator.set(session.operator_user_id, session);
+      }
+      latestByScopeAndOperator.set(key, latestByOperator);
+    });
+
+    const map = new Map<string, Set<string>>();
+    latestByScopeAndOperator.forEach((latestByOperator, key) => {
+      const operatorIds = new Set<string>();
+      latestByOperator.forEach((session) => {
+        if (session.is_active) {
+          operatorIds.add(session.operator_user_id);
+        }
+      });
+      if (operatorIds.size > 0) {
+        map.set(key, operatorIds);
+      }
+    });
+    return map;
+  }, [workSessions]);
+  const involvedOperatorIdsByScope = useMemo(() => {
+    const latestByScopeAndOperator = new Map<
+      string,
+      Map<string, ProductionWorkSessionRow>
+    >();
+    workSessions.forEach((session) => {
+      const key = getWorkSessionScopeKey(
+        session.batch_run_id,
+        session.production_item_id,
+      );
+      const latestByOperator =
+        latestByScopeAndOperator.get(key) ??
+        new Map<string, ProductionWorkSessionRow>();
+      const existing = latestByOperator.get(session.operator_user_id);
+      if (
+        !existing ||
+        getWorkSessionSortTime(session) >= getWorkSessionSortTime(existing)
+      ) {
+        latestByOperator.set(session.operator_user_id, session);
+      }
+      latestByScopeAndOperator.set(key, latestByOperator);
+    });
+
+    const map = new Map<string, Set<string>>();
+    latestByScopeAndOperator.forEach((latestByOperator, key) => {
+      const operatorIds = new Set<string>();
+      latestByOperator.forEach((session) => {
+        const status = session.is_active
+          ? "in_progress"
+          : ((session.ended_status as BatchRunRow["status"] | null) ?? null);
+        if (status && status !== "done") {
+          operatorIds.add(session.operator_user_id);
+        }
+      });
+      if (operatorIds.size > 0) {
+        map.set(key, operatorIds);
+      }
+    });
+    return map;
+  }, [workSessions]);
+  const operatorStatusGroupsByScope = useMemo(() => {
+    const latestByScopeAndOperator = new Map<
+      string,
+      Map<string, ProductionWorkSessionRow>
+    >();
+    workSessions.forEach((session) => {
+      const key = getWorkSessionScopeKey(
+        session.batch_run_id,
+        session.production_item_id,
+      );
+      const latestByOperator =
+        latestByScopeAndOperator.get(key) ??
+        new Map<string, ProductionWorkSessionRow>();
+      const existing = latestByOperator.get(session.operator_user_id);
+      if (
+        !existing ||
+        getWorkSessionSortTime(session) >= getWorkSessionSortTime(existing)
+      ) {
+        latestByOperator.set(session.operator_user_id, session);
+      }
+      latestByScopeAndOperator.set(key, latestByOperator);
+    });
+
+    const map = new Map<string, OperatorWorkStatusGroups>();
+    latestByScopeAndOperator.forEach((latestByOperator, key) => {
+      const groups = createOperatorWorkStatusGroups();
+      latestByOperator.forEach((session) => {
+        addOperatorWorkStatus(
+          groups,
+          session.operator_user_id,
+          session.is_active
+            ? "in_progress"
+            : ((session.ended_status as BatchRunRow["status"] | null) ?? null),
+        );
+      });
+      if (
+        groups.working.size > 0 ||
+        groups.paused.size > 0 ||
+        groups.blocked.size > 0
+      ) {
+        map.set(key, groups);
+      }
+    });
+    return map;
+  }, [workSessions]);
+  const involvedOperatorIdsByConstructionScope = useMemo(() => {
+    const latestByScopeAndOperator = new Map<
+      string,
+      Map<string, ProductionWorkSessionRow>
+    >();
+
+    workSessions.forEach((session) => {
+      if (!session.production_item_id) {
+        return;
+      }
+      const run = batchRunById.get(session.batch_run_id);
+      const item = productionItemById.get(session.production_item_id);
+      if (!run || !item) {
+        return;
+      }
+      const key = getConstructionWorkSessionLogicalKey(run, item);
+      const latestByOperator =
+        latestByScopeAndOperator.get(key) ??
+        new Map<string, ProductionWorkSessionRow>();
+      const existing = latestByOperator.get(session.operator_user_id);
+      if (
+        !existing ||
+        getWorkSessionSortTime(session) >= getWorkSessionSortTime(existing)
+      ) {
+        latestByOperator.set(session.operator_user_id, session);
+      }
+      latestByScopeAndOperator.set(key, latestByOperator);
+    });
+
+    const map = new Map<string, Set<string>>();
+    latestByScopeAndOperator.forEach((latestByOperator, key) => {
+      const operatorIds = new Set<string>();
+      latestByOperator.forEach((session) => {
+        const status = session.is_active
+          ? "in_progress"
+          : ((session.ended_status as BatchRunRow["status"] | null) ?? null);
+        if (status && status !== "done") {
+          operatorIds.add(session.operator_user_id);
+        }
+      });
+      if (operatorIds.size > 0) {
+        map.set(key, operatorIds);
+      }
+    });
+    return map;
+  }, [batchRunById, productionItemById, workSessions]);
+  const operatorStatusGroupsByConstructionScope = useMemo(() => {
+    const latestByScopeAndOperator = new Map<
+      string,
+      Map<string, ProductionWorkSessionRow>
+    >();
+
+    workSessions.forEach((session) => {
+      if (!session.production_item_id) {
+        return;
+      }
+      const run = batchRunById.get(session.batch_run_id);
+      const item = productionItemById.get(session.production_item_id);
+      if (!run || !item) {
+        return;
+      }
+      const key = getConstructionWorkSessionLogicalKey(run, item);
+      const latestByOperator =
+        latestByScopeAndOperator.get(key) ??
+        new Map<string, ProductionWorkSessionRow>();
+      const existing = latestByOperator.get(session.operator_user_id);
+      if (
+        !existing ||
+        getWorkSessionSortTime(session) >= getWorkSessionSortTime(existing)
+      ) {
+        latestByOperator.set(session.operator_user_id, session);
+      }
+      latestByScopeAndOperator.set(key, latestByOperator);
+    });
+
+    const map = new Map<string, OperatorWorkStatusGroups>();
+    latestByScopeAndOperator.forEach((latestByOperator, key) => {
+      const groups = createOperatorWorkStatusGroups();
+      latestByOperator.forEach((session) => {
+        addOperatorWorkStatus(
+          groups,
+          session.operator_user_id,
+          session.is_active
+            ? "in_progress"
+            : ((session.ended_status as BatchRunRow["status"] | null) ?? null),
+        );
+      });
+      if (
+        groups.working.size > 0 ||
+        groups.paused.size > 0 ||
+        groups.blocked.size > 0
+      ) {
+        map.set(key, groups);
+      }
+    });
+    return map;
+  }, [batchRunById, productionItemById, workSessions]);
+  const getInvolvedOperatorIdsForConstructionItem = useCallback(
+    (runId: string, item: ProductionItemRow) => {
+      const run = batchRunById.get(runId);
+      if (!run) {
+        return (
+          involvedOperatorIdsByScope.get(
+            getWorkSessionScopeKey(runId, item.id),
+          ) ?? new Set<string>()
+        );
+      }
+      return (
+        involvedOperatorIdsByConstructionScope.get(
+          getConstructionWorkSessionLogicalKey(run, item),
+        ) ??
+        involvedOperatorIdsByScope.get(
+          getWorkSessionScopeKey(runId, item.id),
+        ) ??
+        new Set<string>()
+      );
+    },
+    [
+      batchRunById,
+      involvedOperatorIdsByConstructionScope,
+      involvedOperatorIdsByScope,
+    ],
+  );
+  const getOperatorStatusGroupsForConstructionItem = useCallback(
+    (runId: string, item: ProductionItemRow) => {
+      const run = batchRunById.get(runId);
+      if (!run) {
+        return (
+          operatorStatusGroupsByScope.get(
+            getWorkSessionScopeKey(runId, item.id),
+          ) ?? createOperatorWorkStatusGroups()
+        );
+      }
+      return (
+        operatorStatusGroupsByConstructionScope.get(
+          getConstructionWorkSessionLogicalKey(run, item),
+        ) ??
+        operatorStatusGroupsByScope.get(
+          getWorkSessionScopeKey(runId, item.id),
+        ) ??
+        createOperatorWorkStatusGroups()
+      );
+    },
+    [
+      batchRunById,
+      operatorStatusGroupsByConstructionScope,
+      operatorStatusGroupsByScope,
+    ],
+  );
+  const workSessionScopeSummaryByKey = useMemo(() => {
+    const map = new Map<string, WorkSessionScopeSummary>();
+    workSessions.forEach((session) => {
+      const isSessionEffectivelyActive = session.is_active;
+      const key = getWorkSessionScopeKey(
+        session.batch_run_id,
+        session.production_item_id,
+      );
+      const current = map.get(key) ?? {
+        activeCount: 0,
+        totalMinutes: 0,
+        totalSeconds: 0,
+        elapsedSeconds: 0,
+        earliestStartedAt: null,
+        latestStoppedAt: null,
+        latestStatus: null,
+      };
+      const workedMinutes = getProductionWorkSessionOverlapMinutes({
+        session,
+        calendar: workingCalendar,
+        nowMs: liveNowMs,
+      }).totalMinutes;
+      const workedSeconds = computeWorkedSecondsBreakdown(
+        session.started_at,
+        session.stopped_at ??
+          (isSessionEffectivelyActive
+            ? new Date(liveNowMs).toISOString()
+            : null),
+        workingCalendar,
+      ).totalSeconds;
+      const nextStatus: BatchRunRow["status"] | null =
+        isSessionEffectivelyActive
+          ? "in_progress"
+          : ((session.ended_status as BatchRunRow["status"] | null) ?? null);
+      const currentStatusTime = Date.parse(
+        current.latestStoppedAt ??
+          current.earliestStartedAt ??
+          "1970-01-01T00:00:00.000Z",
+      );
+      const nextStatusTime = Date.parse(
+        session.updated_at ??
+          session.stopped_at ??
+          session.started_at ??
+          "1970-01-01T00:00:00.000Z",
+      );
+      const nextActiveCount =
+        current.activeCount + (isSessionEffectivelyActive ? 1 : 0);
+      const nextEarliestStartedAt =
+        !current.earliestStartedAt ||
+        Date.parse(session.started_at) < Date.parse(current.earliestStartedAt)
+          ? session.started_at
+          : current.earliestStartedAt;
+      const nextLatestStoppedAt =
+        session.stopped_at &&
+        (!current.latestStoppedAt ||
+          Date.parse(session.stopped_at) > Date.parse(current.latestStoppedAt))
+          ? session.stopped_at
+          : current.latestStoppedAt;
+      const elapsedSeconds = getElapsedSeconds(
+        nextEarliestStartedAt,
+        nextActiveCount > 0
+          ? new Date(liveNowMs).toISOString()
+          : nextLatestStoppedAt,
+        liveNowMs,
+      );
+      map.set(key, {
+        activeCount: nextActiveCount,
+        totalMinutes: current.totalMinutes + workedMinutes,
+        totalSeconds: current.totalSeconds + workedSeconds,
+        elapsedSeconds,
+        earliestStartedAt: nextEarliestStartedAt,
+        latestStoppedAt: nextLatestStoppedAt,
+        latestStatus:
+          nextStatusTime >= currentStatusTime
+            ? nextStatus
+            : current.latestStatus,
+      });
+    });
+    map.forEach((summary, key) => {
+      summary.activeCount = activeOperatorIdsByScope.get(key)?.size ?? 0;
+    });
+    return map;
+  }, [activeOperatorIdsByScope, liveNowMs, workSessions, workingCalendar]);
+  const latestOwnWorkSessionByScope = useMemo(() => {
+    const map = new Map<string, ProductionWorkSessionRow>();
+    workSessions
+      .filter((session) => session.operator_user_id === currentUser.id)
+      .forEach((session) => {
+        const key = getWorkSessionScopeKey(
+          session.batch_run_id,
+          session.production_item_id,
+        );
+        const existing = map.get(key);
+        const existingTime = Date.parse(
+          existing?.updated_at ??
+            existing?.stopped_at ??
+            existing?.started_at ??
+            "1970-01-01T00:00:00.000Z",
+        );
+        const nextTime = Date.parse(
+          session.updated_at ??
+            session.stopped_at ??
+            session.started_at ??
+            "1970-01-01T00:00:00.000Z",
+        );
+        if (!existing || nextTime >= existingTime) {
+          map.set(key, session);
+        }
+      });
+    return map;
+  }, [currentUser.id, workSessions]);
+  const ownWorkSessions = useMemo(
+    () =>
+      workSessions.filter(
+        (session) => session.operator_user_id === currentUser.id,
+      ),
+    [currentUser.id, workSessions],
+  );
+  const ownWorkSessionSecondsByScope = useMemo(() => {
+    const map = new Map<string, number>();
+    ownWorkSessions.forEach((session) => {
+      const key = getWorkSessionScopeKey(
+        session.batch_run_id,
+        session.production_item_id,
+      );
+      const seconds = getElapsedSeconds(
+        session.started_at,
+        session.stopped_at ??
+          (session.is_active ? new Date(liveNowMs).toISOString() : null),
+        liveNowMs,
+      );
+      map.set(key, (map.get(key) ?? 0) + seconds);
+    });
+    return map;
+  }, [liveNowMs, ownWorkSessions]);
+  const ownActiveWorkSessionItemKeys = useMemo(
+    () =>
+      new Set(
+        workSessions
+          .filter(
+            (session) =>
+              session.is_active &&
+              session.production_item_id &&
+              session.operator_user_id === currentUser.id,
+          )
+          .map(
+            (session) =>
+              `${session.batch_run_id}:${session.production_item_id as string}`,
+          ),
+      ),
+    [currentUser.id, workSessions],
+  );
+  const hasActiveWorkSessionForRun = useCallback(
+    (runId: string) => ownActiveWorkSessionRunIds.has(runId),
+    [ownActiveWorkSessionRunIds],
+  );
+  const hasActiveWorkSessionForItem = useCallback(
+    (runId: string, itemId: string) =>
+      ownActiveWorkSessionItemKeys.has(`${runId}:${itemId}`),
+    [ownActiveWorkSessionItemKeys],
+  );
+  const getOwnWorkSessionStatus = useCallback(
+    (
+      runId: string,
+      productionItemId?: string | null,
+    ): BatchRunRow["status"] | null => {
+      const key = getWorkSessionScopeKey(runId, productionItemId);
+      const session = latestOwnWorkSessionByScope.get(key);
+      if (!session) {
+        return null;
+      }
+      if (session.is_active) {
+        return "in_progress";
+      }
+      return (session.ended_status as BatchRunRow["status"] | null) ?? null;
+    },
+    [latestOwnWorkSessionByScope],
+  );
+  const mergeWorkSessionRows = useCallback(
+    (rows: ProductionWorkSessionRow[]) => {
+      if (rows.length === 0) {
+        return;
+      }
+      setWorkSessions((prev) => {
+        const map = new Map(prev.map((row) => [row.id, row]));
+        rows.forEach((row) => {
+          map.set(row.id, row);
+        });
+        return Array.from(map.values()).sort((a, b) => {
+          const aTime = Date.parse(
+            a.updated_at ??
+              a.stopped_at ??
+              a.started_at ??
+              "1970-01-01T00:00:00.000Z",
+          );
+          const bTime = Date.parse(
+            b.updated_at ??
+              b.stopped_at ??
+              b.started_at ??
+              "1970-01-01T00:00:00.000Z",
+          );
+          return bTime - aTime;
+        });
+      });
+    },
+    [],
+  );
+  const getOtherOperatorsOpenStatus = useCallback(
+    (
+      runId: string,
+      productionItemId: string | null | undefined,
+      nextRows: ProductionWorkSessionRow[] = [],
+    ): BatchRunRow["status"] | null => {
+      const scopeKey = getWorkSessionScopeKey(runId, productionItemId);
+      const latestByOperator = new Map<string, ProductionWorkSessionRow>();
+      const rowsById = new Map(
+        workSessions.map((session) => [session.id, session]),
+      );
+      nextRows.forEach((session) => rowsById.set(session.id, session));
+
+      rowsById.forEach((session) => {
+        if (session.operator_user_id === currentUser.id) {
+          return;
+        }
+        if (
+          getWorkSessionScopeKey(
+            session.batch_run_id,
+            session.production_item_id,
+          ) !== scopeKey
+        ) {
+          return;
+        }
+        const existing = latestByOperator.get(session.operator_user_id);
+        const existingTime = Date.parse(
+          existing?.updated_at ??
+            existing?.stopped_at ??
+            existing?.started_at ??
+            "1970-01-01T00:00:00.000Z",
+        );
+        const nextTime = Date.parse(
+          session.updated_at ??
+            session.stopped_at ??
+            session.started_at ??
+            "1970-01-01T00:00:00.000Z",
+        );
+        if (!existing || nextTime >= existingTime) {
+          latestByOperator.set(session.operator_user_id, session);
+        }
+      });
+
+      const statuses = Array.from(latestByOperator.values())
+        .map((session): BatchRunRow["status"] | null => {
+          if (session.is_active) {
+            return "in_progress";
+          }
+          const endedStatus =
+            (session.ended_status as BatchRunRow["status"] | null) ?? null;
+          return endedStatus === "done" ? null : endedStatus;
+        })
+        .filter((status): status is BatchRunRow["status"] => Boolean(status));
+
+      const statusOrder: BatchRunRow["status"][] = [
+        "blocked",
+        "in_progress",
+        "paused",
+      ];
+      return (
+        statusOrder.find((candidate) => statuses.includes(candidate)) ?? null
+      );
+    },
+    [currentUser.id, workSessions],
+  );
 
   const queueByStation = useMemo(() => {
     const map = new Map<string, QueueItem[]>();
@@ -1599,7 +2590,9 @@ export default function OperatorProductionPage() {
       const routeKeys = new Set(
         runs
           .map((run) => run.route_key)
-          .filter((value): value is string => Boolean(value && value !== "default")),
+          .filter((value): value is string =>
+            Boolean(value && value !== "default"),
+          ),
       );
       const items = productionItems.filter((item) => {
         if (item.order_id !== representativeRun.order_id) {
@@ -1634,7 +2627,9 @@ export default function OperatorProductionPage() {
           : undefined;
         return linkedQty ? { ...item, qty: linkedQty } : item;
       });
-      const itemProgress = getProductionItemsProgress(effectiveDedupedItems);
+      const itemProgress = getOperatorVisibleItemsProgress(
+        effectiveDedupedItems,
+      );
       const itemCountProgress = {
         totalQty: effectiveDedupedItems.length,
         completedQty: effectiveDedupedItems.filter(
@@ -1649,11 +2644,7 @@ export default function OperatorProductionPage() {
       const totalQty =
         trackingMode === "construction_level"
           ? totalQtyFromItems
-          : Math.max(
-              totalQtyFromItems,
-              dedupedItems.length,
-              1,
-            );
+          : Math.max(totalQtyFromItems, dedupedItems.length, 1);
       const totalPiecesQty = effectiveDedupedItems.reduce(
         (sum, item) => sum + getProductionItemQuantity(item),
         0,
@@ -1672,73 +2663,137 @@ export default function OperatorProductionPage() {
         primaryConstructionItem.item_name.trim().length > 0
           ? primaryConstructionItem.item_name.trim()
           : null;
+      const unitPosition =
+        trackingMode === "construction_level" && primaryConstructionItem
+          ? (getProductionItemMetaPosition(primaryConstructionItem) ??
+            orderItemPositionBySourceKey.get(
+              getProductionItemSourceKey(primaryConstructionItem) ?? "",
+            ) ??
+            dedupedItems
+              .map(
+                (item) =>
+                  getProductionItemMetaPosition(item) ??
+                  orderItemPositionBySourceKey.get(
+                    getProductionItemSourceKey(item) ?? "",
+                  ) ??
+                  null,
+              )
+              .find((value): value is string => Boolean(value)) ??
+            null)
+          : null;
       const orderNumber =
-        representativeRun.orders?.order_number ?? t("production.main.common.order");
+        representativeRun.orders?.order_number ??
+        t("production.main.common.order");
       const customerName =
-        representativeRun.orders?.customer_name ?? t("production.main.common.customer");
+        representativeRun.orders?.customer_name ??
+        t("production.main.common.customer");
       const dueDate =
         representativeRun.orders?.production_due_date ??
         representativeRun.orders?.due_date ??
         "";
       const priority = representativeRun.orders?.priority ?? "normal";
-      const plannedDate = runs
-        .map((item) => item.planned_date)
-        .filter((value): value is string => Boolean(value))
-        .sort()[0] ?? null;
-      const startedAt = runs
-        .map((item) => item.started_at)
-        .filter((value): value is string => Boolean(value))
-        .sort()[0] ?? null;
-      const doneAt = runs
-        .map((item) => item.done_at)
-        .filter((value): value is string => Boolean(value))
-        .sort()
-        .at(-1) ?? null;
-      const getWorkedMinutes = (
-        startedAtValue: string | null | undefined,
-        doneAtValue: string | null | undefined,
-        storedMinutes: number | null | undefined,
-      ) => {
-        if (startedAtValue) {
-          return computeWorkingMinutes(
-            startedAtValue,
-            doneAtValue ?? null,
-            workingCalendar,
-          );
-        }
-        return Number(storedMinutes ?? 0);
-      };
-      const durationMinutes =
+      const plannedDate =
+        runs
+          .map((item) => item.planned_date)
+          .filter((value): value is string => Boolean(value))
+          .sort()[0] ?? null;
+      const startedAt =
+        runs
+          .map((item) => item.started_at)
+          .filter((value): value is string => Boolean(value))
+          .sort()[0] ?? null;
+      const doneAt =
+        runs
+          .map((item) => item.done_at)
+          .filter((value): value is string => Boolean(value))
+          .sort()
+          .at(-1) ?? null;
+      const scopeEntries =
         trackingMode === "construction_level"
-          ? dedupedItems.length > 0
-            ? dedupedItems.reduce(
-                (sum, item) =>
-                  sum +
-                  getWorkedMinutes(
-                    item.started_at,
-                    item.done_at,
-                    item.duration_minutes,
-                  ),
-                0,
-              )
-            : runs.reduce(
-                (sum, run) =>
-                  sum +
-                  getWorkedMinutes(
-                    run.started_at,
-                    run.done_at,
-                    run.duration_minutes,
-                  ),
-                0,
-              )
-          : runs.reduce((maxMinutes, run) => {
-              const runMinutes = getWorkedMinutes(
-                run.started_at,
-                run.done_at,
-                run.duration_minutes,
+          ? dedupedItems.map((item) => {
+              const matchedRun =
+                runs.find((run) => matchesProductionItemToRun(item, run)) ??
+                null;
+              const scopeKey = getWorkSessionScopeKey(
+                matchedRun?.id ?? representativeRun.id,
+                item.id,
               );
-              return Math.max(maxMinutes, runMinutes);
-            }, 0);
+              return {
+                scopeKey,
+                summary: workSessionScopeSummaryByKey.get(scopeKey) ?? null,
+              };
+            })
+          : runs.map((run) => {
+              const scopeKey = getWorkSessionScopeKey(run.id, null);
+              return {
+                scopeKey,
+                summary: workSessionScopeSummaryByKey.get(scopeKey) ?? null,
+              };
+            });
+      const scopeSummaries = scopeEntries.map((entry) => entry.summary);
+      const involvedOperatorIds = new Set<string>();
+      const operatorStatusGroups = createOperatorWorkStatusGroups();
+      if (trackingMode === "construction_level") {
+        dedupedItems.forEach((item) => {
+          const matchedRun =
+            runs.find((run) => matchesProductionItemToRun(item, run)) ?? null;
+          const runId = matchedRun?.id ?? representativeRun.id;
+          getInvolvedOperatorIdsForConstructionItem(runId, item).forEach(
+            (operatorId) => involvedOperatorIds.add(operatorId),
+          );
+          mergeOperatorWorkStatusGroups(
+            operatorStatusGroups,
+            getOperatorStatusGroupsForConstructionItem(runId, item),
+          );
+        });
+      } else {
+        scopeEntries.forEach((entry) => {
+          const operatorIds = involvedOperatorIdsByScope.get(entry.scopeKey);
+          operatorIds?.forEach((operatorId) =>
+            involvedOperatorIds.add(operatorId),
+          );
+          mergeOperatorWorkStatusGroups(
+            operatorStatusGroups,
+            operatorStatusGroupsByScope.get(entry.scopeKey),
+          );
+        });
+      }
+      const activeScopeCount = scopeSummaries.reduce(
+        (sum, summary) => sum + (summary?.activeCount ?? 0),
+        0,
+      );
+      const latestScopeStatus = scopeSummaries.reduce<
+        BatchRunRow["status"] | null
+      >((current, summary) => summary?.latestStatus ?? current, null);
+      const earliestScopeStart =
+        scopeSummaries
+          .map((summary) => summary?.earliestStartedAt)
+          .filter((value): value is string => Boolean(value))
+          .sort()[0] ?? null;
+      const latestScopeStop =
+        scopeSummaries
+          .map((summary) => summary?.latestStoppedAt)
+          .filter((value): value is string => Boolean(value))
+          .sort()
+          .at(-1) ?? null;
+      const durationMinutes =
+        scopeSummaries.reduce(
+          (sum, summary) => sum + Number(summary?.totalMinutes ?? 0),
+          0,
+        ) ||
+        runs.reduce((sum, run) => sum + Number(run.duration_minutes ?? 0), 0);
+      const durationSeconds =
+        getElapsedSeconds(
+          earliestScopeStart ?? startedAt,
+          activeScopeCount > 0
+            ? new Date(liveNowMs).toISOString()
+            : (latestScopeStop ?? doneAt),
+          liveNowMs,
+        ) ||
+        runs.reduce(
+          (sum, run) => sum + Number(run.duration_minutes ?? 0) * 60,
+          0,
+        );
       const statusOrder: BatchRunRow["status"][] = [
         "blocked",
         "paused",
@@ -1747,10 +2802,65 @@ export default function OperatorProductionPage() {
         "pending",
         "done",
       ];
-      const aggregatedStatus =
-        statusOrder.find((candidate) =>
-          runs.some((candidateRun) => candidateRun.status === candidate),
-        ) ?? representativeRun.status;
+      const areAllRunsDone =
+        runs.length > 0 &&
+        runs.every((candidateRun) => candidateRun.status === "done");
+      const aggregatedStatus = areAllRunsDone
+        ? "done"
+        : activeScopeCount > 0
+          ? "in_progress"
+          : latestScopeStatus === "blocked" ||
+              runs.some((candidateRun) => candidateRun.status === "blocked")
+            ? "blocked"
+            : latestScopeStatus === "paused" ||
+                runs.some((candidateRun) => candidateRun.status === "paused")
+              ? "paused"
+              : (statusOrder.find((candidate) =>
+                  runs.some(
+                    (candidateRun) => candidateRun.status === candidate,
+                  ),
+                ) ?? representativeRun.status);
+      const activeOperatorsCount = involvedOperatorIds.size;
+      const hasOperatorActiveSession =
+        trackingMode === "construction_level"
+          ? dedupedItems.some((item) => {
+              const matchedRun =
+                runs.find((run) => matchesProductionItemToRun(item, run)) ??
+                null;
+              return hasActiveWorkSessionForItem(
+                matchedRun?.id ?? representativeRun.id,
+                item.id,
+              );
+            })
+          : runs.some((run) => hasActiveWorkSessionForRun(run.id));
+      const operatorSessionStatus =
+        trackingMode === "construction_level"
+          ? (() => {
+              const statuses = dedupedItems
+                .map((item) => {
+                  const matchedRun =
+                    runs.find((run) => matchesProductionItemToRun(item, run)) ??
+                    null;
+                  return getOwnWorkSessionStatus(
+                    matchedRun?.id ?? representativeRun.id,
+                    item.id,
+                  );
+                })
+                .filter(Boolean) as BatchRunRow["status"][];
+              return (
+                statusOrder.find((candidate) => statuses.includes(candidate)) ??
+                null
+              );
+            })()
+          : (() => {
+              const statuses = runs
+                .map((run) => getOwnWorkSessionStatus(run.id, null))
+                .filter(Boolean) as BatchRunRow["status"][];
+              return (
+                statusOrder.find((candidate) => statuses.includes(candidate)) ??
+                null
+              );
+            })();
       const queueItem = {
         id: representativeRun.id,
         runIds: runs.map((item) => item.id),
@@ -1770,26 +2880,34 @@ export default function OperatorProductionPage() {
         material,
         attachments: mergeAttachments(
           attachmentsByOrder.get(representativeRun.order_id) ?? [],
-          ...dedupedItems.map(
-            (item) => {
-              const sourceKey = getProductionItemSourceKey(item) ?? "";
-              const linkedOrderItemIds = orderItemIdsBySourceKey.get(sourceKey) ?? [];
-              return mergeAttachments(
-                ...linkedOrderItemIds.map(
-                  (orderItemId) =>
-                    productionAttachmentsByItemId.get(orderItemId) ?? [],
-                ),
-              );
-            },
-          ),
+          ...dedupedItems.map((item) => {
+            const sourceKey = getProductionItemSourceKey(item) ?? "";
+            const linkedOrderItemIds =
+              orderItemIdsBySourceKey.get(sourceKey) ?? [];
+            return mergeAttachments(
+              ...linkedOrderItemIds.map(
+                (orderItemId) =>
+                  productionAttachmentsByItemId.get(orderItemId) ?? [],
+              ),
+            );
+          }),
         ),
-        startedAt,
-        doneAt,
+        startedAt: earliestScopeStart ?? startedAt,
+        doneAt: activeScopeCount > 0 ? null : (latestScopeStop ?? doneAt),
         durationMinutes,
+        durationSeconds,
+        activeOperatorsCount,
+        activeOperatorIds: Array.from(involvedOperatorIds),
+        workingOperatorIds: Array.from(operatorStatusGroups.working),
+        pausedOperatorIds: Array.from(operatorStatusGroups.paused),
+        blockedOperatorIds: Array.from(operatorStatusGroups.blocked),
+        hasOperatorActiveSession,
+        operatorSessionStatus,
         items: effectiveDedupedItems,
         trackingMode,
         unitType,
         unitName,
+        unitPosition,
       } satisfies QueueItem;
       const dedupeKey =
         trackingMode === "construction_level"
@@ -1812,9 +2930,13 @@ export default function OperatorProductionPage() {
     });
     const stationItemsMap = new Map<string, QueueItem[]>();
     queueItemByKey.forEach((queueItem) => {
-      const stationId = queueItem.runIds
-        .map((runId) => batchRuns.find((run) => run.id === runId)?.station_id ?? "")
-        .find(Boolean) ?? "";
+      const stationId =
+        queueItem.runIds
+          .map(
+            (runId) =>
+              batchRuns.find((run) => run.id === runId)?.station_id ?? "",
+          )
+          .find(Boolean) ?? "";
       const list = stationItemsMap.get(stationId) ?? [];
       list.push(queueItem);
       stationItemsMap.set(stationId, list);
@@ -1852,13 +2974,22 @@ export default function OperatorProductionPage() {
   }, [
     attachmentsByOrder,
     batchRuns,
+    getOwnWorkSessionStatus,
+    hasActiveWorkSessionForItem,
+    hasActiveWorkSessionForRun,
+    getInvolvedOperatorIdsForConstructionItem,
+    getOperatorStatusGroupsForConstructionItem,
+    involvedOperatorIdsByScope,
+    liveNowMs,
+    operatorStatusGroupsByScope,
     orderItemIdsBySourceKey,
+    orderItemPositionBySourceKey,
     orderItemQtyBySourceKey,
     productionAttachmentsByItemId,
     productionItems,
     t,
     visibleStations,
-    workingCalendar,
+    workSessionScopeSummaryByKey,
   ]);
 
   const filteredQueueByStation = useMemo(() => {
@@ -1868,6 +2999,14 @@ export default function OperatorProductionPage() {
       const list = queueByStation.get(station.id) ?? [];
       const filtered = list.filter((item) => {
         if (orderFilter && item.orderId !== orderFilter) {
+          return false;
+        }
+        if (
+          !orderFilter &&
+          item.operatorSessionStatus === "done" &&
+          !item.hasOperatorActiveSession &&
+          (item.status === "done" || (item.activeOperatorsCount ?? 0) > 0)
+        ) {
           return false;
         }
         if (!orderFilter) {
@@ -1915,37 +3054,76 @@ export default function OperatorProductionPage() {
     selectedWeekStart,
   ]);
 
+  const queueItems = useMemo(
+    () => Array.from(queueByStation.values()).flat(),
+    [queueByStation],
+  );
+
   const queueItemByOrderId = useMemo(() => {
     const map = new Map<string, QueueItem>();
-    Array.from(queueByStation.values())
-      .flat()
-      .forEach((item) => {
-        if (!map.has(item.orderId)) {
-          map.set(item.orderId, item);
-        }
-      });
+    queueItems.forEach((item) => {
+      if (!map.has(item.orderId)) {
+        map.set(item.orderId, item);
+      }
+    });
     return map;
-  }, [queueByStation]);
+  }, [queueItems]);
 
   const queueItemById = useMemo(() => {
     const map = new Map<string, QueueItem>();
-    Array.from(queueByStation.values())
-      .flat()
-      .forEach((item) => {
-        map.set(item.id, item);
-      });
+    queueItems.forEach((item) => {
+      map.set(item.id, item);
+    });
     return map;
-  }, [queueByStation]);
+  }, [queueItems]);
 
-  const quickActionItem = quickActionOrderId
-    ? (queueItemByOrderId.get(quickActionOrderId) ?? null)
-    : null;
+  const quickActionItem = useMemo(() => {
+    if (!quickActionOrderId) {
+      return null;
+    }
+    const exactItem = queueItems.find((item) => {
+      if (item.orderId !== quickActionOrderId) {
+        return false;
+      }
+      if (quickActionItemId) {
+        return item.items.some((row) => row.id === quickActionItemId);
+      }
+      if (quickActionRowKey) {
+        return item.items.some(
+          (row) => getProductionItemRowKey(row) === quickActionRowKey,
+        );
+      }
+      if (quickActionRowIndex != null) {
+        return item.items.some(
+          (row) => getProductionItemRowIndex(row) === quickActionRowIndex,
+        );
+      }
+      return false;
+    });
+    return exactItem ?? queueItemByOrderId.get(quickActionOrderId) ?? null;
+  }, [
+    queueItemByOrderId,
+    queueItems,
+    quickActionItemId,
+    quickActionOrderId,
+    quickActionRowIndex,
+    quickActionRowKey,
+  ]);
   const quickActionVisibleItems =
     quickActionItem?.trackingMode === "construction_level" &&
     quickActionItemId &&
     quickActionItem
       ? quickActionItem.items.filter((item) => item.id === quickActionItemId)
       : (quickActionItem?.items ?? []);
+  const quickActionWorkingOperatorNames = quickActionItem
+    ? getActiveOperatorNames(quickActionItem.workingOperatorIds ?? [])
+    : [];
+  const quickActionPausedOperatorNames = quickActionItem
+    ? getActiveOperatorNames(quickActionItem.pausedOperatorIds ?? [])
+    : [];
+  const quickActionBlockedOperatorNames = quickActionItem
+    ? getActiveOperatorNames(quickActionItem.blockedOperatorIds ?? [])
+    : [];
   const quickActionHasBlockingDependenciesForBatch = useMemo(() => {
     if (!quickActionItem) {
       return false;
@@ -1958,7 +3136,8 @@ export default function OperatorProductionPage() {
       }
       const groupKey = getItemGroupKey(prodItem);
       return dependencyStations.some((depId) => {
-        const depItem = itemsByGroupAndStation.get(groupKey)?.get(depId) ?? null;
+        const depItem =
+          itemsByGroupAndStation.get(groupKey)?.get(depId) ?? null;
         return depItem && depItem.status !== "done";
       });
     });
@@ -1969,16 +3148,33 @@ export default function OperatorProductionPage() {
     const tomorrow = new Date(`${today}T00:00:00`);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowIso = tomorrow.toISOString();
-    const todayEvents = activityEvents.filter(
-      (row) => String(row.created_at ?? "").slice(0, 10) === today,
+    const sessionStarted = ownWorkSessions.filter(
+      (row) => String(row.started_at ?? "").slice(0, 10) === today,
+    ).length;
+    const sessionDone = ownWorkSessions.filter(
+      (row) =>
+        row.ended_status === "done" &&
+        String(row.stopped_at ?? "").slice(0, 10) === today,
+    ).length;
+    const sessionBlocked = ownWorkSessions.filter(
+      (row) =>
+        row.ended_status === "blocked" &&
+        String(row.stopped_at ?? "").slice(0, 10) === today,
+    ).length;
+    const sessionMinutes = ownWorkSessions.reduce(
+      (sum, session) =>
+        sum +
+        getProductionWorkSessionOverlapMinutes({
+          session,
+          range: {
+            startAt: todayStartIso,
+            endAt: tomorrowIso,
+          },
+          calendar: workingCalendar,
+          nowMs: liveNowMs,
+        }).totalMinutes,
+      0,
     );
-    const eventStarted = todayEvents.filter(
-      (row) => row.to_status === "in_progress",
-    ).length;
-    const eventDone = todayEvents.filter((row) => row.to_status === "done").length;
-    const eventBlocked = todayEvents.filter(
-      (row) => row.to_status === "blocked",
-    ).length;
     const rawStarted =
       latestWorkEntries.filter(
         (entry) =>
@@ -1993,9 +3189,11 @@ export default function OperatorProductionPage() {
           run.status !== "pending",
       ).length;
     const rawDone =
-      latestWorkEntries.filter((entry) => isSameDayIso(entry.doneAt, today)).length +
-      unmatchedBatchRuns.filter((run) => isSameDayIso(run.done_at ?? null, today))
-        .length;
+      latestWorkEntries.filter((entry) => isSameDayIso(entry.doneAt, today))
+        .length +
+      unmatchedBatchRuns.filter((run) =>
+        isSameDayIso(run.done_at ?? null, today),
+      ).length;
     const rawBlocked =
       latestWorkEntries.filter((entry) => entry.status === "blocked").length +
       unmatchedBatchRuns.filter((run) => run.status === "blocked").length;
@@ -2028,18 +3226,17 @@ export default function OperatorProductionPage() {
       );
 
     return {
-      started: Math.max(eventStarted, rawStarted),
-      done: Math.max(eventDone, rawDone),
-      blocked: Math.max(eventBlocked, rawBlocked),
-      minutes: Math.max(todayWorkedMinutes, rawMinutes),
+      started: Math.max(sessionStarted, rawStarted),
+      done: Math.max(sessionDone, rawDone),
+      blocked: Math.max(sessionBlocked, rawBlocked),
+      minutes: Math.max(sessionMinutes, rawMinutes),
     };
   }, [
-    activityEvents,
     latestWorkEntries,
     liveNowMs,
     today,
-    todayWorkedMinutes,
     unmatchedBatchRuns,
+    ownWorkSessions,
     workingCalendar,
   ]);
 
@@ -2050,15 +3247,50 @@ export default function OperatorProductionPage() {
     const weekEnd = new Date(`${today}T00:00:00`);
     weekEnd.setDate(weekEnd.getDate() + 1);
     const weekEndIso = weekEnd.toISOString();
-    const eventStarted = activityEvents.filter(
-      (row) => row.to_status === "in_progress",
-    ).length;
-    const eventDone = activityEvents.filter(
-      (row) => row.to_status === "done",
-    ).length;
-    const eventBlocked = activityEvents.filter(
-      (row) => row.to_status === "blocked",
-    ).length;
+    const sessionStarted = ownWorkSessions.filter((row) => {
+      const time = Date.parse(row.started_at);
+      return (
+        Number.isFinite(time) &&
+        time >= Date.parse(weekStartIso) &&
+        time < Date.parse(weekEndIso)
+      );
+    }).length;
+    const sessionDone = ownWorkSessions.filter((row) => {
+      if (row.ended_status !== "done" || !row.stopped_at) {
+        return false;
+      }
+      const time = Date.parse(row.stopped_at);
+      return (
+        Number.isFinite(time) &&
+        time >= Date.parse(weekStartIso) &&
+        time < Date.parse(weekEndIso)
+      );
+    }).length;
+    const sessionBlocked = ownWorkSessions.filter((row) => {
+      if (row.ended_status !== "blocked" || !row.stopped_at) {
+        return false;
+      }
+      const time = Date.parse(row.stopped_at);
+      return (
+        Number.isFinite(time) &&
+        time >= Date.parse(weekStartIso) &&
+        time < Date.parse(weekEndIso)
+      );
+    }).length;
+    const sessionMinutes = ownWorkSessions.reduce(
+      (sum, session) =>
+        sum +
+        getProductionWorkSessionOverlapMinutes({
+          session,
+          range: {
+            startAt: weekStartIso,
+            endAt: weekEndIso,
+          },
+          calendar: workingCalendar,
+          nowMs: liveNowMs,
+        }).totalMinutes,
+      0,
+    );
     const isInWeek = (value: string | null | undefined) => {
       if (!value) {
         return false;
@@ -2072,7 +3304,8 @@ export default function OperatorProductionPage() {
     };
     const rawStarted =
       latestWorkEntries.filter((entry) => isInWeek(entry.startedAt)).length +
-      unmatchedBatchRuns.filter((run) => isInWeek(run.started_at ?? null)).length;
+      unmatchedBatchRuns.filter((run) => isInWeek(run.started_at ?? null))
+        .length;
     const rawDone =
       latestWorkEntries.filter((entry) => isInWeek(entry.doneAt)).length +
       unmatchedBatchRuns.filter((run) => isInWeek(run.done_at ?? null)).length;
@@ -2107,18 +3340,17 @@ export default function OperatorProductionPage() {
         0,
       );
     return {
-      started: Math.max(eventStarted, rawStarted),
-      done: Math.max(eventDone, rawDone),
-      blocked: Math.max(eventBlocked, rawBlocked),
-      minutes: Math.max(weekWorkedMinutes, rawMinutes),
+      started: Math.max(sessionStarted, rawStarted),
+      done: Math.max(sessionDone, rawDone),
+      blocked: Math.max(sessionBlocked, rawBlocked),
+      minutes: Math.max(sessionMinutes, rawMinutes),
     };
   }, [
-    activityEvents,
     latestWorkEntries,
     liveNowMs,
     today,
     unmatchedBatchRuns,
-    weekWorkedMinutes,
+    ownWorkSessions,
     workingCalendar,
   ]);
 
@@ -2130,6 +3362,18 @@ export default function OperatorProductionPage() {
       ),
     [filteredQueueByStation],
   );
+  const getScopedProductionItemId = (
+    run: BatchRunRow,
+    productionItemId?: string | null,
+  ) => {
+    if (
+      (stations.find((station) => station.id === run.station_id)
+        ?.trackingMode ?? "construction_level") === "construction_level"
+    ) {
+      return productionItemId ?? null;
+    }
+    return null;
+  };
 
   const updateItemStatus = async (
     itemId: string,
@@ -2147,52 +3391,217 @@ export default function OperatorProductionPage() {
       return;
     }
     const now = new Date().toISOString();
-    const wasBlocked = run.status === "blocked" || targetItem.status === "blocked";
+    const wasBlocked =
+      run.status === "blocked" || targetItem.status === "blocked";
     const wasPaused = run.status === "paused" || targetItem.status === "paused";
     const isResumed = (wasBlocked || wasPaused) && status === "in_progress";
-    const { data: transitionedRun, error: transitionError } =
-      await transitionBatchRunStatus(sb, {
+    const scopeProductionItemId = getScopedProductionItemId(run, itemId);
+    const transitionRunTo = async (toStatus: BatchRunRow["status"]) => {
+      const result = await transitionBatchRunStatus(sb, {
         batchRunId: runId,
-        toStatus: status,
+        toStatus,
         reason: extra?.reason ?? null,
         reasonId: extra?.reasonId ?? null,
         productionItemId: itemId,
         actorUserId: currentUser.id,
       });
-    if (transitionError) {
-      setDataError(transitionError.message ?? "Failed to transition batch run status.");
-      return;
-    }
-    if (!transitionedRun) {
-      setDataError("No batch run returned from transition.");
-      return;
-    }
-    const appliedStatus = (transitionedRun.status ??
-      status) as BatchRunRow["status"];
-    const nextRunStartedAt = transitionedRun.started_at ?? run.started_at ?? null;
-    const nextRunDoneAt = transitionedRun.done_at ?? run.done_at ?? null;
-    const nextRunDuration =
-      typeof transitionedRun.duration_minutes === "number"
-        ? transitionedRun.duration_minutes
-        : (run.duration_minutes ?? null);
-
-    if (currentUser.tenantId) {
-      if (run.status !== appliedStatus) {
-        const eventInsertData: StatusEventRow = {
-          id: crypto.randomUUID(),
-          production_item_id: targetItem.id,
-          order_id: run.order_id,
-          batch_run_id: run.id,
-          from_status: run.status,
-          to_status: appliedStatus,
-          reason: extra?.reason ?? null,
-          created_at: now,
-        };
-        setActivityEvents((prev) => [
-          eventInsertData,
-          ...prev,
-        ]);
+      if (result.error) {
+        setDataError(
+          result.error.message ?? "Failed to transition batch run status.",
+        );
+        return null;
       }
+      if (!result.data) {
+        setDataError("No batch run returned from transition.");
+        return null;
+      }
+      return result.data;
+    };
+
+    let transitionedRun: Awaited<ReturnType<typeof transitionRunTo>> = null;
+    let appliedStatus = run.status;
+    let nextRunStartedAt = run.started_at ?? null;
+    let nextRunDoneAt = run.done_at ?? null;
+    let nextRunDuration = run.duration_minutes ?? null;
+
+    if (status === "in_progress") {
+      if (run.status !== "in_progress") {
+        transitionedRun = await transitionRunTo("in_progress");
+        if (!transitionedRun) {
+          return;
+        }
+        appliedStatus = transitionedRun.status as BatchRunRow["status"];
+        nextRunStartedAt = transitionedRun.started_at ?? run.started_at ?? now;
+        nextRunDoneAt = transitionedRun.done_at ?? run.done_at ?? null;
+        nextRunDuration =
+          typeof transitionedRun.duration_minutes === "number"
+            ? transitionedRun.duration_minutes
+            : (run.duration_minutes ?? null);
+      } else {
+        appliedStatus = "in_progress";
+        nextRunStartedAt = run.started_at ?? now;
+        nextRunDoneAt = null;
+      }
+      if (currentUser.tenantId) {
+        const { data: startedSession, error: sessionError } =
+          await startProductionWorkSession(sb, {
+            tenantId: currentUser.tenantId,
+            orderId: run.order_id,
+            batchRunId: runId,
+            productionItemId: scopeProductionItemId,
+            stationId: run.station_id,
+            operatorUserId: currentUser.id,
+            startedAt: now,
+          });
+        if (sessionError) {
+          setDataError(
+            sessionError.message ?? "Failed to start production work session.",
+          );
+          return;
+        }
+        if (startedSession) {
+          mergeWorkSessionRows([startedSession]);
+        }
+      }
+    } else if (status === "paused") {
+      if (!currentUser.tenantId) {
+        return;
+      }
+      const { data: stoppedSessions, error: sessionError } =
+        await stopProductionWorkSession(sb, {
+          tenantId: currentUser.tenantId,
+          batchRunId: runId,
+          productionItemId: scopeProductionItemId,
+          operatorUserId: currentUser.id,
+          endedStatus: "paused",
+          stopReason: extra?.reason ?? null,
+          stopReasonId: extra?.reasonId ?? null,
+          stoppedAt: now,
+        });
+      if (sessionError) {
+        setDataError(
+          sessionError.message ?? "Failed to stop production work session.",
+        );
+        return;
+      }
+      mergeWorkSessionRows(stoppedSessions);
+      const remainingSessions = await listActiveProductionWorkSessions(sb, {
+        tenantId: currentUser.tenantId,
+        batchRunId: runId,
+        productionItemId: scopeProductionItemId,
+      });
+      if (remainingSessions.error) {
+        setDataError(
+          remainingSessions.error.message ??
+            "Failed to load active production work sessions.",
+        );
+        return;
+      }
+      if ((remainingSessions.data?.length ?? 0) === 0) {
+        transitionedRun = await transitionRunTo("paused");
+        if (!transitionedRun) {
+          return;
+        }
+        appliedStatus = transitionedRun.status as BatchRunRow["status"];
+        nextRunStartedAt = transitionedRun.started_at ?? null;
+        nextRunDoneAt = transitionedRun.done_at ?? null;
+        nextRunDuration =
+          typeof transitionedRun.duration_minutes === "number"
+            ? transitionedRun.duration_minutes
+            : (run.duration_minutes ?? null);
+      } else {
+        appliedStatus = "in_progress";
+        nextRunStartedAt = run.started_at ?? null;
+        nextRunDoneAt = null;
+      }
+    } else if (status === "done") {
+      if (!currentUser.tenantId) {
+        return;
+      }
+      const { data: stoppedSessions, error: sessionError } =
+        await stopProductionWorkSession(sb, {
+          tenantId: currentUser.tenantId,
+          batchRunId: runId,
+          productionItemId: scopeProductionItemId,
+          operatorUserId: currentUser.id,
+          endedStatus: "done",
+          stopReason: extra?.reason ?? null,
+          stopReasonId: extra?.reasonId ?? null,
+          stoppedAt: now,
+        });
+      if (sessionError) {
+        setDataError(
+          sessionError.message ?? "Failed to stop production work session.",
+        );
+        return;
+      }
+      mergeWorkSessionRows(stoppedSessions);
+      const otherOpenStatus = getOtherOperatorsOpenStatus(
+        runId,
+        scopeProductionItemId,
+        stoppedSessions,
+      );
+      if (!otherOpenStatus) {
+        transitionedRun = await transitionRunTo("done");
+        if (!transitionedRun) {
+          return;
+        }
+        appliedStatus = transitionedRun.status as BatchRunRow["status"];
+        nextRunStartedAt = transitionedRun.started_at ?? null;
+        nextRunDoneAt = transitionedRun.done_at ?? null;
+        nextRunDuration =
+          typeof transitionedRun.duration_minutes === "number"
+            ? transitionedRun.duration_minutes
+            : (run.duration_minutes ?? null);
+      } else {
+        appliedStatus = otherOpenStatus;
+        nextRunStartedAt = run.started_at ?? null;
+        nextRunDoneAt = null;
+      }
+    } else if (status === "blocked") {
+      if (!currentUser.tenantId) {
+        return;
+      }
+      const { data: stoppedSessions, error: sessionError } =
+        await stopProductionWorkSessions(sb, {
+          tenantId: currentUser.tenantId,
+          batchRunId: runId,
+          productionItemId: scopeProductionItemId,
+          endedStatus: status,
+          stopReason: extra?.reason ?? null,
+          stopReasonId: extra?.reasonId ?? null,
+          stoppedAt: now,
+        });
+      if (sessionError) {
+        setDataError(
+          sessionError.message ?? "Failed to stop production work sessions.",
+        );
+        return;
+      }
+      mergeWorkSessionRows(stoppedSessions);
+      transitionedRun = await transitionRunTo(status);
+      if (!transitionedRun) {
+        return;
+      }
+      appliedStatus = transitionedRun.status as BatchRunRow["status"];
+      nextRunStartedAt = transitionedRun.started_at ?? null;
+      nextRunDoneAt = transitionedRun.done_at ?? null;
+      nextRunDuration =
+        typeof transitionedRun.duration_minutes === "number"
+          ? transitionedRun.duration_minutes
+          : (run.duration_minutes ?? null);
+    } else {
+      transitionedRun = await transitionRunTo(status);
+      if (!transitionedRun) {
+        return;
+      }
+      appliedStatus = transitionedRun.status as BatchRunRow["status"];
+      nextRunStartedAt = transitionedRun.started_at ?? run.started_at ?? null;
+      nextRunDoneAt = transitionedRun.done_at ?? run.done_at ?? null;
+      nextRunDuration =
+        typeof transitionedRun.duration_minutes === "number"
+          ? transitionedRun.duration_minutes
+          : (run.duration_minutes ?? null);
     }
 
     if (appliedStatus === "blocked" && currentUser.tenantId) {
@@ -2278,14 +3687,15 @@ export default function OperatorProductionPage() {
         },
       });
     }
+
     setBatchRuns((prev) =>
       prev.map((item) =>
         item.id === runId
           ? {
               ...item,
               status: appliedStatus,
-              blocked_reason: transitionedRun.blocked_reason ?? null,
-              blocked_reason_id: transitionedRun.blocked_reason_id ?? null,
+              blocked_reason: transitionedRun?.blocked_reason ?? null,
+              blocked_reason_id: transitionedRun?.blocked_reason_id ?? null,
               started_at: nextRunStartedAt,
               done_at: nextRunDoneAt,
               duration_minutes: nextRunDuration,
@@ -2366,18 +3776,15 @@ export default function OperatorProductionPage() {
           nextRuns
             .filter((item) => item.order_id === run.order_id)
             .map((item) => ({
-            status: item.status,
-            stationId: item.station_id,
-          })),
+              status: item.status,
+              stationId: item.station_id,
+            })),
           rules.productionCompletionConfig,
         )
       ) {
         const totalDuration = nextRuns
           .filter((item) => item.order_id === run.order_id)
-          .reduce(
-            (sum, item) => sum + Number(item.duration_minutes ?? 0),
-          0,
-        );
+          .reduce((sum, item) => sum + Number(item.duration_minutes ?? 0), 0);
         await sb
           .from("orders")
           .update({ production_duration_minutes: totalDuration })
@@ -2395,9 +3802,16 @@ export default function OperatorProductionPage() {
     if (pendingAction) {
       return;
     }
+    if (
+      status === "in_progress" &&
+      !isWithinWorkingSchedule(new Date(liveNowMs), workingCalendar)
+    ) {
+      setDataError(t("production.operator.queue.outsideWorkingHours"));
+      return;
+    }
     if (status === "paused") {
       const targetItem = productionItems.find((item) => item.id === itemId);
-      if (!targetItem || targetItem.status !== "in_progress") {
+      if (!targetItem || !hasActiveWorkSessionForItem(runId, itemId)) {
         return;
       }
     }
@@ -2420,14 +3834,14 @@ export default function OperatorProductionPage() {
     const quantity = getProductionItemQuantity(item);
     const nextCompletedQty = Math.min(Math.max(completedQty, 0), quantity);
     const now = new Date().toISOString();
-  const nextMeta = {
-    ...((item.meta as Record<string, unknown> | null) ?? {}),
-    completedQty: nextCompletedQty,
-    lastCompletedQtyAt: now,
-    lastCompletedQtyBy: currentUser.id,
-  };
+    const nextMeta = {
+      ...((item.meta as Record<string, unknown> | null) ?? {}),
+      completedQty: nextCompletedQty,
+      lastCompletedQtyAt: now,
+      lastCompletedQtyBy: currentUser.id,
+    };
 
-  const { error } = await sb
+    const { error } = await sb
       .from("production_items")
       .update({
         meta: nextMeta,
@@ -2461,6 +3875,10 @@ export default function OperatorProductionPage() {
     if (pendingAction) {
       return;
     }
+    const sb = supabase;
+    if (!sb) {
+      return;
+    }
     const targetItemRaw = productionItems.find((item) => item.id === itemId);
     if (!targetItemRaw) {
       return;
@@ -2471,7 +3889,7 @@ export default function OperatorProductionPage() {
     const targetItem = linkedQty
       ? { ...targetItemRaw, qty: linkedQty }
       : targetItemRaw;
-    const remainingQty = getProductionItemRemainingQty(targetItem);
+    const remainingQty = getOperatorVisibleRemainingQty(targetItem);
     if (
       remainingQty <= 0 ||
       targetItem.status === "blocked" ||
@@ -2485,9 +3903,26 @@ export default function OperatorProductionPage() {
     );
     const quantity = getProductionItemQuantity(targetItem);
     const nextCompletedQty =
-      getProductionItemCompletedQty(targetItem) + safeUnits;
+      getOperatorVisibleCompletedQty(targetItem) + safeUnits;
     setPendingAction({ itemId, action: "done" });
     try {
+      const run = batchRuns.find((item) => item.id === runId);
+      const scopeProductionItemId = run
+        ? getScopedProductionItemId(run, itemId)
+        : itemId;
+      const otherOpenStatus =
+        nextCompletedQty >= quantity && run
+          ? getOtherOperatorsOpenStatus(runId, scopeProductionItemId)
+          : null;
+      if (nextCompletedQty >= quantity && otherOpenStatus) {
+        setCompleteMultipleQtyByItem((prev) => ({
+          ...prev,
+          [itemId]: "1",
+        }));
+        await updateItemStatus(itemId, runId, "done");
+        return;
+      }
+
       const saved = await updateProductionItemCompletedQty(
         targetItem,
         nextCompletedQty,
@@ -2502,7 +3937,6 @@ export default function OperatorProductionPage() {
       if (nextCompletedQty >= quantity) {
         await updateItemStatus(itemId, runId, "done");
       } else {
-        const run = batchRuns.find((item) => item.id === runId);
         if (run) {
           publishProductionLiveEvent({
             type: "status-changed",
@@ -2531,8 +3965,7 @@ export default function OperatorProductionPage() {
   }) => {
     return confirm({
       title:
-        options?.title?.trim() ||
-        t("production.operator.doneConfirm.title"),
+        options?.title?.trim() || t("production.operator.doneConfirm.title"),
       description:
         options?.description?.trim() ||
         t("production.operator.doneConfirm.description"),
@@ -2601,35 +4034,216 @@ export default function OperatorProductionPage() {
     if (!run) {
       return;
     }
-
-    const { data: transitionedRun, error: transitionError } =
-      await transitionBatchRunStatus(sb, {
+    if (status === "paused" && !hasActiveWorkSessionForRun(runId)) {
+      return;
+    }
+    const now = new Date().toISOString();
+    const transitionRunTo = async (toStatus: BatchRunRow["status"]) => {
+      const result = await transitionBatchRunStatus(sb, {
         batchRunId: runId,
-        toStatus: status,
+        toStatus,
         reason: extra?.reason ?? null,
         reasonId: extra?.reasonId ?? null,
         actorUserId: currentUser.id,
       });
+      if (result.error) {
+        setDataError(
+          result.error.message ?? "Failed to transition batch run status.",
+        );
+        return null;
+      }
+      if (!result.data) {
+        setDataError("No batch run returned from transition.");
+        return null;
+      }
+      return result.data;
+    };
 
-    if (transitionError) {
-      setDataError(
-        transitionError.message ?? "Failed to transition batch run status.",
+    let transitionedRun: Awaited<ReturnType<typeof transitionRunTo>> = null;
+    let appliedStatus = run.status;
+    let nextRunStartedAt = run.started_at ?? null;
+    let nextRunDoneAt = run.done_at ?? null;
+    let nextRunDuration = run.duration_minutes ?? null;
+
+    if (status === "in_progress") {
+      if (run.status !== "in_progress") {
+        transitionedRun = await transitionRunTo("in_progress");
+        if (!transitionedRun) {
+          return;
+        }
+        appliedStatus = transitionedRun.status as BatchRunRow["status"];
+        nextRunStartedAt = transitionedRun.started_at ?? run.started_at ?? now;
+        nextRunDoneAt = transitionedRun.done_at ?? run.done_at ?? null;
+        nextRunDuration =
+          typeof transitionedRun.duration_minutes === "number"
+            ? transitionedRun.duration_minutes
+            : (run.duration_minutes ?? null);
+      } else {
+        appliedStatus = "in_progress";
+        nextRunStartedAt = run.started_at ?? now;
+        nextRunDoneAt = null;
+      }
+      if (currentUser.tenantId) {
+        const { data: startedSession, error: sessionError } =
+          await startProductionWorkSession(sb, {
+            tenantId: currentUser.tenantId,
+            orderId: run.order_id,
+            batchRunId: runId,
+            productionItemId: null,
+            stationId: run.station_id,
+            operatorUserId: currentUser.id,
+            startedAt: now,
+          });
+        if (sessionError) {
+          setDataError(
+            sessionError.message ?? "Failed to start production work session.",
+          );
+          return;
+        }
+        if (startedSession) {
+          mergeWorkSessionRows([startedSession]);
+        }
+      }
+    } else if (status === "paused") {
+      if (!currentUser.tenantId) {
+        return;
+      }
+      const { data: stoppedSessions, error: sessionError } =
+        await stopProductionWorkSession(sb, {
+          tenantId: currentUser.tenantId,
+          batchRunId: runId,
+          productionItemId: null,
+          operatorUserId: currentUser.id,
+          endedStatus: "paused",
+          stopReason: extra?.reason ?? null,
+          stopReasonId: extra?.reasonId ?? null,
+          stoppedAt: now,
+        });
+      if (sessionError) {
+        setDataError(
+          sessionError.message ?? "Failed to stop production work session.",
+        );
+        return;
+      }
+      mergeWorkSessionRows(stoppedSessions);
+      const remainingSessions = await listActiveProductionWorkSessions(sb, {
+        tenantId: currentUser.tenantId,
+        batchRunId: runId,
+        productionItemId: null,
+      });
+      if (remainingSessions.error) {
+        setDataError(
+          remainingSessions.error.message ??
+            "Failed to load active production work sessions.",
+        );
+        return;
+      }
+      if ((remainingSessions.data?.length ?? 0) === 0) {
+        transitionedRun = await transitionRunTo("paused");
+        if (!transitionedRun) {
+          return;
+        }
+        appliedStatus = transitionedRun.status as BatchRunRow["status"];
+        nextRunStartedAt = transitionedRun.started_at ?? null;
+        nextRunDoneAt = transitionedRun.done_at ?? null;
+        nextRunDuration =
+          typeof transitionedRun.duration_minutes === "number"
+            ? transitionedRun.duration_minutes
+            : (run.duration_minutes ?? null);
+      } else {
+        appliedStatus = "in_progress";
+        nextRunStartedAt = run.started_at ?? null;
+        nextRunDoneAt = null;
+      }
+    } else if (status === "done") {
+      if (!currentUser.tenantId) {
+        return;
+      }
+      const { data: stoppedSessions, error: sessionError } =
+        await stopProductionWorkSession(sb, {
+          tenantId: currentUser.tenantId,
+          batchRunId: runId,
+          productionItemId: null,
+          operatorUserId: currentUser.id,
+          endedStatus: "done",
+          stopReason: extra?.reason ?? null,
+          stopReasonId: extra?.reasonId ?? null,
+          stoppedAt: now,
+        });
+      if (sessionError) {
+        setDataError(
+          sessionError.message ?? "Failed to stop production work session.",
+        );
+        return;
+      }
+      mergeWorkSessionRows(stoppedSessions);
+      const otherOpenStatus = getOtherOperatorsOpenStatus(
+        runId,
+        null,
+        stoppedSessions,
       );
-      return;
+      if (!otherOpenStatus) {
+        transitionedRun = await transitionRunTo("done");
+        if (!transitionedRun) {
+          return;
+        }
+        appliedStatus = transitionedRun.status as BatchRunRow["status"];
+        nextRunStartedAt = transitionedRun.started_at ?? null;
+        nextRunDoneAt = transitionedRun.done_at ?? null;
+        nextRunDuration =
+          typeof transitionedRun.duration_minutes === "number"
+            ? transitionedRun.duration_minutes
+            : (run.duration_minutes ?? null);
+      } else {
+        appliedStatus = otherOpenStatus;
+        nextRunStartedAt = run.started_at ?? null;
+        nextRunDoneAt = null;
+      }
+    } else if (status === "blocked") {
+      if (!currentUser.tenantId) {
+        return;
+      }
+      const { data: stoppedSessions, error: sessionError } =
+        await stopProductionWorkSessions(sb, {
+          tenantId: currentUser.tenantId,
+          batchRunId: runId,
+          productionItemId: null,
+          endedStatus: status,
+          stopReason: extra?.reason ?? null,
+          stopReasonId: extra?.reasonId ?? null,
+          stoppedAt: now,
+        });
+      if (sessionError) {
+        setDataError(
+          sessionError.message ?? "Failed to stop production work sessions.",
+        );
+        return;
+      }
+      mergeWorkSessionRows(stoppedSessions);
+      transitionedRun = await transitionRunTo(status);
+      if (!transitionedRun) {
+        return;
+      }
+      appliedStatus = transitionedRun.status as BatchRunRow["status"];
+      nextRunStartedAt = transitionedRun.started_at ?? null;
+      nextRunDoneAt = transitionedRun.done_at ?? null;
+      nextRunDuration =
+        typeof transitionedRun.duration_minutes === "number"
+          ? transitionedRun.duration_minutes
+          : (run.duration_minutes ?? null);
+    } else {
+      transitionedRun = await transitionRunTo(status);
+      if (!transitionedRun) {
+        return;
+      }
+      appliedStatus = transitionedRun.status as BatchRunRow["status"];
+      nextRunStartedAt = transitionedRun.started_at ?? run.started_at ?? null;
+      nextRunDoneAt = transitionedRun.done_at ?? run.done_at ?? null;
+      nextRunDuration =
+        typeof transitionedRun.duration_minutes === "number"
+          ? transitionedRun.duration_minutes
+          : (run.duration_minutes ?? null);
     }
-    if (!transitionedRun) {
-      setDataError("No batch run returned from transition.");
-      return;
-    }
-
-    const appliedStatus = (transitionedRun.status ??
-      status) as BatchRunRow["status"];
-    const nextRunStartedAt = transitionedRun.started_at ?? run.started_at ?? null;
-    const nextRunDoneAt = transitionedRun.done_at ?? run.done_at ?? null;
-    const nextRunDuration =
-      typeof transitionedRun.duration_minutes === "number"
-        ? transitionedRun.duration_minutes
-        : (run.duration_minutes ?? null);
 
     setBatchRuns((prev) =>
       prev.map((item) =>
@@ -2637,8 +4251,8 @@ export default function OperatorProductionPage() {
           ? {
               ...item,
               status: appliedStatus,
-              blocked_reason: transitionedRun.blocked_reason ?? null,
-              blocked_reason_id: transitionedRun.blocked_reason_id ?? null,
+              blocked_reason: transitionedRun?.blocked_reason ?? null,
+              blocked_reason_id: transitionedRun?.blocked_reason_id ?? null,
               started_at: nextRunStartedAt,
               done_at: nextRunDoneAt,
               duration_minutes: nextRunDuration,
@@ -2700,6 +4314,13 @@ export default function OperatorProductionPage() {
     extra?: { reason?: string | null; reasonId?: string | null },
   ) => {
     if (pendingRunAction || pendingAction) {
+      return;
+    }
+    if (
+      status === "in_progress" &&
+      !isWithinWorkingSchedule(new Date(liveNowMs), workingCalendar)
+    ) {
+      setDataError(t("production.operator.queue.outsideWorkingHours"));
       return;
     }
     const run = batchRuns.find((item) => item.id === runId);
@@ -3125,20 +4746,18 @@ export default function OperatorProductionPage() {
     if (!quickActionOrderId) {
       return;
     }
-    const candidates = productionItems.filter(
-      (item) => {
-        if (item.order_id !== quickActionOrderId) {
-          return false;
-        }
-        if (quickActionRowKey) {
-          return getProductionItemRowKey(item) === quickActionRowKey;
-        }
-        if (quickActionRowIndex != null) {
-          return getProductionItemRowIndex(item) === quickActionRowIndex;
-        }
+    const candidates = productionItems.filter((item) => {
+      if (item.order_id !== quickActionOrderId) {
         return false;
-      },
-    );
+      }
+      if (quickActionRowKey) {
+        return getProductionItemRowKey(item) === quickActionRowKey;
+      }
+      if (quickActionRowIndex != null) {
+        return getProductionItemRowIndex(item) === quickActionRowIndex;
+      }
+      return false;
+    });
     if (candidates.length === 0) {
       return;
     }
@@ -3148,7 +4767,12 @@ export default function OperatorProductionPage() {
       return bTs - aTs;
     })[0];
     setQuickActionItemId(target.id);
-  }, [quickActionOrderId, quickActionRowIndex, quickActionRowKey, productionItems]);
+  }, [
+    quickActionOrderId,
+    quickActionRowIndex,
+    quickActionRowKey,
+    productionItems,
+  ]);
 
   const handleScannerResolved = async (result: ResolveScanTargetResult) => {
     const sb = supabase;
@@ -3244,12 +4868,18 @@ export default function OperatorProductionPage() {
     return null;
   }
 
+  const selectedWeekNumber = getIsoWeekNumber(selectedWeekStart);
+
   const headerSubtitle = t("production.operator.header.subtitle", {
-    date: `${formatDate(selectedWeekStart)} - ${formatDate(selectedWeekEnd)}`,
+    date: `(${selectedWeekNumber} ${t("production.operator.filters.week")}) ${formatDate(selectedWeekStart)} - ${formatDate(selectedWeekEnd)}`,
   });
   const selectedWeekLabel = `${formatDate(selectedWeekStart)} - ${formatDate(
     selectedWeekEnd,
   )}`;
+  const isWithinWorkingHoursNow = isWithinWorkingSchedule(
+    new Date(liveNowMs),
+    workingCalendar,
+  );
   const closeBlockedDialog = () => {
     setBlockedRunId(null);
     setBlockedItemId(null);
@@ -3314,9 +4944,9 @@ export default function OperatorProductionPage() {
           disabled={
             blockedItemId
               ? isActionLoading(blockedItemId, "blocked")
-              : (blockedRunId
-                  ? isRunActionLoading(blockedRunId, "blocked")
-                  : false)
+              : blockedRunId
+                ? isRunActionLoading(blockedRunId, "blocked")
+                : false
           }
           className="gap-2"
         >
@@ -3391,9 +5021,9 @@ export default function OperatorProductionPage() {
           disabled={
             pausedItemId
               ? isActionLoading(pausedItemId, "paused")
-              : (pausedRunId
-                  ? isRunActionLoading(pausedRunId, "paused")
-                  : false)
+              : pausedRunId
+                ? isRunActionLoading(pausedRunId, "paused")
+                : false
           }
           className="gap-2"
         >
@@ -3415,20 +5045,21 @@ export default function OperatorProductionPage() {
         showCompact={showCompactMobileTitle}
         className="pt-6 pb-6"
         rightAction={
-          isWarehouseQueueView ? null :
-          <button
-            type="button"
-            onClick={() => setIsProfilePanelOpen(true)}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background shadow-sm"
-            aria-label={t("production.operator.profile.openPanel")}
-          >
-            <UserAvatar
-              avatarUrl={currentUser.avatarUrl}
-              name={currentUser.name}
-              fallback={userInitials || "U"}
-              sizeClass="h-9 w-9"
-            />
-          </button>
+          isWarehouseQueueView ? null : (
+            <button
+              type="button"
+              onClick={() => setIsProfilePanelOpen(true)}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background shadow-sm"
+              aria-label={t("production.operator.profile.openPanel")}
+            >
+              <UserAvatar
+                avatarUrl={currentUser.avatarUrl}
+                name={currentUser.name}
+                fallback={userInitials || "U"}
+                sizeClass="h-9 w-9"
+              />
+            </button>
+          )
         }
       />
 
@@ -3437,23 +5068,24 @@ export default function OperatorProductionPage() {
         title={t("production.operator.header.title")}
         subtitle={headerSubtitle}
         actions={
-          isWarehouseQueueView ? null :
-          <button
-            type="button"
-            onClick={() => setIsProfilePanelOpen(true)}
-            className="hidden items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-muted/40 md:inline-flex"
-          >
-            <UserAvatar
-              avatarUrl={currentUser.avatarUrl}
-              name={currentUser.name}
-              fallback={userInitials || "U"}
-              sizeClass="h-7 w-7"
-            />
-            <span className="max-w-56 truncate font-medium">
-              {currentUser.name} ({userRoleLabel})
-            </span>
-            <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
-          </button>
+          isWarehouseQueueView ? null : (
+            <button
+              type="button"
+              onClick={() => setIsProfilePanelOpen(true)}
+              className="hidden items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-muted/40 md:inline-flex"
+            >
+              <UserAvatar
+                avatarUrl={currentUser.avatarUrl}
+                name={currentUser.name}
+                fallback={userInitials || "U"}
+                sizeClass="h-7 w-7"
+              />
+              <span className="max-w-56 truncate font-medium">
+                {currentUser.name} ({userRoleLabel})
+              </span>
+              <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
+            </button>
+          )
         }
         className="top-0!"
       />
@@ -3573,7 +5205,7 @@ export default function OperatorProductionPage() {
             </Select>
           </SelectField>
 
-          <div className="flex items-end gap-2">
+          <div className="flex items-start gap-2">
             <Button
               type="button"
               variant={onlyBlocked ? "secondary" : "outline"}
@@ -3591,26 +5223,25 @@ export default function OperatorProductionPage() {
               <QrCodeIcon className="h-4 w-4" />
               {t("production.operator.filters.scan")}
             </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-10"
+              onClick={() =>
+                setQueryParams({
+                  date: today,
+                  station: stationFilter ?? null,
+                  order: null,
+                  status: null,
+                  priority: null,
+                  q: null,
+                  blocked: null,
+                })
+              }
+            >
+              {t("production.operator.filters.reset")}
+            </Button>
           </div>
-
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-10 self-end"
-            onClick={() =>
-              setQueryParams({
-                date: today,
-                station: stationFilter ?? null,
-                order: null,
-                status: null,
-                priority: null,
-                q: null,
-                blocked: null,
-              })
-            }
-          >
-            {t("production.operator.filters.reset")}
-          </Button>
         </div>
       </div>
 
@@ -3707,7 +5338,7 @@ export default function OperatorProductionPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 grid-cols-1">
         {visibleStations.map((station) => {
           const queue = filteredQueueByStation.get(station.id) ?? [];
           const stationTotalMinutes = queue.reduce(
@@ -3735,7 +5366,7 @@ export default function OperatorProductionPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-3 grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
                 {queue.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
                     {t("production.operator.queue.noWorkQueued")}
@@ -3752,14 +5383,20 @@ export default function OperatorProductionPage() {
                         const isReceiptOnlyTracking =
                           item.trackingMode === "receipt_only";
                         const metaParts: string[] = [];
-                        if (!isConstructionTracking && (item.constructionCount ?? 0) > 0) {
+                        if (
+                          !isConstructionTracking &&
+                          (item.constructionCount ?? 0) > 0
+                        ) {
                           metaParts.push(
                             t("production.operator.queue.constructionEntries", {
                               count: item.constructionCount ?? 0,
                             }),
                           );
                         }
-                        if (!isConstructionTracking && (item.totalPiecesQty ?? 0) > 0) {
+                        if (
+                          !isConstructionTracking &&
+                          (item.totalPiecesQty ?? 0) > 0
+                        ) {
                           metaParts.push(
                             t("production.operator.queue.totalPieces", {
                               count: item.totalPiecesQty ?? 0,
@@ -3781,12 +5418,33 @@ export default function OperatorProductionPage() {
                           );
                         }
                         const metaLine = metaParts.join(" - ");
-                        const stationDurationMinutes = isConstructionTracking
-                          ? Number(item.durationMinutes ?? 0)
-                          : 0;
                         const orderDurationMinutes = !isConstructionTracking
                           ? Number(item.durationMinutes ?? 0)
                           : 0;
+                        const orderDurationSeconds = !isConstructionTracking
+                          ? Number(item.durationSeconds ?? 0)
+                          : 0;
+                        const ownOrderDurationSeconds = !isConstructionTracking
+                          ? item.runIds.reduce(
+                              (sum, runId) =>
+                                sum +
+                                (ownWorkSessionSecondsByScope.get(
+                                  getWorkSessionScopeKey(runId, null),
+                                ) ?? 0),
+                              0,
+                            )
+                          : 0;
+                        const visibleOwnOrderDurationSeconds =
+                          orderDurationSeconds > 0
+                            ? Math.min(
+                                ownOrderDurationSeconds,
+                                orderDurationSeconds,
+                              )
+                            : ownOrderDurationSeconds;
+                        const ownOrderDurationLabel =
+                          visibleOwnOrderDurationSeconds > 0
+                            ? formatLiveDuration(visibleOwnOrderDurationSeconds)
+                            : null;
                         const hasBatchStarted =
                           Boolean(item.startedAt) ||
                           item.status === "in_progress" ||
@@ -3804,16 +5462,18 @@ export default function OperatorProductionPage() {
                         const hasBlockingDependenciesForBatch = item.items.some(
                           (prodItem) => {
                             const dependencyStations =
-                              dependenciesByStation.get(prodItem.station_id ?? "") ??
-                              [];
+                              dependenciesByStation.get(
+                                prodItem.station_id ?? "",
+                              ) ?? [];
                             if (dependencyStations.length === 0) {
                               return false;
                             }
                             const groupKey = getItemGroupKey(prodItem);
                             return dependencyStations.some((depId) => {
                               const depItem =
-                                itemsByGroupAndStation.get(groupKey)?.get(depId) ??
-                                null;
+                                itemsByGroupAndStation
+                                  .get(groupKey)
+                                  ?.get(depId) ?? null;
                               return depItem && depItem.status !== "done";
                             });
                           },
@@ -3822,23 +5482,6 @@ export default function OperatorProductionPage() {
                           item.id,
                           "done",
                         );
-                        const elapsedMinutes = item.startedAt
-                          ? computeWorkingMinutes(
-                              item.startedAt,
-                              item.doneAt ?? null,
-                              workingCalendar,
-                            )
-                          : 0;
-                        const elapsedLabel = item.startedAt
-                          ? item.status === "in_progress"
-                            ? formatLiveDuration(
-                                item.startedAt,
-                                item.doneAt ?? null,
-                                liveNowMs,
-                                workingCalendar,
-                              )
-                            : formatDuration(elapsedMinutes)
-                          : null;
                         const customerName = item.customerName?.trim() ?? "";
                         const materialName = item.material?.trim() ?? "";
                         const showMaterialName =
@@ -3855,9 +5498,19 @@ export default function OperatorProductionPage() {
                             excludeValues: [
                               item.orderNumber,
                               item.customerName,
+                              item.unitPosition ?? "",
                               item.unitName ?? "",
                             ],
                           },
+                        );
+                        const workingOperatorNames = getActiveOperatorNames(
+                          item.workingOperatorIds ?? [],
+                        );
+                        const pausedOperatorNames = getActiveOperatorNames(
+                          item.pausedOperatorIds ?? [],
+                        );
+                        const blockedOperatorNames = getActiveOperatorNames(
+                          item.blockedOperatorIds ?? [],
                         );
                         return (
                           <>
@@ -3866,39 +5519,24 @@ export default function OperatorProductionPage() {
                                 <span className="font-semibold">
                                   {item.orderNumber}
                                 </span>
-                            <div className="mt-1 text-[11px] text-muted-foreground">
-                              {item.customerName}
-                            </div>
-                            {isConstructionTracking &&
-                            (item.unitType || item.unitName) ? (
-                              <div className="mt-1.5 space-y-0.5 text-[12px] leading-5">
-                                <div>
-                                  <span className="inline-flex rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                                    {t(
-                                      "production.operator.queue.constructionModeBadge",
-                                    )}
-                                  </span>
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {item.customerName}
                                 </div>
-                                {item.unitName ? (
-                                  <div className="font-medium text-foreground">
-                                    {item.unitName}
+
+                                {displayFields.length > 0 ? (
+                                  <div className="mt-1.5 space-y-0.5 text-[11px] leading-5 text-muted-foreground">
+                                    {displayFields.map((entry) => (
+                                      <div key={`${item.id}:${entry.label}`}>
+                                        <span className="font-medium text-foreground">
+                                          {entry.label}:
+                                        </span>{" "}
+                                        <span>{entry.value}</span>
+                                      </div>
+                                    ))}
                                   </div>
                                 ) : null}
                               </div>
-                            ) : null}
-                            {displayFields.length > 0 ? (
-                              <div className="mt-1.5 space-y-0.5 text-[11px] leading-5 text-muted-foreground">
-                                {displayFields.map((entry) => (
-                                  <div key={`${item.id}:${entry.label}`}>
-                                    <span className="font-medium text-foreground">
-                                      {entry.label}:
-                                    </span>{" "}
-                                    <span>{entry.value}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
+
                               <div className="flex items-center gap-2">
                                 {!isConstructionTracking ? (
                                   <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
@@ -3908,13 +5546,34 @@ export default function OperatorProductionPage() {
                                 <Badge variant={priorityBadge(item.priority)}>
                                   {priorityLabel(item.priority)}
                                 </Badge>
-                                <Badge
-                                  variant={statusBadge(item.status)}
-                                >
+                                <Badge variant={statusBadge(item.status)}>
                                   {runStatusLabel(item.status ?? "queued")}
                                 </Badge>
                               </div>
                             </div>
+                            {isConstructionTracking &&
+                            (item.unitPosition ||
+                              item.unitType ||
+                              item.unitName) ? (
+                              <div className="mt-1.5 flex w-full justify-between gap-3 text-[12px] leading-5">
+                                <div className="min-w-0 space-y-0.5">
+                                  {item.unitName ? (
+                                    <div className="font-medium text-foreground">
+                                      {item.unitPosition
+                                        ? `${t("production.main.jobs.position")}: ${item.unitPosition} | ${item.unitName}`
+                                        : item.unitName}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div>
+                                  <span className="inline-flex rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                    {t(
+                                      "production.operator.queue.constructionModeBadge",
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : null}
                             {metaLine ? (
                               <div className="mt-1 text-muted-foreground">
                                 {metaLine}
@@ -3925,219 +5584,445 @@ export default function OperatorProductionPage() {
                                 {item.material}
                               </div>
                             ) : null}
-                            {stationDurationMinutes > 0 ? (
+                            {!isConstructionTracking &&
+                            item.activeOperatorsCount &&
+                            item.activeOperatorsCount > 0 ? (
+                              <>
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {t(
+                                    "production.operator.queue.activeOperators",
+                                    {
+                                      count: item.activeOperatorsCount,
+                                    },
+                                  )}
+                                </div>
+                                {workingOperatorNames.length > 0 ? (
+                                  <div className="mt-1 text-[11px] text-muted-foreground">
+                                    {t(
+                                      "production.operator.queue.workingOperators",
+                                      {
+                                        names: workingOperatorNames.join(", "),
+                                      },
+                                    )}
+                                  </div>
+                                ) : null}
+                                {pausedOperatorNames.length > 0 ? (
+                                  <div className="mt-1 text-[11px] text-muted-foreground">
+                                    {t(
+                                      "production.operator.queue.pausedOperators",
+                                      {
+                                        names: pausedOperatorNames.join(", "),
+                                      },
+                                    )}
+                                  </div>
+                                ) : null}
+                                {blockedOperatorNames.length > 0 ? (
+                                  <div className="mt-1 text-[11px] text-muted-foreground">
+                                    {t(
+                                      "production.operator.queue.blockedOperators",
+                                      {
+                                        names: blockedOperatorNames.join(", "),
+                                      },
+                                    )}
+                                  </div>
+                                ) : null}
+                              </>
+                            ) : null}
+                            {!isConstructionTracking &&
+                            item.operatorSessionStatus ? (
                               <div className="mt-1 text-[11px] text-muted-foreground">
-                                {t("production.operator.queue.stationTime")}{" "}
-                                {formatDuration(stationDurationMinutes)}
+                                {t("production.operator.queue.myStatus", {
+                                  status: runStatusLabel(
+                                    item.operatorSessionStatus,
+                                  ),
+                                })}
                               </div>
                             ) : null}
-                            {orderDurationMinutes > 0 ? (
+                            {!isConstructionTracking &&
+                            ownOrderDurationLabel ? (
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                {t("production.operator.queue.myTime", {
+                                  value: ownOrderDurationLabel,
+                                })}
+                              </div>
+                            ) : null}
+                            {orderDurationSeconds > 0 ||
+                            orderDurationMinutes > 0 ? (
                               <div className="mt-1 text-[11px] text-muted-foreground">
                                 {t("production.operator.queue.orderTime")}{" "}
-                                {formatDuration(orderDurationMinutes)}
-                              </div>
-                            ) : null}
-                            {elapsedLabel ? (
-                              <div className="mt-2 text-[11px] text-muted-foreground">
-                                {t("production.operator.queue.time", {
-                                  value: elapsedLabel,
-                                })}
+                                {orderDurationSeconds > 0
+                                  ? formatLiveDuration(orderDurationSeconds)
+                                  : formatDuration(orderDurationMinutes)}
                               </div>
                             ) : null}
                             {item.items.length > 0 && isConstructionTracking ? (
                               <div className="mt-3">
                                 <div className="space-y-2">
                                   {item.items.map((prodItem) => {
-                                      const blockedReason =
-                                        (
-                                          prodItem.meta as Record<
-                                            string,
-                                            unknown
-                                          > | null
-                                        )?.blocked_reason ?? null;
-                                      const pausedReason =
-                                        (
-                                          prodItem.meta as Record<
-                                            string,
-                                            unknown
-                                          > | null
-                                        )?.paused_reason ?? null;
-                                      const groupKey =
-                                        getItemGroupKey(prodItem);
-                                      const dependencyStations =
-                                        dependenciesByStation.get(
-                                          prodItem.station_id ?? "",
-                                        ) ?? [];
-                                      const blockingDependencies =
-                                        dependencyStations
-                                          .map((depId) => {
-                                            const depItem =
-                                              itemsByGroupAndStation
-                                                .get(groupKey)
-                                                ?.get(depId) ?? null;
-                                            if (
-                                              !depItem ||
-                                              depItem.status === "done"
-                                            ) {
-                                              return null;
-                                            }
-                                            return {
-                                              stationId: depId,
-                                              status: depItem.status,
-                                            };
-                                          })
-                                          .filter(Boolean) as Array<{
-                                          stationId: string;
-                                          status: ProductionItemRow["status"];
-                                        }>;
-                                      const hasBlockingDependencies =
-                                        blockingDependencies.length > 0;
-                                      const {
-                                        effectiveStatus,
-                                        effectiveStartedAt,
-                                        effectiveDoneAt,
-                                      } = resolveConstructionItemState(
+                                    const blockedReason =
+                                      (
+                                        prodItem.meta as Record<
+                                          string,
+                                          unknown
+                                        > | null
+                                      )?.blocked_reason ?? null;
+                                    const pausedReason =
+                                      (
+                                        prodItem.meta as Record<
+                                          string,
+                                          unknown
+                                        > | null
+                                      )?.paused_reason ?? null;
+                                    const groupKey = getItemGroupKey(prodItem);
+                                    const dependencyStations =
+                                      dependenciesByStation.get(
+                                        prodItem.station_id ?? "",
+                                      ) ?? [];
+                                    const blockingDependencies =
+                                      dependencyStations
+                                        .map((depId) => {
+                                          const depItem =
+                                            itemsByGroupAndStation
+                                              .get(groupKey)
+                                              ?.get(depId) ?? null;
+                                          if (
+                                            !depItem ||
+                                            depItem.status === "done"
+                                          ) {
+                                            return null;
+                                          }
+                                          return {
+                                            stationId: depId,
+                                            status: depItem.status,
+                                          };
+                                        })
+                                        .filter(Boolean) as Array<{
+                                        stationId: string;
+                                        status: ProductionItemRow["status"];
+                                      }>;
+                                    const hasBlockingDependencies =
+                                      blockingDependencies.length > 0;
+                                    const {
+                                      effectiveStatus,
+                                      matchedRun,
+                                      scopeSummary,
+                                    } = resolveConstructionItemState(
+                                      prodItem,
+                                      item,
+                                      batchRuns,
+                                      workSessionScopeSummaryByKey,
+                                    );
+                                    const infoRunId = matchedRun?.id ?? item.id;
+                                    const infoScopeKey = getWorkSessionScopeKey(
+                                      infoRunId,
+                                      prodItem.id,
+                                    );
+                                    const activeOperatorIds =
+                                      getInvolvedOperatorIdsForConstructionItem(
+                                        infoRunId,
                                         prodItem,
-                                        item,
-                                        batchRuns,
                                       );
-                                      const itemElapsedMinutes =
-                                        effectiveStartedAt
-                                          ? computeWorkingMinutes(
-                                              effectiveStartedAt,
-                                              effectiveDoneAt ?? null,
-                                              workingCalendar,
-                                            )
-                                          : 0;
-                                      const itemElapsedLabel =
-                                        effectiveStartedAt
-                                          ? formatDuration(itemElapsedMinutes)
-                                          : null;
-                                      const itemQuantity =
-                                        getProductionItemQuantity(prodItem);
-                                      const itemCompletedQty =
-                                        getProductionItemCompletedQty(prodItem);
-                                      const itemRemainingQty =
-                                        getProductionItemRemainingQty(prodItem);
-                                      return (
-                                        <div
-                                          key={prodItem.id}
-                                          className="rounded-md border border-border bg-muted/20 px-2 py-2"
-                                        >
+                                    const activeOperatorCount =
+                                      activeOperatorIds.size;
+                                    const operatorStatusGroups =
+                                      getOperatorStatusGroupsForConstructionItem(
+                                        infoRunId,
+                                        prodItem,
+                                      );
+                                    const workingOperatorNames =
+                                      getActiveOperatorNames(
+                                        operatorStatusGroups.working,
+                                      );
+                                    const pausedOperatorNames =
+                                      getActiveOperatorNames(
+                                        operatorStatusGroups.paused,
+                                      );
+                                    const blockedOperatorNames =
+                                      getActiveOperatorNames(
+                                        operatorStatusGroups.blocked,
+                                      );
+                                    const ownSessionStatus =
+                                      getOwnWorkSessionStatus(
+                                        infoRunId,
+                                        prodItem.id,
+                                      );
+                                    const ownElapsedSeconds =
+                                      ownWorkSessionSecondsByScope.get(
+                                        infoScopeKey,
+                                      ) ?? 0;
+                                    const visibleOwnElapsedSeconds =
+                                      Number(
+                                        scopeSummary?.elapsedSeconds ?? 0,
+                                      ) > 0
+                                        ? Math.min(
+                                            ownElapsedSeconds,
+                                            Number(
+                                              scopeSummary?.elapsedSeconds ?? 0,
+                                            ),
+                                          )
+                                        : ownElapsedSeconds;
+                                    const ownElapsedLabel =
+                                      visibleOwnElapsedSeconds > 0
+                                        ? formatLiveDuration(
+                                            visibleOwnElapsedSeconds,
+                                          )
+                                        : null;
+                                    const itemElapsedLabel =
+                                      Number(
+                                        scopeSummary?.elapsedSeconds ?? 0,
+                                      ) > 0
+                                        ? formatLiveDuration(
+                                            Number(
+                                              scopeSummary?.elapsedSeconds ?? 0,
+                                            ),
+                                          )
+                                        : null;
+                                    const itemQuantity =
+                                      getProductionItemQuantity(prodItem);
+                                    const itemCompletedQty =
+                                      getOperatorVisibleCompletedQty(prodItem);
+                                    const itemRemainingQty =
+                                      getOperatorVisibleRemainingQty(prodItem);
+                                    const showConstructionItemHeader =
+                                      item.items.length > 1;
+                                    const itemPosition =
+                                      getProductionItemMetaPosition(prodItem) ??
+                                      orderItemPositionBySourceKey.get(
+                                        getProductionItemSourceKey(prodItem) ??
+                                          "",
+                                      ) ??
+                                      null;
+                                    return (
+                                      <div
+                                        key={prodItem.id}
+                                        className="space-y-2"
+                                      >
+                                        {showConstructionItemHeader ? (
                                           <div className="flex items-start justify-between gap-2">
                                             <div className="text-[11px] text-muted-foreground">
-                                              {prodItem.item_name}
+                                              {itemPosition
+                                                ? `${t("production.main.jobs.position")}: ${itemPosition} | ${prodItem.item_name}`
+                                                : prodItem.item_name}
                                             </div>
                                             <Badge
                                               variant={statusBadge(
-                                                effectiveStatus,
+                                                (effectiveStatus ??
+                                                  "queued") as BatchRunRow["status"],
                                               )}
                                             >
                                               {runStatusLabel(
-                                                effectiveStatus ?? "queued",
+                                                (effectiveStatus ??
+                                                  "queued") as BatchRunRow["status"],
                                               )}
                                             </Badge>
                                           </div>
-                                          <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
-                                            <div>
-                                              {t(
-                                                "production.operator.queue.constructionUnits",
-                                                {
-                                                  qty: prodItem.qty,
-                                                },
-                                              )}
-                                            </div>
-                                            <div>
-                                              {t(
-                                                "production.operator.queue.constructionReadyProgress",
-                                                {
-                                                  completed: itemCompletedQty,
-                                                  total: itemQuantity,
-                                                },
-                                              )}
-                                            </div>
-                                            {prodItem.material ? (
-                                              <div>{prodItem.material}</div>
-                                            ) : null}
+                                        ) : null}
+                                        <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
+                                          <div>
+                                            {t(
+                                              "production.operator.queue.constructionReadyProgress",
+                                              {
+                                                completed: itemCompletedQty,
+                                                total: itemQuantity,
+                                              },
+                                            )}
                                           </div>
-                                          {hasBlockingDependencies ? (
-                                            <div className="mt-2 space-y-1">
-                                              <div className="text-[11px] text-amber-600">
-                                                {t("production.operator.queue.waitingFor")}
-                                              </div>
-                                              <div className="flex flex-wrap gap-1">
-                                                {blockingDependencies.map(
-                                                  (dep) => {
-                                                    const name =
-                                                      stationsById.get(
-                                                        dep.stationId,
-                                                      ) ??
-                                                      t(
-                                                        "production.operator.queue.stationFallback",
-                                                      );
-                                                    return (
-                                                      <span
-                                                        key={dep.stationId}
-                                                        className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700"
-                                                      >
-                                                        {name} -{" "}
-                                                        {runStatusLabel(
-                                                          dep.status,
-                                                        )}
-                                                      </span>
-                                                    );
+                                          {prodItem.material ? (
+                                            <div>{prodItem.material}</div>
+                                          ) : null}
+                                          {activeOperatorCount > 0 ? (
+                                            <>
+                                              <div>
+                                                {t(
+                                                  "production.operator.queue.activeOperators",
+                                                  {
+                                                    count: activeOperatorCount,
                                                   },
                                                 )}
                                               </div>
+                                              {workingOperatorNames.length >
+                                              0 ? (
+                                                <div>
+                                                  {t(
+                                                    "production.operator.queue.workingOperators",
+                                                    {
+                                                      names:
+                                                        workingOperatorNames.join(
+                                                          ", ",
+                                                        ),
+                                                    },
+                                                  )}
+                                                </div>
+                                              ) : null}
+                                              {pausedOperatorNames.length >
+                                              0 ? (
+                                                <div>
+                                                  {t(
+                                                    "production.operator.queue.pausedOperators",
+                                                    {
+                                                      names:
+                                                        pausedOperatorNames.join(
+                                                          ", ",
+                                                        ),
+                                                    },
+                                                  )}
+                                                </div>
+                                              ) : null}
+                                              {blockedOperatorNames.length >
+                                              0 ? (
+                                                <div>
+                                                  {t(
+                                                    "production.operator.queue.blockedOperators",
+                                                    {
+                                                      names:
+                                                        blockedOperatorNames.join(
+                                                          ", ",
+                                                        ),
+                                                    },
+                                                  )}
+                                                </div>
+                                              ) : null}
+                                            </>
+                                          ) : null}
+                                          {ownSessionStatus ? (
+                                            <div>
+                                              {t(
+                                                "production.operator.queue.myStatus",
+                                                {
+                                                  status: runStatusLabel(
+                                                    ownSessionStatus ??
+                                                      "queued",
+                                                  ),
+                                                },
+                                              )}
                                             </div>
                                           ) : null}
-                                          {itemElapsedLabel ? (
-                                            <div className="mt-1 text-[11px] text-muted-foreground">
-                                              {t("production.operator.queue.time", {
+                                          {ownElapsedLabel ? (
+                                            <div>
+                                              {t(
+                                                "production.operator.queue.myTime",
+                                                {
+                                                  value: ownElapsedLabel,
+                                                },
+                                              )}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                        {hasBlockingDependencies ? (
+                                          <div className="mt-2 space-y-1">
+                                            <div className="text-[11px] text-amber-600">
+                                              {t(
+                                                "production.operator.queue.waitingFor",
+                                              )}
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
+                                              {blockingDependencies.map(
+                                                (dep) => {
+                                                  const name =
+                                                    stationsById.get(
+                                                      dep.stationId,
+                                                    ) ??
+                                                    t(
+                                                      "production.operator.queue.stationFallback",
+                                                    );
+                                                  return (
+                                                    <span
+                                                      key={dep.stationId}
+                                                      className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700"
+                                                    >
+                                                      {name} -{" "}
+                                                      {runStatusLabel(
+                                                        dep.status,
+                                                      )}
+                                                    </span>
+                                                  );
+                                                },
+                                              )}
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                        {itemElapsedLabel ? (
+                                          <div className="mt-1 text-[11px] text-muted-foreground">
+                                            {t(
+                                              "production.operator.queue.constructionTime",
+                                              {
                                                 value: itemElapsedLabel,
-                                              })}
-                                            </div>
-                                          ) : null}
-                                          {prodItem.status === "blocked" &&
-                                          blockedReason ? (
-                                            <div className="mt-1 text-[11px] text-rose-600">
-                                              {t("production.operator.queue.blockedReason", {
+                                              },
+                                            )}
+                                          </div>
+                                        ) : null}
+                                        {prodItem.status === "blocked" &&
+                                        blockedReason ? (
+                                          <div className="mt-1 text-[11px] text-rose-600">
+                                            {t(
+                                              "production.operator.queue.blockedReason",
+                                              {
                                                 reason: String(blockedReason),
-                                              })}
-                                            </div>
-                                          ) : null}
-                                          {prodItem.status === "paused" &&
-                                          pausedReason ? (
-                                            <div className="mt-1 text-[11px] text-amber-600">
-                                              {t("production.operator.queue.pausedReason", {
+                                              },
+                                            )}
+                                          </div>
+                                        ) : null}
+                                        {prodItem.status === "paused" &&
+                                        pausedReason ? (
+                                          <div className="mt-1 text-[11px] text-amber-600">
+                                            {t(
+                                              "production.operator.queue.pausedReason",
+                                              {
                                                 reason: String(pausedReason),
-                                              })}
-                                            </div>
-                                          ) : null}
+                                              },
+                                            )}
+                                          </div>
+                                        ) : null}
+                                        <div className="mt-3 rounded-md border border-border bg-muted/20 px-2 py-2">
+                                          <div className="text-[11px] text-muted-foreground">
+                                            {t(
+                                              "production.operator.queue.constructionActions",
+                                            )}
+                                          </div>
                                           <div className="mt-2 flex items-stretch gap-2">
                                             {(() => {
                                               const {
                                                 effectiveStatus,
                                                 effectiveStartedAt,
+                                                matchedRun,
                                               } = resolveConstructionItemState(
                                                 prodItem,
                                                 item,
                                                 batchRuns,
+                                                workSessionScopeSummaryByKey,
                                               );
+                                              const actionRunId =
+                                                matchedRun?.id ?? item.id;
+                                              const hasOperatorActiveSession =
+                                                hasActiveWorkSessionForItem(
+                                                  actionRunId,
+                                                  prodItem.id,
+                                                );
+                                              const hasOperatorCompletedSession =
+                                                ownSessionStatus === "done" &&
+                                                (effectiveStatus === "done" ||
+                                                  activeOperatorCount > 0);
                                               const hasStarted =
                                                 Boolean(effectiveStartedAt) ||
-                                                effectiveStatus === "in_progress" ||
+                                                effectiveStatus ===
+                                                  "in_progress" ||
                                                 effectiveStatus === "paused";
                                               const isBlocked =
                                                 effectiveStatus === "blocked";
                                               const isPaused =
                                                 effectiveStatus === "paused";
+                                              const shouldResumeOwnSession =
+                                                ownSessionStatus === "paused" ||
+                                                ownSessionStatus === "blocked";
                                               const startLockedByDate =
                                                 !hasStarted &&
                                                 !isBlocked &&
                                                 isFuturePlannedDate(
                                                   item.plannedDate,
                                                 );
+                                              const startLockedByWorkHours =
+                                                !hasOperatorActiveSession &&
+                                                !isWithinWorkingHoursNow;
                                               const isDone =
                                                 effectiveStatus === "done";
                                               const isStarting =
@@ -4145,11 +6030,10 @@ export default function OperatorProductionPage() {
                                                   prodItem.id,
                                                   "in_progress",
                                                 );
-                                              const isPausing =
-                                                isActionLoading(
-                                                  prodItem.id,
-                                                  "paused",
-                                                );
+                                              const isPausing = isActionLoading(
+                                                prodItem.id,
+                                                "paused",
+                                              );
                                               const isCompleting =
                                                 isActionLoading(
                                                   prodItem.id,
@@ -4159,36 +6043,40 @@ export default function OperatorProductionPage() {
                                                 <>
                                                   <Button
                                                     variant={
-                                                      effectiveStatus === "in_progress"
+                                                      hasOperatorActiveSession
                                                         ? "secondary"
                                                         : "default"
                                                     }
                                                     size="sm"
-                                                    className={operatorPrimaryActionClass}
+                                                    className={
+                                                      operatorPrimaryActionClass
+                                                    }
                                                     disabled={
                                                       isDone ||
+                                                      hasOperatorCompletedSession ||
                                                       startLockedByDate ||
+                                                      startLockedByWorkHours ||
                                                       (!isBlocked &&
                                                         !isPaused &&
                                                         hasBlockingDependencies) ||
-                                                      (effectiveStatus === "in_progress"
+                                                      (hasOperatorActiveSession
                                                         ? isPausing
                                                         : isStarting)
                                                     }
                                                     onClick={() =>
-                                                      effectiveStatus === "in_progress"
+                                                      hasOperatorActiveSession
                                                         ? handleOpenPaused(
-                                                            item.id,
+                                                            actionRunId,
                                                             prodItem.id,
                                                           )
                                                         : handleUserStatusUpdate(
                                                             prodItem.id,
-                                                            item.id,
+                                                            actionRunId,
                                                             "in_progress",
                                                           )
                                                     }
                                                   >
-                                                    {effectiveStatus === "in_progress" ? (
+                                                    {hasOperatorActiveSession ? (
                                                       isPausing ? (
                                                         <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
                                                       ) : (
@@ -4199,11 +6087,19 @@ export default function OperatorProductionPage() {
                                                     ) : (
                                                       <PlayIcon className="h-4 w-4" />
                                                     )}
-                                                    {isBlocked || isPaused
-                                                      ? t("production.operator.actions.resume")
-                                                      : effectiveStatus === "in_progress"
-                                                        ? t("production.operator.actions.pause")
-                                                      : t("production.operator.actions.start")}
+                                                    {isBlocked ||
+                                                    isPaused ||
+                                                    shouldResumeOwnSession
+                                                      ? t(
+                                                          "production.operator.actions.resume",
+                                                        )
+                                                      : hasOperatorActiveSession
+                                                        ? t(
+                                                            "production.operator.actions.pause",
+                                                          )
+                                                        : t(
+                                                            "production.operator.actions.start",
+                                                          )}
                                                   </Button>
                                                   {startLockedByDate &&
                                                   item.plannedDate ? (
@@ -4226,7 +6122,7 @@ export default function OperatorProductionPage() {
                                                           size="sm"
                                                           className={`${operatorSuccessActionClass} justify-between`}
                                                           disabled={
-                                                            !hasStarted ||
+                                                            !hasOperatorActiveSession ||
                                                             isDone ||
                                                             isBlocked ||
                                                             isPaused ||
@@ -4238,7 +6134,9 @@ export default function OperatorProductionPage() {
                                                           ) : (
                                                             <CheckCheckIcon className="h-4 w-4" />
                                                           )}
-                                                          {t("production.operator.actions.done")}
+                                                          {t(
+                                                            "production.operator.actions.done",
+                                                          )}
                                                           <ChevronDownIcon className="h-3.5 w-3.5" />
                                                         </Button>
                                                       </PopoverTrigger>
@@ -4328,9 +6226,11 @@ export default function OperatorProductionPage() {
                                                     <Button
                                                       variant="outline"
                                                       size="sm"
-                                                      className={operatorSuccessActionClass}
+                                                      className={
+                                                        operatorSuccessActionClass
+                                                      }
                                                       disabled={
-                                                        !hasStarted ||
+                                                        !hasOperatorActiveSession ||
                                                         isDone ||
                                                         isBlocked ||
                                                         isPaused ||
@@ -4358,10 +6258,16 @@ export default function OperatorProductionPage() {
                                                   <Button
                                                     variant="outline"
                                                     size="icon"
-                                                    className={operatorWarningIconActionClass}
+                                                    className={
+                                                      operatorWarningIconActionClass
+                                                    }
                                                     disabled={isDone}
-                                                    aria-label={t("production.operator.actions.blocked")}
-                                                    title={t("production.operator.actions.blocked")}
+                                                    aria-label={t(
+                                                      "production.operator.actions.blocked",
+                                                    )}
+                                                    title={t(
+                                                      "production.operator.actions.blocked",
+                                                    )}
                                                     onClick={() =>
                                                       handleOpenBlocked(
                                                         item.id,
@@ -4376,8 +6282,48 @@ export default function OperatorProductionPage() {
                                             })()}
                                           </div>
                                         </div>
-                                      );
-                                    })}
+                                        {(() => {
+                                          const {
+                                            effectiveStatus,
+                                            effectiveStartedAt,
+                                          } = resolveConstructionItemState(
+                                            prodItem,
+                                            item,
+                                            batchRuns,
+                                            workSessionScopeSummaryByKey,
+                                          );
+                                          const hasStarted =
+                                            Boolean(effectiveStartedAt) ||
+                                            effectiveStatus === "in_progress" ||
+                                            effectiveStatus === "paused";
+                                          const isBlocked =
+                                            effectiveStatus === "blocked";
+                                          const startLockedByDate =
+                                            !hasStarted &&
+                                            !isBlocked &&
+                                            isFuturePlannedDate(
+                                              item.plannedDate,
+                                            );
+                                          const startLockedByWorkHours =
+                                            effectiveStatus !== "in_progress" &&
+                                            !isWithinWorkingHoursNow;
+                                          if (
+                                            startLockedByDate ||
+                                            !startLockedByWorkHours
+                                          ) {
+                                            return null;
+                                          }
+                                          return (
+                                            <div className="mt-1 text-[10px] text-amber-600">
+                                              {t(
+                                                "production.operator.queue.outsideWorkingHours",
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </div>
                             ) : null}
@@ -4387,98 +6333,165 @@ export default function OperatorProductionPage() {
                               <div className="mt-3 rounded-md border border-border bg-muted/20 px-2 py-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <div className="text-[11px] text-muted-foreground">
-                                    {isConstructionTracking && item.items.length === 0
-                                      ? t("production.operator.queue.batchActions")
+                                    {isConstructionTracking &&
+                                    item.items.length === 0
+                                      ? t(
+                                          "production.operator.queue.batchActions",
+                                        )
                                       : isReceiptOnlyTracking
-                                      ? t("production.operator.queue.receiptAction")
-                                      : t("production.operator.queue.batchActions")}
+                                        ? t(
+                                            "production.operator.queue.receiptAction",
+                                          )
+                                        : t(
+                                            "production.operator.queue.batchActions",
+                                          )}
                                   </div>
                                   <div className="flex w-full items-stretch gap-2">
-                                    {!isReceiptOnlyTracking ? (
-                                      <Button
-                                        variant={
-                                          item.status === "in_progress"
-                                            ? "secondary"
-                                            : "default"
-                                        }
-                                        size="sm"
-                                        className={operatorPrimaryActionClass}
-                                        disabled={
-                                          isBatchDone ||
-                                          batchStartLockedByDate ||
-                                          hasBlockingDependenciesForBatch ||
-                                          (item.status === "in_progress"
-                                            ? isRunActionLoading(item.id, "paused")
-                                            : isRunActionLoading(item.id, "in_progress"))
-                                        }
-                                        onClick={() =>
-                                          item.status === "in_progress"
-                                            ? handleOpenPaused(item.id)
-                                            : handleRunStatusUpdate(
+                                    {(() => {
+                                      const hasOperatorActiveRunSession =
+                                        item.runIds.some((runId) =>
+                                          hasActiveWorkSessionForRun(runId),
+                                        );
+                                      const hasOperatorCompletedRunSession =
+                                        item.operatorSessionStatus === "done" &&
+                                        (isBatchDone ||
+                                          (item.activeOperatorsCount ?? 0) > 0);
+                                      const shouldResumeRunSession =
+                                        item.operatorSessionStatus ===
+                                          "paused" ||
+                                        item.operatorSessionStatus ===
+                                          "blocked";
+                                      return (
+                                        <>
+                                          {!isReceiptOnlyTracking ? (
+                                            <Button
+                                              variant={
+                                                hasOperatorActiveRunSession
+                                                  ? "secondary"
+                                                  : "default"
+                                              }
+                                              size="sm"
+                                              className={
+                                                operatorPrimaryActionClass
+                                              }
+                                              disabled={
+                                                isBatchDone ||
+                                                hasOperatorCompletedRunSession ||
+                                                batchStartLockedByDate ||
+                                                (!hasOperatorActiveRunSession &&
+                                                  !isWithinWorkingHoursNow) ||
+                                                hasBlockingDependenciesForBatch ||
+                                                (hasOperatorActiveRunSession
+                                                  ? isRunActionLoading(
+                                                      item.id,
+                                                      "paused",
+                                                    )
+                                                  : isRunActionLoading(
+                                                      item.id,
+                                                      "in_progress",
+                                                    ))
+                                              }
+                                              onClick={() =>
+                                                hasOperatorActiveRunSession
+                                                  ? handleOpenPaused(item.id)
+                                                  : handleRunStatusUpdate(
+                                                      item.id,
+                                                      "in_progress",
+                                                    )
+                                              }
+                                            >
+                                              {hasOperatorActiveRunSession ? (
+                                                isRunActionLoading(
+                                                  item.id,
+                                                  "paused",
+                                                ) ? (
+                                                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                                ) : (
+                                                  <PauseIcon className="h-4 w-4" />
+                                                )
+                                              ) : isRunActionLoading(
+                                                  item.id,
+                                                  "in_progress",
+                                                ) ? (
+                                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                              ) : (
+                                                <PlayIcon className="h-4 w-4" />
+                                              )}
+                                              {isBatchBlocked ||
+                                              isBatchPaused ||
+                                              shouldResumeRunSession
+                                                ? t(
+                                                    "production.operator.actions.resume",
+                                                  )
+                                                : hasOperatorActiveRunSession
+                                                  ? t(
+                                                      "production.operator.actions.pause",
+                                                    )
+                                                  : t(
+                                                      "production.operator.actions.start",
+                                                    )}
+                                            </Button>
+                                          ) : null}
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className={
+                                              operatorSuccessActionClass
+                                            }
+                                            disabled={
+                                              (!isReceiptOnlyTracking &&
+                                                (!hasOperatorActiveRunSession ||
+                                                  isBatchDone ||
+                                                  isBatchBlocked ||
+                                                  isBatchPaused)) ||
+                                              (isReceiptOnlyTracking &&
+                                                (isBatchDone ||
+                                                  isFuturePlannedDate(
+                                                    item.plannedDate,
+                                                  ) ||
+                                                  hasBlockingDependenciesForBatch)) ||
+                                              isBatchCompleting
+                                            }
+                                            onClick={() =>
+                                              void handleConfirmedRunDone(
                                                 item.id,
-                                                "in_progress",
+                                                item.orderNumber,
                                               )
-                                        }
-                                      >
-                                        {item.status === "in_progress" ? (
-                                          isRunActionLoading(item.id, "paused") ? (
-                                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                                          ) : (
-                                            <PauseIcon className="h-4 w-4" />
-                                          )
-                                        ) : isRunActionLoading(item.id, "in_progress") ? (
-                                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                                        ) : (
-                                          <PlayIcon className="h-4 w-4" />
-                                        )}
-                                        {isBatchBlocked || isBatchPaused
-                                          ? t("production.operator.actions.resume")
-                                          : item.status === "in_progress"
-                                            ? t("production.operator.actions.pause")
-                                            : t("production.operator.actions.start")}
-                                      </Button>
-                                    ) : null}
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className={operatorSuccessActionClass}
-                                      disabled={
-                                        (!isReceiptOnlyTracking &&
-                                          (!hasBatchStarted ||
-                                            isBatchDone ||
-                                            isBatchBlocked ||
-                                            isBatchPaused)) ||
-                                        (isReceiptOnlyTracking &&
-                                          (isBatchDone ||
-                                            isFuturePlannedDate(item.plannedDate) ||
-                                            hasBlockingDependenciesForBatch)) ||
-                                        isBatchCompleting
-                                      }
-                                      onClick={() =>
-                                        void handleConfirmedRunDone(
-                                          item.id,
-                                          item.orderNumber,
-                                        )
-                                      }
-                                    >
-                                      {isBatchCompleting ? (
-                                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                                      ) : (
-                                        <CheckCheckIcon className="h-4 w-4" />
-                                      )}
-                                      {isReceiptOnlyTracking
-                                        ? t("production.operator.actions.received")
-                                        : t("production.operator.actions.done")}
-                                    </Button>
+                                            }
+                                          >
+                                            {isBatchCompleting ? (
+                                              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                            ) : (
+                                              <CheckCheckIcon className="h-4 w-4" />
+                                            )}
+                                            {isReceiptOnlyTracking
+                                              ? t(
+                                                  "production.operator.actions.received",
+                                                )
+                                              : t(
+                                                  "production.operator.actions.done",
+                                                )}
+                                          </Button>
+                                        </>
+                                      );
+                                    })()}
                                     {!isReceiptOnlyTracking ? (
                                       <Button
                                         variant="outline"
                                         size="icon"
-                                        className={operatorWarningIconActionClass}
+                                        className={
+                                          operatorWarningIconActionClass
+                                        }
                                         disabled={isBatchDone}
-                                        aria-label={t("production.operator.actions.blocked")}
-                                        title={t("production.operator.actions.blocked")}
-                                        onClick={() => handleOpenBlocked(item.id)}
+                                        aria-label={t(
+                                          "production.operator.actions.blocked",
+                                        )}
+                                        title={t(
+                                          "production.operator.actions.blocked",
+                                        )}
+                                        onClick={() =>
+                                          handleOpenBlocked(item.id)
+                                        }
                                       >
                                         <BanIcon className="h-4 w-4" />
                                       </Button>
@@ -4487,9 +6500,21 @@ export default function OperatorProductionPage() {
                                 </div>
                                 {batchStartLockedByDate && item.plannedDate ? (
                                   <div className="mt-1 text-[10px] text-amber-600">
-                                    {t("production.operator.queue.availableOn", {
-                                      date: formatDate(item.plannedDate),
-                                    })}
+                                    {t(
+                                      "production.operator.queue.availableOn",
+                                      {
+                                        date: formatDate(item.plannedDate),
+                                      },
+                                    )}
+                                  </div>
+                                ) : null}
+                                {!batchStartLockedByDate &&
+                                item.status !== "in_progress" &&
+                                !isWithinWorkingHoursNow ? (
+                                  <div className="mt-1 text-[10px] text-amber-600">
+                                    {t(
+                                      "production.operator.queue.outsideWorkingHours",
+                                    )}
                                   </div>
                                 ) : null}
                               </div>
@@ -4505,19 +6530,6 @@ export default function OperatorProductionPage() {
                               {item.attachments.length > 0 ? (
                                 <div className="space-y-2">
                                   <div className="flex flex-wrap gap-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 gap-2 text-xs"
-                                      onClick={() => void openPrimaryAttachment(item)}
-                                    >
-                                      {signingJobs.has(item.id) ? (
-                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                                      ) : (
-                                        <FileTextIcon className="h-3.5 w-3.5" />
-                                      )}
-                                      {t("production.operator.files.openPrimary")}
-                                    </Button>
                                     <Button
                                       variant="outline"
                                       size="sm"
@@ -4567,7 +6579,9 @@ export default function OperatorProductionPage() {
                                     <div className="space-y-2">
                                       {signingJobs.has(item.id) ? (
                                         <div className="text-xs text-muted-foreground">
-                                          {t("production.operator.files.loading")}
+                                          {t(
+                                            "production.operator.files.loading",
+                                          )}
                                         </div>
                                       ) : null}
                                       {item.attachments.map((attachment) => {
@@ -4691,7 +6705,9 @@ export default function OperatorProductionPage() {
               }
             >
               <SelectTrigger className="h-10 w-full">
-                <SelectValue placeholder={t("production.operator.status.all")} />
+                <SelectValue
+                  placeholder={t("production.operator.status.all")}
+                />
               </SelectTrigger>
               <SelectContent>
                 {statusOptions.map((option) => (
@@ -4801,6 +6817,76 @@ export default function OperatorProductionPage() {
                       })}`
                     : ""}
                 </div>
+                {quickActionItem.activeOperatorsCount &&
+                quickActionItem.activeOperatorsCount > 0 ? (
+                  <>
+                    <div className="mt-1">
+                      {t("production.operator.queue.activeOperators", {
+                        count: quickActionItem.activeOperatorsCount,
+                      })}
+                    </div>
+                    {quickActionWorkingOperatorNames.length > 0 ? (
+                      <div className="mt-1">
+                        {t("production.operator.queue.workingOperators", {
+                          names: quickActionWorkingOperatorNames.join(", "),
+                        })}
+                      </div>
+                    ) : null}
+                    {quickActionPausedOperatorNames.length > 0 ? (
+                      <div className="mt-1">
+                        {t("production.operator.queue.pausedOperators", {
+                          names: quickActionPausedOperatorNames.join(", "),
+                        })}
+                      </div>
+                    ) : null}
+                    {quickActionBlockedOperatorNames.length > 0 ? (
+                      <div className="mt-1">
+                        {t("production.operator.queue.blockedOperators", {
+                          names: quickActionBlockedOperatorNames.join(", "),
+                        })}
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+                {quickActionItem.operatorSessionStatus ? (
+                  <div className="mt-1">
+                    {t("production.operator.queue.myStatus", {
+                      status: runStatusLabel(
+                        quickActionItem.operatorSessionStatus,
+                      ),
+                    })}
+                  </div>
+                ) : null}
+                {(() => {
+                  if (quickActionItem.trackingMode === "construction_level") {
+                    return null;
+                  }
+                  const ownSeconds = quickActionItem.runIds.reduce(
+                    (sum, runId) =>
+                      sum +
+                      (ownWorkSessionSecondsByScope.get(
+                        getWorkSessionScopeKey(runId, null),
+                      ) ?? 0),
+                    0,
+                  );
+                  const visibleOwnSeconds =
+                    Number(quickActionItem.durationSeconds ?? 0) > 0
+                      ? Math.min(
+                          ownSeconds,
+                          Number(quickActionItem.durationSeconds ?? 0),
+                        )
+                      : ownSeconds;
+                  if (visibleOwnSeconds <= 0) {
+                    return null;
+                  }
+                  return (
+                    <div className="mt-1">
+                      {t("production.operator.queue.myTime", {
+                        value: formatLiveDuration(visibleOwnSeconds),
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
               <div className="rounded-md border border-border bg-background px-3 py-2">
                 <div className="text-xs text-muted-foreground">
@@ -4813,19 +6899,6 @@ export default function OperatorProductionPage() {
                 {quickActionItem.attachments.length > 0 ? (
                   <div className="mt-3 space-y-2">
                     <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 gap-2 text-xs"
-                        onClick={() => void openPrimaryAttachment(quickActionItem)}
-                      >
-                        {signingJobs.has(quickActionItem.id) ? (
-                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                        ) : (
-                          <FileTextIcon className="h-3.5 w-3.5" />
-                        )}
-                        {t("production.operator.files.openPrimary")}
-                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -4921,80 +6994,120 @@ export default function OperatorProductionPage() {
                     </Badge>
                   </div>
                   <div className="mt-3 flex w-full items-stretch gap-2">
-                    {quickActionItem.trackingMode !== "receipt_only" ? (
-                      <Button
-                        variant={
-                          quickActionItem.status === "in_progress"
-                            ? "secondary"
-                            : "default"
-                        }
-                        size="sm"
-                        className={operatorPrimaryActionClass}
-                        disabled={
-                          quickActionItem.status === "done" ||
-                          isFuturePlannedDate(quickActionItem.plannedDate) ||
-                          (quickActionItem.status === "in_progress"
-                            ? isRunActionLoading(quickActionItem.id, "paused")
-                            : isRunActionLoading(quickActionItem.id, "in_progress"))
-                        }
-                        onClick={() =>
-                          quickActionItem.status === "in_progress"
-                            ? handleOpenPaused(quickActionItem.id)
-                            : handleRunStatusUpdate(
+                    {(() => {
+                      const hasOperatorActiveRunSession =
+                        quickActionItem.runIds.some((runId) =>
+                          hasActiveWorkSessionForRun(runId),
+                        );
+                      const hasOperatorCompletedRunSession =
+                        quickActionItem.operatorSessionStatus === "done" &&
+                        (quickActionItem.status === "done" ||
+                          (quickActionItem.activeOperatorsCount ?? 0) > 0);
+                      const shouldResumeRunSession =
+                        quickActionItem.operatorSessionStatus === "paused" ||
+                        quickActionItem.operatorSessionStatus === "blocked";
+                      return (
+                        <>
+                          {quickActionItem.trackingMode !== "receipt_only" ? (
+                            <Button
+                              variant={
+                                hasOperatorActiveRunSession
+                                  ? "secondary"
+                                  : "default"
+                              }
+                              size="sm"
+                              className={operatorPrimaryActionClass}
+                              disabled={
+                                quickActionItem.status === "done" ||
+                                hasOperatorCompletedRunSession ||
+                                isFuturePlannedDate(
+                                  quickActionItem.plannedDate,
+                                ) ||
+                                (!hasOperatorActiveRunSession &&
+                                  !isWithinWorkingHoursNow) ||
+                                (hasOperatorActiveRunSession
+                                  ? isRunActionLoading(
+                                      quickActionItem.id,
+                                      "paused",
+                                    )
+                                  : isRunActionLoading(
+                                      quickActionItem.id,
+                                      "in_progress",
+                                    ))
+                              }
+                              onClick={() =>
+                                hasOperatorActiveRunSession
+                                  ? handleOpenPaused(quickActionItem.id)
+                                  : handleRunStatusUpdate(
+                                      quickActionItem.id,
+                                      "in_progress",
+                                    )
+                              }
+                            >
+                              {hasOperatorActiveRunSession ? (
+                                isRunActionLoading(
+                                  quickActionItem.id,
+                                  "paused",
+                                ) ? (
+                                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                ) : (
+                                  <PauseIcon className="h-4 w-4" />
+                                )
+                              ) : isRunActionLoading(
+                                  quickActionItem.id,
+                                  "in_progress",
+                                ) ? (
+                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                              ) : (
+                                <PlayIcon className="h-4 w-4" />
+                              )}
+                              {quickActionItem.status === "blocked" ||
+                              quickActionItem.status === "paused" ||
+                              shouldResumeRunSession
+                                ? t("production.operator.actions.resume")
+                                : hasOperatorActiveRunSession
+                                  ? t("production.operator.actions.pause")
+                                  : t("production.operator.actions.start")}
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={operatorSuccessActionClass}
+                            disabled={
+                              (quickActionItem.trackingMode !==
+                                "receipt_only" &&
+                                (!hasOperatorActiveRunSession ||
+                                  quickActionItem.status === "done" ||
+                                  quickActionItem.status === "paused")) ||
+                              (quickActionItem.trackingMode ===
+                                "receipt_only" &&
+                                (quickActionItem.status === "done" ||
+                                  isFuturePlannedDate(
+                                    quickActionItem.plannedDate,
+                                  ) ||
+                                  quickActionHasBlockingDependenciesForBatch)) ||
+                              isRunActionLoading(quickActionItem.id, "done")
+                            }
+                            onClick={() =>
+                              void handleConfirmedRunDone(
                                 quickActionItem.id,
-                                "in_progress",
+                                quickActionItem.orderNumber,
                               )
-                        }
-                      >
-                        {quickActionItem.status === "in_progress" ? (
-                          isRunActionLoading(quickActionItem.id, "paused") ? (
-                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                          ) : (
-                            <PauseIcon className="h-4 w-4" />
-                          )
-                        ) : isRunActionLoading(quickActionItem.id, "in_progress") ? (
-                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                        ) : (
-                          <PlayIcon className="h-4 w-4" />
-                        )}
-                        {quickActionItem.status === "blocked" ||
-                        quickActionItem.status === "paused"
-                          ? t("production.operator.actions.resume")
-                          : quickActionItem.status === "in_progress"
-                            ? t("production.operator.actions.pause")
-                            : t("production.operator.actions.start")}
-                      </Button>
-                    ) : null}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={operatorSuccessActionClass}
-                      disabled={
-                        (quickActionItem.trackingMode !== "receipt_only" &&
-                          (quickActionItem.status === "done" ||
-                            quickActionItem.status === "paused")) ||
-                        (quickActionItem.trackingMode === "receipt_only" &&
-                          (quickActionItem.status === "done" ||
-                            isFuturePlannedDate(quickActionItem.plannedDate) ||
-                            quickActionHasBlockingDependenciesForBatch)) ||
-                        isRunActionLoading(quickActionItem.id, "done")
-                      }
-                      onClick={() =>
-                        void handleConfirmedRunDone(
-                          quickActionItem.id,
-                          quickActionItem.orderNumber,
-                        )
-                      }
-                    >
-                      {isRunActionLoading(quickActionItem.id, "done") ? (
-                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                      ) : (
-                        <CheckCheckIcon className="h-4 w-4" />
-                      )}
-                      {quickActionItem.trackingMode === "receipt_only"
-                        ? t("production.operator.actions.received")
-                        : t("production.operator.actions.done")}
-                    </Button>
+                            }
+                          >
+                            {isRunActionLoading(quickActionItem.id, "done") ? (
+                              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                            ) : (
+                              <CheckCheckIcon className="h-4 w-4" />
+                            )}
+                            {quickActionItem.trackingMode === "receipt_only"
+                              ? t("production.operator.actions.received")
+                              : t("production.operator.actions.done")}
+                          </Button>
+                        </>
+                      );
+                    })()}
                     {quickActionItem.trackingMode !== "receipt_only" ? (
                       <Button
                         variant="outline"
@@ -5017,6 +7130,14 @@ export default function OperatorProductionPage() {
                       })}
                     </div>
                   ) : null}
+                  {!isFuturePlannedDate(quickActionItem.plannedDate) &&
+                  quickActionItem.status !== "in_progress" &&
+                  quickActionItem.trackingMode !== "receipt_only" &&
+                  !isWithinWorkingHoursNow ? (
+                    <div className="mt-1 text-[11px] text-amber-600">
+                      {t("production.operator.queue.outsideWorkingHours")}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               {quickActionItem.trackingMode === "construction_level"
@@ -5024,11 +7145,62 @@ export default function OperatorProductionPage() {
                     const {
                       effectiveStatus,
                       effectiveStartedAt,
+                      matchedRun,
+                      scopeSummary,
                     } = resolveConstructionItemState(
                       prodItem,
                       quickActionItem,
                       batchRuns,
+                      workSessionScopeSummaryByKey,
                     );
+                    const actionRunId = matchedRun?.id ?? quickActionItem.id;
+                    const ownSessionStatus = getOwnWorkSessionStatus(
+                      actionRunId,
+                      prodItem.id,
+                    );
+                    const activeOperatorIds =
+                      getInvolvedOperatorIdsForConstructionItem(
+                        actionRunId,
+                        prodItem,
+                      );
+                    const activeOperatorCount = activeOperatorIds.size;
+                    const operatorStatusGroups =
+                      getOperatorStatusGroupsForConstructionItem(
+                        actionRunId,
+                        prodItem,
+                      );
+                    const workingOperatorNames = getActiveOperatorNames(
+                      operatorStatusGroups.working,
+                    );
+                    const pausedOperatorNames = getActiveOperatorNames(
+                      operatorStatusGroups.paused,
+                    );
+                    const blockedOperatorNames = getActiveOperatorNames(
+                      operatorStatusGroups.blocked,
+                    );
+                    const ownElapsedSeconds =
+                      ownWorkSessionSecondsByScope.get(
+                        getWorkSessionScopeKey(actionRunId, prodItem.id),
+                      ) ?? 0;
+                    const visibleOwnElapsedSeconds =
+                      Number(scopeSummary?.elapsedSeconds ?? 0) > 0
+                        ? Math.min(
+                            ownElapsedSeconds,
+                            Number(scopeSummary?.elapsedSeconds ?? 0),
+                          )
+                        : ownElapsedSeconds;
+                    const ownElapsedLabel =
+                      visibleOwnElapsedSeconds > 0
+                        ? formatLiveDuration(visibleOwnElapsedSeconds)
+                        : null;
+                    const itemElapsedLabel =
+                      Number(scopeSummary?.elapsedSeconds ?? 0) > 0
+                        ? formatLiveDuration(
+                            Number(scopeSummary?.elapsedSeconds ?? 0),
+                          )
+                        : null;
+                    const hasOperatorActiveSession =
+                      hasActiveWorkSessionForItem(actionRunId, prodItem.id);
                     const hasStarted =
                       Boolean(effectiveStartedAt) ||
                       effectiveStatus === "in_progress" ||
@@ -5036,10 +7208,18 @@ export default function OperatorProductionPage() {
                     const isBlocked = effectiveStatus === "blocked";
                     const isPaused = effectiveStatus === "paused";
                     const isDone = effectiveStatus === "done";
+                    const shouldResumeOwnSession =
+                      ownSessionStatus === "paused" ||
+                      ownSessionStatus === "blocked";
+                    const hasOperatorCompletedSession =
+                      ownSessionStatus === "done" &&
+                      (isDone || activeOperatorCount > 0);
                     const startLockedByDate =
                       !hasStarted &&
                       !isBlocked &&
                       isFuturePlannedDate(quickActionItem.plannedDate);
+                    const startLockedByWorkHours =
+                      !hasOperatorActiveSession && !isWithinWorkingHoursNow;
                     const isStarting = isActionLoading(
                       prodItem.id,
                       "in_progress",
@@ -5047,28 +7227,40 @@ export default function OperatorProductionPage() {
                     const isCompleting = isActionLoading(prodItem.id, "done");
                     const itemQuantity = getProductionItemQuantity(prodItem);
                     const itemCompletedQty =
-                      getProductionItemCompletedQty(prodItem);
+                      getOperatorVisibleCompletedQty(prodItem);
                     const itemRemainingQty =
-                      getProductionItemRemainingQty(prodItem);
+                      getOperatorVisibleRemainingQty(prodItem);
+                    const showConstructionItemHeader =
+                      quickActionVisibleItems.length > 1;
+                    const itemPosition =
+                      getProductionItemMetaPosition(prodItem) ??
+                      orderItemPositionBySourceKey.get(
+                        getProductionItemSourceKey(prodItem) ?? "",
+                      ) ??
+                      null;
                     return (
-                      <div
-                        key={prodItem.id}
-                        className="rounded-md border border-border bg-background px-3 py-2"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-xs text-muted-foreground">
-                            {prodItem.item_name}
+                      <div key={prodItem.id} className="space-y-2">
+                        {showConstructionItemHeader ? (
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs text-muted-foreground">
+                              {itemPosition
+                                ? `${t("production.main.jobs.position")}: ${itemPosition} | ${prodItem.item_name}`
+                                : prodItem.item_name}
+                            </div>
+                            <Badge
+                              variant={statusBadge(
+                                (effectiveStatus ??
+                                  "queued") as BatchRunRow["status"],
+                              )}
+                            >
+                              {runStatusLabel(
+                                (effectiveStatus ??
+                                  "queued") as BatchRunRow["status"],
+                              )}
+                            </Badge>
                           </div>
-                          <Badge variant={statusBadge(effectiveStatus)}>
-                            {runStatusLabel(effectiveStatus ?? "queued")}
-                          </Badge>
-                        </div>
+                        ) : null}
                         <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
-                          <div>
-                            {t("production.operator.queue.constructionUnits", {
-                              qty: prodItem.qty,
-                            })}
-                          </div>
                           <div>
                             {t(
                               "production.operator.queue.constructionReadyProgress",
@@ -5078,199 +7270,276 @@ export default function OperatorProductionPage() {
                               },
                             )}
                           </div>
-                        </div>
-                        <div className="mt-3 flex items-stretch gap-2">
-                          <Button
-                            variant={
-                              effectiveStatus === "in_progress"
-                                ? "secondary"
-                                : "default"
-                            }
-                            size="sm"
-                            className={operatorPrimaryActionClass}
-                            disabled={
-                              isDone ||
-                              startLockedByDate ||
-                              (effectiveStatus === "in_progress"
-                                ? isActionLoading(prodItem.id, "paused")
-                                : isStarting)
-                            }
-                            onClick={() =>
-                              effectiveStatus === "in_progress"
-                                ? handleOpenPaused(
-                                    quickActionItem.id,
-                                    prodItem.id,
-                                  )
-                                : handleUserStatusUpdate(
-                                    prodItem.id,
-                                    quickActionItem.id,
-                                    "in_progress",
-                                  )
-                            }
-                          >
-                            {effectiveStatus === "in_progress" ? (
-                              isActionLoading(prodItem.id, "paused") ? (
-                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                              ) : (
-                                <PauseIcon className="h-4 w-4" />
-                              )
-                            ) : isStarting ? (
-                              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                            ) : (
-                              <PlayIcon className="h-4 w-4" />
-                            )}
-                            {isBlocked || isPaused
-                              ? t("production.operator.actions.resume")
-                              : effectiveStatus === "in_progress"
-                                ? t("production.operator.actions.pause")
-                              : t("production.operator.actions.start")}
-                          </Button>
-                          {itemRemainingQty > 1 ? (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className={`${operatorSuccessActionClass} justify-between`}
-                                  disabled={
-                                    !hasStarted ||
-                                    isDone ||
-                                    isBlocked ||
-                                    isPaused ||
-                                    isCompleting
-                                  }
-                                >
-                                  {isCompleting ? (
-                                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                                  ) : (
-                                    <CheckCheckIcon className="h-4 w-4" />
+                          {activeOperatorCount > 0 ? (
+                            <>
+                              <div>
+                                {t(
+                                  "production.operator.queue.activeOperators",
+                                  {
+                                    count: activeOperatorCount,
+                                  },
+                                )}
+                              </div>
+                              {workingOperatorNames.length > 0 ? (
+                                <div>
+                                  {t(
+                                    "production.operator.queue.workingOperators",
+                                    {
+                                      names: workingOperatorNames.join(", "),
+                                    },
                                   )}
-                                  {t("production.operator.actions.done")}
-                                  <ChevronDownIcon className="h-3.5 w-3.5" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-64 p-3">
-                                <div className="space-y-3">
-                                  <Button
-                                    variant="default"
-                                    size="sm"
-                                    className="h-10 w-full justify-start rounded-lg px-3 text-left font-semibold"
-                                    onClick={() =>
-                                      void handleConfirmedCompleteItemUnits(
-                                        prodItem.id,
-                                        quickActionItem.id,
-                                        1,
-                                        prodItem.item_name,
-                                      )
-                                    }
-                                  >
-                                    {t(
-                                      "production.operator.actions.completeOne",
-                                    )}
-                                  </Button>
-                                  <div className="rounded-md border border-border p-2">
-                                    <div className="mb-2 text-[11px] font-medium text-muted-foreground">
-                                      {t(
-                                        "production.operator.queue.remainingQty",
-                                        {
-                                          count: itemRemainingQty,
-                                        },
-                                      )}
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Input
-                                        type="number"
-                                        min={1}
-                                        max={itemRemainingQty}
-                                        value={
-                                          completeMultipleQtyByItem[
-                                            prodItem.id
-                                          ] ?? "1"
-                                        }
-                                        onChange={(event) =>
-                                          setCompleteMultipleQtyByItem(
-                                            (prev) => ({
-                                              ...prev,
-                                              [prodItem.id]:
-                                                event.target.value,
-                                            }),
-                                          )
-                                        }
-                                        className="h-10"
-                                      />
-                                      <Button
-                                        size="sm"
-                                        className="h-10 w-full"
-                                        onClick={() =>
-                                          void handleConfirmedCompleteItemUnits(
-                                            prodItem.id,
-                                            quickActionItem.id,
-                                            Number(
-                                              completeMultipleQtyByItem[
-                                                prodItem.id
-                                              ] ?? 1,
-                                            ),
-                                            prodItem.item_name,
-                                          )
-                                        }
-                                      >
-                                        {t(
-                                          "production.operator.actions.completeMany",
-                                        )}
-                                      </Button>
-                                    </div>
-                                  </div>
                                 </div>
-                              </PopoverContent>
-                            </Popover>
-                          ) : (
+                              ) : null}
+                              {pausedOperatorNames.length > 0 ? (
+                                <div>
+                                  {t(
+                                    "production.operator.queue.pausedOperators",
+                                    {
+                                      names: pausedOperatorNames.join(", "),
+                                    },
+                                  )}
+                                </div>
+                              ) : null}
+                              {blockedOperatorNames.length > 0 ? (
+                                <div>
+                                  {t(
+                                    "production.operator.queue.blockedOperators",
+                                    {
+                                      names: blockedOperatorNames.join(", "),
+                                    },
+                                  )}
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {ownSessionStatus ? (
+                            <div>
+                              {t("production.operator.queue.myStatus", {
+                                status: runStatusLabel(ownSessionStatus),
+                              })}
+                            </div>
+                          ) : null}
+                          {ownElapsedLabel ? (
+                            <div>
+                              {t("production.operator.queue.myTime", {
+                                value: ownElapsedLabel,
+                              })}
+                            </div>
+                          ) : null}
+                          {itemElapsedLabel ? (
+                            <div>
+                              {t("production.operator.queue.constructionTime", {
+                                value: itemElapsedLabel,
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="mt-3 rounded-md border border-border bg-background px-3 py-2">
+                          <div className="text-xs text-muted-foreground">
+                            {t("production.operator.queue.constructionActions")}
+                          </div>
+                          <div className="mt-3 flex items-stretch gap-2">
                             <Button
-                              variant="outline"
+                              variant={
+                                hasOperatorActiveSession
+                                  ? "secondary"
+                                  : "default"
+                              }
                               size="sm"
-                              className={operatorSuccessActionClass}
+                              className={operatorPrimaryActionClass}
                               disabled={
-                                !hasStarted ||
                                 isDone ||
-                                isBlocked ||
-                                isPaused ||
-                                isCompleting
+                                hasOperatorCompletedSession ||
+                                startLockedByDate ||
+                                startLockedByWorkHours ||
+                                (hasOperatorActiveSession
+                                  ? isActionLoading(prodItem.id, "paused")
+                                  : isStarting)
                               }
                               onClick={() =>
-                                void handleConfirmedCompleteItemUnits(
-                                  prodItem.id,
+                                hasOperatorActiveSession
+                                  ? handleOpenPaused(actionRunId, prodItem.id)
+                                  : handleUserStatusUpdate(
+                                      prodItem.id,
+                                      actionRunId,
+                                      "in_progress",
+                                    )
+                              }
+                            >
+                              {hasOperatorActiveSession ? (
+                                isActionLoading(prodItem.id, "paused") ? (
+                                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                ) : (
+                                  <PauseIcon className="h-4 w-4" />
+                                )
+                              ) : isStarting ? (
+                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                              ) : (
+                                <PlayIcon className="h-4 w-4" />
+                              )}
+                              {isBlocked || isPaused || shouldResumeOwnSession
+                                ? t("production.operator.actions.resume")
+                                : hasOperatorActiveSession
+                                  ? t("production.operator.actions.pause")
+                                  : t("production.operator.actions.start")}
+                            </Button>
+                            {itemRemainingQty > 1 ? (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={`${operatorSuccessActionClass} justify-between`}
+                                    disabled={
+                                      !hasOperatorActiveSession ||
+                                      isDone ||
+                                      isBlocked ||
+                                      isPaused ||
+                                      isCompleting
+                                    }
+                                  >
+                                    {isCompleting ? (
+                                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                    ) : (
+                                      <CheckCheckIcon className="h-4 w-4" />
+                                    )}
+                                    {t("production.operator.actions.done")}
+                                    <ChevronDownIcon className="h-3.5 w-3.5" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-64 p-3">
+                                  <div className="space-y-3">
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      className="h-10 w-full justify-start rounded-lg px-3 text-left font-semibold"
+                                      onClick={() =>
+                                        void handleConfirmedCompleteItemUnits(
+                                          prodItem.id,
+                                          quickActionItem.id,
+                                          1,
+                                          prodItem.item_name,
+                                        )
+                                      }
+                                    >
+                                      {t(
+                                        "production.operator.actions.completeOne",
+                                      )}
+                                    </Button>
+                                    <div className="rounded-md border border-border p-2">
+                                      <div className="mb-2 text-[11px] font-medium text-muted-foreground">
+                                        {t(
+                                          "production.operator.queue.remainingQty",
+                                          {
+                                            count: itemRemainingQty,
+                                          },
+                                        )}
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Input
+                                          type="number"
+                                          min={1}
+                                          max={itemRemainingQty}
+                                          value={
+                                            completeMultipleQtyByItem[
+                                              prodItem.id
+                                            ] ?? "1"
+                                          }
+                                          onChange={(event) =>
+                                            setCompleteMultipleQtyByItem(
+                                              (prev) => ({
+                                                ...prev,
+                                                [prodItem.id]:
+                                                  event.target.value,
+                                              }),
+                                            )
+                                          }
+                                          className="h-10"
+                                        />
+                                        <Button
+                                          size="sm"
+                                          className="h-10 w-full"
+                                          onClick={() =>
+                                            void handleConfirmedCompleteItemUnits(
+                                              prodItem.id,
+                                              quickActionItem.id,
+                                              Number(
+                                                completeMultipleQtyByItem[
+                                                  prodItem.id
+                                                ] ?? 1,
+                                              ),
+                                              prodItem.item_name,
+                                            )
+                                          }
+                                        >
+                                          {t(
+                                            "production.operator.actions.completeMany",
+                                          )}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className={operatorSuccessActionClass}
+                                disabled={
+                                  !hasOperatorActiveSession ||
+                                  isDone ||
+                                  isBlocked ||
+                                  isPaused ||
+                                  isCompleting
+                                }
+                                onClick={() =>
+                                  void handleConfirmedCompleteItemUnits(
+                                    prodItem.id,
+                                    quickActionItem.id,
+                                    1,
+                                    prodItem.item_name,
+                                  )
+                                }
+                              >
+                                {isCompleting ? (
+                                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                ) : (
+                                  <CheckCheckIcon className="h-4 w-4" />
+                                )}
+                                {t("production.operator.actions.done")}
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className={operatorWarningIconActionClass}
+                              disabled={isDone}
+                              aria-label={t(
+                                "production.operator.actions.blocked",
+                              )}
+                              title={t("production.operator.actions.blocked")}
+                              onClick={() =>
+                                handleOpenBlocked(
                                   quickActionItem.id,
-                                  1,
-                                  prodItem.item_name,
+                                  prodItem.id,
                                 )
                               }
                             >
-                              {isCompleting ? (
-                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-                              ) : (
-                                <CheckCheckIcon className="h-4 w-4" />
-                              )}
-                              {t("production.operator.actions.done")}
+                              <BanIcon className="h-4 w-4" />
                             </Button>
-                          )}
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className={operatorWarningIconActionClass}
-                            disabled={isDone}
-                            aria-label={t("production.operator.actions.blocked")}
-                            title={t("production.operator.actions.blocked")}
-                            onClick={() =>
-                              handleOpenBlocked(quickActionItem.id, prodItem.id)
-                            }
-                          >
-                            <BanIcon className="h-4 w-4" />
-                          </Button>
+                          </div>
                         </div>
                         {startLockedByDate && quickActionItem.plannedDate ? (
                           <div className="mt-1 text-[11px] text-amber-600">
                             {t("production.operator.queue.availableOn", {
                               date: formatDate(quickActionItem.plannedDate),
                             })}
+                          </div>
+                        ) : null}
+                        {!startLockedByDate && startLockedByWorkHours ? (
+                          <div className="mt-1 text-[11px] text-amber-600">
+                            {t("production.operator.queue.outsideWorkingHours")}
                           </div>
                         ) : null}
                       </div>
@@ -5292,209 +7561,213 @@ export default function OperatorProductionPage() {
       </BottomSheet>
 
       {!isWarehouseQueueView ? (
-      <SideDrawer
-        open={isProfilePanelOpen}
-        onClose={() => setIsProfilePanelOpen(false)}
-        ariaLabel={t("production.operator.profile.aria")}
-        closeButtonLabel={t("production.operator.profile.closePanel")}
-        side="right"
-      >
-        <div className="flex h-full flex-col">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h3 className="text-sm font-semibold">
-              {t("production.operator.profile.title")}
-            </h3>
-            <button
-              type="button"
-              className="text-sm text-muted-foreground"
-              onClick={() => setIsProfilePanelOpen(false)}
-            >
-              {t("production.operator.common.close")}
-            </button>
+        <SideDrawer
+          open={isProfilePanelOpen}
+          onClose={() => setIsProfilePanelOpen(false)}
+          ariaLabel={t("production.operator.profile.aria")}
+          closeButtonLabel={t("production.operator.profile.closePanel")}
+          side="right"
+        >
+          <div className="flex h-full flex-col">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold">
+                {t("production.operator.profile.title")}
+              </h3>
+              <button
+                type="button"
+                className="text-sm text-muted-foreground"
+                onClick={() => setIsProfilePanelOpen(false)}
+              >
+                {t("production.operator.common.close")}
+              </button>
+            </div>
+            <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
+                <UserAvatar
+                  avatarUrl={currentUser.avatarUrl}
+                  name={currentUser.name}
+                  fallback={userInitials || "U"}
+                  sizeClass="h-12 w-12"
+                />
+                <div className="min-w-0">
+                  <div className="truncate font-semibold">
+                    {currentUser.name}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {userRoleLabel}
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    {t("production.operator.profile.todayDone")}
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {activitySummary.done}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    {t("production.operator.profile.todayTime")}
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {formatDuration(activitySummary.minutes)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    {t("production.operator.profile.weekDone")}
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {weeklySummary.done}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    {t("production.operator.profile.weekTime")}
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {formatDuration(weeklySummary.minutes)}
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2 pb-2">
+                <ThemeToggle
+                  variant="menu"
+                  className="rounded-lg border border-border px-3 py-2 hover:bg-muted/40"
+                />
+                <Link
+                  href="/profile"
+                  onClick={() => setIsProfilePanelOpen(false)}
+                  className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
+                >
+                  <UserCircle2Icon className="h-4 w-4" />
+                  {t("production.operator.profile.openProfile")}
+                </Link>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
+                  onClick={() => {
+                    setIsProfilePanelOpen(false);
+                    void signOut();
+                  }}
+                >
+                  <LogOutIcon className="h-4 w-4" />
+                  {t("production.operator.profile.signOut")}
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
-              <UserAvatar
-                avatarUrl={currentUser.avatarUrl}
-                name={currentUser.name}
-                fallback={userInitials || "U"}
-                sizeClass="h-12 w-12"
-              />
-              <div className="min-w-0">
-                <div className="truncate font-semibold">{currentUser.name}</div>
-                <div className="text-sm text-muted-foreground">
-                  {userRoleLabel}
-                </div>
-              </div>
+        </SideDrawer>
+      ) : null}
+
+      {!isWarehouseQueueView ? (
+        <div
+          className={`fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex ${isProfilePanelOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
+          aria-hidden={!isProfilePanelOpen}
+        >
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">
+                {t("production.operator.profile.title")}
+              </h3>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsProfilePanelOpen(false)}
+              >
+                {t("production.operator.common.close")}
+              </Button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">
-                  {t("production.operator.profile.todayDone")}
-                </div>
-                <div className="text-lg font-semibold">
-                  {activitySummary.done}
-                </div>
-              </div>
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">
-                  {t("production.operator.profile.todayTime")}
-                </div>
-                <div className="text-lg font-semibold">
-                  {formatDuration(activitySummary.minutes)}
-                </div>
-              </div>
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">
-                  {t("production.operator.profile.weekDone")}
-                </div>
-                <div className="text-lg font-semibold">
-                  {weeklySummary.done}
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
+                <UserAvatar
+                  avatarUrl={currentUser.avatarUrl}
+                  name={currentUser.name}
+                  fallback={userInitials || "U"}
+                  sizeClass="h-12 w-12"
+                />
+                <div className="min-w-0">
+                  <div className="truncate font-semibold">
+                    {currentUser.name}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {userRoleLabel}
+                  </div>
                 </div>
               </div>
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">
-                  {t("production.operator.profile.weekTime")}
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
+                    {t("production.operator.profile.todayDone")}
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {activitySummary.done}
+                  </div>
                 </div>
-                <div className="text-lg font-semibold">
-                  {formatDuration(weeklySummary.minutes)}
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
+                    {t("production.operator.profile.todayTime")}
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {formatDuration(activitySummary.minutes)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
+                    {t("production.operator.profile.weekDone")}
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {weeklySummary.done}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
+                    {t("production.operator.profile.weekTime")}
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {formatDuration(weeklySummary.minutes)}
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="space-y-2 pb-2">
               <ThemeToggle
                 variant="menu"
                 className="rounded-lg border border-border px-3 py-2 hover:bg-muted/40"
               />
-              <Link
-                href="/profile"
-                onClick={() => setIsProfilePanelOpen(false)}
-                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
-              >
-                <UserCircle2Icon className="h-4 w-4" />
-                {t("production.operator.profile.openProfile")}
-              </Link>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40"
-                onClick={() => {
-                  setIsProfilePanelOpen(false);
-                  void signOut();
-                }}
-              >
-                <LogOutIcon className="h-4 w-4" />
-                {t("production.operator.profile.signOut")}
-              </button>
-            </div>
-          </div>
-        </div>
-      </SideDrawer>
-      ) : null}
-
-      {!isWarehouseQueueView ? (
-      <div
-        className={`fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 md:flex ${isProfilePanelOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
-        aria-hidden={!isProfilePanelOpen}
-      >
-        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">
-              {t("production.operator.profile.title")}
-            </h3>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsProfilePanelOpen(false)}
-            >
-              {t("production.operator.common.close")}
-            </Button>
-          </div>
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
-              <UserAvatar
-                avatarUrl={currentUser.avatarUrl}
-                name={currentUser.name}
-                fallback={userInitials || "U"}
-                sizeClass="h-12 w-12"
-              />
-              <div className="min-w-0">
-                <div className="truncate font-semibold">{currentUser.name}</div>
-                <div className="text-sm text-muted-foreground">
-                  {userRoleLabel}
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">
-                  <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
-                  {t("production.operator.profile.todayDone")}
-                </div>
-                <div className="text-lg font-semibold">
-                  {activitySummary.done}
-                </div>
-              </div>
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">
-                  <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
-                  {t("production.operator.profile.todayTime")}
-                </div>
-                <div className="text-lg font-semibold">
-                  {formatDuration(activitySummary.minutes)}
-                </div>
-              </div>
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">
-                  <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
-                  {t("production.operator.profile.weekDone")}
-                </div>
-                <div className="text-lg font-semibold">
-                  {weeklySummary.done}
-                </div>
-              </div>
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[11px] text-muted-foreground">
-                  <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
-                  {t("production.operator.profile.weekTime")}
-                </div>
-                <div className="text-lg font-semibold">
-                  {formatDuration(weeklySummary.minutes)}
-                </div>
-              </div>
-            </div>
-            <ThemeToggle
-              variant="menu"
-              className="rounded-lg border border-border px-3 py-2 hover:bg-muted/40"
-            />
-            <div className="flex gap-2">
-              <Link href="/profile" className="flex-1">
+              <div className="flex gap-2">
+                <Link href="/profile" className="flex-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={() => setIsProfilePanelOpen(false)}
+                  >
+                    <SettingsIcon className="h-4 w-4" />
+                    {t("production.operator.profile.openProfile")}
+                  </Button>
+                </Link>
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full gap-2"
-                  onClick={() => setIsProfilePanelOpen(false)}
+                  className="gap-2"
+                  onClick={() => {
+                    setIsProfilePanelOpen(false);
+                    void signOut();
+                  }}
                 >
-                  <SettingsIcon className="h-4 w-4" />
-                  {t("production.operator.profile.openProfile")}
+                  <LogOutIcon className="h-4 w-4" />
+                  {t("production.operator.profile.signOut")}
                 </Button>
-              </Link>
-              <Button
-                type="button"
-                variant="outline"
-                className="gap-2"
-                onClick={() => {
-                  setIsProfilePanelOpen(false);
-                  void signOut();
-                }}
-              >
-                <LogOutIcon className="h-4 w-4" />
-                {t("production.operator.profile.signOut")}
-              </Button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
       ) : null}
 
       <div

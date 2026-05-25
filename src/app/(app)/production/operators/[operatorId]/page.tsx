@@ -43,6 +43,7 @@ import type {
   JoinedProductionOrder,
   ProductionItemRow,
   ProductionStatusEventRow,
+  ProductionWorkSessionRow,
 } from "@/types/production";
 
 function getCurrentMonthDateValue() {
@@ -117,6 +118,9 @@ export default function ProductionOperatorDetailPage() {
   const [assignments, setAssignments] = useState<OperatorAssignmentRow[]>([]);
   const [stations, setStations] = useState<OperatorStationRow[]>([]);
   const [events, setEvents] = useState<ProductionStatusEventRow[]>([]);
+  const [workSessions, setWorkSessions] = useState<ProductionWorkSessionRow[]>(
+    [],
+  );
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
   const [productionItems, setProductionItems] = useState<ProductionItemRow[]>(
     [],
@@ -153,6 +157,7 @@ export default function ProductionOperatorDetailPage() {
         stationsResult,
         settingsResult,
         eventsResult,
+        workSessionsResult,
         batchRunsResult,
         itemsResult,
       ] = await Promise.all([
@@ -190,6 +195,15 @@ export default function ProductionOperatorDetailPage() {
           .order("created_at", { ascending: false })
           .limit(5000),
         sb
+          .from("production_work_sessions")
+          .select(
+            "id, tenant_id, order_id, batch_run_id, production_item_id, station_id, operator_user_id, started_at, stopped_at, ended_status, stop_reason, stop_reason_id, duration_minutes, is_active, created_at, updated_at",
+          )
+          .eq("tenant_id", user.tenantId)
+          .eq("operator_user_id", operatorId)
+          .order("started_at", { ascending: false })
+          .limit(5000),
+        sb
           .from("batch_runs")
           .select(
             "id, order_id, batch_code, station_id, route_key, step_index, status, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, production_due_date, priority, customer_name, status)",
@@ -215,6 +229,7 @@ export default function ProductionOperatorDetailPage() {
         stationsResult.error ||
         settingsResult.error ||
         eventsResult.error ||
+        workSessionsResult.error ||
         batchRunsResult.error ||
         itemsResult.error
       ) {
@@ -231,6 +246,9 @@ export default function ProductionOperatorDetailPage() {
         setWorkingCalendar(parseWorkingCalendar(settingsResult.data));
       }
       setEvents((eventsResult.data ?? []) as ProductionStatusEventRow[]);
+      setWorkSessions(
+        (workSessionsResult.data ?? []) as ProductionWorkSessionRow[],
+      );
       setBatchRuns(
         ((batchRunsResult.data ?? []) as Array<Record<string, unknown>>).map(
           (row) => ({
@@ -294,6 +312,7 @@ export default function ProductionOperatorDetailPage() {
         assignments,
         stations,
         events,
+        workSessions,
         batchRuns,
         productionItems,
         filter: {
@@ -308,6 +327,7 @@ export default function ProductionOperatorDetailPage() {
       assignments,
       stations,
       events,
+      workSessions,
       batchRuns,
       productionItems,
       selectedRange,
@@ -349,6 +369,7 @@ export default function ProductionOperatorDetailPage() {
       buildOperatorOrderBreakdown({
         actorUserId: operatorId,
         events,
+        workSessions,
         batchRuns,
         productionItems,
         filter: {
@@ -361,6 +382,7 @@ export default function ProductionOperatorDetailPage() {
     [
       operatorId,
       events,
+      workSessions,
       batchRuns,
       productionItems,
       selectedRange,
@@ -375,6 +397,7 @@ export default function ProductionOperatorDetailPage() {
       buildOperatorUnitBreakdown({
         actorUserId: operatorId,
         events,
+        workSessions,
         productionItems,
         filter: {
           range: selectedRange,
@@ -386,6 +409,7 @@ export default function ProductionOperatorDetailPage() {
     [
       operatorId,
       events,
+      workSessions,
       productionItems,
       selectedRange,
       orderSearch,
@@ -399,6 +423,7 @@ export default function ProductionOperatorDetailPage() {
       buildOperatorStationBreakdown({
         actorUserId: operatorId,
         events,
+        workSessions,
         productionItems,
         stations,
         batchRuns,
@@ -412,6 +437,7 @@ export default function ProductionOperatorDetailPage() {
     [
       operatorId,
       events,
+      workSessions,
       productionItems,
       stations,
       batchRuns,

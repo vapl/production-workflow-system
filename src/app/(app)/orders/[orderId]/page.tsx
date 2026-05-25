@@ -111,6 +111,7 @@ import {
   mapOrderItemRow,
 } from "@/lib/domain/orderItems";
 import {
+  erpCoreConstructionColumnKeys,
   getConstructionColumnPresentationKey,
   getLocalizedConstructionColumnDisplayLabel,
   localizeConstructionColumnLabel,
@@ -145,6 +146,18 @@ import {
   canEditOrderInlineField,
   canEditOrderInputs as canEditOrderInputsByRole,
 } from "@/lib/domain/orderPermissions";
+
+function isUnitColumnManagedInSettings(column: Pick<OrderInputTableColumn, "key">) {
+  return !erpCoreConstructionColumnKeys.has(column.key.toLowerCase());
+}
+
+function isVisibleUnitTableColumn(column: OrderInputTableColumn) {
+  return (
+    isUnitColumnManagedInSettings(column) &&
+    column.isActive !== false &&
+    column.showInTable !== false
+  );
+}
 
 function getFileExtension(fileName: string) {
   const dotIndex = fileName.lastIndexOf(".");
@@ -2502,6 +2515,10 @@ export default function OrderDetailPage() {
     }));
     return [...tableColumns, ...customColumns];
   }, [primaryConstructionField?.columns, unitAttributeFields]);
+  const primaryUnitVisibleColumns = useMemo(
+    () => primaryUnitConfiguredColumns.filter(isVisibleUnitTableColumn),
+    [primaryUnitConfiguredColumns],
+  );
   const getUnitImportDraftKey = useCallback(
     (column: { key: string; semanticKey?: string | null }) =>
       (
@@ -2573,12 +2590,12 @@ export default function OrderDetailPage() {
         "attributes.material",
       ];
     }
-    const columns = primaryUnitConfiguredColumns;
+    const columns = primaryUnitVisibleColumns;
     return columns.map((column) => column.key);
   }, [
     bomImportTableField?.columns,
     constructionImportTarget,
-    primaryUnitConfiguredColumns,
+    primaryUnitVisibleColumns,
   ]);
 
   const constructionImportPreviewColumns = useMemo(() => {
@@ -2693,8 +2710,7 @@ export default function OrderDetailPage() {
         );
     }
 
-    return primaryUnitConfiguredColumns
-      .filter((column) => column.isActive !== false)
+    return primaryUnitVisibleColumns
       .map((column) => {
         const draftKey = getUnitImportDraftKey(column);
         return {
@@ -2727,7 +2743,7 @@ export default function OrderDetailPage() {
     constructionImportTarget,
     getUnitImportDraftKey,
     locale,
-    primaryUnitConfiguredColumns,
+    primaryUnitVisibleColumns,
     t,
   ]);
 
@@ -2855,9 +2871,7 @@ export default function OrderDetailPage() {
                     column.isActive !== false && (column.useInBomTable ?? false),
                 )
           )
-            : primaryUnitConfiguredColumns.filter(
-                (column) => column.isActive !== false,
-              );
+            : primaryUnitVisibleColumns;
 
     configuredColumns.forEach((column) => {
       const draftKey =
@@ -2894,7 +2908,7 @@ export default function OrderDetailPage() {
     constructionImportTarget,
     getUnitImportDraftKey,
     locale,
-    primaryUnitConfiguredColumns,
+    primaryUnitVisibleColumns,
   ]);
 
   const constructionImportHeaderOptions = useMemo(() => {
@@ -3636,15 +3650,12 @@ export default function OrderDetailPage() {
                 ? bomImportTableField?.columns?.filter(
                     (column) => column.isActive !== false,
                   ) ?? []
-                : primaryUnitConfiguredColumns.filter(
+                : primaryUnitVisibleColumns.filter(
                     (column) =>
-                      column.isActive !== false &&
                       (column.useInBomTable ?? false),
                   )
             )
-          : primaryUnitConfiguredColumns.filter(
-              (column) => column.isActive !== false,
-            );
+          : primaryUnitVisibleColumns;
 
       configuredColumns.forEach((column) => {
         const bomDraftKeyByColumnKey: Record<string, string> = {
@@ -3690,7 +3701,7 @@ export default function OrderDetailPage() {
       getConstructionImportRowTypeHints,
       getUnitImportDraftKey,
       importProfilesByTarget,
-      primaryUnitConfiguredColumns,
+      primaryUnitVisibleColumns,
       resolveBestConstructionImportProfile,
       savedConstructionImportMapping,
       suggestConstructionImportMapping,
@@ -4513,9 +4524,7 @@ export default function OrderDetailPage() {
         return;
       }
 
-      const columns = primaryUnitConfiguredColumns.filter(
-        (column) => column.isActive !== false,
-      );
+      const columns = primaryUnitVisibleColumns;
 
       const importedRows = constructionImportDraftRows.map((row) => {
         const mappedRow: Record<string, unknown> = {};
@@ -4601,7 +4610,7 @@ export default function OrderDetailPage() {
     notify,
     parseDimensionToken,
     primaryConstructionField,
-    primaryUnitConfiguredColumns,
+    primaryUnitVisibleColumns,
     setIsApplyingConstructionImport,
     t,
   ]);
@@ -4700,13 +4709,27 @@ export default function OrderDetailPage() {
         constructionImportTarget,
         sourceName,
       );
+      const pdfImportColumns =
+        constructionImportTarget === "bom"
+          ? (
+              (bomImportTableField?.columns?.filter(
+                (column) => column.isActive !== false,
+              ) ?? []).length > 0
+                ? bomImportTableField?.columns?.filter(
+                    (column) => column.isActive !== false,
+                  ) ?? []
+                : primaryUnitVisibleColumns.filter(
+                    (column) => column.useInBomTable ?? false,
+                  )
+            )
+          : primaryUnitVisibleColumns;
 
       const requestPayload = {
         orderId: orderState.id,
         target: constructionImportTarget,
         attachmentId: options.attachmentId,
         document: requestDocument,
-        columns: (field.columns ?? []).map((column) => ({
+        columns: pdfImportColumns.map((column) => ({
           key: column.key,
           label: column.label,
           aiKey: column.aiKey,
@@ -4785,7 +4808,7 @@ export default function OrderDetailPage() {
 
       const normalizedRows = normalizeAiTableRows(
         payload.rows ?? [],
-        field.columns ?? [],
+        pdfImportColumns,
         options.attachmentId
           ? { attachmentId: options.attachmentId }
           : undefined,
@@ -4797,7 +4820,7 @@ export default function OrderDetailPage() {
           source_row_ref: String(index + 1),
         };
 
-        (field.columns ?? []).forEach((column) => {
+        pdfImportColumns.forEach((column) => {
           const semanticKey = column.semanticKey;
           if (!semanticKey) {
             return;
@@ -6988,7 +7011,7 @@ export default function OrderDetailPage() {
 
     if (field.fieldType === "table") {
       const columns = field.isPrimaryConstructionTable
-        ? primaryUnitConfiguredColumns
+        ? primaryUnitVisibleColumns
         : (field.columns ?? []);
       const rows = getConstructionRows(field.id);
       const hasRowValueForColumn = (columnKey: string) =>

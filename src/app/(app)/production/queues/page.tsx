@@ -53,7 +53,6 @@ import {
   rowKeyForProductionItem,
 } from "@/lib/domain/productionSplitActions";
 import type { ProductionJobOrderItem } from "@/lib/domain/productionJobDetail";
-import { computeWorkedSecondsBreakdown } from "@/lib/domain/workingCalendar";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabaseClient";
 import type {
@@ -62,6 +61,7 @@ import type {
   ProductionPriority,
   ProductionStation,
   ProductionStatusEventRow,
+  ProductionWorkSessionRow,
 } from "@/types/production";
 
 function normalizeJoinedOrder(value: unknown): BatchRunRow["orders"] {
@@ -147,6 +147,14 @@ type ProductionDisplayFieldConfig = {
   key: string;
   label: string;
   sortOrder: number;
+};
+type OperatorProfileNameRow = {
+  id: string;
+  full_name: string | null;
+};
+type OperatorConfigNameRow = {
+  user_id: string | null;
+  name: string | null;
 };
 
 function getProductionItemMetaRow(item: ProductionItemRow) {
@@ -261,20 +269,21 @@ function formatLiveQueueDuration(
   startedAt: string | null | undefined,
   doneAt: string | null | undefined,
   nowMs: number,
-  calendar: {
-    workdays: number[];
-    shifts: Array<{ start: string; end: string }>;
-    overtimeEnabled: boolean;
-  },
 ) {
   if (!startedAt) {
     return "0s";
   }
-  const totalSeconds = computeWorkedSecondsBreakdown(
-    startedAt,
-    doneAt ?? new Date(nowMs).toISOString(),
-    calendar,
-  ).totalSeconds;
+  const startMs = Date.parse(startedAt);
+  const endMs = doneAt ? Date.parse(doneAt) : nowMs;
+  const totalSeconds =
+    Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+      ? Math.floor((endMs - startMs) / 1000)
+      : 0;
+  return formatQueueSeconds(totalSeconds);
+}
+
+function formatQueueSeconds(totalSeconds: number) {
+  if (!totalSeconds || totalSeconds <= 0) return "0s";
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
@@ -303,6 +312,15 @@ export default function ProductionQueuesPage() {
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
   const [activityEvents, setActivityEvents] = useState<
     ProductionStatusEventRow[]
+  >([]);
+  const [workSessions, setWorkSessions] = useState<ProductionWorkSessionRow[]>(
+    [],
+  );
+  const [operatorProfiles, setOperatorProfiles] = useState<
+    OperatorProfileNameRow[]
+  >([]);
+  const [operatorConfigs, setOperatorConfigs] = useState<
+    OperatorConfigNameRow[]
   >([]);
   const [quickFilter, setQuickFilter] = useState<QueueQuickFilter>("none");
   const [dateFrom, setDateFrom] = useState("");
@@ -358,19 +376,13 @@ export default function ProductionQueuesPage() {
   }, [dataError]);
 
   useEffect(() => {
-    const hasActiveRuns = batchRuns.some(
-      (run) => run.status === "in_progress" && Boolean(run.started_at),
-    );
-    if (!hasActiveRuns) {
-      return;
-    }
     const intervalId = window.setInterval(() => {
       setLiveNowMs(Date.now());
     }, 1000);
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [batchRuns]);
+  }, []);
 
   useEffect(() => {
     const sb = supabase;
@@ -429,7 +441,16 @@ export default function ProductionQueuesPage() {
       setIsLoading(false);
       return;
     }
-    const [stationsResult, itemsResult, orderItemsResult, runsResult, eventsResult] =
+    const [
+      stationsResult,
+      itemsResult,
+      orderItemsResult,
+      runsResult,
+      eventsResult,
+      workSessionsResult,
+      profilesResult,
+      operatorsResult,
+    ] =
       await Promise.all([
         sb
           .from("workstations")
@@ -445,7 +466,7 @@ export default function ProductionQueuesPage() {
           .order("created_at", { ascending: false }),
         sb
           .from("order_items")
-          .select("id, order_id, item_name, item_type, qty, source_row_id")
+          .select("id, order_id, position, item_name, item_type, qty, source_row_id")
           .order("created_at", { ascending: true }),
         sb
           .from("batch_runs")
@@ -461,13 +482,35 @@ export default function ProductionQueuesPage() {
           )
           .order("created_at", { ascending: false })
           .limit(5000),
+        sb
+          .from("production_work_sessions")
+          .select(
+            "id, tenant_id, order_id, batch_run_id, production_item_id, station_id, operator_user_id, started_at, stopped_at, ended_status, stop_reason, stop_reason_id, duration_minutes, is_active, created_at, updated_at",
+          )
+          .order("started_at", { ascending: false })
+          .limit(5000),
+        user?.tenantId
+          ? sb
+              .from("profiles")
+              .select("id, full_name")
+              .eq("tenant_id", user.tenantId)
+          : Promise.resolve({ data: [], error: null }),
+        user?.tenantId
+          ? sb
+              .from("operators")
+              .select("user_id, name")
+              .eq("tenant_id", user.tenantId)
+          : Promise.resolve({ data: [], error: null }),
       ]);
     if (
       stationsResult.error ||
       itemsResult.error ||
       orderItemsResult.error ||
       runsResult.error ||
-      eventsResult.error
+      eventsResult.error ||
+      workSessionsResult.error ||
+      profilesResult.error ||
+      operatorsResult.error
     ) {
       setDataError(t("production.main.errors.loadFailed"));
       setIsLoading(false);
@@ -500,8 +543,15 @@ export default function ProductionQueuesPage() {
     setActivityEvents(
       (eventsResult.data ?? []) as ProductionStatusEventRow[],
     );
+    setWorkSessions(
+      (workSessionsResult.data ?? []) as ProductionWorkSessionRow[],
+    );
+    setOperatorProfiles(
+      (profilesResult.data ?? []) as OperatorProfileNameRow[],
+    );
+    setOperatorConfigs((operatorsResult.data ?? []) as OperatorConfigNameRow[]);
     setIsLoading(false);
-  }, [t]);
+  }, [t, user?.tenantId]);
 
   const { normalizedDateFrom, normalizedDateTo } = useMemo(() => {
     const fallbackStart = "2000-01-01";
@@ -564,6 +614,11 @@ export default function ProductionQueuesPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "workstations" },
+        scheduleReload,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "production_work_sessions" },
         scheduleReload,
       )
       .subscribe();
@@ -650,6 +705,7 @@ export default function ProductionQueuesPage() {
         productionItems,
         orderItems,
         activityEvents,
+        workSessions,
         calendar: { workdays, shifts, overtimeEnabled },
         nowMs: liveNowMs,
         stations,
@@ -660,6 +716,7 @@ export default function ProductionQueuesPage() {
     [
       batchRuns,
       activityEvents,
+      workSessions,
       liveNowMs,
       orderItems,
       productionItems,
@@ -669,6 +726,33 @@ export default function ProductionQueuesPage() {
       stations,
       workdays,
     ],
+  );
+
+  const operatorNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    operatorConfigs.forEach((operator) => {
+      const userId = operator.user_id;
+      const name = operator.name?.trim();
+      if (userId && name) {
+        map.set(userId, name);
+      }
+    });
+    operatorProfiles.forEach((profile) => {
+      const name = profile.full_name?.trim();
+      if (name) {
+        map.set(profile.id, name);
+      }
+    });
+    return map;
+  }, [operatorConfigs, operatorProfiles]);
+
+  const getOperatorNames = useCallback(
+    (operatorIds: string[] | null | undefined) =>
+      Array.from(new Set(operatorIds ?? []))
+        .map((operatorId) => operatorNameById.get(operatorId) ?? null)
+        .filter((name): name is string => Boolean(name))
+        .sort((a, b) => a.localeCompare(b)),
+    [operatorNameById],
   );
 
   const filteredQueueByStation = useMemo(() => {
@@ -1908,6 +1992,7 @@ export default function ProductionQueuesPage() {
                                           excludeValues: [
                                             item.orderNumber,
                                             item.customerName,
+                                            item.unitPosition ?? "",
                                             item.unitName ?? "",
                                             item.unitType ?? "",
                                           ],
@@ -1931,6 +2016,73 @@ export default function ProductionQueuesPage() {
                                       </div>
                                     );
                                   })()}
+                                  {(() => {
+                                    const involvedOperatorNames =
+                                      getOperatorNames(
+                                        item.involvedOperatorIds,
+                                      );
+                                    const workingOperatorNames =
+                                      getOperatorNames(item.workingOperatorIds);
+                                    const pausedOperatorNames =
+                                      getOperatorNames(item.pausedOperatorIds);
+                                    const blockedOperatorNames =
+                                      getOperatorNames(item.blockedOperatorIds);
+                                    if (involvedOperatorNames.length === 0) {
+                                      return null;
+                                    }
+                                    return (
+                                      <div className="mt-1.5 space-y-0.5 text-[11px] leading-5 text-muted-foreground">
+                                        <div>
+                                          {t(
+                                            "production.main.queues.involvedOperators",
+                                            {
+                                              count:
+                                                involvedOperatorNames.length,
+                                            },
+                                          )}
+                                        </div>
+                                        {workingOperatorNames.length > 0 ? (
+                                          <div>
+                                            {t(
+                                              "production.main.queues.workingOperators",
+                                              {
+                                                names:
+                                                  workingOperatorNames.join(
+                                                    ", ",
+                                                  ),
+                                              },
+                                            )}
+                                          </div>
+                                        ) : null}
+                                        {pausedOperatorNames.length > 0 ? (
+                                          <div>
+                                            {t(
+                                              "production.main.queues.pausedOperators",
+                                              {
+                                                names:
+                                                  pausedOperatorNames.join(
+                                                    ", ",
+                                                  ),
+                                              },
+                                            )}
+                                          </div>
+                                        ) : null}
+                                        {blockedOperatorNames.length > 0 ? (
+                                          <div>
+                                            {t(
+                                              "production.main.queues.blockedOperators",
+                                              {
+                                                names:
+                                                  blockedOperatorNames.join(
+                                                    ", ",
+                                                  ),
+                                              },
+                                            )}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })()}
                                   <div className="mt-1.5">
                                     <Badge
                                       variant={statusBadge(item.status)}
@@ -1950,11 +2102,13 @@ export default function ProductionQueuesPage() {
                                   <div className="text-[12px] leading-5 text-muted-foreground">
                                     {item.trackingMode ===
                                     "construction_level"
-                                      ? `${t("production.main.common.group")} ${
-                                          displayBatchCodeByOrderBatch.get(
-                                            `${item.orderId}:${item.batchCode}`,
-                                          ) ?? item.batchCode
-                                        } | `
+                                      ? item.unitPosition
+                                        ? `${t("production.main.jobs.position")}: ${item.unitPosition} | `
+                                        : `${t("production.main.common.group")} ${
+                                            displayBatchCodeByOrderBatch.get(
+                                              `${item.orderId}:${item.batchCode}`,
+                                            ) ?? item.batchCode
+                                          } | `
                                       : ""}
                                     {t("production.main.common.qty")}{" "}
                                     {item.totalQty} |{" "}
@@ -1964,14 +2118,17 @@ export default function ProductionQueuesPage() {
                                     })}{" "}
                                     |{" "}
                                     {t("production.main.queues.time")}{" "}
-                                    {item.status === "in_progress" &&
-                                    item.startedAt
-                                      ? formatLiveQueueDuration(
-                                          item.startedAt,
-                                          item.doneAt ?? null,
-                                          liveNowMs,
-                                          { workdays, shifts, overtimeEnabled },
+                                    {Number(item.durationSeconds ?? 0) > 0
+                                      ? formatQueueSeconds(
+                                          Number(item.durationSeconds ?? 0),
                                         )
+                                      : item.status === "in_progress" &&
+                                          item.startedAt
+                                        ? formatLiveQueueDuration(
+                                            item.startedAt,
+                                            item.doneAt ?? null,
+                                            liveNowMs,
+                                          )
                                       : formatQueueDuration(
                                           Number(item.durationMinutes ?? 0),
                                         )}

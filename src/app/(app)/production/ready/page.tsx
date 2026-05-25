@@ -233,8 +233,9 @@ export default function ProductionReadyPage() {
         productionItems,
         readyOrders,
         batchRuns,
+        orderItems,
       }),
-    [productionItems, readyOrders, batchRuns],
+    [productionItems, readyOrders, batchRuns, orderItems],
   );
 
   const filteredReadyGroups = useMemo(
