@@ -1,4 +1,4 @@
-const CACHE_NAME = "pws-static-v1";
+const CACHE_NAME = "pws-static-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -27,6 +27,15 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api")) return;
+  if (
+    url.searchParams.has("_rsc") ||
+    request.headers.get("RSC") === "1" ||
+    request.headers.has("Next-Router-State-Tree") ||
+    request.headers.has("Next-Router-Prefetch")
+  ) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   if (request.mode === "navigate") {
     event.respondWith(

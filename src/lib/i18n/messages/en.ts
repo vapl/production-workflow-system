@@ -24,6 +24,7 @@
     appName: "Production Workflow System",
     appTagline: "Operational tool for manufacturing",
     shiftDay: "Shift: Day | {date}",
+    refresh: "Refresh data",
     search: "Search",
     notifications: "Notifications",
     notificationsTitle: "Notifications",

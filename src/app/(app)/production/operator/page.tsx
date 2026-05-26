@@ -925,6 +925,7 @@ export default function OperatorProductionPage() {
   const [workSessions, setWorkSessions] = useState<ProductionWorkSessionRow[]>(
     [],
   );
+  const [pullRefreshNonce, setPullRefreshNonce] = useState(0);
   const [operatorProfiles, setOperatorProfiles] = useState<
     OperatorProfileNameRow[]
   >([]);
@@ -987,6 +988,16 @@ export default function OperatorProductionPage() {
   const storagePublicPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${supabaseBucket}/`
     : "";
+
+  useEffect(() => {
+    const handlePullRefresh = () => {
+      setPullRefreshNonce((value) => value + 1);
+    };
+    window.addEventListener("pws:pull-refresh", handlePullRefresh);
+    return () => {
+      window.removeEventListener("pws:pull-refresh", handlePullRefresh);
+    };
+  }, []);
 
   const setQueryParams = (
     updates: Record<string, string | null | undefined>,
@@ -1144,7 +1155,7 @@ export default function OperatorProductionPage() {
 
   useEffect(() => {
     void refreshWorkSessions();
-  }, [refreshWorkSessions]);
+  }, [pullRefreshNonce, refreshWorkSessions]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -1192,7 +1203,7 @@ export default function OperatorProductionPage() {
     let isMounted = true;
     let usedCache = false;
 
-    if (cacheKey) {
+    if (cacheKey && pullRefreshNonce === 0) {
       try {
         const raw = window.sessionStorage.getItem(cacheKey);
         if (raw) {
@@ -1469,6 +1480,7 @@ export default function OperatorProductionPage() {
     selectedWeekEnd,
     selectedWeekStart,
     orderFilter,
+    pullRefreshNonce,
   ]);
 
   useEffect(() => {

@@ -24,6 +24,7 @@
     appName: "Production Workflow System",
     appTagline: "Operāciju rīks ražošanai",
     shiftDay: "Maiņa: Diena | {date}",
+    refresh: "Atjaunot datus",
     search: "Meklēt",
     notifications: "Paziņojumi",
     notificationsTitle: "Paziņojumi",

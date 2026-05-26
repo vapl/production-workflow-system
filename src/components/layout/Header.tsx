@@ -18,6 +18,7 @@ import { toIntlLocale } from "@/lib/i18n/locales";
 import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 type NotificationItem = {
   id: string;
@@ -80,6 +81,7 @@ export function Header() {
   const user = useCurrentUser();
   const { signOut } = useAuthActions();
   const { t } = useI18n();
+  const pathname = usePathname();
   const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
@@ -99,6 +101,14 @@ export function Header() {
     if (normalized === "station") return t("header.body.station");
     if (normalized === "action") return t("header.body.action");
     return label;
+  };
+
+  const handleAppRefresh = () => {
+    window.dispatchEvent(
+      new CustomEvent("pws:pull-refresh", {
+        detail: { pathname },
+      }),
+    );
   };
 
   useEffect(() => {
@@ -360,7 +370,13 @@ export function Header() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             {user.isAuthenticated ? (
-              <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleAppRefresh}
+                className="flex items-center gap-3 rounded-xl text-left transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                aria-label={t("header.refresh")}
+                title={t("header.refresh")}
+              >
                 {user.tenantLogoUrl ? (
                   <img
                     src={user.tenantLogoUrl}
@@ -380,7 +396,7 @@ export function Header() {
                     {t("header.appName")}
                   </p>
                 </div>
-              </div>
+              </button>
             ) : (
               <>
                 <div className="rounded-lg bg-primary p-2">

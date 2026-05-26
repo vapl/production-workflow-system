@@ -75,6 +75,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const canViewProductionOperator = hasPermission("production.operator.view");
   const canViewSettings = hasPermission("settings.view");
   const canViewCompany = user.isAdmin;
+  const canUsePullToRefresh = () =>
+    window.matchMedia("(pointer: coarse)").matches && window.innerWidth < 1180;
 
   const drawerNavItems = useMemo(
     () =>
@@ -290,6 +292,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [hideTabsNav, isDesktopTabsVisible]);
 
   useEffect(() => {
+    const finishRefresh = () => {
+      window.setTimeout(() => {
+        setIsPullRefreshing(false);
+      }, 600);
+    };
+    const handleAppRefresh = () => {
+      setIsPullRefreshing(true);
+      router.refresh();
+      finishRefresh();
+    };
+
+    window.addEventListener("pws:pull-refresh", handleAppRefresh);
+    return () => {
+      window.removeEventListener("pws:pull-refresh", handleAppRefresh);
+    };
+  }, [router]);
+
+  useEffect(() => {
     const threshold = 72;
     const maxDistance = 96;
     const reset = () => {
@@ -297,7 +317,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setPullDistance(0);
     };
     const handleTouchStart = (event: TouchEvent) => {
-      if (window.innerWidth >= 768 || isMobileDrawerOpen || isPullRefreshing) {
+      if (!canUsePullToRefresh() || isMobileDrawerOpen || isPullRefreshing) {
         return;
       }
       const target = event.target as HTMLElement | null;
@@ -343,11 +363,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (!shouldRefresh || isPullRefreshing) {
         return;
       }
-      setIsPullRefreshing(true);
-      router.refresh();
-      window.setTimeout(() => {
-        setIsPullRefreshing(false);
-      }, 600);
+      window.dispatchEvent(
+        new CustomEvent("pws:pull-refresh", {
+          detail: { pathname },
+        }),
+      );
     };
 
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
@@ -360,7 +380,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("touchcancel", handleTouchEnd);
     };
-  }, [isMobileDrawerOpen, isPullRefreshing, pullDistance, router]);
+  }, [isMobileDrawerOpen, isPullRefreshing, pathname, pullDistance]);
 
   useEffect(() => {
     if (!user.loading && !user.isAuthenticated && !isPublicRoute) {
@@ -552,7 +572,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       {pullDistance > 0 || isPullRefreshing ? (
         <div
-          className="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top)+0.4rem)] z-50 -translate-x-1/2 md:hidden"
+          className="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top)+0.4rem)] z-50 -translate-x-1/2"
           style={{
             opacity: isPullRefreshing ? 1 : pullProgress,
             transform: `translate(-50%, ${isPullRefreshing ? 0 : (1 - pullProgress) * -8}px)`,
