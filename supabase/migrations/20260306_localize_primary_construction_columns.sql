@@ -25,8 +25,8 @@ label_map as (
   select *
   from (
     values
-      ('position'::text, 'Rindas Nr.'::text, 'Line No.'::text, '№ строки'::text),
-      ('line_no'::text, 'Rindas Nr.'::text, 'Line No.'::text, '№ строки'::text),
+      ('position'::text, 'Pozīcija'::text, 'Position'::text, 'Позиция'::text),
+      ('line_no'::text, 'Pozīcija'::text, 'Position'::text, 'Позиция'::text),
       ('item_type'::text, 'Produkta tips'::text, 'Item type'::text, 'Тип изделия'::text),
       ('construction'::text, 'Produkta tips'::text, 'Item type'::text, 'Тип изделия'::text),
       ('type'::text, 'Produkta tips'::text, 'Item type'::text, 'Тип изделия'::text),

@@ -1891,6 +1891,7 @@
         searchPlaceholder: "Search order, batch or customer",
         date: "Date",
         week: "Week",
+        allOrders: "All orders",
         weekHint: "Choosing a day shows the full corresponding week.",
         status: "Status",
         priority: "Priority",
@@ -2198,7 +2199,7 @@
       advancedColumnsTitle: "System fields",
       columnSubtitleKey: "Key",
       columnLabels: {
-        position: "Line No.",
+        position: "Position",
         itemType: "Item type",
         itemName: "Item name",
         dimensions: "Dimensions",

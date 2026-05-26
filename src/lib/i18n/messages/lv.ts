@@ -1969,6 +1969,7 @@
         searchPlaceholder: "Meklēt pasūtījumu, partiju vai klientu",
         date: "Datums",
         week: "Nedēļa",
+        allOrders: "Visi pasūtījumi",
         weekHint: "Atlasot dienu, tiek parādīta visa attiecīgā nedēļa.",
         status: "Statuss",
         priority: "Prioritāte",
@@ -2288,7 +2289,7 @@
       advancedColumnsTitle: "Papildu sistēmas lauki",
       columnSubtitleKey: "Atslēga",
       columnLabels: {
-        position: "Rindas Nr.",
+        position: "Pozīcija",
         itemType: "Produkta tips",
         itemName: "Produkta nosaukums",
         dimensions: "Izmēri",

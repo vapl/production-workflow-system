@@ -2,8 +2,8 @@
   select *
   from (
     values
-      ('position'::text, 'Line No.'::text),
-      ('line_no'::text, 'Line No.'::text),
+      ('position'::text, 'Position'::text),
+      ('line_no'::text, 'Position'::text),
       ('item_type'::text, 'Item type'::text),
       ('construction'::text, 'Item type'::text),
       ('type'::text, 'Item type'::text),

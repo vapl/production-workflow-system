@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
 import { Input } from "@/components/ui/Input";
 import {
   Popover,
@@ -827,7 +828,10 @@ export default function OperatorProductionPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const selectedDateParam = searchParams.get("date") || today;
+  const isWeekDateFilterActive = searchParams.get("dateFilter") === "week";
+  const selectedDateParam = isWeekDateFilterActive
+    ? (searchParams.get("date") ?? "")
+    : "";
   const stationFilter = searchParams.get("station");
   const orderFilter = searchParams.get("order");
   const [selectedDate, setSelectedDate] = useState(selectedDateParam);
@@ -868,12 +872,12 @@ export default function OperatorProductionPage() {
   const hideMobileFloatingControls = useHideMobileFloatingControls();
   const isWarehouseQueueView = pathname.startsWith("/warehouse");
   const { weekStart: selectedWeekStart, weekEnd: selectedWeekEnd } = useMemo(
-    () => getWeekRangeForDate(selectedDate),
-    [selectedDate],
+    () => getWeekRangeForDate(selectedDate || today),
+    [selectedDate, today],
   );
   const cacheKey =
-    currentUser.id && selectedDate && !orderFilter
-      ? `pws_operator_cache_${currentUser.id}_${selectedWeekStart}_${selectedWeekEnd}`
+    currentUser.id && !orderFilter
+      ? `pws_operator_cache_${currentUser.id}_${selectedDate || "all"}_${selectedWeekStart}_${selectedWeekEnd}`
       : "";
   const [stations, setStations] = useState<Station[]>([]);
   const [batchRuns, setBatchRuns] = useState<BatchRunRow[]>([]);
@@ -971,6 +975,10 @@ export default function OperatorProductionPage() {
   const blockedOnlyLabel = onlyBlocked
     ? t("production.operator.filters.blockedOnlyOn")
     : t("production.operator.filters.blockedOnly");
+  const hiddenFilterCount =
+    (statusFilter !== "all" ? 1 : 0) +
+    (priorityFilter !== "all" ? 1 : 0) +
+    (onlyBlocked ? 1 : 0);
   const runStatusLabel = (status: BatchRunRow["status"]) =>
     t(`production.operator.status.${status}`);
   const priorityLabel = (priority: Priority) =>
@@ -3009,7 +3017,7 @@ export default function OperatorProductionPage() {
         ) {
           return false;
         }
-        if (!orderFilter) {
+        if (!orderFilter && selectedDate) {
           const filterDate = item.plannedDate ?? item.dueDate ?? null;
           if (
             filterDate &&
@@ -3050,6 +3058,7 @@ export default function OperatorProductionPage() {
     priorityFilter,
     onlyBlocked,
     orderFilter,
+    selectedDate,
     selectedWeekEnd,
     selectedWeekStart,
   ]);
@@ -4688,7 +4697,8 @@ export default function OperatorProductionPage() {
     const queryValue = (next?.q ?? searchQuery).trim();
     const blockedValue = next?.blocked ?? onlyBlocked;
     setQueryParams({
-      date: dateValue || today,
+      date: dateValue || null,
+      dateFilter: dateValue ? "week" : null,
       status: statusValue === "all" ? null : statusValue,
       priority: priorityValue === "all" ? null : priorityValue,
       q: queryValue || null,
@@ -4810,7 +4820,7 @@ export default function OperatorProductionPage() {
     }
     const targetRoute =
       currentUser.role === "Operator" && result.orderId
-        ? `/production/operator?date=${encodeURIComponent(selectedDate)}&order=${encodeURIComponent(result.orderId)}`
+        ? `/production/operator?${selectedDate ? `date=${encodeURIComponent(selectedDate)}&dateFilter=week&` : ""}order=${encodeURIComponent(result.orderId)}`
         : result.targetRoute;
     if (sb && currentUser.tenantId) {
       await sb.from("qr_scan_events").insert({
@@ -4836,7 +4846,8 @@ export default function OperatorProductionPage() {
         rowIndex,
       });
       setQueryParams({
-        date: selectedDate,
+        date: selectedDate || null,
+        dateFilter: selectedDate ? "week" : null,
         status: statusFilter === "all" ? null : statusFilter,
         priority: priorityFilter === "all" ? null : priorityFilter,
         q: searchQuery.trim() || null,
@@ -4870,12 +4881,14 @@ export default function OperatorProductionPage() {
 
   const selectedWeekNumber = getIsoWeekNumber(selectedWeekStart);
 
+  const selectedWeekFilterLabel = `(${selectedWeekNumber} ${t("production.operator.filters.week")}) ${formatDate(selectedWeekStart)} - ${formatDate(selectedWeekEnd)}`;
+  const selectedAllOrdersLabel = t("production.operator.filters.allOrders");
   const headerSubtitle = t("production.operator.header.subtitle", {
-    date: `(${selectedWeekNumber} ${t("production.operator.filters.week")}) ${formatDate(selectedWeekStart)} - ${formatDate(selectedWeekEnd)}`,
+    date: selectedDate ? selectedWeekFilterLabel : selectedAllOrdersLabel,
   });
-  const selectedWeekLabel = `${formatDate(selectedWeekStart)} - ${formatDate(
-    selectedWeekEnd,
-  )}`;
+  const selectedWeekLabel = selectedDate
+    ? `${formatDate(selectedWeekStart)} - ${formatDate(selectedWeekEnd)}`
+    : selectedAllOrdersLabel;
   const isWithinWorkingHoursNow = isWithinWorkingSchedule(
     new Date(liveNowMs),
     workingCalendar,
@@ -5123,124 +5136,147 @@ export default function OperatorProductionPage() {
         </div>
       ) : null}
 
-      <div className="hidden rounded-xl border border-border bg-card p-3 md:block md:p-4">
-        <div>
-          <Input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            onBlur={() => applyFiltersToUrl({ q: searchQuery })}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                applyFiltersToUrl({ q: searchQuery });
-              }
-            }}
-            placeholder={t("production.operator.filters.searchPlaceholder")}
-            icon="search"
-            className="h-10"
-          />
-        </div>
+      <div className="hidden rounded-2xl border border-border bg-muted/10 p-4 md:block">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+          <div className="min-w-0 flex-1">
+            <Input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onBlur={() => applyFiltersToUrl({ q: searchQuery })}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  applyFiltersToUrl({ q: searchQuery });
+                }
+              }}
+              placeholder={t("production.operator.filters.searchPlaceholder")}
+              icon="search"
+              className="h-10"
+            />
+          </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <DatePicker
-            label={t("production.operator.filters.week")}
-            value={selectedDate}
-            displayValue={selectedWeekLabel}
-            description={t("production.operator.filters.weekHint")}
-            onChange={(value) => applyFiltersToUrl({ date: value || today })}
-          />
-
-          <SelectField
-            label={t("production.operator.filters.status")}
-            value={statusFilter}
-            onValueChange={(value) =>
-              applyFiltersToUrl({ status: value as QueueStatusFilter })
-            }
-          >
-            <Select
-              value={statusFilter}
-              onValueChange={(value) =>
-                applyFiltersToUrl({ status: value as QueueStatusFilter })
-              }
-            >
-              <SelectTrigger className="h-10 w-full">
-                <SelectValue
-                  placeholder={t("production.operator.status.all")}
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SelectField>
-
-          <SelectField
-            label={t("production.operator.filters.priority")}
-            value={priorityFilter}
-            onValueChange={(value) =>
-              applyFiltersToUrl({ priority: value as "all" | Priority })
-            }
-          >
-            <Select
-              value={priorityFilter}
-              onValueChange={(value) =>
-                applyFiltersToUrl({ priority: value as "all" | Priority })
-              }
-            >
-              <SelectTrigger className="h-10 w-full">
-                <SelectValue
-                  placeholder={t("production.operator.priority.all")}
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {priorityOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SelectField>
-
-          <div className="flex items-start gap-2">
-            <Button
-              type="button"
-              variant={onlyBlocked ? "secondary" : "outline"}
-              className="h-10 flex-1"
-              onClick={() => applyFiltersToUrl({ blocked: !onlyBlocked })}
-            >
-              {blockedOnlyLabel}
-            </Button>
+          <div className="flex items-center gap-2 xl:ml-auto">
+            <DatePicker
+              value={selectedDate}
+              displayValue={selectedWeekLabel}
+              placeholder={t("production.operator.filters.week")}
+              className="w-[280px] max-w-[34vw]"
+              triggerClassName="h-10"
+              onChange={(value) => applyFiltersToUrl({ date: value || "" })}
+            />
             <Button
               type="button"
               variant="outline"
-              className="h-10 gap-2"
+              className="h-10 gap-2 rounded-full bg-background shadow-sm"
               onClick={() => setIsScannerOpen(true)}
             >
               <QrCodeIcon className="h-4 w-4" />
               {t("production.operator.filters.scan")}
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-10"
-              onClick={() =>
-                setQueryParams({
-                  date: today,
-                  station: stationFilter ?? null,
-                  order: null,
-                  status: null,
-                  priority: null,
-                  q: null,
-                  blocked: null,
-                })
+            <FiltersDropdown
+              label={
+                hiddenFilterCount > 0
+                  ? `${t("production.operator.filters.title")} (${hiddenFilterCount})`
+                  : t("production.operator.filters.title")
               }
+              className="h-10"
+              contentClassName="w-[360px] p-4"
             >
-              {t("production.operator.filters.reset")}
-            </Button>
+              <div className="space-y-4">
+                <SelectField
+                  label={t("production.operator.filters.status")}
+                  value={statusFilter}
+                  onValueChange={(value) =>
+                    applyFiltersToUrl({ status: value as QueueStatusFilter })
+                  }
+                >
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) =>
+                      applyFiltersToUrl({ status: value as QueueStatusFilter })
+                    }
+                  >
+                    <SelectTrigger className="h-10 w-full">
+                      <SelectValue
+                        placeholder={t("production.operator.status.all")}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {statusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SelectField>
+
+                <SelectField
+                  label={t("production.operator.filters.priority")}
+                  value={priorityFilter}
+                  onValueChange={(value) =>
+                    applyFiltersToUrl({ priority: value as "all" | Priority })
+                  }
+                >
+                  <Select
+                    value={priorityFilter}
+                    onValueChange={(value) =>
+                      applyFiltersToUrl({
+                        priority: value as "all" | Priority,
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-10 w-full">
+                      <SelectValue
+                        placeholder={t("production.operator.priority.all")}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {priorityOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SelectField>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    applyFiltersToUrl({ blocked: !onlyBlocked })
+                  }
+                  className={`inline-flex h-9 w-full items-center justify-center rounded-full border px-3 text-sm font-medium transition ${
+                    onlyBlocked
+                      ? "border-foreground bg-foreground text-background shadow-sm"
+                      : "border-border bg-background text-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {blockedOnlyLabel}
+                </button>
+
+                <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="ml-auto h-9"
+                    onClick={() =>
+                      setQueryParams({
+                        date: null,
+                        dateFilter: null,
+                        station: stationFilter ?? null,
+                        order: null,
+                        status: null,
+                        priority: null,
+                        q: null,
+                        blocked: null,
+                      })
+                    }
+                  >
+                    {t("production.operator.filters.reset")}
+                  </Button>
+                </div>
+              </div>
+            </FiltersDropdown>
           </div>
         </div>
       </div>
@@ -6689,7 +6725,7 @@ export default function OperatorProductionPage() {
             value={selectedDate}
             displayValue={selectedWeekLabel}
             description={t("production.operator.filters.weekHint")}
-            onChange={(value) => applyFiltersToUrl({ date: value || today })}
+            onChange={(value) => applyFiltersToUrl({ date: value || "" })}
           />
           <SelectField
             label={t("production.operator.filters.status")}
@@ -6760,7 +6796,8 @@ export default function OperatorProductionPage() {
             onClick={() => {
               setIsFiltersOpen(false);
               setQueryParams({
-                date: today,
+                date: null,
+                dateFilter: null,
                 station: stationFilter ?? null,
                 order: null,
                 status: null,

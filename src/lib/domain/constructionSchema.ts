@@ -9,7 +9,7 @@ export const constructionColumnSemanticOptions: Array<{
   value: ConstructionColumnSemanticKey;
   label: string;
 }> = [
-  { value: "position", label: "Line No." },
+  { value: "position", label: "Position" },
   { value: "item_type", label: "Item type" },
   { value: "item_name", label: "Item name" },
   { value: "qty", label: "Quantity" },
@@ -91,7 +91,7 @@ export const erpCoreConstructionColumnKeys = new Set(
 export const defaultConstructionTableColumns: OrderInputTableColumn[] = [
   {
     key: "position",
-    label: "Line No.",
+    label: "Position",
     semanticKey: "position",
     fieldType: "text",
     isActive: true,
