@@ -239,7 +239,9 @@ function buildProductionDisplayEntries(
         sortOrder: number;
       } => Boolean(entry),
     )
-    .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+    .sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label),
+    );
 
   return typeof options?.limit === "number"
     ? entries.slice(0, options.limit)
@@ -450,58 +452,59 @@ export default function ProductionQueuesPage() {
       workSessionsResult,
       profilesResult,
       operatorsResult,
-    ] =
-      await Promise.all([
-        sb
-          .from("workstations")
-          .select("id, name, sort_order, tracking_mode")
-          .eq("is_active", true)
-          .order("sort_order", { ascending: true })
-          .order("name", { ascending: true }),
-        sb
-          .from("production_items")
-          .select(
-            "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, started_at, done_at, duration_minutes, created_at, orders (order_number, due_date, production_due_date, priority, customer_name)",
-          )
-          .order("created_at", { ascending: false }),
-        sb
-          .from("order_items")
-          .select("id, order_id, position, item_name, item_type, qty, source_row_id")
-          .order("created_at", { ascending: true }),
-        sb
-          .from("batch_runs")
-          .select(
-            "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, production_due_date, priority, customer_name)",
-          )
-          .order("step_index", { ascending: true })
-          .order("planned_date", { ascending: true }),
-        sb
-          .from("production_status_events")
-          .select(
-            "id, production_item_id, batch_run_id, order_id, from_status, to_status, reason, created_at, actor_user_id",
-          )
-          .order("created_at", { ascending: false })
-          .limit(5000),
-        sb
-          .from("production_work_sessions")
-          .select(
-            "id, tenant_id, order_id, batch_run_id, production_item_id, station_id, operator_user_id, started_at, stopped_at, ended_status, stop_reason, stop_reason_id, duration_minutes, is_active, created_at, updated_at",
-          )
-          .order("started_at", { ascending: false })
-          .limit(5000),
-        user?.tenantId
-          ? sb
-              .from("profiles")
-              .select("id, full_name")
-              .eq("tenant_id", user.tenantId)
-          : Promise.resolve({ data: [], error: null }),
-        user?.tenantId
-          ? sb
-              .from("operators")
-              .select("user_id, name")
-              .eq("tenant_id", user.tenantId)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+    ] = await Promise.all([
+      sb
+        .from("workstations")
+        .select("id, name, sort_order, tracking_mode")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true }),
+      sb
+        .from("production_items")
+        .select(
+          "id, order_id, batch_code, item_name, qty, material, status, station_id, meta, started_at, done_at, duration_minutes, created_at, orders (order_number, due_date, production_due_date, priority, customer_name)",
+        )
+        .order("created_at", { ascending: false }),
+      sb
+        .from("order_items")
+        .select(
+          "id, order_id, position, item_name, item_type, qty, source_row_id",
+        )
+        .order("created_at", { ascending: true }),
+      sb
+        .from("batch_runs")
+        .select(
+          "id, order_id, batch_code, station_id, route_key, step_index, status, blocked_reason, blocked_reason_id, planned_date, started_at, done_at, duration_minutes, orders (order_number, due_date, production_due_date, priority, customer_name)",
+        )
+        .order("step_index", { ascending: true })
+        .order("planned_date", { ascending: true }),
+      sb
+        .from("production_status_events")
+        .select(
+          "id, production_item_id, batch_run_id, order_id, from_status, to_status, reason, created_at, actor_user_id",
+        )
+        .order("created_at", { ascending: false })
+        .limit(5000),
+      sb
+        .from("production_work_sessions")
+        .select(
+          "id, tenant_id, order_id, batch_run_id, production_item_id, station_id, operator_user_id, started_at, stopped_at, ended_status, stop_reason, stop_reason_id, duration_minutes, is_active, created_at, updated_at",
+        )
+        .order("started_at", { ascending: false })
+        .limit(5000),
+      user?.tenantId
+        ? sb
+            .from("profiles")
+            .select("id, full_name")
+            .eq("tenant_id", user.tenantId)
+        : Promise.resolve({ data: [], error: null }),
+      user?.tenantId
+        ? sb
+            .from("operators")
+            .select("user_id, name")
+            .eq("tenant_id", user.tenantId)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
     if (
       stationsResult.error ||
       itemsResult.error ||
@@ -540,9 +543,7 @@ export default function ProductionQueuesPage() {
         orders: normalizeJoinedOrder((row as { orders?: unknown }).orders),
       })),
     );
-    setActivityEvents(
-      (eventsResult.data ?? []) as ProductionStatusEventRow[],
-    );
+    setActivityEvents((eventsResult.data ?? []) as ProductionStatusEventRow[]);
     setWorkSessions(
       (workSessionsResult.data ?? []) as ProductionWorkSessionRow[],
     );
@@ -760,11 +761,7 @@ export default function ProductionQueuesPage() {
     const matchesQuickFilter = (item: ProductionQueueItem) => {
       const itemDate = item.plannedDate?.slice(0, 10) ?? "";
 
-      if (
-        normalizedDateFrom &&
-        itemDate &&
-        itemDate < normalizedDateFrom
-      ) {
+      if (normalizedDateFrom && itemDate && itemDate < normalizedDateFrom) {
         return false;
       }
 
@@ -781,12 +778,20 @@ export default function ProductionQueuesPage() {
       }
 
       if (quickFilter === "days7") {
-        return Boolean(itemDate) && itemDate >= today && itemDate <= addDaysToInputDate(today, 6);
+        return (
+          Boolean(itemDate) &&
+          itemDate >= today &&
+          itemDate <= addDaysToInputDate(today, 6)
+        );
       }
 
       if (quickFilter === "late") {
         const comparisonDate = itemDate || item.dueDate?.slice(0, 10) || "";
-        return Boolean(comparisonDate) && comparisonDate < today && item.status !== "done";
+        return (
+          Boolean(comparisonDate) &&
+          comparisonDate < today &&
+          item.status !== "done"
+        );
       }
 
       if (quickFilter === "blocked") {
@@ -972,7 +977,9 @@ export default function ProductionQueuesPage() {
     () =>
       Array.from(
         new Set(
-          selectedQueueRunIds.flatMap((id) => queueItemByRunId.get(id)?.item.runIds ?? []),
+          selectedQueueRunIds.flatMap(
+            (id) => queueItemByRunId.get(id)?.item.runIds ?? [],
+          ),
         ),
       ),
     [queueItemByRunId, selectedQueueRunIds],
@@ -1043,7 +1050,10 @@ export default function ProductionQueuesPage() {
       item.material.toLowerCase().includes(query) ||
       item.items.some((row) => row.item_name.toLowerCase().includes(query));
 
-    const matchesQuick = (item: ProductionQueueItem, filter: QueueQuickFilter) => {
+    const matchesQuick = (
+      item: ProductionQueueItem,
+      filter: QueueQuickFilter,
+    ) => {
       const itemDate = item.plannedDate?.slice(0, 10) ?? "";
       if (filter === "today") {
         return itemDate === today;
@@ -1057,7 +1067,11 @@ export default function ProductionQueuesPage() {
       }
       if (filter === "late") {
         const comparisonDate = itemDate || item.dueDate?.slice(0, 10) || "";
-        return Boolean(comparisonDate) && comparisonDate < today && item.status !== "done";
+        return (
+          Boolean(comparisonDate) &&
+          comparisonDate < today &&
+          item.status !== "done"
+        );
       }
       if (filter === "blocked") {
         return item.status === "blocked";
@@ -1069,7 +1083,10 @@ export default function ProductionQueuesPage() {
     };
 
     const baseItems = allItems.filter(
-      (item) => matchesMode(item) && matchesAdvancedDateFilter(item) && matchesSearch(item),
+      (item) =>
+        matchesMode(item) &&
+        matchesAdvancedDateFilter(item) &&
+        matchesSearch(item),
     );
 
     quickFilterOptions.forEach((filter) => {
@@ -1106,7 +1123,9 @@ export default function ProductionQueuesPage() {
       return;
     }
 
-    const runs = batchRuns.filter((run) => selectedBatchRunIds.includes(run.id));
+    const runs = batchRuns.filter((run) =>
+      selectedBatchRunIds.includes(run.id),
+    );
     const movable = runs.filter(
       (run) =>
         run.status === "queued" ||
@@ -1352,8 +1371,7 @@ export default function ProductionQueuesPage() {
           )
           .map((row) => ({
             runId: row.runId,
-            plannedDate:
-              row.plannedDate,
+            plannedDate: row.plannedDate,
           }))
           .filter((row) => Boolean(row.plannedDate));
 
@@ -1502,13 +1520,17 @@ export default function ProductionQueuesPage() {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-muted-foreground">
-                      {t("production.main.queues.advancedFilters.quickFiltersLabel")}
+                      {t(
+                        "production.main.queues.advancedFilters.quickFiltersLabel",
+                      )}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {quickFilterOptions.map((filter) => (
                         <Button
                           key={filter.value}
-                          variant={quickFilter === filter.value ? "default" : "outline"}
+                          variant={
+                            quickFilter === filter.value ? "default" : "outline"
+                          }
                           size="sm"
                           className="h-8 rounded-full px-3"
                           onClick={() =>
@@ -1517,7 +1539,8 @@ export default function ProductionQueuesPage() {
                             )
                           }
                         >
-                          {filter.label} {quickFilterCounts.get(filter.value) ?? 0}
+                          {filter.label}{" "}
+                          {quickFilterCounts.get(filter.value) ?? 0}
                         </Button>
                       ))}
                     </div>
@@ -1547,7 +1570,9 @@ export default function ProductionQueuesPage() {
                         setQuickFilter("none");
                         resetAdvancedFilters();
                       }}
-                      disabled={quickFilter === "none" && !hasAdvancedDateFilter}
+                      disabled={
+                        quickFilter === "none" && !hasAdvancedDateFilter
+                      }
                     >
                       {t("production.main.queues.advancedFilters.reset")}
                     </Button>
@@ -1846,32 +1871,31 @@ export default function ProductionQueuesPage() {
                     <CardTitle className="flex items-start justify-between gap-3">
                       <div>
                         <span>{station.name}</span>
-                        <div className="mt-0.5 text-[13px] font-normal text-muted-foreground">
-                          {t("production.main.queues.backlog")}{" "}
-                          {formatQueueDuration(metrics?.totalMinutes ?? 0)} |{" "}
-                          {t("production.main.queues.late")}{" "}
-                          <span
-                            className={
-                              (metrics?.lateCount ?? 0) > 0
-                                ? "text-destructive"
-                                : "text-foreground"
-                            }
-                          >
-                            {metrics?.lateCount ?? 0}
-                          </span>
-                        </div>
                       </div>
-                      <span className="text-xs font-normal text-muted-foreground">
-                        {t("production.main.queues.queueCount", {
-                          count: metrics?.queueCount ?? 0,
-                        })}
-                      </span>
                     </CardTitle>
-                    <div className="mt-1 grid grid-cols-3 gap-1.5 text-[10px] text-muted-foreground">
+                    <div className="mt-1 grid grid-cols-[repeat(auto-fit,minmax(80px,1fr))] gap-1.5 text-[10px] text-muted-foreground">
                       <div>
                         {t("production.main.common.qty")}:{" "}
                         <span className="font-medium text-foreground">
                           {metrics?.totalQty ?? 0}
+                        </span>
+                      </div>
+                      <div>
+                        {t("production.main.queues.late")}{" "}
+                        <span
+                          className={
+                            (metrics?.lateCount ?? 0) > 0
+                              ? "text-destructive"
+                              : "text-foreground"
+                          }
+                        >
+                          {metrics?.lateCount ?? 0}
+                        </span>
+                      </div>
+                      <div>
+                        {t("production.main.status.queued")}:{" "}
+                        <span className="font-medium text-foreground">
+                          {metrics?.queueCount ?? 0}
                         </span>
                       </div>
                       <div>
@@ -1962,8 +1986,7 @@ export default function ProductionQueuesPage() {
                                   <div className="text-xs text-muted-foreground">
                                     {item.customerName}
                                   </div>
-                                  {item.trackingMode ===
-                                    "construction_level" &&
+                                  {item.trackingMode === "construction_level" &&
                                   (item.unitType || item.unitName) ? (
                                     <div className="mt-1.5 space-y-0.5 text-[12px] leading-5">
                                       {item.unitType ? (
@@ -2100,8 +2123,7 @@ export default function ProductionQueuesPage() {
                                     {formatQueueGroupDate(item.plannedDate, t)}
                                   </div>
                                   <div className="text-[12px] leading-5 text-muted-foreground">
-                                    {item.trackingMode ===
-                                    "construction_level"
+                                    {item.trackingMode === "construction_level"
                                       ? item.unitPosition
                                         ? `${t("production.main.jobs.position")}: ${item.unitPosition} | `
                                         : `${t("production.main.common.group")} ${
@@ -2116,8 +2138,7 @@ export default function ProductionQueuesPage() {
                                       completed: item.completedQty ?? 0,
                                       total: item.totalQty,
                                     })}{" "}
-                                    |{" "}
-                                    {t("production.main.queues.time")}{" "}
+                                    | {t("production.main.queues.time")}{" "}
                                     {Number(item.durationSeconds ?? 0) > 0
                                       ? formatQueueSeconds(
                                           Number(item.durationSeconds ?? 0),
@@ -2129,9 +2150,9 @@ export default function ProductionQueuesPage() {
                                             item.doneAt ?? null,
                                             liveNowMs,
                                           )
-                                      : formatQueueDuration(
-                                          Number(item.durationMinutes ?? 0),
-                                        )}
+                                        : formatQueueDuration(
+                                            Number(item.durationMinutes ?? 0),
+                                          )}
                                     {Number(item.overtimeMinutes ?? 0) > 0
                                       ? ` | ${t("production.main.queues.overtime")} ${formatQueueDuration(
                                           Number(item.overtimeMinutes ?? 0),
@@ -2146,8 +2167,7 @@ export default function ProductionQueuesPage() {
                                   ) : null}
                                   {(() => {
                                     if (
-                                      item.trackingMode ===
-                                      "construction_level"
+                                      item.trackingMode === "construction_level"
                                     ) {
                                       return null;
                                     }

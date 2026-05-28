@@ -22,6 +22,7 @@ import {
 import type {
   BatchRunRow,
   ProductionItemRow,
+  ProductionStatus,
   ProductionStatusEventRow,
   ProductionWorkSessionRow,
 } from "@/types/production";
@@ -42,6 +43,9 @@ export type OperatorConfigRow = {
   role: string | null;
   hourly_rate: number | null;
   overtime_rate: number | null;
+  weekly_target_minutes?: number | null;
+  monthly_target_minutes?: number | null;
+  overtime_threshold_minutes?: number | null;
   is_active?: boolean | null;
 };
 
@@ -54,6 +58,7 @@ export type OperatorAssignmentRow = {
 export type OperatorStationRow = {
   id: string;
   name: string;
+  trackingMode?: "construction_level" | "order_level" | "receipt_only" | null;
 };
 
 export type OperatorSummaryRow = {
@@ -72,6 +77,15 @@ export type OperatorSummaryRow = {
   completedOrders: number;
 };
 
+export type OperatorOverviewRow = OperatorSummaryRow & {
+  hasConstructionLevelAssignment: boolean;
+  isOrderLevelOperator: boolean;
+  completedUnits: number;
+  relatedUnits: number;
+  displayUnits: number;
+  ordersWithWorkCount: number;
+};
+
 function normalizeOperatorName(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? "";
 }
@@ -80,7 +94,10 @@ export type OperatorOrderBreakdownRow = {
   orderId: string;
   orderNumber: string;
   customerName: string;
+  stationId: string | null;
+  status: ProductionStatus | string | null;
   workedMinutes: number;
+  itemCount?: number;
   completedItems: number;
 };
 
@@ -90,11 +107,25 @@ export type OperatorUnitBreakdownRow = {
   orderNumber: string;
   customerName: string;
   batchCode: string;
+  productType: string | null;
+  unitPosition: string | null;
   itemName: string;
   qty: number;
+  status: ProductionStatus | string | null;
   workedMinutes: number;
   stationId: string | null;
   doneAt: string | null;
+  completed: boolean;
+};
+
+export type OperatorOrderItemRow = {
+  id: string;
+  order_id: string;
+  source_row_id?: string | null;
+  sort_order?: number | null;
+  position?: string | null;
+  item_type?: string | null;
+  item_name?: string | null;
 };
 
 export type OperatorStationBreakdownRow = {
@@ -104,11 +135,97 @@ export type OperatorStationBreakdownRow = {
   completedItems: number;
 };
 
+function hasCompletedTimestamp(value: string | null | undefined) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function getProductionItemSourceKey(item: ProductionItemRow) {
+  const meta = item.meta as Record<string, unknown> | null;
+  const row =
+    meta && typeof meta.row === "object" && meta.row !== null
+      ? (meta.row as Record<string, unknown>)
+      : null;
+  const sourceRowId =
+    meta && typeof meta.sourceRowId === "string" ? meta.sourceRowId : undefined;
+  const orderItemId =
+    row && typeof row.order_item_id === "string"
+      ? row.order_item_id
+      : undefined;
+  const rowKey =
+    meta && typeof meta.rowKey === "string" ? meta.rowKey : undefined;
+  return sourceRowId ?? orderItemId ?? rowKey ?? null;
+}
+
+function getProductionItemMetaRowValue(item: ProductionItemRow, key: string) {
+  const meta = item.meta as Record<string, unknown> | null;
+  const row =
+    meta && typeof meta.row === "object" && meta.row !== null
+      ? (meta.row as Record<string, unknown>)
+      : null;
+  const candidates = [row, meta].filter(
+    (value): value is Record<string, unknown> => Boolean(value),
+  );
+  for (const source of candidates) {
+    const value = source[key];
+    if (value == null) {
+      continue;
+    }
+    const stringValue = String(value).trim();
+    if (stringValue) {
+      return stringValue;
+    }
+  }
+  return null;
+}
+
+function getOrderItemPositionLabel(item: OperatorOrderItemRow | undefined) {
+  if (!item) {
+    return null;
+  }
+  const explicit = item.position?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  return "Pos. -";
+}
+
+function getOrderItemProductTypeLabel(item: OperatorOrderItemRow | undefined) {
+  const explicit = item?.item_type?.trim();
+  return explicit || null;
+}
+
+function getProductionItemCompletedQty(item: ProductionItemRow) {
+  const meta = item.meta as Record<string, unknown> | null;
+  const value = meta?.completedQty;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getProductionItemCompletedAt(item: ProductionItemRow) {
+  const meta = item.meta as Record<string, unknown> | null;
+  return item.done_at ?? (typeof meta?.lastCompletedQtyAt === "string"
+    ? meta.lastCompletedQtyAt
+    : null);
+}
+
+function getProductionItemCompletedBy(item: ProductionItemRow) {
+  const meta = item.meta as Record<string, unknown> | null;
+  return typeof meta?.lastCompletedQtyBy === "string"
+    ? meta.lastCompletedQtyBy
+    : null;
+}
+
 export type OperatorMetricsFilter = {
   range?: WorkedMinutesRange | null;
   search?: string | null;
   calendar?: WorkingCalendar | null;
   assignedStationIds?: string[] | null;
+  orderLevelStationIds?: string[] | null;
 };
 
 type FallbackOperatorMetrics = {
@@ -139,10 +256,21 @@ function addBreakdown(
   };
 }
 
+function isEventInRange(
+  event: ProductionStatusEventRow,
+  range?: WorkedMinutesRange | null,
+) {
+  if (!range) {
+    return true;
+  }
+  return isTimestampInRange(event.created_at, range);
+}
+
 function uniqueCompletedItemsByActor(
   actorUserId: string,
   events: ProductionStatusEventRow[],
   productionItems: ProductionItemRow[],
+  range?: WorkedMinutesRange | null,
 ) {
   const completedIds = new Set(
     events
@@ -150,7 +278,8 @@ function uniqueCompletedItemsByActor(
         (event) =>
           event.actor_user_id === actorUserId &&
           event.to_status === "done" &&
-          typeof event.production_item_id === "string",
+          typeof event.production_item_id === "string" &&
+          isEventInRange(event, range),
       )
       .map((event) => event.production_item_id as string),
   );
@@ -160,6 +289,7 @@ function uniqueCompletedItemsByActor(
 function uniqueCompletedItemIdsByActor(
   actorUserId: string,
   events: ProductionStatusEventRow[],
+  range?: WorkedMinutesRange | null,
 ) {
   return new Set(
     events
@@ -167,7 +297,8 @@ function uniqueCompletedItemIdsByActor(
         (event) =>
           event.actor_user_id === actorUserId &&
           event.to_status === "done" &&
-          typeof event.production_item_id === "string",
+          typeof event.production_item_id === "string" &&
+          isEventInRange(event, range),
       )
       .map((event) => event.production_item_id as string),
   );
@@ -200,9 +331,20 @@ function getActorRunOnlyEvents(
   );
 }
 
+function hasActorEventInRange(
+  actorUserId: string,
+  events: ProductionStatusEventRow[],
+  range?: WorkedMinutesRange | null,
+) {
+  return events.some(
+    (event) => event.actor_user_id === actorUserId && isEventInRange(event, range),
+  );
+}
+
 function uniqueCompletedRunIdsByActor(
   actorUserId: string,
   events: ProductionStatusEventRow[],
+  range?: WorkedMinutesRange | null,
 ) {
   return new Set(
     events
@@ -211,7 +353,8 @@ function uniqueCompletedRunIdsByActor(
           event.actor_user_id === actorUserId &&
           event.to_status === "done" &&
           !event.production_item_id &&
-          typeof event.batch_run_id === "string",
+          typeof event.batch_run_id === "string" &&
+          isEventInRange(event, range),
       )
       .map((event) => event.batch_run_id as string),
   );
@@ -221,8 +364,9 @@ function uniqueCompletedRunsByActor(
   actorUserId: string,
   events: ProductionStatusEventRow[],
   batchRuns: BatchRunRow[],
+  range?: WorkedMinutesRange | null,
 ) {
-  const completedRunIds = uniqueCompletedRunIdsByActor(actorUserId, events);
+  const completedRunIds = uniqueCompletedRunIdsByActor(actorUserId, events, range);
   return batchRuns.filter((run) => completedRunIds.has(run.id));
 }
 
@@ -396,6 +540,18 @@ function isTimestampInRange(
   return point >= start && point < end;
 }
 
+function isWorkSessionInRange(
+  session: ProductionWorkSessionRow,
+  range?: WorkedMinutesRange | null,
+) {
+  if (!range) {
+    return true;
+  }
+  return [session.started_at, session.stopped_at].some((value) =>
+    isTimestampInRange(value, range),
+  );
+}
+
 function buildFallbackOperatorMetrics(params: {
   stationIds: Set<string>;
   productionItems: ProductionItemRow[];
@@ -507,11 +663,13 @@ function buildFallbackOrderBreakdown(params: {
     }
     const current = map.get(item.order_id) ?? {
       orderId: item.order_id,
-      orderNumber: item.orders?.order_number ?? item.order_id,
-      customerName: item.orders?.customer_name ?? "",
-      workedMinutes: 0,
-      completedItems: 0,
-    };
+        stationId: item.station_id,
+        orderNumber: item.orders?.order_number ?? item.order_id,
+        customerName: item.orders?.customer_name ?? "",
+        status: item.status,
+        workedMinutes: 0,
+        completedItems: 0,
+      };
     current.workedMinutes += Math.max(0, Number(item.duration_minutes ?? 0));
     if (item.status === "done") {
       current.completedItems += 1;
@@ -545,8 +703,10 @@ function buildFallbackOrderBreakdown(params: {
     }
     const current = map.get(run.order_id) ?? {
       orderId: run.order_id,
+      stationId: run.station_id,
       orderNumber: run.orders?.order_number ?? run.order_id,
       customerName: run.orders?.customer_name ?? "",
+      status: run.status,
       workedMinutes: 0,
       completedItems: 0,
     };
@@ -563,15 +723,89 @@ function buildFallbackOrderBreakdown(params: {
 }
 
 function buildFallbackUnitBreakdown(params: {
+  actorUserId: string;
   assignedStationIds: string[];
+  stations: OperatorStationRow[];
   productionItems: ProductionItemRow[];
+  orderItems?: OperatorOrderItemRow[];
+  batchRuns: BatchRunRow[];
+  completedItemIds: Set<string>;
   search: string;
   range?: WorkedMinutesRange | null;
 }) {
   const stationIds = new Set(params.assignedStationIds);
+  const stationTrackingModeById = new Map(
+    params.stations.map((station) => [
+      station.id,
+      station.trackingMode ?? "construction_level",
+    ]),
+  );
+  const orderItemById = new Map(
+    (params.orderItems ?? []).map((item) => [item.id, item]),
+  );
+  const orderItemBySourceKey = new Map<string, OperatorOrderItemRow>();
+  (params.orderItems ?? []).forEach((item) => {
+    if (item.source_row_id) {
+      orderItemBySourceKey.set(`${item.order_id}:${item.source_row_id}`, item);
+    }
+  });
+  const getUnitPosition = (item: ProductionItemRow) => {
+    const sourceKey = getProductionItemSourceKey(item);
+    const orderItem = sourceKey
+      ? (orderItemById.get(sourceKey) ??
+        orderItemBySourceKey.get(`${item.order_id}:${sourceKey}`))
+      : undefined;
+    return (
+      getProductionItemMetaRowValue(item, "position") ??
+      getOrderItemPositionLabel(orderItem) ??
+      null
+    );
+  };
+  const getUnitProductType = (item: ProductionItemRow) => {
+    const sourceKey = getProductionItemSourceKey(item);
+    const orderItem = sourceKey
+      ? (orderItemById.get(sourceKey) ??
+        orderItemBySourceKey.get(`${item.order_id}:${sourceKey}`))
+      : undefined;
+    return (
+      getProductionItemMetaRowValue(item, "item_type") ??
+      getOrderItemProductTypeLabel(orderItem) ??
+      item.material ??
+      null
+    );
+  };
+  const findMatchingRun = (item: ProductionItemRow) => {
+    const itemSourceKey = getProductionItemSourceKey(item);
+    return params.batchRuns.find((run) => {
+      if (run.order_id !== item.order_id || run.batch_code !== item.batch_code) {
+        return false;
+      }
+      if (!run.station_id || !stationIds.has(run.station_id)) {
+        return false;
+      }
+      if (
+        (stationTrackingModeById.get(run.station_id) ?? "construction_level") !==
+        "construction_level"
+      ) {
+        return false;
+      }
+      if (itemSourceKey && run.route_key && run.route_key !== "default") {
+        return itemSourceKey === run.route_key;
+      }
+      return true;
+    });
+  };
   return params.productionItems
     .filter((item) => {
-      if (!item.station_id || !stationIds.has(item.station_id)) {
+      const matchingRun = findMatchingRun(item);
+      const stationId = item.station_id ?? matchingRun?.station_id ?? null;
+      if (!stationId || !stationIds.has(stationId)) {
+        return false;
+      }
+      if (
+        (stationTrackingModeById.get(stationId) ?? "construction_level") !==
+        "construction_level"
+      ) {
         return false;
       }
       if (
@@ -584,21 +818,41 @@ function buildFallbackUnitBreakdown(params: {
       ) {
         return false;
       }
-      return isTimestampInRange(item.done_at ?? item.started_at ?? null, params.range);
+      const completedAt = getProductionItemCompletedAt(item);
+      const completedBy = getProductionItemCompletedBy(item);
+      const isCompleted =
+        params.completedItemIds.has(item.id) ||
+        (completedBy === params.actorUserId &&
+          getProductionItemCompletedQty(item) >=
+            Math.max(1, Number(item.qty ?? 0)));
+      if (!isCompleted) {
+        return false;
+      }
+      return isTimestampInRange(
+        completedAt ?? matchingRun?.done_at ?? item.started_at ?? null,
+        params.range,
+      );
     })
-    .map((item) => ({
-      productionItemId: item.id,
-      orderId: item.order_id,
-      orderNumber: item.orders?.order_number ?? item.order_id,
-      customerName: item.orders?.customer_name ?? "",
-      batchCode: item.batch_code,
-      itemName: item.item_name,
-      qty: Number(item.qty ?? 0),
-      workedMinutes: Math.max(0, Number(item.duration_minutes ?? 0)),
-      stationId: item.station_id,
-      doneAt: item.done_at ?? null,
-    }))
-    .filter((item) => item.workedMinutes > 0 || Boolean(item.doneAt))
+    .map((item) => {
+      const matchingRun = findMatchingRun(item);
+      const completedAt = getProductionItemCompletedAt(item);
+      return {
+        productionItemId: item.id,
+        orderId: item.order_id,
+        orderNumber: item.orders?.order_number ?? item.order_id,
+        customerName: item.orders?.customer_name ?? "",
+        batchCode: item.batch_code,
+        productType: getUnitProductType(item),
+        unitPosition: getUnitPosition(item),
+        itemName: item.item_name,
+        qty: Number(item.qty ?? 0),
+        status: item.status,
+        workedMinutes: Math.max(0, Number(item.duration_minutes ?? 0)),
+        stationId: item.station_id ?? matchingRun?.station_id ?? null,
+        doneAt: completedAt ?? matchingRun?.done_at ?? null,
+        completed: true,
+      };
+    })
     .sort((a, b) => b.workedMinutes - a.workedMinutes);
 }
 
@@ -757,6 +1011,57 @@ function getWorkSessionBreakdown(params: {
   } satisfies WorkedTimeBreakdown;
 }
 
+function getOperatorOrderStatusRank(status: ProductionStatus | string | null) {
+  switch (status) {
+    case "blocked":
+      return 5;
+    case "paused":
+      return 4;
+    case "in_progress":
+      return 3;
+    case "done":
+      return 2;
+    case "pending":
+    case "queued":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function mergeOperatorOrderStatus(
+  current: ProductionStatus | string | null,
+  next: ProductionStatus | string | null,
+) {
+  return getOperatorOrderStatusRank(next) >= getOperatorOrderStatusRank(current)
+    ? next
+    : current;
+}
+
+function getOperatorSessionStatus(
+  session: Pick<
+    ProductionWorkSessionRow,
+    "is_active" | "ended_status" | "stopped_at"
+  >,
+) {
+  if (session.is_active) {
+    return "in_progress" satisfies ProductionStatus;
+  }
+  if (
+    session.ended_status === "paused" ||
+    session.ended_status === "blocked" ||
+    session.ended_status === "done"
+  ) {
+    return session.ended_status;
+  }
+  return session.stopped_at ? "paused" : "in_progress";
+}
+
+function getSingleAssignedStationId(assignedStationIds: string[] | null | undefined) {
+  const unique = Array.from(new Set(assignedStationIds ?? []));
+  return unique.length === 1 ? unique[0] : null;
+}
+
 export function buildOperatorSummaryRows(params: {
   profiles: OperatorProfileRow[];
   operatorConfigs: OperatorConfigRow[];
@@ -799,19 +1104,31 @@ export function buildOperatorSummaryRows(params: {
       const actorEvents = getActorEvents(profile.id, events);
       const actorRunOnlyEvents = getActorRunOnlyEvents(profile.id, events);
       const actorSessions = workSessions.filter(
-        (session) => session.operator_user_id === profile.id,
+        (session) =>
+          session.operator_user_id === profile.id &&
+          isWorkSessionInRange(session, filter?.range),
       );
-      const completedItemIds = uniqueCompletedItemIdsByActor(profile.id, events);
-      const completedRunIds = uniqueCompletedRunIdsByActor(profile.id, events);
+      const completedItemIds = uniqueCompletedItemIdsByActor(
+        profile.id,
+        events,
+        filter?.range,
+      );
+      const completedRunIds = uniqueCompletedRunIdsByActor(
+        profile.id,
+        events,
+        filter?.range,
+      );
       const completedItems = uniqueCompletedItemsByActor(
         profile.id,
         events,
         productionItems,
+        filter?.range,
       );
       const completedRuns = uniqueCompletedRunsByActor(
         profile.id,
         events,
         batchRuns,
+        filter?.range,
       );
       const workedBreakdownByItem = filter?.range
         ? buildWorkedBreakdownByItemInRange(actorEvents, filter.range, calendar)
@@ -980,32 +1297,14 @@ export function buildOperatorSummaryRows(params: {
       let finalOvertimeMinutes = search
         ? visibleBreakdown.overtimeMinutes
         : totalBreakdown.overtimeMinutes;
-      let finalCompletedItems = filteredCompletedItems.length + filteredCompletedRuns.length;
-      let finalCompletedQty = completedQty;
-      let finalCompletedOrders = completedOrders;
+      const finalCompletedItems =
+        filteredCompletedItems.length + filteredCompletedRuns.length;
+      const finalCompletedQty = completedQty;
+      const finalCompletedOrders = completedOrders;
       if (actorSessions.length > 0) {
         finalWorkedMinutes = sessionBreakdown.totalMinutes;
         finalRegularMinutes = sessionBreakdown.regularMinutes;
         finalOvertimeMinutes = sessionBreakdown.overtimeMinutes;
-      }
-      if (
-        finalWorkedMinutes <= 0 &&
-        finalCompletedItems <= 0 &&
-        stationIds.size > 0
-      ) {
-        const fallbackMetrics = buildFallbackOperatorMetrics({
-          stationIds,
-          productionItems,
-          batchRuns,
-          search,
-          range: filter?.range,
-        });
-        finalWorkedMinutes = fallbackMetrics.workedMinutes;
-        finalRegularMinutes = fallbackMetrics.regularMinutes;
-        finalOvertimeMinutes = fallbackMetrics.overtimeMinutes;
-        finalCompletedItems = fallbackMetrics.completedItems;
-        finalCompletedQty = fallbackMetrics.completedQty;
-        finalCompletedOrders = fallbackMetrics.completedOrders;
       }
       const hourlyRate = config?.hourly_rate ?? null;
       const overtimeRate = config?.overtime_rate ?? config?.hourly_rate ?? null;
@@ -1033,12 +1332,102 @@ export function buildOperatorSummaryRows(params: {
     .sort((a, b) => b.workedMinutes - a.workedMinutes);
 }
 
+export function buildOperatorOverviewRows(params: {
+  profiles: OperatorProfileRow[];
+  operatorConfigs: OperatorConfigRow[];
+  assignments: OperatorAssignmentRow[];
+  stations: OperatorStationRow[];
+  events: ProductionStatusEventRow[];
+  workSessions?: ProductionWorkSessionRow[];
+  productionItems: ProductionItemRow[];
+  batchRuns: BatchRunRow[];
+  filter?: OperatorMetricsFilter;
+}) {
+  const {
+    profiles,
+    operatorConfigs,
+    assignments,
+    stations,
+    events,
+    workSessions = [],
+    productionItems,
+    batchRuns,
+    filter,
+  } = params;
+  const summaryRows = buildOperatorSummaryRows(params);
+  const orderLevelStationIds = stations
+    .filter((station) => station.trackingMode !== "construction_level")
+    .map((station) => station.id);
+  const orderLevelStationSet = new Set(orderLevelStationIds);
+
+  return summaryRows.map((row) => {
+    const assignedStationIds = assignments
+      .filter(
+        (assignment) => assignment.user_id === row.userId && assignment.is_active,
+      )
+      .map((assignment) => assignment.station_id);
+    const hasConstructionLevelAssignment = assignedStationIds.some(
+      (stationId) => !orderLevelStationSet.has(stationId),
+    );
+    const isOrderLevelOperator =
+      assignedStationIds.length > 0 && !hasConstructionLevelAssignment;
+
+    const orderBreakdown = buildOperatorOrderBreakdown({
+      actorUserId: row.userId,
+      events,
+      workSessions,
+      batchRuns,
+      productionItems,
+      stations,
+      filter: {
+        ...filter,
+        assignedStationIds,
+        orderLevelStationIds,
+      },
+    });
+
+    const unitBreakdown = hasConstructionLevelAssignment
+      ? buildOperatorUnitBreakdown({
+          actorUserId: row.userId,
+          events,
+          workSessions,
+          batchRuns,
+          productionItems,
+          stations,
+          filter: {
+            ...filter,
+            assignedStationIds,
+          },
+        })
+      : [];
+
+    const completedUnits = unitBreakdown
+      .filter((unit) => unit.status === "done")
+      .reduce((sum, unit) => sum + Math.max(1, Number(unit.qty ?? 0)), 0);
+    const relatedUnits = orderBreakdown.reduce(
+      (sum, item) => sum + Math.max(item.itemCount ?? item.completedItems ?? 0, 0),
+      0,
+    );
+
+    return {
+      ...row,
+      hasConstructionLevelAssignment,
+      isOrderLevelOperator,
+      completedUnits,
+      relatedUnits,
+      displayUnits: isOrderLevelOperator ? relatedUnits : completedUnits,
+      ordersWithWorkCount: orderBreakdown.length,
+    } satisfies OperatorOverviewRow;
+  });
+}
+
 export function buildOperatorOrderBreakdown(params: {
   actorUserId: string;
   events: ProductionStatusEventRow[];
   workSessions?: ProductionWorkSessionRow[];
   productionItems: ProductionItemRow[];
   batchRuns: BatchRunRow[];
+  stations?: OperatorStationRow[];
   filter?: OperatorMetricsFilter;
 }) {
   const {
@@ -1047,6 +1436,7 @@ export function buildOperatorOrderBreakdown(params: {
     workSessions = [],
     productionItems,
     batchRuns,
+    stations = [],
     filter,
   } = params;
   const workedMinutesByItem = buildAttributedWorkedMinutesByItem(
@@ -1055,19 +1445,83 @@ export function buildOperatorOrderBreakdown(params: {
     filter?.range,
     filter?.calendar,
   );
+  const runOnlyEvents = events.filter(
+    (event) => !event.production_item_id && event.batch_run_id,
+  );
   const workedMinutesByRun = buildAttributedWorkedMinutesByRun(
-    events,
+    runOnlyEvents,
     actorUserId,
     filter?.range,
     filter?.calendar,
   );
-  const completedItemIds = uniqueCompletedItemIdsByActor(actorUserId, events);
-  const completedRunIds = uniqueCompletedRunIdsByActor(actorUserId, events);
+  const completedItemIds = uniqueCompletedItemIdsByActor(
+    actorUserId,
+    events,
+    filter?.range,
+  );
+  const completedRunIds = uniqueCompletedRunIdsByActor(
+    actorUserId,
+    events,
+    filter?.range,
+  );
   const search = normalizeSearch(filter?.search);
   const productionItemById = new Map(productionItems.map((item) => [item.id, item]));
   const batchRunById = new Map(batchRuns.map((run) => [run.id, run]));
   const map = new Map<string, OperatorOrderBreakdownRow>();
+  const assignedStationSet = new Set(filter?.assignedStationIds ?? []);
+  const orderLevelStationSet = new Set(
+    filter?.orderLevelStationIds ??
+      stations
+        .filter((station) => station.trackingMode !== "construction_level")
+        .map((station) => station.id),
+  );
+  const singleAssignedStationId = getSingleAssignedStationId(
+    filter?.assignedStationIds,
+  );
+  const shouldIncludeStation = (stationId: string | null | undefined) =>
+    assignedStationSet.size === 0 || Boolean(stationId && assignedStationSet.has(stationId));
+  const isOrderLevelStation = (stationId: string | null | undefined) =>
+    Boolean(stationId && orderLevelStationSet.has(stationId));
+  const sessionOrderIds = new Set<string>();
+  const itemIdsByOrder = new Map<string, Set<string>>();
+  const scopeKeysByOrder = new Map<string, Set<string>>();
+  const addOrderItemScope = (
+    orderId: string,
+    key: string | null | undefined,
+  ) => {
+    if (!key) {
+      return;
+    }
+    const keys = scopeKeysByOrder.get(orderId) ?? new Set<string>();
+    keys.add(key);
+    scopeKeysByOrder.set(orderId, keys);
+  };
+  const addOrderItemId = (
+    orderId: string,
+    productionItemId: string | null | undefined,
+  ) => {
+    if (!productionItemId) {
+      return;
+    }
+    const ids = itemIdsByOrder.get(orderId) ?? new Set<string>();
+    ids.add(productionItemId);
+    itemIdsByOrder.set(orderId, ids);
+    addOrderItemScope(orderId, `item:${productionItemId}`);
+  };
   const actorSessions = workSessions.filter(
+    (session) =>
+      session.operator_user_id === actorUserId &&
+      isWorkSessionInRange(session, filter?.range),
+  );
+  const hasActorEventsInRange = hasActorEventInRange(
+    actorUserId,
+    events,
+    filter?.range,
+  );
+  if (actorSessions.length === 0 && !hasActorEventsInRange) {
+    return [];
+  }
+  const hasPreciseSessionsForActor = workSessions.some(
     (session) => session.operator_user_id === actorUserId,
   );
   if (actorSessions.length > 0) {
@@ -1093,23 +1547,52 @@ export function buildOperatorOrderBreakdown(params: {
       });
       const workedMinutes = breakdown.totalMinutes;
       const orderId = item?.order_id ?? run?.order_id ?? session.order_id;
+      const stationId =
+        session.station_id ??
+        item?.station_id ??
+        run?.station_id ??
+        singleAssignedStationId;
+      if (!shouldIncludeStation(stationId)) {
+        return;
+      }
       if (workedMinutes <= 0 || !orderId) {
         return;
       }
       const current = map.get(orderId) ?? {
         orderId,
-        orderNumber:
-          item?.orders?.order_number ?? run?.orders?.order_number ?? orderId,
-        customerName:
-          item?.orders?.customer_name ?? run?.orders?.customer_name ?? "",
-        workedMinutes: 0,
-        completedItems: 0,
-      };
+      stationId: stationId ?? null,
+      orderNumber:
+        item?.orders?.order_number ?? run?.orders?.order_number ?? orderId,
+      customerName:
+        item?.orders?.customer_name ?? run?.orders?.customer_name ?? "",
+      status: item?.status ?? run?.status ?? null,
+      workedMinutes: 0,
+      completedItems: 0,
+    };
+      current.status = mergeOperatorOrderStatus(
+        current.status,
+        getOperatorSessionStatus(session),
+      );
+      current.stationId = current.stationId ?? stationId ?? null;
       current.workedMinutes += workedMinutes;
       map.set(orderId, current);
+      sessionOrderIds.add(orderId);
+      addOrderItemId(orderId, session.production_item_id);
+      if (!session.production_item_id) {
+        addOrderItemScope(
+          orderId,
+          session.batch_run_id
+            ? `run:${session.batch_run_id}`
+            : `order:${orderId}`,
+        );
+      }
     });
   }
   productionItems.forEach((item) => {
+    const stationId = item.station_id ?? singleAssignedStationId;
+    if (!shouldIncludeStation(stationId)) {
+      return;
+    }
     if (
       !matchesOrderSearch(
         search,
@@ -1125,25 +1608,42 @@ export function buildOperatorOrderBreakdown(params: {
       workedMinutesByItem,
     );
     const itemCompleted = completedItemIds.has(item.id);
-    if (itemWorkedMinutes <= 0 && !itemCompleted) {
+    const hasSessionOrder = map.has(item.order_id);
+    const shouldAddWorkedMinutes =
+      !hasPreciseSessionsForActor &&
+      itemWorkedMinutes > 0 &&
+      !sessionOrderIds.has(item.order_id);
+    const shouldAddCompletion = itemCompleted && (!hasPreciseSessionsForActor || hasSessionOrder);
+    if (!shouldAddWorkedMinutes && !shouldAddCompletion) {
       return;
     }
     const current = map.get(item.order_id) ?? {
       orderId: item.order_id,
+      stationId,
       orderNumber: item.orders?.order_number ?? item.order_id,
       customerName: item.orders?.customer_name ?? "",
+      status: item.status,
       workedMinutes: 0,
       completedItems: 0,
     };
-    if (actorSessions.length === 0) {
+    if (shouldAddWorkedMinutes) {
+      current.stationId = current.stationId ?? stationId ?? null;
       current.workedMinutes += itemWorkedMinutes;
+      current.status = mergeOperatorOrderStatus(current.status, "in_progress");
+      addOrderItemId(item.order_id, item.id);
     }
-    if (itemCompleted) {
+    if (shouldAddCompletion) {
       current.completedItems += 1;
+      current.status = mergeOperatorOrderStatus(current.status, "done");
+      addOrderItemId(item.order_id, item.id);
     }
     map.set(item.order_id, current);
   });
   batchRuns.forEach((run) => {
+    const stationId = run.station_id ?? singleAssignedStationId;
+    if (!shouldIncludeStation(stationId) || !isOrderLevelStation(stationId)) {
+      return;
+    }
     if (
       !matchesOrderSearch(
         search,
@@ -1156,43 +1656,47 @@ export function buildOperatorOrderBreakdown(params: {
     }
     const runWorkedMinutes = getAttributedRunWorkedMinutes(run, workedMinutesByRun);
     const runCompleted = completedRunIds.has(run.id);
-    if (runWorkedMinutes <= 0 && !runCompleted) {
+    const hasSessionOrder = map.has(run.order_id);
+    const shouldAddWorkedMinutes =
+      !hasPreciseSessionsForActor &&
+      runWorkedMinutes > 0 &&
+      !sessionOrderIds.has(run.order_id);
+    const shouldAddCompletion = runCompleted && (!hasPreciseSessionsForActor || hasSessionOrder);
+    if (!shouldAddWorkedMinutes && !shouldAddCompletion) {
       return;
     }
     const current = map.get(run.order_id) ?? {
       orderId: run.order_id,
+      stationId,
       orderNumber: run.orders?.order_number ?? run.order_id,
       customerName: run.orders?.customer_name ?? "",
+      status: run.status,
       workedMinutes: 0,
       completedItems: 0,
     };
-    if (actorSessions.length === 0) {
+    if (shouldAddWorkedMinutes) {
+      current.stationId = current.stationId ?? stationId ?? null;
       current.workedMinutes += runWorkedMinutes;
+      current.status = mergeOperatorOrderStatus(current.status, "in_progress");
+      addOrderItemScope(run.order_id, `run:${run.id}`);
     }
-    if (runCompleted) {
+    if (shouldAddCompletion) {
       current.completedItems += 1;
+      current.status = mergeOperatorOrderStatus(current.status, "done");
+      addOrderItemScope(run.order_id, `run:${run.id}`);
     }
     map.set(run.order_id, current);
   });
-  const rows = Array.from(map.values()).sort((a, b) => b.workedMinutes - a.workedMinutes);
-  const fallbackRows =
-    (filter?.assignedStationIds?.length ?? 0) > 0
-      ? buildFallbackOrderBreakdown({
-          assignedStationIds: filter?.assignedStationIds ?? [],
-          productionItems,
-          batchRuns,
-          search,
-          range: filter?.range,
-        })
-      : [];
-  const actorCompleted = rows.reduce((sum, row) => sum + row.completedItems, 0);
-  const fallbackCompleted = fallbackRows.reduce(
-    (sum, row) => sum + row.completedItems,
-    0,
-  );
-  if (fallbackRows.length > 0 && actorCompleted === 0 && fallbackCompleted > 0) {
-    return fallbackRows;
-  }
+  const rows = Array.from(map.values())
+    .map((row) => ({
+      ...row,
+      itemCount:
+        itemIdsByOrder.get(row.orderId)?.size ??
+        scopeKeysByOrder.get(row.orderId)?.size ??
+        row.completedItems,
+    }))
+    .filter((row) => row.workedMinutes > 0 || row.completedItems > 0)
+    .sort((a, b) => b.workedMinutes - a.workedMinutes);
   return rows;
 }
 
@@ -1200,14 +1704,20 @@ export function buildOperatorUnitBreakdown(params: {
   actorUserId: string;
   events: ProductionStatusEventRow[];
   workSessions?: ProductionWorkSessionRow[];
+  batchRuns?: BatchRunRow[];
   productionItems: ProductionItemRow[];
+  orderItems?: OperatorOrderItemRow[];
+  stations?: OperatorStationRow[];
   filter?: OperatorMetricsFilter;
 }) {
   const {
     actorUserId,
     events,
     workSessions = [],
+    batchRuns = [],
     productionItems,
+    orderItems = [],
+    stations = [],
     filter,
   } = params;
   const workedMinutesByItem = buildAttributedWorkedMinutesByItem(
@@ -1217,17 +1727,82 @@ export function buildOperatorUnitBreakdown(params: {
     filter?.calendar,
   );
   const search = normalizeSearch(filter?.search);
+  const completedItemIds = uniqueCompletedItemIdsByActor(
+    actorUserId,
+    events,
+    filter?.range,
+  );
+  const stationTrackingModeById = new Map(
+    stations.map((station) => [
+      station.id,
+      station.trackingMode ?? "construction_level",
+    ]),
+  );
+  const orderItemById = new Map(orderItems.map((item) => [item.id, item]));
+  const orderItemBySourceKey = new Map<string, OperatorOrderItemRow>();
+  orderItems.forEach((item) => {
+    if (item.source_row_id) {
+      orderItemBySourceKey.set(`${item.order_id}:${item.source_row_id}`, item);
+    }
+  });
+  const getUnitPosition = (item: ProductionItemRow) => {
+    const sourceKey = getProductionItemSourceKey(item);
+    const orderItem = sourceKey
+      ? (orderItemById.get(sourceKey) ??
+        orderItemBySourceKey.get(`${item.order_id}:${sourceKey}`))
+      : undefined;
+    return (
+      getProductionItemMetaRowValue(item, "position") ??
+      getOrderItemPositionLabel(orderItem) ??
+      null
+    );
+  };
+  const getUnitProductType = (item: ProductionItemRow) => {
+    const sourceKey = getProductionItemSourceKey(item);
+    const orderItem = sourceKey
+      ? (orderItemById.get(sourceKey) ??
+        orderItemBySourceKey.get(`${item.order_id}:${sourceKey}`))
+      : undefined;
+    return (
+      getProductionItemMetaRowValue(item, "item_type") ??
+      getOrderItemProductTypeLabel(orderItem) ??
+      item.material ??
+      null
+    );
+  };
+  const isConstructionLevelStation = (stationId: string | null | undefined) =>
+    !stationId ||
+    (stationTrackingModeById.get(stationId) ?? "construction_level") ===
+      "construction_level";
+  const assignedStationSet = new Set(filter?.assignedStationIds ?? []);
+  const shouldIncludeStation = (stationId: string | null | undefined) =>
+    !stationId ||
+    assignedStationSet.size === 0 ||
+    assignedStationSet.has(stationId);
   const actorSessions = workSessions.filter(
     (session) =>
-      session.operator_user_id === actorUserId && !!session.production_item_id,
+      session.operator_user_id === actorUserId &&
+      isWorkSessionInRange(session, filter?.range) &&
+      (!!session.production_item_id || !!session.batch_run_id),
+  );
+  const hasActorEventsInRange = hasActorEventInRange(
+    actorUserId,
+    events,
+    filter?.range,
+  );
+  if (actorSessions.length === 0 && !hasActorEventsInRange) {
+    return [];
+  }
+  const hasPreciseSessionsForActor = workSessions.some(
+    (session) => session.operator_user_id === actorUserId,
   );
   if (actorSessions.length > 0) {
     const workedMinutesBySessionItem = new Map<string, number>();
+    const statusBySessionItem = new Map<string, ProductionStatus | string | null>();
+    const stationIdBySessionItem = new Map<string, string | null>();
+    const productionItemById = new Map(productionItems.map((item) => [item.id, item]));
+    const batchRunById = new Map(batchRuns.map((run) => [run.id, run]));
     actorSessions.forEach((session) => {
-      const itemId = session.production_item_id;
-      if (!itemId) {
-        return;
-      }
       const breakdown = getWorkSessionBreakdown({
         session,
         range: filter?.range,
@@ -1236,30 +1811,64 @@ export function buildOperatorUnitBreakdown(params: {
       if (breakdown.totalMinutes <= 0) {
         return;
       }
-      workedMinutesBySessionItem.set(
-        itemId,
-        (workedMinutesBySessionItem.get(itemId) ?? 0) + breakdown.totalMinutes,
-      );
+      const sessionItem = session.production_item_id
+        ? (productionItemById.get(session.production_item_id) ?? null)
+        : null;
+      const run = batchRunById.get(session.batch_run_id) ?? null;
+      const sessionStationId =
+        session.station_id ?? sessionItem?.station_id ?? run?.station_id ?? null;
+      if (
+        !isConstructionLevelStation(sessionStationId) ||
+        !shouldIncludeStation(sessionStationId)
+      ) {
+        return;
+      }
+      if (session.production_item_id) {
+        workedMinutesBySessionItem.set(
+          session.production_item_id,
+          (workedMinutesBySessionItem.get(session.production_item_id) ?? 0) +
+            breakdown.totalMinutes,
+        );
+        statusBySessionItem.set(
+          session.production_item_id,
+          mergeOperatorOrderStatus(
+            statusBySessionItem.get(session.production_item_id) ?? null,
+            getOperatorSessionStatus(session),
+          ),
+        );
+        stationIdBySessionItem.set(session.production_item_id, sessionStationId);
+        return;
+      }
     });
     const sessionRows = productionItems
       .map((item) => {
         const workedMinutes = workedMinutesBySessionItem.get(item.id) ?? 0;
+        const stationId = stationIdBySessionItem.get(item.id) ?? item.station_id;
         return {
           productionItemId: item.id,
           orderId: item.order_id,
           orderNumber: item.orders?.order_number ?? item.order_id,
           customerName: item.orders?.customer_name ?? "",
           batchCode: item.batch_code,
+          productType: getUnitProductType(item),
+          unitPosition: getUnitPosition(item),
           itemName: item.item_name,
           qty: Number(item.qty ?? 0),
+          status: statusBySessionItem.get(item.id) ?? item.status,
           workedMinutes,
-          stationId: item.station_id,
+          stationId,
           doneAt: item.done_at ?? null,
+          completed:
+            completedItemIds.has(item.id) ||
+            (hasCompletedTimestamp(item.done_at) &&
+              isTimestampInRange(item.done_at, filter?.range)),
         };
       })
       .filter(
         (item) =>
-          item.workedMinutes > 0 &&
+          (item.workedMinutes > 0 || item.completed) &&
+          isConstructionLevelStation(item.stationId) &&
+          shouldIncludeStation(item.stationId) &&
           matchesOrderSearch(
             search,
             item.orderNumber,
@@ -1271,12 +1880,18 @@ export function buildOperatorUnitBreakdown(params: {
     if (sessionRows.length > 0) {
       return sessionRows;
     }
+    if (hasPreciseSessionsForActor) {
+      return [];
+    }
   }
-  const rows = productionItems
-    .map((item) => {
-      const workedMinutes = getAttributedItemWorkedMinutes(
-        item,
-        workedMinutesByItem,
+  if (hasPreciseSessionsForActor) {
+    return [];
+  }
+    const rows = productionItems
+      .map((item) => {
+        const workedMinutes = getAttributedItemWorkedMinutes(
+          item,
+          workedMinutesByItem,
       );
       return {
         productionItemId: item.id,
@@ -1284,16 +1899,25 @@ export function buildOperatorUnitBreakdown(params: {
         orderNumber: item.orders?.order_number ?? item.order_id,
         customerName: item.orders?.customer_name ?? "",
         batchCode: item.batch_code,
+        productType: getUnitProductType(item),
+        unitPosition: getUnitPosition(item),
         itemName: item.item_name,
         qty: Number(item.qty ?? 0),
-        workedMinutes,
-        stationId: item.station_id,
-        doneAt: item.done_at ?? null,
+        status: item.status,
+          workedMinutes,
+          stationId: item.station_id,
+          doneAt: item.done_at ?? null,
+          completed:
+            completedItemIds.has(item.id) ||
+            (hasCompletedTimestamp(item.done_at) &&
+              isTimestampInRange(item.done_at, filter?.range)),
       };
     })
     .filter(
       (item) =>
-        item.workedMinutes > 0 &&
+        (item.workedMinutes > 0 || item.completed) &&
+        isConstructionLevelStation(item.stationId) &&
+        shouldIncludeStation(item.stationId) &&
         matchesOrderSearch(
           search,
           item.orderNumber,
@@ -1305,8 +1929,13 @@ export function buildOperatorUnitBreakdown(params: {
   const fallbackRows =
     (filter?.assignedStationIds?.length ?? 0) > 0
       ? buildFallbackUnitBreakdown({
+          actorUserId,
           assignedStationIds: filter?.assignedStationIds ?? [],
+          stations,
           productionItems,
+          orderItems,
+          batchRuns,
+          completedItemIds,
           search,
           range: filter?.range,
         })
@@ -1336,25 +1965,74 @@ export function buildOperatorStationBreakdown(params: {
     filter,
   } = params;
   const stationNameById = new Map(stations.map((station) => [station.id, station.name]));
+  const stationTrackingModeById = new Map(
+    stations.map((station) => [
+      station.id,
+      station.trackingMode ?? "construction_level",
+    ]),
+  );
   const workedMinutesByItem = buildAttributedWorkedMinutesByItem(
     events,
     actorUserId,
     filter?.range,
     filter?.calendar,
   );
+  const runOnlyEvents = events.filter(
+    (event) => !event.production_item_id && event.batch_run_id,
+  );
   const workedMinutesByRun = buildAttributedWorkedMinutesByRun(
-    events,
+    runOnlyEvents,
     actorUserId,
     filter?.range,
     filter?.calendar,
+  );
+  const completedItemIds = uniqueCompletedItemIdsByActor(
+    actorUserId,
+    events,
+    filter?.range,
+  );
+  const completedRunIds = uniqueCompletedRunIdsByActor(
+    actorUserId,
+    events,
+    filter?.range,
   );
   const search = normalizeSearch(filter?.search);
   const map = new Map<string, OperatorStationBreakdownRow>();
   const productionItemById = new Map(productionItems.map((item) => [item.id, item]));
   const batchRunById = new Map(batchRuns.map((run) => [run.id, run]));
-  const actorSessions = workSessions.filter(
-    (session) => session.operator_user_id === actorUserId,
+  const assignedStationSet = new Set(filter?.assignedStationIds ?? []);
+  const singleAssignedStationId = getSingleAssignedStationId(
+    filter?.assignedStationIds,
   );
+  const shouldIncludeStation = (stationId: string) =>
+    assignedStationSet.size === 0 || assignedStationSet.has(stationId);
+  const isOrderLevelStation = (stationId: string | null | undefined) =>
+    Boolean(
+      stationId &&
+        (stationTrackingModeById.get(stationId) ?? "construction_level") !==
+          "construction_level",
+    );
+  const isCompletedItemInRange = (item: ProductionItemRow) =>
+    completedItemIds.has(item.id) ||
+    (hasCompletedTimestamp(item.done_at) &&
+      isTimestampInRange(item.done_at, filter?.range));
+  const isCompletedRunInRange = (run: BatchRunRow) =>
+    completedRunIds.has(run.id) ||
+    (hasCompletedTimestamp(run.done_at) &&
+      isTimestampInRange(run.done_at, filter?.range));
+  const actorSessions = workSessions.filter(
+    (session) =>
+      session.operator_user_id === actorUserId &&
+      isWorkSessionInRange(session, filter?.range),
+  );
+  const hasActorEventsInRange = hasActorEventInRange(
+    actorUserId,
+    events,
+    filter?.range,
+  );
+  if (actorSessions.length === 0 && !hasActorEventsInRange) {
+    return [];
+  }
   if (actorSessions.length > 0) {
     actorSessions.forEach((session) => {
       const item = session.production_item_id
@@ -1380,7 +2058,11 @@ export function buildOperatorStationBreakdown(params: {
         return;
       }
       const stationId =
-        session.station_id ?? item?.station_id ?? run?.station_id ?? "unassigned";
+        session.station_id ??
+        item?.station_id ??
+        run?.station_id ??
+        singleAssignedStationId ??
+        "unassigned";
       const current = map.get(stationId) ?? {
         stationId,
         stationName: stationNameById.get(stationId) ?? stationId,
@@ -1390,6 +2072,31 @@ export function buildOperatorStationBreakdown(params: {
       current.workedMinutes += breakdown.totalMinutes;
       map.set(stationId, current);
     });
+    if (map.size > 0) {
+      productionItems.forEach((item) => {
+        if (!isCompletedItemInRange(item)) {
+          return;
+        }
+        const stationId = item.station_id ?? singleAssignedStationId ?? "unassigned";
+        const current = map.get(stationId);
+        if (current) {
+          current.completedItems += 1;
+        }
+      });
+      batchRuns.forEach((run) => {
+        if (!isCompletedRunInRange(run)) {
+          return;
+        }
+        const stationId = run.station_id ?? singleAssignedStationId ?? "unassigned";
+        const current = map.get(stationId);
+        if (current) {
+          current.completedItems += 1;
+        }
+      });
+      return Array.from(map.values()).sort(
+        (a, b) => b.workedMinutes - a.workedMinutes,
+      );
+    }
   }
   productionItems.forEach((item) => {
     const workedMinutes = getAttributedItemWorkedMinutes(
@@ -1407,7 +2114,10 @@ export function buildOperatorStationBreakdown(params: {
     ) {
       return;
     }
-    const stationId = item.station_id ?? "unassigned";
+    const stationId = item.station_id ?? singleAssignedStationId ?? "unassigned";
+    if (!shouldIncludeStation(stationId)) {
+      return;
+    }
     const current = map.get(stationId) ?? {
       stationId,
       stationName: stationNameById.get(stationId) ?? stationId,
@@ -1417,13 +2127,17 @@ export function buildOperatorStationBreakdown(params: {
     if (actorSessions.length === 0) {
       current.workedMinutes += workedMinutes;
     }
-    current.completedItems += 1;
+    if (isCompletedItemInRange(item)) {
+      current.completedItems += 1;
+    }
     map.set(stationId, current);
   });
   batchRuns.forEach((run) => {
     const workedMinutes = getAttributedRunWorkedMinutes(run, workedMinutesByRun);
+    const stationId = run.station_id ?? singleAssignedStationId ?? "unassigned";
     if (
       workedMinutes <= 0 ||
+      !isOrderLevelStation(stationId) ||
       !matchesOrderSearch(
         search,
         run.orders?.order_number,
@@ -1433,7 +2147,9 @@ export function buildOperatorStationBreakdown(params: {
     ) {
       return;
     }
-    const stationId = run.station_id ?? "unassigned";
+    if (!shouldIncludeStation(stationId)) {
+      return;
+    }
     const current = map.get(stationId) ?? {
       stationId,
       stationName: stationNameById.get(stationId) ?? stationId,
@@ -1443,29 +2159,12 @@ export function buildOperatorStationBreakdown(params: {
     if (actorSessions.length === 0) {
       current.workedMinutes += workedMinutes;
     }
-    current.completedItems += 1;
+    if (isCompletedRunInRange(run)) {
+      current.completedItems += 1;
+    }
     map.set(stationId, current);
   });
   const rows = Array.from(map.values()).sort((a, b) => b.workedMinutes - a.workedMinutes);
-  const fallbackRows =
-    (filter?.assignedStationIds?.length ?? 0) > 0
-      ? buildFallbackStationBreakdown({
-          assignedStationIds: filter?.assignedStationIds ?? [],
-          stations,
-          productionItems,
-          batchRuns,
-          search,
-          range: filter?.range,
-        })
-      : [];
-  const actorCompleted = rows.reduce((sum, row) => sum + row.completedItems, 0);
-  const fallbackCompleted = fallbackRows.reduce(
-    (sum, row) => sum + row.completedItems,
-    0,
-  );
-  if (fallbackRows.length > 0 && actorCompleted === 0 && fallbackCompleted > 0) {
-    return fallbackRows;
-  }
   return rows;
 }
 
@@ -1488,5 +2187,5 @@ export function formatLaborCost(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) {
     return "-";
   }
-  return value.toFixed(2);
+  return `${value.toFixed(2)} €`;
 }

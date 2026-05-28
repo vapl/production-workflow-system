@@ -432,7 +432,7 @@ export function buildQueueByStation(params: {
       "pending",
       "done",
     ];
-    const status =
+    const statusFromRuns =
       statusOrder.find((candidate) =>
         runs.some((run) => run.status === candidate),
       ) ?? representativeRun.status;
@@ -470,6 +470,16 @@ export function buildQueueByStation(params: {
     );
     const sessionElapsedSeconds = getElapsedSecondsForSessions(scopeSessions);
     const operatorGroups = getOperatorGroupsForSessions(scopeSessions);
+    const status: ProductionStatus =
+      statusFromRuns === "done"
+        ? "done"
+        : statusFromRuns === "blocked" || operatorGroups.blocked.size > 0
+          ? "blocked"
+          : operatorGroups.working.size > 0
+            ? "in_progress"
+            : operatorGroups.paused.size > 0
+              ? "paused"
+              : statusFromRuns;
 
     const queueItem = {
       id: representativeRun.id,

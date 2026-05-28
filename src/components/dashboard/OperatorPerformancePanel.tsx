@@ -34,6 +34,7 @@ import type {
 type PeriodKey = "7d" | "30d" | "90d" | "all";
 
 type OperatorRow = {
+  userId: string;
   operator: string;
   hours: number;
   constructions: number;
@@ -286,17 +287,22 @@ export function OperatorPerformancePanel() {
   );
 
   const operatorOptions = useMemo(
-    () => stationFilteredRows.map((row) => row.name).sort((a, b) => a.localeCompare(b)),
+    () =>
+      stationFilteredRows
+        .map((row) => ({ value: row.userId, label: row.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
     [stationFilteredRows],
   );
 
   const selectedOperator =
-    operator === "all" || operatorOptions.includes(operator) ? operator : "all";
+    operator === "all" || operatorOptions.some((option) => option.value === operator)
+      ? operator
+      : "all";
 
   const visibleRows = useMemo(
     () =>
       stationFilteredRows.filter((row) =>
-        selectedOperator === "all" ? true : row.name === selectedOperator,
+        selectedOperator === "all" ? true : row.userId === selectedOperator,
       ),
     [selectedOperator, stationFilteredRows],
   );
@@ -304,6 +310,7 @@ export function OperatorPerformancePanel() {
   const operatorRows = useMemo<OperatorRow[]>(
     () =>
       visibleRows.map((row) => ({
+        userId: row.userId,
         operator: row.name,
         hours: row.workedMinutes / 60,
         constructions: row.completedItems,
@@ -343,7 +350,7 @@ export function OperatorPerformancePanel() {
         station === "all" ? true : row.stations.includes(station),
       );
       const selectedRows = rows.filter((row) =>
-        selectedOperator === "all" ? true : row.name === selectedOperator,
+        selectedOperator === "all" ? true : row.userId === selectedOperator,
       );
       const value =
         selectedRows.reduce((sum, row) => sum + row.workedMinutes, 0) / 60;
@@ -439,8 +446,8 @@ export function OperatorPerformancePanel() {
               <SelectContent>
                 <SelectItem value="all">{t("dashboard.operatorPerformance.allOperators")}</SelectItem>
                 {operatorOptions.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -580,7 +587,7 @@ export function OperatorPerformancePanel() {
                 </tr>
               ) : (
                 operatorRows.map((row) => (
-                  <tr key={row.operator} className="border-t border-border">
+                  <tr key={row.userId} className="border-t border-border">
                     <td className="px-4 py-2 font-medium">{row.operator}</td>
                     <td className="px-4 py-2 text-muted-foreground">
                       {row.stations.length > 0

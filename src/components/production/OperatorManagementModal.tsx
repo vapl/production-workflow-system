@@ -225,7 +225,10 @@ export function OperatorManagementModal({
       const sessionResult = await sb.auth.getSession();
       session = sessionResult.data.session;
       const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : 0;
-      if (!session?.access_token || (expiresAtMs && expiresAtMs - Date.now() < 60_000)) {
+      if (
+        !session?.access_token ||
+        (expiresAtMs && expiresAtMs - Date.now() < 60_000)
+      ) {
         const refreshResult = await sb.auth.refreshSession();
         session = refreshResult.data.session ?? session;
       }
@@ -251,7 +254,9 @@ export function OperatorManagementModal({
 
     let response = await makeRequest(await getAccessToken());
     if (response.status === 401) {
-      response = await makeRequest(await getAccessToken({ forceRefresh: true }));
+      response = await makeRequest(
+        await getAccessToken({ forceRefresh: true }),
+      );
     }
     return response;
   };
@@ -545,7 +550,7 @@ export function OperatorManagementModal({
             ) : null}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px_160px]">
+          <div className="grid gap-4 md:grid-cols-[1fr_1fr_1fr]">
             <InputField
               label={t("production.main.operators.managePin")}
               type="password"

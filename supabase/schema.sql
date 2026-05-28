@@ -1085,6 +1085,9 @@ create table if not exists public.operators (
   station_id uuid references public.workstations(id) on delete set null,
   hourly_rate numeric,
   overtime_rate numeric,
+  weekly_target_minutes integer,
+  monthly_target_minutes integer,
+  overtime_threshold_minutes integer,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -1095,6 +1098,26 @@ create unique index if not exists operators_user_id_uidx
   on public.operators(user_id)
   where user_id is not null;
 create index if not exists operators_station_id_idx on public.operators(station_id);
+
+create table if not exists public.operator_absences (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  operator_id uuid not null references public.operators(id) on delete cascade,
+  absence_type text not null default 'vacation',
+  start_date date not null,
+  end_date date not null,
+  note text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint operator_absences_date_order_check check (end_date >= start_date)
+);
+
+create index if not exists operator_absences_tenant_id_idx
+  on public.operator_absences(tenant_id);
+create index if not exists operator_absences_operator_id_idx
+  on public.operator_absences(operator_id);
+create index if not exists operator_absences_date_idx
+  on public.operator_absences(start_date, end_date);
 
 create table if not exists public.stop_reasons (
   id uuid primary key default gen_random_uuid(),
@@ -1447,6 +1470,11 @@ for each row execute procedure public.set_updated_at();
 drop trigger if exists set_operators_updated_at on public.operators;
 create trigger set_operators_updated_at
 before update on public.operators
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists set_operator_absences_updated_at on public.operator_absences;
+create trigger set_operator_absences_updated_at
+before update on public.operator_absences
 for each row execute procedure public.set_updated_at();
 
 drop trigger if exists set_stop_reasons_updated_at on public.stop_reasons;
@@ -1831,6 +1859,7 @@ alter table public.workstations enable row level security;
 alter table public.station_dependencies enable row level security;
 alter table public.tenant_settings enable row level security;
 alter table public.operators enable row level security;
+alter table public.operator_absences enable row level security;
 alter table public.stop_reasons enable row level security;
 alter table public.construction_items enable row level security;
 alter table public.batches enable row level security;
@@ -1992,6 +2021,48 @@ create policy "operators_delete_by_tenant" on public.operators
     exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.tenant_id = operators.tenant_id
+    )
+  );
+
+create policy "operator_absences_select_by_tenant" on public.operator_absences
+  for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = operator_absences.tenant_id
+    )
+  );
+
+create policy "operator_absences_insert_by_tenant" on public.operator_absences
+  for insert
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = operator_absences.tenant_id
+    )
+  );
+
+create policy "operator_absences_update_by_tenant" on public.operator_absences
+  for update
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = operator_absences.tenant_id
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = operator_absences.tenant_id
+    )
+  );
+
+create policy "operator_absences_delete_by_tenant" on public.operator_absences
+  for delete
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.tenant_id = operator_absences.tenant_id
     )
   );
 

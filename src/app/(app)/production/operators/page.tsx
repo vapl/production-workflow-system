@@ -2,17 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { format } from "date-fns";
 import {
   ArrowLeftIcon,
+  CalendarIcon,
   ArrowRightIcon,
   SearchIcon,
+  SettingsIcon,
   UserCircle2Icon,
   XIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
+import { Calendar } from "@/components/ui/Calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { SelectField } from "@/components/ui/SelectField";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
@@ -21,7 +27,7 @@ import { ProductionStatCard } from "@/components/production/ProductionStatCard";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useHideMobileFloatingControls } from "@/hooks/useHideMobileFloatingControls";
 import {
-  buildOperatorSummaryRows,
+  buildOperatorOverviewRows,
   formatLaborCost,
   formatWorkedDuration,
   type OperatorAssignmentRow,
@@ -42,6 +48,8 @@ import type {
   ProductionStatusEventRow,
   ProductionWorkSessionRow,
 } from "@/types/production";
+import type { DateRange } from "react-day-picker";
+import { InputField } from "@/components/ui/InputField";
 
 function normalizeJoinedOrder(value: unknown): JoinedProductionOrder | null {
   const item = Array.isArray(value) ? (value[0] ?? null) : value;
@@ -71,15 +79,112 @@ function normalizeJoinedOrder(value: unknown): JoinedProductionOrder | null {
   };
 }
 
+function getCurrentPeriodValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return {
+    startDate: `${year}-${month}-01`,
+    endDate: `${year}-${month}-${String(
+      new Date(year, now.getMonth() + 1, 0).getDate(),
+    ).padStart(2, "0")}`,
+  };
+}
+
+function parseDateValue(dateValue: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    return null;
+  }
+  const [yearValue, monthPart, dayPart] = dateValue.split("-");
+  const year = Number(yearValue);
+  const monthIndex = Number(monthPart) - 1;
+  const day = Number(dayPart);
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(monthIndex) ||
+    !Number.isFinite(day)
+  ) {
+    return null;
+  }
+  const parsed = new Date(year, monthIndex, day, 0, 0, 0, 0);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isFutureDate(date: Date) {
+  const now = new Date();
+  const today = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+  return date.getTime() > today.getTime();
+}
+
+function buildDateRange(startDate: string, endDate: string) {
+  const start = parseDateValue(startDate);
+  const end = parseDateValue(endDate);
+  if (!start || !end) {
+    return null;
+  }
+  const normalizedStart = start <= end ? start : end;
+  const normalizedEnd = end >= start ? end : start;
+  const endExclusive = new Date(normalizedEnd);
+  endExclusive.setDate(endExclusive.getDate() + 1);
+  return {
+    startAt: normalizedStart.toISOString(),
+    endAt: endExclusive.toISOString(),
+  };
+}
+
+function formatPeriodLabel(startDate: string, endDate: string, locale: string) {
+  const start = parseDateValue(startDate);
+  const end = parseDateValue(endDate);
+  if (!start || !end) {
+    return "";
+  }
+  const formatter = new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  });
+  return `${formatter.format(start)} - ${formatter.format(end)}`;
+}
+
+function buildDateRangeValue(range: DateRange | undefined) {
+  const from = range?.from ? new Date(range.from) : null;
+  const to = range?.to ? new Date(range.to) : null;
+  if (!from || !to) {
+    return null;
+  }
+  const start = from <= to ? from : to;
+  const end = to >= from ? to : from;
+  return {
+    startDate: format(start, "yyyy-MM-dd"),
+    endDate: format(end, "yyyy-MM-dd"),
+  };
+}
+
 export default function ProductionOperatorsPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const user = useCurrentUser();
+  const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [dataError, setDataError] = useState("");
   const [search, setSearch] = useState("");
+  const [stationFilter, setStationFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("worked_desc");
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [selectedPeriod, setSelectedPeriod] = useState(getCurrentPeriodValue);
+  const [periodPickerOpen, setPeriodPickerOpen] = useState(false);
+  const [periodPickerDraft, setPeriodPickerDraft] = useState<
+    DateRange | undefined
+  >(undefined);
   const [profiles, setProfiles] = useState<OperatorProfileRow[]>([]);
   const [operatorConfigs, setOperatorConfigs] = useState<OperatorConfigRow[]>(
     [],
@@ -101,6 +206,24 @@ export default function ProductionOperatorsPage() {
   });
   const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
   const hideMobileFloatingControls = useHideMobileFloatingControls();
+  const selectedRange = useMemo(
+    () => buildDateRange(selectedPeriod.startDate, selectedPeriod.endDate),
+    [selectedPeriod],
+  );
+  const selectedPeriodLabel = useMemo(
+    () =>
+      formatPeriodLabel(
+        selectedPeriod.startDate,
+        selectedPeriod.endDate,
+        locale,
+      ),
+    [locale, selectedPeriod.endDate, selectedPeriod.startDate],
+  );
+  const selectedPeriodRange = useMemo<DateRange | undefined>(() => {
+    const from = parseDateValue(selectedPeriod.startDate);
+    const to = parseDateValue(selectedPeriod.endDate);
+    return from && to ? { from, to } : undefined;
+  }, [selectedPeriod.endDate, selectedPeriod.startDate]);
 
   useEffect(() => {
     const sb = supabase;
@@ -140,7 +263,7 @@ export default function ProductionOperatorsPage() {
           .eq("tenant_id", user.tenantId),
         sb
           .from("workstations")
-          .select("id, name")
+          .select("id, name, tracking_mode")
           .eq("tenant_id", user.tenantId)
           .eq("is_active", true)
           .order("sort_order", { ascending: true }),
@@ -203,7 +326,19 @@ export default function ProductionOperatorsPage() {
       setProfiles((profilesResult.data ?? []) as OperatorProfileRow[]);
       setOperatorConfigs((configsResult.data ?? []) as OperatorConfigRow[]);
       setAssignments((assignmentsResult.data ?? []) as OperatorAssignmentRow[]);
-      setStations((stationsResult.data ?? []) as OperatorStationRow[]);
+      setStations(
+        ((stationsResult.data ?? []) as Array<Record<string, unknown>>).map(
+          (row) => ({
+            id: String(row.id),
+            name: String(row.name ?? ""),
+            trackingMode:
+              row.tracking_mode === "order_level" ||
+              row.tracking_mode === "receipt_only"
+                ? row.tracking_mode
+                : "construction_level",
+          }),
+        ),
+      );
       if (settingsResult.data) {
         setWorkingCalendar(parseWorkingCalendar(settingsResult.data));
       }
@@ -236,9 +371,15 @@ export default function ProductionOperatorsPage() {
     };
   }, [reloadNonce, t, user.tenantId]);
 
+  useEffect(() => {
+    if (searchParams.get("manage") === "1") {
+      setIsManageModalOpen(true);
+    }
+  }, [searchParams]);
+
   const operatorRows = useMemo(
     () =>
-      buildOperatorSummaryRows({
+      buildOperatorOverviewRows({
         profiles,
         operatorConfigs,
         assignments,
@@ -248,6 +389,7 @@ export default function ProductionOperatorsPage() {
         batchRuns,
         productionItems,
         filter: {
+          range: selectedRange,
           calendar: workingCalendar,
         },
       }),
@@ -260,6 +402,7 @@ export default function ProductionOperatorsPage() {
       workSessions,
       batchRuns,
       productionItems,
+      selectedRange,
       workingCalendar,
     ],
   );
@@ -272,31 +415,92 @@ export default function ProductionOperatorsPage() {
           profiles.some(
             (profile) =>
               profile.id === row.userId &&
-              ((profile.role?.trim().toLowerCase() === "operator") ||
+              (profile.role?.trim().toLowerCase() === "operator" ||
                 profile.auth_mode === "pin"),
           ),
       ),
     [operatorRows, profiles],
   );
 
+  const stationFilterOptions = useMemo(
+    () => [
+      {
+        value: "all",
+        label: t("production.main.operators.allStations"),
+      },
+      ...stations.map((station) => ({
+        value: station.name,
+        label: station.name,
+      })),
+    ],
+    [stations, t],
+  );
+
+  const sortOptions = useMemo(
+    () => [
+      {
+        value: "worked_desc",
+        label: t("production.main.operators.sortWorkedHours"),
+      },
+      {
+        value: "labor_desc",
+        label: t("production.main.operators.sortLaborCost"),
+      },
+      {
+        value: "units_desc",
+        label: t("production.main.operators.sortUnits"),
+      },
+      {
+        value: "orders_desc",
+        label: t("production.main.operators.sortOrders"),
+      },
+      {
+        value: "name_asc",
+        label: t("production.main.operators.sortName"),
+      },
+    ],
+    [t],
+  );
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) {
-      return visibleOperatorRows;
-    }
-    return visibleOperatorRows.filter((row) => {
-      return (
+    const baseRows = visibleOperatorRows.filter((row) => {
+      const matchesSearch =
+        !query ||
         row.name.toLowerCase().includes(query) ||
         row.role.toLowerCase().includes(query) ||
-        row.stations.some((station) => station.toLowerCase().includes(query))
-      );
+        row.stations.some((station) => station.toLowerCase().includes(query));
+      const matchesStation =
+        stationFilter === "all" || row.stations.includes(stationFilter);
+      return matchesSearch && matchesStation;
     });
-  }, [search, visibleOperatorRows]);
+
+    const rows = [...baseRows];
+    rows.sort((a, b) => {
+      switch (sortBy) {
+        case "labor_desc":
+          return (b.laborCost ?? 0) - (a.laborCost ?? 0);
+        case "units_desc":
+          return b.displayUnits - a.displayUnits;
+        case "orders_desc":
+          return b.ordersWithWorkCount - a.ordersWithWorkCount;
+        case "name_asc":
+          return a.name.localeCompare(b.name);
+        case "worked_desc":
+        default:
+          return b.workedMinutes - a.workedMinutes;
+      }
+    });
+    return rows;
+  }, [search, sortBy, stationFilter, visibleOperatorRows]);
 
   const loginCodeByUserId = useMemo(
     () =>
       new Map(
-        profiles.map((profile) => [profile.id, profile.login_code?.trim() ?? ""]),
+        profiles.map((profile) => [
+          profile.id,
+          profile.login_code?.trim() ?? "",
+        ]),
       ),
     [profiles],
   );
@@ -308,9 +512,12 @@ export default function ProductionOperatorsPage() {
           acc.workedMinutes += row.workedMinutes;
           acc.regularMinutes += row.regularMinutes;
           acc.overtimeMinutes += row.overtimeMinutes;
-          acc.completedItems += row.completedItems;
-          acc.completedQty += row.completedQty;
-          acc.completedOrders += row.completedOrders;
+          if (!row.isOrderLevelOperator) {
+            acc.completedQty += row.completedUnits;
+          } else {
+            acc.relatedUnits += row.relatedUnits;
+          }
+          acc.completedOrders += row.ordersWithWorkCount;
           acc.laborCost += row.laborCost ?? 0;
           return acc;
         },
@@ -318,8 +525,8 @@ export default function ProductionOperatorsPage() {
           workedMinutes: 0,
           regularMinutes: 0,
           overtimeMinutes: 0,
-          completedItems: 0,
           completedQty: 0,
+          relatedUnits: 0,
           completedOrders: 0,
           laborCost: 0,
         },
@@ -340,6 +547,21 @@ export default function ProductionOperatorsPage() {
     </Tooltip>
   );
 
+  const manageOperatorsButton = (
+    <Tooltip content={t("production.main.operators.manageTitle")} side="bottom">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="rounded-full"
+        onClick={() => setIsManageModalOpen(true)}
+        aria-label={t("production.main.operators.manageTitle")}
+      >
+        <SettingsIcon className="h-4 w-4" />
+      </Button>
+    </Tooltip>
+  );
+
   const closeMobileSearch = useCallback(() => {
     setIsMobileSearchOpen(false);
   }, []);
@@ -351,6 +573,75 @@ export default function ProductionOperatorsPage() {
     }, 50);
   }, []);
 
+  const periodPickerControl = (compact = false) => (
+    <div className="relative inline-flex">
+      <Button
+        type="button"
+        variant="outline"
+        size={compact ? "sm" : "default"}
+        className={
+          compact
+            ? "h-8 w-[210px] rounded-full px-3 text-xs font-medium"
+            : "h-9 w-full max-w-[260px] rounded-full px-3 text-xs font-medium"
+        }
+        onClick={() => {
+          setPeriodPickerDraft(selectedPeriodRange);
+          setPeriodPickerOpen((current) => !current);
+        }}
+      >
+        <span className="truncate">{selectedPeriodLabel}</span>
+        <CalendarIcon className="h-4 w-4" />
+      </Button>
+      {periodPickerOpen ? (
+        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[340px] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl">
+          <div className="space-y-1 border-b border-border px-3 py-2">
+            <div className="text-xs font-medium text-foreground">
+              {t("production.main.operatorDetail.period")}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t("production.main.operatorDetail.periodPickerHint")}
+            </div>
+          </div>
+          <Calendar
+            mode="range"
+            className="w-full"
+            classNames={{
+              root: "relative p-0",
+              month: "space-y-3 px-3 pb-3",
+              month_caption:
+                "relative flex min-h-10 items-center justify-center pt-2",
+              nav: "absolute left-0 top-0 z-10 flex w-full items-center justify-between px-3 pt-2",
+            }}
+            selected={periodPickerDraft ?? selectedPeriodRange}
+            onSelect={(range) => {
+              setPeriodPickerDraft(range ?? undefined);
+              const nextValue = buildDateRangeValue(range ?? undefined);
+              if (!nextValue) {
+                return;
+              }
+              setSelectedPeriod(nextValue);
+            }}
+            disabled={isFutureDate}
+            showWeekNumber={false}
+            initialFocus
+          />
+          <div className="flex justify-end border-t border-border px-3 py-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                setPeriodPickerOpen(false);
+                setPeriodPickerDraft(undefined);
+              }}
+            >
+              OK
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <section className="relative space-y-4 pb-24 md:pb-0">
       <DesktopPageHeader
@@ -361,15 +652,28 @@ export default function ProductionOperatorsPage() {
           </span>
         }
         subtitle={t("production.main.operators.subtitle")}
+        actions={
+          <div className="flex items-center gap-2">
+            {periodPickerControl(true)}
+            {manageOperatorsButton}
+          </div>
+        }
         titleBlockClassName="md:max-w-none xl:max-w-none"
+        sticky
       />
       <MobilePageTitle
         title={t("production.main.operators.title")}
         subtitle={t("production.main.operators.mobileSubtitle")}
         showCompact={false}
         className="pt-6 pb-6"
-        rightAction={backToReadyButton}
+        rightAction={
+          <div className="flex items-center gap-2">
+            {manageOperatorsButton}
+            {backToReadyButton}
+          </div>
+        }
       />
+      <div className="px-4 md:hidden">{periodPickerControl()}</div>
 
       {dataError ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive">
@@ -377,7 +681,7 @@ export default function ProductionOperatorsPage() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
         <ProductionStatCard
           label={t("production.main.operators.operators")}
           value={filteredRows.length}
@@ -402,6 +706,11 @@ export default function ProductionOperatorsPage() {
           hint={t("production.main.operators.completedQtyHint")}
         />
         <ProductionStatCard
+          label={t("production.main.operators.relatedUnits")}
+          value={totals.relatedUnits}
+          hint={t("production.main.operators.relatedUnitsHint")}
+        />
+        <ProductionStatCard
           label={t("production.main.operators.ordersShort")}
           value={totals.completedOrders}
           hint={t("production.main.operators.ordersHint")}
@@ -422,26 +731,35 @@ export default function ProductionOperatorsPage() {
                 {t("production.main.operators.listSubtitle")}
               </p>
             </div>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setIsManageModalOpen(true)}
-            >
-              {t("production.main.operators.manageTitle")}
-            </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <label className="hidden space-y-1 text-xs text-muted-foreground md:block">
-            {t("production.main.common.search")}
-            <Input
-              icon="search"
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(220px,0.8fr)_minmax(220px,0.8fr)]">
+            <InputField
+              label={t("header.search")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("production.main.operators.searchPlaceholder")}
-              className="h-10"
+              wrapperClassName="h-11"
+              startIcon={<SearchIcon className="h-4 w-4" />}
             />
-          </label>
+            <div className="max-w-xs">
+              <SelectField
+                label={t("production.main.operators.filterByStation")}
+                value={stationFilter}
+                onValueChange={setStationFilter}
+                options={stationFilterOptions}
+              />
+            </div>
+            <div className="max-w-xs">
+              <SelectField
+                label={t("production.main.operators.sortBy")}
+                value={sortBy}
+                onValueChange={setSortBy}
+                options={sortOptions}
+              />
+            </div>
+          </div>
 
           {isLoading ? (
             <div className="text-sm text-muted-foreground">
@@ -480,15 +798,14 @@ export default function ProductionOperatorsPage() {
                       {formatWorkedDuration(row.workedMinutes)}
                     </span>
                     <span className="rounded-full border border-border px-2 py-1">
-                      {t("production.main.operators.itemsShort")}{" "}
-                      {row.completedItems}
-                    </span>
-                    <span className="rounded-full border border-border px-2 py-1">
-                      {t("production.main.common.qty")} {row.completedQty}
+                      {row.isOrderLevelOperator
+                        ? t("production.main.operatorDetail.relatedUnitsShort")
+                        : t("production.main.operators.itemsShort")}{" "}
+                      {row.displayUnits}
                     </span>
                     <span className="rounded-full border border-border px-2 py-1">
                       {t("production.main.operators.ordersShort")}{" "}
-                      {row.completedOrders}
+                      {row.ordersWithWorkCount}
                     </span>
                     <span className="rounded-full border border-border px-2 py-1">
                       {t("production.main.operators.rateShort")}{" "}
