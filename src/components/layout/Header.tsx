@@ -87,9 +87,9 @@ export function Header() {
   const [isHidden, setIsHidden] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notificationItems, setNotificationItems] = useState<NotificationItem[]>(
-    [],
-  );
+  const [notificationItems, setNotificationItems] = useState<
+    NotificationItem[]
+  >([]);
   const [canViewNotifications, setCanViewNotifications] = useState(true);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
@@ -304,7 +304,12 @@ export function Header() {
     return () => {
       isMounted = false;
     };
-  }, [canViewNotifications, notificationsOpen, user.isAuthenticated, user.tenantId]);
+  }, [
+    canViewNotifications,
+    notificationsOpen,
+    user.isAuthenticated,
+    user.tenantId,
+  ]);
 
   const handleMarkAllRead = async () => {
     if (!supabase || !user.tenantId) {
@@ -321,7 +326,10 @@ export function Header() {
       .update({ read_at: new Date().toISOString() })
       .in("id", ids);
     setNotificationItems((prev) =>
-      prev.map((item) => ({ ...item, read_at: item.read_at ?? new Date().toISOString() })),
+      prev.map((item) => ({
+        ...item,
+        read_at: item.read_at ?? new Date().toISOString(),
+      })),
     );
     setUnreadCount((prev) => Math.max(0, prev - ids.length));
   };
@@ -336,7 +344,9 @@ export function Header() {
       .eq("id", id);
     setNotificationItems((prev) =>
       prev.map((item) =>
-        item.id === id ? { ...item, read_at: item.read_at ?? new Date().toISOString() } : item,
+        item.id === id
+          ? { ...item, read_at: item.read_at ?? new Date().toISOString() }
+          : item,
       ),
     );
     setUnreadCount((prev) => Math.max(0, prev - 1));
@@ -419,15 +429,7 @@ export function Header() {
               {t("header.shiftDay", { date: currentDate ?? "--" })}
             </div>
 
-            <div className="hidden items-center gap-1 rounded-full border border-border bg-background px-2 py-1 sm:flex">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-full"
-                aria-label={t("header.search")}
-              >
-                <SearchIcon className="h-4 w-4" />
-              </Button>
+            <div className="hidden items-center gap-1 rounded-full border border-border bg-background px-1 py-1 sm:flex">
               {canViewNotifications ? (
                 <div className="relative" ref={notificationsRef}>
                   <Button
@@ -446,86 +448,90 @@ export function Header() {
                   ) : null}
                   {notificationsOpen ? (
                     <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-card p-2 shadow-lg">
-                    <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
-                      <span>{t("header.notificationsTitle")}</span>
-                      <button
-                        type="button"
-                        onClick={handleMarkAllRead}
-                        className="text-xs text-foreground hover:underline"
-                      >
-                        {t("header.markAllRead")}
-                      </button>
-                    </div>
-                    <div className="max-h-80 overflow-y-auto">
-                      {notificationItems.length === 0 ? (
-                        <div className="px-2 py-4 text-center text-xs text-muted-foreground">
-                          {t("header.noNotifications")}
-                        </div>
-                      ) : (
-                        notificationItems.map((item) => (
-                          <button
-                            type="button"
-                            key={item.id}
-                            onClick={() => handleMarkRead(item.id)}
-                            className={`flex w-full flex-col gap-1 rounded-lg px-2 py-2 text-left text-xs transition ${
-                              item.read_at
-                                ? "text-muted-foreground hover:bg-muted/40"
-                                : "bg-muted/30 text-foreground hover:bg-muted/50"
-                            }`}
-                          >
-                            <span
-                              className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${notificationBadgeClass(item.type)}`}
+                      <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
+                        <span>{t("header.notificationsTitle")}</span>
+                        <button
+                          type="button"
+                          onClick={handleMarkAllRead}
+                          className="text-xs text-foreground hover:underline"
+                        >
+                          {t("header.markAllRead")}
+                        </button>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto">
+                        {notificationItems.length === 0 ? (
+                          <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                            {t("header.noNotifications")}
+                          </div>
+                        ) : (
+                          notificationItems.map((item) => (
+                            <button
+                              type="button"
+                              key={item.id}
+                              onClick={() => handleMarkRead(item.id)}
+                              className={`flex w-full flex-col gap-1 rounded-lg px-2 py-2 text-left text-xs transition ${
+                                item.read_at
+                                  ? "text-muted-foreground hover:bg-muted/40"
+                                  : "bg-muted/30 text-foreground hover:bg-muted/50"
+                              }`}
                             >
-                              {t(notificationBadgeLabel(item.type))}
-                            </span>
-                            <span className="font-medium">{item.title}</span>
-                            {item.body ? (
-                              <div className="mt-1 space-y-1 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5">
-                                {notificationBodyRows(item.body).map((row, idx) => (
-                                  <div
-                                    key={`${item.id}-row-${idx}`}
-                                    className="flex gap-1.5"
-                                  >
-                                    {row.label ? (
-                                      <span className="min-w-12 text-muted-foreground">
-                                        {translateBodyLabel(row.label)}:
-                                      </span>
-                                    ) : null}
-                                    <span className="text-foreground">{row.value}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : null}
-                            <span className="text-[10px] text-muted-foreground">
-                              {new Date(item.created_at).toLocaleString(
-                                toIntlLocale(user.locale),
-                              )}
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                    <div className="mt-2 border-t border-border pt-2 text-center text-xs">
-                      <Link
-                        href="/notifications"
-                        className="text-foreground hover:underline"
-                        onClick={() => setNotificationsOpen(false)}
-                      >
-                        {t("header.viewAll")}
-                      </Link>
-                    </div>
+                              <span
+                                className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${notificationBadgeClass(item.type)}`}
+                              >
+                                {t(notificationBadgeLabel(item.type))}
+                              </span>
+                              <span className="font-medium">{item.title}</span>
+                              {item.body ? (
+                                <div className="mt-1 space-y-1 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5">
+                                  {notificationBodyRows(item.body).map(
+                                    (row, idx) => (
+                                      <div
+                                        key={`${item.id}-row-${idx}`}
+                                        className="flex gap-1.5"
+                                      >
+                                        {row.label ? (
+                                          <span className="min-w-12 text-muted-foreground">
+                                            {translateBodyLabel(row.label)}:
+                                          </span>
+                                        ) : null}
+                                        <span className="text-foreground">
+                                          {row.value}
+                                        </span>
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              ) : null}
+                              <span className="text-[10px] text-muted-foreground">
+                                {new Date(item.created_at).toLocaleString(
+                                  toIntlLocale(user.locale),
+                                )}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                      <div className="mt-2 border-t border-border pt-2 text-center text-xs">
+                        <Link
+                          href="/notifications"
+                          className="text-foreground hover:underline"
+                          onClick={() => setNotificationsOpen(false)}
+                        >
+                          {t("header.viewAll")}
+                        </Link>
+                      </div>
                     </div>
                   ) : null}
                 </div>
               ) : null}
-              <Button
+              {/* <Button
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 rounded-full"
                 aria-label={t("header.help")}
               >
                 <HelpCircleIcon className="h-4 w-4" />
-              </Button>
+              </Button> */}
             </div>
 
             <div className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">

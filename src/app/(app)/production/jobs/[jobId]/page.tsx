@@ -517,9 +517,7 @@ export default function ProductionJobDetailPage() {
           typeof station.tenant_id === "string" ? station.tenant_id : null,
         name: String(station.name ?? ""),
         description:
-          typeof station.description === "string"
-            ? station.description
-            : null,
+          typeof station.description === "string" ? station.description : null,
         sortOrder:
           typeof station.sort_order === "number" ? station.sort_order : null,
         trackingMode:
@@ -540,7 +538,9 @@ export default function ProductionJobDetailPage() {
       const routeKeysWithRuns = new Set(
         normalizedBatchRuns
           .map((run) => run.route_key?.trim())
-          .filter((value): value is string => Boolean(value && value !== "default")),
+          .filter((value): value is string =>
+            Boolean(value && value !== "default"),
+          ),
       );
       const missingRouteItems =
         !hasReleasedRuns && parsedWorkstations.length > 0
@@ -773,7 +773,7 @@ export default function ProductionJobDetailPage() {
   }, [productionItemsBySourceRowId, sortedRuns, uniqueOrderItems]);
   const kpis = useMemo(() => {
     const todayIso = new Date().toISOString().slice(0, 10);
-      const workingCalendar = { workdays, shifts, overtimeEnabled };
+    const workingCalendar = { workdays, shifts, overtimeEnabled };
     const totalUnits = uniqueOrderItems.length;
     const workedBreakdownByItem = buildWorkedBreakdownByItem(
       activityEvents,
@@ -1138,14 +1138,15 @@ export default function ProductionJobDetailPage() {
 
     try {
       const stationTrackingMode =
-        workstations.find((station) => station.id === run.station_id)?.trackingMode ??
-        "construction_level";
-      const relatedItems =
-        (productionItemsBySourceRowId.get(sourceOrderItemId) ?? []).filter(
-          (item) =>
-            item.batch_code === run.batch_code &&
-            (!run.station_id || item.station_id === run.station_id),
-        );
+        workstations.find((station) => station.id === run.station_id)
+          ?.trackingMode ?? "construction_level";
+      const relatedItems = (
+        productionItemsBySourceRowId.get(sourceOrderItemId) ?? []
+      ).filter(
+        (item) =>
+          item.batch_code === run.batch_code &&
+          (!run.station_id || item.station_id === run.station_id),
+      );
 
       if (
         stationTrackingMode === "construction_level" &&
@@ -1174,7 +1175,8 @@ export default function ProductionJobDetailPage() {
             supabase,
             {
               batchRunId: run.id,
-              toStatus: nextCompletedQty > 0 && quantity > 1 ? "paused" : "queued",
+              toStatus:
+                nextCompletedQty > 0 && quantity > 1 ? "paused" : "queued",
               productionItemId: item.id,
               actorUserId: currentUser.id,
               reason: t("production.main.jobs.reopenReason"),
@@ -2363,14 +2365,6 @@ export default function ProductionJobDetailPage() {
                   </div>
                   <div className="rounded-xl border border-border/70 bg-background px-3 py-2">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                      {t("production.main.jobs.product")}
-                    </div>
-                    <div className="mt-1 font-medium">
-                      {order?.product_name ?? "-"}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-border/70 bg-background px-3 py-2">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                       {t("orders.page.dueDate")}
                     </div>
                     <div className="mt-1 font-medium">
@@ -2653,7 +2647,9 @@ export default function ProductionJobDetailPage() {
                                                   run,
                                                 )
                                               }
-                                              disabled={reopeningRunId === run.id}
+                                              disabled={
+                                                reopeningRunId === run.id
+                                              }
                                               className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white text-foreground transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
                                               aria-label={t(
                                                 "production.main.jobs.reopenCompletedAction",
@@ -2754,18 +2750,18 @@ export default function ProductionJobDetailPage() {
                     </div>
                     <div className="space-y-3">
                       {orderItems.map((item) => {
-                        const docs = (docsByOrderItem.get(item.id) ?? []).filter(
-                          (doc) => {
-                            const attachment = attachmentById.get(
-                              doc.order_attachment_id,
-                            );
-                            return Boolean(
-                              attachment &&
-                                (isProductionAttachment(attachment) ||
-                                  doc.role === "production"),
-                            );
-                          },
-                        );
+                        const docs = (
+                          docsByOrderItem.get(item.id) ?? []
+                        ).filter((doc) => {
+                          const attachment = attachmentById.get(
+                            doc.order_attachment_id,
+                          );
+                          return Boolean(
+                            attachment &&
+                            (isProductionAttachment(attachment) ||
+                              doc.role === "production"),
+                          );
+                        });
                         if (docs.length === 0) return null;
                         return (
                           <div

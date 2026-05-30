@@ -246,7 +246,7 @@
       "Plāna pārslēgšana funkciju ierobežošanai. Norēķinu integrāciju var pievienot vēlāk.",
     plan: "Plāns",
     basic: "Basic",
-    basicDescription: "Tikai manuāli ārējie darbi",
+    basicDescription: "Tikai manuāli ārējie pasūtījumi",
     pro: "Pro",
     proDescription: "Ietver sūtīšanu partnerim",
     enabled: "ieslēgts",
@@ -662,7 +662,7 @@
         yes: "Jā",
         no: "Nē",
         fieldLabels: {
-          externalOrder: "Ārējais pasūtījums",
+          externalOrder: "Ārējā pasūtījuma Nr.",
           unitPrice: "Cena bez PVN",
           invoicePrice: "Rēķina cena",
           dueDate: "Termiņš",
@@ -1571,7 +1571,8 @@
           fromDate: "No datuma",
           toDate: "Līdz datumam",
           reset: "Notīrīt filtrus",
-          historyHint: "Izmantojiet datumu diapazonu vēsturisku darbu meklēšanai.",
+          historyHint:
+            "Izmantojiet datumu diapazonu vēsturisku darbu meklēšanai.",
         },
         viewMode: {
           active: "Aktīvās",
@@ -1664,7 +1665,8 @@
         failedReleaseToQueues: "Neizdevās palaist darbu staciju rindās.",
         failedUpdateOverview: "Neizdevās atjaunināt pārskata laukus.",
         reopenCompletedAction: "Atvērt atpakaļ labošanai",
-        reopenedForCorrection: "Pabeigtais darbs tika atvērts atpakaļ labošanai.",
+        reopenedForCorrection:
+          "Pabeigtais darbs tika atvērts atpakaļ labošanai.",
         failedReopenCompleted:
           "Neizdevās atvērt pabeigto darbu atpakaļ labošanai.",
         reopenReason: "Atvērts atpakaļ labošanai",
@@ -1834,7 +1836,8 @@
         relatedUnits: "Saist. vien.",
         relatedUnitsHint:
           "Vienības, kas izvēlētajā periodā bija piesaistītas operatoru darbam pasūtījuma līmeņa stacijās.",
-        ordersHint: "Pasūtījumi, kuros operatoriem bija darbs izvēlētajā periodā.",
+        ordersHint:
+          "Pasūtījumi, kuros operatoriem bija darbs izvēlētajā periodā.",
         laborCost: "Darba izmaksas",
         laborCostHint: "Pēc saglabātajām stundas likmēm.",
         listTitle: "Operatoru saraksts",
@@ -2173,14 +2176,12 @@
       },
       doneConfirm: {
         title: "Apstiprināt pabeigšanu?",
-        description:
-          "Vai tiešām vēlaties atzīmēt šo darbu kā pabeigtu?",
-        itemDescription:
-          "Vai tiešām vēlaties atzīmēt \"{label}\" kā pabeigtu?",
+        description: "Vai tiešām vēlaties atzīmēt šo darbu kā pabeigtu?",
+        itemDescription: 'Vai tiešām vēlaties atzīmēt "{label}" kā pabeigtu?',
         unitsDescription:
-          "Vai tiešām vēlaties atzīmēt {count} gab. no \"{label}\" kā pabeigtus?",
+          'Vai tiešām vēlaties atzīmēt {count} gab. no "{label}" kā pabeigtus?',
         runDescription:
-          "Vai tiešām vēlaties atzīmēt pasūtījumu \"{label}\" kā pabeigtu šajā stacijā?",
+          'Vai tiešām vēlaties atzīmēt pasūtījumu "{label}" kā pabeigtu šajā stacijā?',
         confirm: "Jā, pabeigt",
       },
       files: {
@@ -2320,20 +2321,20 @@
       notificationsDescription:
         "Izvēlieties, kas saņem sistēmas paziņojumus par bloķētiem un atsāktiem darbiem.",
       workdays: "Darba dienas",
-        shifts: "Maiņas",
-        overtimeEnabled: "Iespējot virsstundas",
-        overtimeEnabledHint:
-          "Ja izslēgts, laiks skaitās tikai maiņas ietvaros un virsstundu lauki tiek paslēpti.",
-        shiftStart: "Maiņas {index} sākums",
+      shifts: "Maiņas",
+      overtimeEnabled: "Iespējot virsstundas",
+      overtimeEnabledHint:
+        "Ja izslēgts, laiks skaitās tikai maiņas ietvaros un virsstundu lauki tiek paslēpti.",
+      shiftStart: "Maiņas {index} sākums",
       shiftEnd: "Maiņas {index} beigas",
-        overtimeStart: "Maiņas {index} virsstundu sākums",
-        overtimeEnd: "Maiņas {index} virsstundu beigas",
+      overtimeStart: "Maiņas {index} virsstundu sākums",
+      overtimeEnd: "Maiņas {index} virsstundu beigas",
       addShift: "Pievienot maiņu",
       overnightShiftHint: "Atbalstīta nakts maiņa, piemēram, 22:00 līdz 06:00.",
-        overtimeStartHint:
-          "Pirms maiņas sākuma no šī laika darbs skaitās kā virsstundas.",
-        overtimeEndHint:
-          "Pēc maiņas beigām līdz šim laikam darbs skaitās kā virsstundas. Pēc tam taimeris apstājas.",
+      overtimeStartHint:
+        "Pirms maiņas sākuma no šī laika darbs skaitās kā virsstundas.",
+      overtimeEndHint:
+        "Pēc maiņas beigām līdz šim laikam darbs skaitās kā virsstundas. Pēc tam taimeris apstājas.",
       saveHours: "Saglabāt darba laikus",
       stationName: "Stacijas nosaukums",
       stationNamePlaceholder: "Griešana",
@@ -2549,11 +2550,13 @@
       addPartner: "Pievienot partneri",
       removePartnerConfirm: 'Noņemt partneri "{name}"?',
       noPartners: "Partneru vēl nav.",
-      externalSchemaTitle: "Ārējo darbu shēma",
-      externalSchemaDescription: "Konfigurējiet laukus ārpakalpojumu darbiem.",
-      noExternalFields: "Ārējo darbu lauku vēl nav. Pievienojiet pirmo lauku.",
+      externalSchemaTitle: "Ārējo pasūtījumu shēma",
+      externalSchemaDescription:
+        "Konfigurējiet laukus ārpakalpojumu pasūtījumiem.",
+      noExternalFields:
+        "Ārējo pasūtījumu lauku vēl nav. Pievienojiet pirmo lauku.",
       externalFieldsHint:
-        "Pievienojiet vai rediģējiet laukus ārējo darbu formām.",
+        "Pievienojiet vai rediģējiet laukus ārējo pasūtījumu formām.",
       enablePriceReconciliation:
         "Ieslēgt cenu salīdzināšanu (plānotā pret rēķina)",
       savePricing: "Saglabāt cenu iestatījumus",

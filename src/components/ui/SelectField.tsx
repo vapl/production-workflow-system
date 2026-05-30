@@ -59,7 +59,7 @@ export function SelectField({
   const labelId = id ?? `select-field-${generatedId}`;
 
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("flex flex-col gap-1", className)}>
       {label ? (
         <label
           id={labelId}
@@ -93,12 +93,16 @@ export function SelectField({
         </Select>
       )}
       {description ? (
-        <div className={cn("text-xs text-muted-foreground", descriptionClassName)}>
+        <div
+          className={cn("text-xs text-muted-foreground", descriptionClassName)}
+        >
           {description}
         </div>
       ) : null}
       {error ? (
-        <div className={cn("text-xs text-destructive", errorClassName)}>{error}</div>
+        <div className={cn("text-xs text-destructive", errorClassName)}>
+          {error}
+        </div>
       ) : null}
     </div>
   );

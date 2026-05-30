@@ -30,7 +30,7 @@ export function InputField({
   const inputId = id ?? `input-field-${generatedId}`;
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-1">
       {label ? (
         <label
           htmlFor={inputId}
@@ -47,7 +47,9 @@ export function InputField({
         {...inputProps}
       />
       {description ? (
-        <div className={cn("text-xs text-muted-foreground", descriptionClassName)}>
+        <div
+          className={cn("text-xs text-muted-foreground", descriptionClassName)}
+        >
           {description}
         </div>
       ) : null}
