@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangleIcon,
   ExternalLinkIcon,
@@ -9,6 +10,7 @@ import {
   Layers3Icon,
   PaperclipIcon,
   SearchIcon,
+  SettingsIcon,
   SlidersHorizontalIcon,
   TimerResetIcon,
   Users2Icon,
@@ -25,6 +27,9 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import { DesktopPageHeader } from "@/components/layout/DesktopPageHeader";
 import { MobilePageTitle } from "@/components/layout/MobilePageTitle";
 import { ProductionStatCard } from "@/components/production/ProductionStatCard";
+import { ProductionSettingsBridgeModal } from "@/components/production/ProductionSettingsBridgeModal";
+import { DetailTabsBar } from "@/components/layout/DetailTabsBar";
+import { Tabs } from "@/components/ui/Tabs";
 import {
   buildReadyBatchGroups,
   computeReadyProductionKpis,
@@ -93,6 +98,7 @@ function formatDateInput(value: string) {
 
 export default function ProductionReadyPage() {
   const { t } = useI18n();
+  const router = useRouter();
   const supabaseUnavailable = !supabase;
   const todayIso = new Date().toISOString().slice(0, 10);
   const [isLoading, setIsLoading] = useState(false);
@@ -105,6 +111,7 @@ export default function ProductionReadyPage() {
     "all" | "late" | "today" | "week"
   >("all");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [readyOrders, setReadyOrders] = useState<ReadyOrderRow[]>([]);
@@ -238,39 +245,35 @@ export default function ProductionReadyPage() {
     [productionItems, readyOrders, batchRuns, orderItems],
   );
 
-  const filteredReadyGroups = useMemo(
-    () => {
-      const baseGroups = filterReadyBatchGroups(
-        readyGroups,
-        readyPriority,
-        readySearch,
-      );
-      if (readyDueFilter === "all") {
-        return baseGroups;
-      }
-      const weekEnd = new Date(todayIso);
-      weekEnd.setDate(weekEnd.getDate() + 7);
-      const weekEndIso = weekEnd.toISOString().slice(0, 10);
+  const filteredReadyGroups = useMemo(() => {
+    const baseGroups = filterReadyBatchGroups(
+      readyGroups,
+      readyPriority,
+      readySearch,
+    );
+    if (readyDueFilter === "all") {
+      return baseGroups;
+    }
+    const weekEnd = new Date(todayIso);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    const weekEndIso = weekEnd.toISOString().slice(0, 10);
 
-      return baseGroups.filter((group) => {
-        if (!group.dueDate) {
-          return false;
-        }
-        if (readyDueFilter === "late") {
-          return group.dueDate < todayIso;
-        }
-        if (readyDueFilter === "today") {
-          return group.dueDate === todayIso;
-        }
-        return group.dueDate >= todayIso && group.dueDate <= weekEndIso;
-      });
-    },
-    [readyDueFilter, readyGroups, readyPriority, readySearch, todayIso],
-  );
+    return baseGroups.filter((group) => {
+      if (!group.dueDate) {
+        return false;
+      }
+      if (readyDueFilter === "late") {
+        return group.dueDate < todayIso;
+      }
+      if (readyDueFilter === "today") {
+        return group.dueDate === todayIso;
+      }
+      return group.dueDate >= todayIso && group.dueDate <= weekEndIso;
+    });
+  }, [readyDueFilter, readyGroups, readyPriority, readySearch, todayIso]);
 
   const kpis = useMemo(
-    () =>
-      computeReadyProductionKpis(readyGroups, todayIso),
+    () => computeReadyProductionKpis(readyGroups, todayIso),
     [readyGroups, todayIso],
   );
 
@@ -298,521 +301,599 @@ export default function ProductionReadyPage() {
     }, 50);
   }, []);
 
+  const productionNavTabs = [
+    {
+      value: "ready",
+      label: t("production.main.subnav.ready"),
+    },
+    {
+      value: "inProgress",
+      label: t("production.main.subnav.inProduction"),
+    },
+  ] as const;
+
+  const handleProductionNavChange = (value: string) => {
+    switch (value) {
+      case "inProgress":
+        router.push("/production/in-progress");
+        return;
+      case "ready":
+      default:
+        router.push("/production/ready");
+    }
+  };
+
   return (
-    <section className="relative flex flex-col gap-4 pb-28 pt-16 md:pb-0 md:pt-0">
-      <DesktopPageHeader
-        sticky
-        title={t("production.main.planning.readyForProduction")}
-        subtitle={t("production.main.ready.headerSubtitle")}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild variant="secondary">
+    <Tabs
+      value="ready"
+      onValueChange={handleProductionNavChange}
+      className="space-y-0 md:space-y-4"
+    >
+      <section className="relative flex flex-col gap-4 pb-28 pt-16 md:pb-0 md:pt-0">
+        <DesktopPageHeader
+          sticky
+          title={t("production.main.planning.readyForProduction")}
+          subtitle={t("production.main.ready.headerSubtitle")}
+          actions={
+            <DetailTabsBar
+              tabs={productionNavTabs.map((tab) => ({
+                value: tab.value,
+                label: tab.label,
+              }))}
+              className="min-w-0 flex-1 py-0"
+            />
+          }
+        />
+        <MobilePageTitle
+          title={t("production.main.planning.readyForProduction")}
+          subtitle={t("production.main.ready.mobileSubtitle")}
+          showCompact={false}
+          className="pt-6 pb-6"
+        />
+
+        <div className="hidden md:flex md:items-center md:justify-end md:gap-4">
+          <div className="flex shrink-0 items-center gap-2">
+            <Button asChild variant="outline">
               <Link href="/production/queues">
                 <Layers3Icon className="mr-2 h-4 w-4" />
                 {t("production.main.subnav.queues")}
               </Link>
             </Button>
-            <Button asChild variant="secondary">
+            <Button asChild variant="outline">
               <Link href="/production/operators">
                 <Users2Icon className="mr-2 h-4 w-4" />
                 {t("production.main.subnav.operators")}
               </Link>
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={t("production.main.subnav.settings")}
+              onClick={() => setIsSettingsModalOpen(true)}
+            >
+              <SettingsIcon className="h-4 w-4" />
+            </Button>
           </div>
-        }
-      />
-      <MobilePageTitle
-        title={t("production.main.planning.readyForProduction")}
-        subtitle={t("production.main.ready.mobileSubtitle")}
-        showCompact={false}
-        className="pt-6 pb-6"
-      />
+        </div>
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <ProductionStatCard
-          label={t("production.main.ready.readyJobs")}
-          value={kpis.total}
-          hint={t("production.main.ready.readyJobsHint")}
-          icon={<Layers3Icon className="h-4 w-4" />}
-        />
-        <ProductionStatCard
-          label={t("production.main.ready.urgent")}
-          value={kpis.urgent}
-          hint={t("production.main.ready.urgentHint")}
-          tone="warning"
-          icon={<AlertTriangleIcon className="h-4 w-4" />}
-        />
-        <ProductionStatCard
-          label={t("production.main.ready.highPriority")}
-          value={kpis.high}
-          hint={t("production.main.ready.highPriorityHint")}
-          icon={<Layers3Icon className="h-4 w-4" />}
-        />
-        <ProductionStatCard
-          label={t("production.main.ready.dueNow")}
-          value={kpis.dueTodayOrEarlier}
-          hint={t("production.main.ready.dueNowHint")}
-          tone="danger"
-          icon={<TimerResetIcon className="h-4 w-4" />}
-        />
-      </div>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <ProductionStatCard
+            label={t("production.main.ready.readyJobs")}
+            value={kpis.total}
+            hint={t("production.main.ready.readyJobsHint")}
+            icon={<Layers3Icon className="h-4 w-4" />}
+          />
+          <ProductionStatCard
+            label={t("production.main.ready.urgent")}
+            value={kpis.urgent}
+            hint={t("production.main.ready.urgentHint")}
+            tone="warning"
+            icon={<AlertTriangleIcon className="h-4 w-4" />}
+          />
+          <ProductionStatCard
+            label={t("production.main.ready.highPriority")}
+            value={kpis.high}
+            hint={t("production.main.ready.highPriorityHint")}
+            icon={<Layers3Icon className="h-4 w-4" />}
+          />
+          <ProductionStatCard
+            label={t("production.main.ready.dueNow")}
+            value={kpis.dueTodayOrEarlier}
+            hint={t("production.main.ready.dueNowHint")}
+            tone="danger"
+            icon={<TimerResetIcon className="h-4 w-4" />}
+          />
+        </div>
 
-      <Card className="border-border/80 shadow-sm">
-        <CardContent className="space-y-4 pt-4">
-          {supabaseUnavailable ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive">
-              {t("production.main.errors.supabaseNotConfigured")}
+        <Card className="border-border/80 shadow-sm">
+          <CardContent className="space-y-4 pt-4">
+            {supabaseUnavailable ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive">
+                {t("production.main.errors.supabaseNotConfigured")}
+              </div>
+            ) : null}
+
+            {dataError ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive">
+                {dataError}
+              </div>
+            ) : null}
+
+            <div className="hidden rounded-2xl border border-border bg-muted/10 p-4 md:block">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+                <div className="min-w-0 flex-1">
+                  <Input
+                    icon="search"
+                    value={readySearch}
+                    onChange={(event) => setReadySearch(event.target.value)}
+                    placeholder={t(
+                      "production.main.planning.orderCustomerPlaceholder",
+                    )}
+                    className="h-10"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 xl:ml-auto">
+                  <FiltersDropdown
+                    label={
+                      activeFilterCount > 0
+                        ? `${t("production.main.ready.filters")} (${activeFilterCount})`
+                        : t("production.main.ready.filters")
+                    }
+                    contentClassName="w-[320px] p-4"
+                  >
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">
+                          {t("production.main.common.priority")}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(
+                            [
+                              ["all", t("production.main.common.all")],
+                              ["urgent", t("production.main.priority.urgent")],
+                              ["high", t("production.main.priority.high")],
+                              ["normal", t("production.main.priority.normal")],
+                              ["low", t("production.main.priority.low")],
+                            ] as const
+                          ).map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() =>
+                                setReadyPriority(
+                                  value as ProductionPriority | "all",
+                                )
+                              }
+                              className={`inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-xs font-medium transition ${
+                                readyPriority === value
+                                  ? "border-foreground bg-foreground text-background shadow-sm"
+                                  : "border-border bg-background text-foreground hover:bg-muted/50"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">
+                          {t("production.main.ready.dueFilter")}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(
+                            [
+                              ["all", t("production.main.common.all")],
+                              ["late", t("production.main.ready.dueLate")],
+                              ["today", t("production.main.ready.dueToday")],
+                              ["week", t("production.main.ready.dueWeek")],
+                            ] as const
+                          ).map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() =>
+                                setReadyDueFilter(
+                                  value as "all" | "late" | "today" | "week",
+                                )
+                              }
+                              className={`inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-xs font-medium transition ${
+                                readyDueFilter === value
+                                  ? "border-foreground bg-foreground text-background shadow-sm"
+                                  : "border-border bg-background text-foreground hover:bg-muted/50"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between border-t border-border pt-3">
+                        <div className="text-sm text-muted-foreground">
+                          {t("production.main.ready.activeFilters", {
+                            count: activeFilterCount,
+                          })}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setReadyPriority("all");
+                            setReadyDueFilter("all");
+                          }}
+                          disabled={activeFilterCount === 0}
+                        >
+                          {t("production.main.ready.resetFilters")}
+                        </Button>
+                      </div>
+                    </div>
+                  </FiltersDropdown>
+                </div>
+              </div>
             </div>
-          ) : null}
 
-          {dataError ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive">
-              {dataError}
+            {isLoading ? (
+              <div className="rounded-lg border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                {t("production.main.planning.loadingReadyBatches")}
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              {filteredReadyGroups.map((group) => {
+                const items = orderItemsByOrder.get(group.orderId) ?? [];
+                const files = orderAttachments[group.orderId] ?? [];
+                const hasFiles = files.length > 0;
+                const late = Boolean(
+                  group.dueDate &&
+                  group.dueDate <= new Date().toISOString().slice(0, 10),
+                );
+                const note = items.find(
+                  (item) => item.production_notes,
+                )?.production_notes;
+
+                return (
+                  <div
+                    key={group.key}
+                    className="rounded-2xl border border-border/80 bg-background p-4 shadow-sm transition hover:border-border hover:bg-muted/20"
+                  >
+                    <div className="flex flex-col gap-3 xl:grid xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+                      <div className="min-w-0 space-y-3">
+                        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                          <div className="text-lg font-semibold leading-none">
+                            {group.orderNumber}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={priorityBadge(group.priority)}>
+                              {t(`production.main.priority.${group.priority}`)}
+                            </Badge>
+                            {late ? (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/5 px-2 py-0.5 text-[11px] font-medium text-destructive">
+                                <AlertTriangleIcon className="h-3 w-3" />
+                                {t("production.main.ready.dueTodayBadge")}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-base text-foreground/85">
+                            {group.customerName}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                            <span>
+                              {t("production.main.ready.dueLine", {
+                                date: formatDateInput(group.dueDate),
+                                batch: group.batchCode,
+                                qty: group.totalQty,
+                              })}
+                            </span>
+                            {hasFiles ? (
+                              <span className="inline-flex items-center gap-1.5">
+                                <PaperclipIcon className="h-3.5 w-3.5" />
+                                {t("production.main.ready.filesCount", {
+                                  count: files.length,
+                                })}
+                              </span>
+                            ) : null}
+                          </div>
+                          {group.material ? (
+                            <div className="text-sm text-muted-foreground">
+                              {group.material}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                        <Tooltip
+                          content={t("production.main.ready.openJob")}
+                          side="top"
+                          interaction="hover"
+                        >
+                          <Button asChild size="icon">
+                            <Link
+                              href={`/production/jobs/${group.orderId}`}
+                              aria-label={t("production.main.ready.openJob")}
+                            >
+                              <ClipboardListIcon className="h-4.5 w-4.5" />
+                            </Link>
+                          </Button>
+                        </Tooltip>
+                        <Tooltip
+                          content={t("production.main.ready.openOrder")}
+                          side="top"
+                          interaction="hover"
+                        >
+                          <Button asChild variant="secondary" size="icon">
+                            <Link
+                              href={`/orders/${group.orderId}`}
+                              aria-label={t("production.main.ready.openOrder")}
+                            >
+                              <ExternalLinkIcon className="h-4.5 w-4.5" />
+                            </Link>
+                          </Button>
+                        </Tooltip>
+                      </div>
+                    </div>
+
+                    {note ? (
+                      <div className="mt-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-sm text-muted-foreground">
+                        {note}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
-          ) : null}
 
-          <div className="hidden rounded-2xl border border-border bg-muted/10 p-4 md:block">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-              <div className="min-w-0 flex-1">
+            {!isLoading && filteredReadyGroups.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
+                {t("production.main.planning.noBatchesReady")}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        {isMobileSearchOpen ? (
+          <div className="fixed inset-0 z-50 flex items-end bg-black/45 backdrop-blur-[1.5px] md:hidden">
+            <div className="w-full px-4 pb-[calc(env(safe-area-inset-bottom)-2px)]">
+              <div className="flex items-center gap-2">
                 <Input
+                  ref={mobileSearchInputRef}
+                  type="search"
+                  autoFocus
                   icon="search"
                   value={readySearch}
                   onChange={(event) => setReadySearch(event.target.value)}
                   placeholder={t(
                     "production.main.planning.orderCustomerPlaceholder",
                   )}
-                  className="h-10"
+                  enterKeyHint="search"
+                  className="h-12 text-[16px]"
+                  wrapperClassName="rounded-full border-border bg-background shadow-lg"
                 />
-              </div>
-
-              <div className="flex items-center gap-2 xl:ml-auto">
-                <FiltersDropdown
-                  label={
-                    activeFilterCount > 0
-                      ? `${t("production.main.ready.filters")} (${activeFilterCount})`
-                      : t("production.main.ready.filters")
-                  }
-                  contentClassName="w-[320px] p-4"
+                <button
+                  type="button"
+                  onClick={closeMobileSearch}
+                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg"
+                  aria-label={t("production.main.common.close")}
                 >
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">
-                        {t("production.main.common.priority")}
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {(
-                          [
-                            ["all", t("production.main.common.all")],
-                            ["urgent", t("production.main.priority.urgent")],
-                            ["high", t("production.main.priority.high")],
-                            ["normal", t("production.main.priority.normal")],
-                            ["low", t("production.main.priority.low")],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            onClick={() =>
-                              setReadyPriority(
-                                value as ProductionPriority | "all",
-                              )
-                            }
-                            className={`inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-xs font-medium transition ${
-                              readyPriority === value
-                                ? "border-foreground bg-foreground text-background shadow-sm"
-                                : "border-border bg-background text-foreground hover:bg-muted/50"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">
-                        {t("production.main.ready.dueFilter")}
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {(
-                          [
-                            ["all", t("production.main.common.all")],
-                            ["late", t("production.main.ready.dueLate")],
-                            ["today", t("production.main.ready.dueToday")],
-                            ["week", t("production.main.ready.dueWeek")],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            onClick={() =>
-                              setReadyDueFilter(
-                                value as "all" | "late" | "today" | "week",
-                              )
-                            }
-                            className={`inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-xs font-medium transition ${
-                              readyDueFilter === value
-                                ? "border-foreground bg-foreground text-background shadow-sm"
-                                : "border-border bg-background text-foreground hover:bg-muted/50"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-border pt-3">
-                      <div className="text-sm text-muted-foreground">
-                        {t("production.main.ready.activeFilters", {
-                          count: activeFilterCount,
-                        })}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setReadyPriority("all");
-                          setReadyDueFilter("all");
-                        }}
-                        disabled={activeFilterCount === 0}
-                      >
-                        {t("production.main.ready.resetFilters")}
-                      </Button>
-                    </div>
-                  </div>
-                </FiltersDropdown>
+                  <XIcon className="h-5 w-5" />
+                </button>
               </div>
             </div>
+            <button
+              type="button"
+              className="fixed inset-0 -z-10 h-full w-full"
+              aria-label={t("production.main.common.close")}
+              onClick={closeMobileSearch}
+            />
           </div>
+        ) : null}
 
-          {isLoading ? (
-            <div className="rounded-lg border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-              {t("production.main.planning.loadingReadyBatches")}
+        <BottomSheet
+          open={isFiltersOpen}
+          onClose={() => setIsFiltersOpen(false)}
+          ariaLabel={t("production.main.ready.filters")}
+          title={t("production.main.ready.filters")}
+          closeButtonLabel={t("production.main.common.close")}
+          keyboardAware
+          enableSwipeToClose
+        >
+          <div className="space-y-4 overflow-y-auto px-4 pb-4 pt-3">
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-foreground">
+                {t("production.main.common.priority")}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["all", t("production.main.common.all")],
+                    ["urgent", t("production.main.priority.urgent")],
+                    ["high", t("production.main.priority.high")],
+                    ["normal", t("production.main.priority.normal")],
+                    ["low", t("production.main.priority.low")],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      setReadyPriority(value as ProductionPriority | "all")
+                    }
+                    className={`inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-medium transition ${
+                      readyPriority === value
+                        ? "border-foreground bg-foreground text-background shadow-sm"
+                        : "border-border bg-background text-foreground hover:bg-muted/50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-          ) : null}
 
-          <div className="grid gap-3 md:grid-cols-2">
-            {filteredReadyGroups.map((group) => {
-              const items = orderItemsByOrder.get(group.orderId) ?? [];
-              const files = orderAttachments[group.orderId] ?? [];
-              const hasFiles = files.length > 0;
-              const late = Boolean(
-                group.dueDate &&
-                group.dueDate <= new Date().toISOString().slice(0, 10),
-              );
-              const note = items.find(
-                (item) => item.production_notes,
-              )?.production_notes;
-
-              return (
-                <div
-                  key={group.key}
-                  className="rounded-2xl border border-border/80 bg-background p-4 shadow-sm transition hover:border-border hover:bg-muted/20"
-                >
-                  <div className="flex flex-col gap-3 xl:grid xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
-                    <div className="min-w-0 space-y-3">
-                      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-                        <div className="text-lg font-semibold leading-none">
-                          {group.orderNumber}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={priorityBadge(group.priority)}>
-                            {t(`production.main.priority.${group.priority}`)}
-                          </Badge>
-                          {late ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/5 px-2 py-0.5 text-[11px] font-medium text-destructive">
-                              <AlertTriangleIcon className="h-3 w-3" />
-                              {t("production.main.ready.dueTodayBadge")}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="text-base text-foreground/85">
-                          {group.customerName}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                          <span>
-                            {t("production.main.ready.dueLine", {
-                              date: formatDateInput(group.dueDate),
-                              batch: group.batchCode,
-                              qty: group.totalQty,
-                            })}
-                          </span>
-                          {hasFiles ? (
-                            <span className="inline-flex items-center gap-1.5">
-                              <PaperclipIcon className="h-3.5 w-3.5" />
-                              {t("production.main.ready.filesCount", {
-                                count: files.length,
-                              })}
-                            </span>
-                          ) : null}
-                        </div>
-                        {group.material ? (
-                          <div className="text-sm text-muted-foreground">
-                            {group.material}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                      <Tooltip
-                        content={t("production.main.ready.openJob")}
-                        side="top"
-                        interaction="hover"
-                      >
-                        <Button asChild size="icon">
-                          <Link
-                            href={`/production/jobs/${group.orderId}`}
-                            aria-label={t("production.main.ready.openJob")}
-                          >
-                            <ClipboardListIcon className="h-4.5 w-4.5" />
-                          </Link>
-                        </Button>
-                      </Tooltip>
-                      <Tooltip
-                        content={t("production.main.ready.openOrder")}
-                        side="top"
-                        interaction="hover"
-                      >
-                        <Button asChild variant="secondary" size="icon">
-                          <Link
-                            href={`/orders/${group.orderId}`}
-                            aria-label={t("production.main.ready.openOrder")}
-                          >
-                            <ExternalLinkIcon className="h-4.5 w-4.5" />
-                          </Link>
-                        </Button>
-                      </Tooltip>
-                    </div>
-                  </div>
-
-                  {note ? (
-                    <div className="mt-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-sm text-muted-foreground">
-                      {note}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-
-          {!isLoading && filteredReadyGroups.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
-              {t("production.main.planning.noBatchesReady")}
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-foreground">
+                {t("production.main.ready.dueFilter")}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["all", t("production.main.common.all")],
+                    ["late", t("production.main.ready.dueLate")],
+                    ["today", t("production.main.ready.dueToday")],
+                    ["week", t("production.main.ready.dueWeek")],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      setReadyDueFilter(
+                        value as "all" | "late" | "today" | "week",
+                      )
+                    }
+                    className={`inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-medium transition ${
+                      readyDueFilter === value
+                        ? "border-foreground bg-foreground text-background shadow-sm"
+                        : "border-border bg-background text-foreground hover:bg-muted/50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-          ) : null}
-        </CardContent>
-      </Card>
 
-      {isMobileSearchOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/45 backdrop-blur-[1.5px] md:hidden">
-          <div className="w-full px-4 pb-[calc(env(safe-area-inset-bottom)-2px)]">
-            <div className="flex items-center gap-2">
-              <Input
-                ref={mobileSearchInputRef}
-                type="search"
-                autoFocus
-                icon="search"
-                value={readySearch}
-                onChange={(event) => setReadySearch(event.target.value)}
-                placeholder={t("production.main.planning.orderCustomerPlaceholder")}
-                enterKeyHint="search"
-                className="h-12 text-[16px]"
-                wrapperClassName="rounded-full border-border bg-background shadow-lg"
-              />
-              <button
+            <div className="flex items-center justify-between border-t border-border pt-3">
+              <div className="text-sm text-muted-foreground">
+                {t("production.main.ready.activeFilters", {
+                  count: activeFilterCount,
+                })}
+              </div>
+              <Button
                 type="button"
-                onClick={closeMobileSearch}
-                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg"
-                aria-label={t("production.main.common.close")}
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setReadyPriority("all");
+                  setReadyDueFilter("all");
+                }}
+                disabled={activeFilterCount === 0}
               >
-                <XIcon className="h-5 w-5" />
-              </button>
+                {t("production.main.ready.resetFilters")}
+              </Button>
             </div>
           </div>
-          <button
-            type="button"
-            className="fixed inset-0 -z-10 h-full w-full"
-            aria-label={t("production.main.common.close")}
-            onClick={closeMobileSearch}
-          />
-        </div>
-      ) : null}
+        </BottomSheet>
 
-      <BottomSheet
-        open={isFiltersOpen}
-        onClose={() => setIsFiltersOpen(false)}
-        ariaLabel={t("production.main.ready.filters")}
-        title={t("production.main.ready.filters")}
-        closeButtonLabel={t("production.main.common.close")}
-        keyboardAware
-        enableSwipeToClose
-      >
-        <div className="space-y-4 overflow-y-auto px-4 pb-4 pt-3">
-          <div className="space-y-2">
-            <div className="text-sm font-medium text-foreground">
-              {t("production.main.common.priority")}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  ["all", t("production.main.common.all")],
-                  ["urgent", t("production.main.priority.urgent")],
-                  ["high", t("production.main.priority.high")],
-                  ["normal", t("production.main.priority.normal")],
-                  ["low", t("production.main.priority.low")],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() =>
-                    setReadyPriority(value as ProductionPriority | "all")
-                  }
-                  className={`inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-medium transition ${
-                    readyPriority === value
-                      ? "border-foreground bg-foreground text-background shadow-sm"
-                      : "border-border bg-background text-foreground hover:bg-muted/50"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="text-sm font-medium text-foreground">
-              {t("production.main.ready.dueFilter")}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  ["all", t("production.main.common.all")],
-                  ["late", t("production.main.ready.dueLate")],
-                  ["today", t("production.main.ready.dueToday")],
-                  ["week", t("production.main.ready.dueWeek")],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() =>
-                    setReadyDueFilter(value as "all" | "late" | "today" | "week")
-                  }
-                  className={`inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-medium transition ${
-                    readyDueFilter === value
-                      ? "border-foreground bg-foreground text-background shadow-sm"
-                      : "border-border bg-background text-foreground hover:bg-muted/50"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between border-t border-border pt-3">
-            <div className="text-sm text-muted-foreground">
-              {t("production.main.ready.activeFilters", {
-                count: activeFilterCount,
-              })}
-            </div>
+        <BottomSheet
+          open={isMobileNavOpen}
+          onClose={() => setIsMobileNavOpen(false)}
+          ariaLabel={t("production.main.common.actions")}
+          title={t("production.main.common.actions")}
+          closeButtonLabel={t("production.main.common.close")}
+          keyboardAware
+          enableSwipeToClose
+        >
+          <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3">
+            <Button
+              asChild
+              variant="outline"
+              className="h-12 w-full justify-start rounded-2xl"
+              onClick={() => setIsMobileNavOpen(false)}
+            >
+              <Link href="/production/in-progress">
+                {t("production.main.subnav.inProduction")}
+              </Link>
+            </Button>
+            <Button
+              asChild
+              variant="outline"
+              className="h-12 w-full justify-start rounded-2xl"
+              onClick={() => setIsMobileNavOpen(false)}
+            >
+              <Link href="/production/queues">
+                <Layers3Icon className="mr-2 h-4 w-4" />
+                {t("production.main.subnav.queues")}
+              </Link>
+            </Button>
+            <Button
+              asChild
+              variant="outline"
+              className="h-12 w-full justify-start rounded-2xl"
+              onClick={() => setIsMobileNavOpen(false)}
+            >
+              <Link href="/production/operators">
+                <Users2Icon className="mr-2 h-4 w-4" />
+                {t("production.main.subnav.operators")}
+              </Link>
+            </Button>
             <Button
               type="button"
-              variant="ghost"
-              size="sm"
+              variant="outline"
+              className="h-12 w-full justify-start rounded-2xl"
               onClick={() => {
-                setReadyPriority("all");
-                setReadyDueFilter("all");
+                setIsMobileNavOpen(false);
+                setIsSettingsModalOpen(true);
               }}
-              disabled={activeFilterCount === 0}
             >
-              {t("production.main.ready.resetFilters")}
+              <SettingsIcon className="mr-2 h-4 w-4" />
+              {t("production.main.subnav.settings")}
             </Button>
           </div>
-        </div>
-      </BottomSheet>
+        </BottomSheet>
 
-      <BottomSheet
-        open={isMobileNavOpen}
-        onClose={() => setIsMobileNavOpen(false)}
-        ariaLabel={t("production.main.common.actions")}
-        title={t("production.main.common.actions")}
-        closeButtonLabel={t("production.main.common.close")}
-        keyboardAware
-        enableSwipeToClose
-      >
-        <div className="space-y-3 overflow-y-auto px-4 pb-4 pt-3">
-          <Button
-            asChild
-            variant="outline"
-            className="h-12 w-full justify-start rounded-2xl"
-            onClick={() => setIsMobileNavOpen(false)}
-          >
-            <Link href="/production/queues">
-              <Layers3Icon className="mr-2 h-4 w-4" />
-              {t("production.main.subnav.queues")}
-            </Link>
-          </Button>
-          <Button
-            asChild
-            variant="outline"
-            className="h-12 w-full justify-start rounded-2xl"
-            onClick={() => setIsMobileNavOpen(false)}
-          >
-            <Link href="/production/operators">
-              <Users2Icon className="mr-2 h-4 w-4" />
-              {t("production.main.subnav.operators")}
-            </Link>
-          </Button>
-        </div>
-      </BottomSheet>
+        <div
+          className={`fixed inset-x-4 bottom-[calc(2.75rem+env(safe-area-inset-bottom))] z-30 transition-all duration-200 md:hidden ${
+            hideMobileFloatingControls
+              ? "translate-y-16 opacity-0"
+              : "translate-y-0 opacity-100"
+          }`}
+        >
+          <div className="flex items-end justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-12 w-12 rounded-full bg-card shadow-lg"
+                onClick={() => setIsFiltersOpen(true)}
+                aria-label={t("production.main.ready.filters")}
+              >
+                <SlidersHorizontalIcon className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-12 w-12 rounded-full bg-card shadow-lg"
+                onClick={openMobileSearch}
+                aria-label={t("production.main.common.search")}
+              >
+                <SearchIcon className="h-5 w-5" />
+              </Button>
+            </div>
 
-      <div
-        className={`fixed inset-x-4 bottom-[calc(2.75rem+env(safe-area-inset-bottom))] z-30 transition-all duration-200 md:hidden ${
-          hideMobileFloatingControls
-            ? "translate-y-16 opacity-0"
-            : "translate-y-0 opacity-100"
-        }`}
-      >
-        <div className="flex items-end justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-12 w-12 rounded-full bg-card shadow-lg"
-              onClick={() => setIsFiltersOpen(true)}
-              aria-label={t("production.main.ready.filters")}
-            >
-              <SlidersHorizontalIcon className="h-5 w-5" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-12 w-12 rounded-full bg-card shadow-lg"
-              onClick={openMobileSearch}
-              aria-label={t("production.main.common.search")}
-            >
-              <SearchIcon className="h-5 w-5" />
-            </Button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              className="h-12 rounded-full bg-card px-4 shadow-lg"
-              onClick={() => setIsMobileNavOpen(true)}
-            >
-              <Layers3Icon className="mr-2 h-4 w-4" />
-              {t("production.main.common.actions")}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="h-12 rounded-full bg-card px-4 shadow-lg"
+                onClick={() => setIsMobileNavOpen(true)}
+              >
+                <Layers3Icon className="mr-2 h-4 w-4" />
+                {t("production.main.common.actions")}
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+        <ProductionSettingsBridgeModal
+          open={isSettingsModalOpen}
+          onClose={() => setIsSettingsModalOpen(false)}
+          t={t}
+        />
+      </section>
+    </Tabs>
   );
 }

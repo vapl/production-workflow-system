@@ -2456,24 +2456,6 @@ export default function OrderDetailPage() {
                 }))
               }
             />
-            // <label key={field.id} className="text-sm font-medium">
-            //   {fieldLabel}
-            //   <Input
-            //     type={field.fieldType === "number" ? "number" : "text"}
-            //     value={
-            //       typeof rawValue === "string" || typeof rawValue === "number"
-            //         ? String(rawValue)
-            //         : ""
-            //     }
-            //     onChange={(event) =>
-            //       setValues((prev) => ({
-            //         ...prev,
-            //         [field.id]: event.target.value,
-            //       }))
-            //     }
-            //     className="h-10 w-full px-3 text-sm"
-            //   />
-            // </label>
           );
         })}
       </div>

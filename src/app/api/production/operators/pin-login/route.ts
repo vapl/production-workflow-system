@@ -41,7 +41,10 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
-  if (!profile?.tenant_id || profile.role !== "Operator") {
+  if (
+    !profile?.tenant_id ||
+    (profile.role !== "Operator" && profile.role !== "Warehouse")
+  ) {
     return NextResponse.json(
       { error: "Operator login code not found." },
       { status: 404 },

@@ -249,7 +249,7 @@ export default function ProductionOperatorsPage() {
           .from("profiles")
           .select("id, full_name, role, login_code, auth_mode, is_active")
           .eq("tenant_id", user.tenantId)
-          .in("role", ["Operator", "Production planner", "Admin"]),
+          .in("role", ["Operator", "Warehouse", "Production planner", "Admin"]),
         sb
           .from("operators")
           .select(

@@ -56,7 +56,6 @@ export const defaultPermissionRoles: PermissionRoleMap = {
     "Admin",
     "Production planner",
     "Operator",
-    "Warehouse",
   ],
   "orders.manage": ["Admin", "Sales"],
 };

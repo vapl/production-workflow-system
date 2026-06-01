@@ -16,6 +16,7 @@ import {
 type UpsertPayload = {
   userId?: string;
   fullName?: string;
+  role?: string;
   loginCode?: string;
   pin?: string;
   hourlyRate?: number | null;
@@ -84,6 +85,8 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as UpsertPayload;
   const userId = typeof body.userId === "string" ? body.userId : "";
   const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
+  const requestedRole =
+    body.role === "Warehouse" ? "Warehouse" : "Operator";
   const normalizedLoginCode = normalizeOperatorLoginCode(
     typeof body.loginCode === "string" ? body.loginCode : "",
   );
@@ -276,11 +279,30 @@ export async function POST(request: Request) {
     }
   }
 
+  const { data: existingProfile, error: existingProfileError } = await admin
+    .from("profiles")
+    .select("role")
+    .eq("id", targetUserId)
+    .maybeSingle();
+
+  if (existingProfileError) {
+    return NextResponse.json(
+      { error: existingProfileError.message ?? "Failed to load operator profile." },
+      { status: 500 },
+    );
+  }
+
+  const preservedRole =
+    requestedRole === "Warehouse" ||
+    (existingProfile?.role === "Warehouse" && body.role == null)
+      ? "Warehouse"
+      : "Operator";
+
   const profilePayload = {
     id: targetUserId,
     tenant_id: tenantId,
     full_name: fullName,
-    role: "Operator",
+    role: preservedRole,
     is_admin: false,
     is_owner: false,
     is_active: true,
@@ -288,13 +310,13 @@ export async function POST(request: Request) {
     auth_mode: "pin",
   };
 
-  const { error: profileError } = await admin
+  const { error: persistedProfileError } = await admin
     .from("profiles")
     .upsert(profilePayload, { onConflict: "id" });
 
-  if (profileError) {
+  if (persistedProfileError) {
     return NextResponse.json(
-      { error: profileError.message ?? "Failed to save operator profile." },
+      { error: persistedProfileError.message ?? "Failed to save operator profile." },
       { status: 500 },
     );
   }
@@ -317,7 +339,7 @@ export async function POST(request: Request) {
     tenant_id: tenantId,
     user_id: targetUserId,
     name: fullName,
-    role: "Operator",
+    role: preservedRole,
     hourly_rate: hourlyRate,
     overtime_rate: overtimeRate,
     is_active: true,

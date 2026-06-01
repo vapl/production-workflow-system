@@ -15,6 +15,7 @@ import {
 import { ResponsiveModal } from "@/components/ui/ResponsiveModal";
 import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
+import { SelectField } from "@/components/ui/SelectField";
 import { cn } from "@/components/ui/utils";
 import { supabase } from "@/lib/supabaseClient";
 import type {
@@ -38,6 +39,7 @@ type OperatorManagementModalProps = {
 type ManagedOperatorRow = {
   userId: string;
   fullName: string;
+  role: "Operator" | "Warehouse";
   loginCode: string;
   isActive: boolean;
   hourlyRate: number | null;
@@ -66,6 +68,7 @@ export function OperatorManagementModal({
 }: OperatorManagementModalProps) {
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [fullName, setFullName] = useState("");
+  const [role, setRole] = useState<"Operator" | "Warehouse">("Operator");
   const [loginCode, setLoginCode] = useState("");
   const [pin, setPin] = useState("");
   const [hourlyRate, setHourlyRate] = useState("");
@@ -106,6 +109,7 @@ export function OperatorManagementModal({
         return {
           userId: profile.id,
           fullName: profile.full_name?.trim() || "",
+          role: profile.role === "Warehouse" ? "Warehouse" : "Operator",
           loginCode: profile.login_code?.trim() || "",
           isActive: profile.is_active ?? true,
           hourlyRate: config?.hourly_rate ?? null,
@@ -144,6 +148,7 @@ export function OperatorManagementModal({
     const initialRow = managedRows[0] ?? null;
     setSelectedUserId(initialRow?.userId ?? "");
     setFullName(initialRow?.fullName ?? "");
+    setRole(initialRow?.role ?? "Operator");
     setLoginCode(initialRow?.loginCode ?? "");
     setPin("");
     setHourlyRate(
@@ -165,6 +170,7 @@ export function OperatorManagementModal({
       return;
     }
     setFullName(selectedRow.fullName);
+    setRole(selectedRow.role);
     setLoginCode(selectedRow.loginCode);
     setPin("");
     setHourlyRate(
@@ -184,6 +190,7 @@ export function OperatorManagementModal({
   const resetForCreate = () => {
     setSelectedUserId("");
     setFullName("");
+    setRole("Operator");
     setLoginCode("");
     setPin("");
     setHourlyRate("");
@@ -288,6 +295,7 @@ export function OperatorManagementModal({
         {
           userId: selectedUserId || undefined,
           fullName,
+          role,
           loginCode,
           pin: (isCreating || isResetPinMode ? pin.trim() : "") || undefined,
           hourlyRate: parseOptionalNumber(hourlyRate),
@@ -411,6 +419,11 @@ export function OperatorManagementModal({
                   {row.fullName}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
+                  {row.role === "Warehouse"
+                    ? t("production.main.operators.manageRoleWarehouse")
+                    : t("production.main.operators.manageRoleOperator")}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
                   {t("production.main.operators.manageCodeLabel")}:{" "}
                   {row.loginCode || "—"}
                 </div>
@@ -489,11 +502,29 @@ export function OperatorManagementModal({
               {t("production.main.operators.manageBasicInfoHint")}
             </div>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <InputField
               label={t("production.main.operators.manageName")}
               value={fullName}
               onChange={(event) => setFullName(event.target.value)}
+            />
+            <SelectField
+              label={t("production.main.operators.manageRole")}
+              value={role}
+              onValueChange={(value) =>
+                setRole(value === "Warehouse" ? "Warehouse" : "Operator")
+              }
+              options={[
+                {
+                  value: "Operator",
+                  label: t("production.main.operators.manageRoleOperator"),
+                },
+                {
+                  value: "Warehouse",
+                  label: t("production.main.operators.manageRoleWarehouse"),
+                },
+              ]}
+              description={t("production.main.operators.manageRoleHint")}
             />
             <InputField
               label={t("production.main.operators.manageCode")}
