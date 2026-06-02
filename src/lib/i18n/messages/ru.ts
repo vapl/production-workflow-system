@@ -2180,7 +2180,7 @@
         constructionModeBadge: "Конструкция",
         dueDate: "Срок {date}",
         stationTime: "Время станции:",
-        orderTime: "Время заказа:",
+        orderTime: "Общее время работы:",
         time: "Время: {value}",
         constructionTime: "Время конструкции: {value}",
         hideConstructions: "Скрыть конструкции",

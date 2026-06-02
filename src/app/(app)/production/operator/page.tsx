@@ -2400,16 +2400,16 @@ export default function OperatorProductionPage() {
         session.batch_run_id,
         session.production_item_id,
       );
-      const seconds = getElapsedSeconds(
+      const seconds = computeWorkedSecondsBreakdown(
         session.started_at,
         session.stopped_at ??
           (session.is_active ? new Date(liveNowMs).toISOString() : null),
-        liveNowMs,
-      );
+        workingCalendar,
+      ).totalSeconds;
       map.set(key, (map.get(key) ?? 0) + seconds);
     });
     return map;
-  }, [liveNowMs, ownWorkSessions]);
+  }, [liveNowMs, ownWorkSessions, workingCalendar]);
   const ownActiveWorkSessionItemKeys = useMemo(
     () =>
       new Set(
@@ -2803,12 +2803,9 @@ export default function OperatorProductionPage() {
         ) ||
         runs.reduce((sum, run) => sum + Number(run.duration_minutes ?? 0), 0);
       const durationSeconds =
-        getElapsedSeconds(
-          earliestScopeStart ?? startedAt,
-          activeScopeCount > 0
-            ? new Date(liveNowMs).toISOString()
-            : (latestScopeStop ?? doneAt),
-          liveNowMs,
+        scopeSummaries.reduce(
+          (sum, summary) => sum + Number(summary?.totalSeconds ?? 0),
+          0,
         ) ||
         runs.reduce(
           (sum, run) => sum + Number(run.duration_minutes ?? 0) * 60,
@@ -5798,15 +5795,14 @@ export default function OperatorProductionPage() {
                                       ownWorkSessionSecondsByScope.get(
                                         infoScopeKey,
                                       ) ?? 0;
+                                    const scopeWorkedSeconds = Number(
+                                      scopeSummary?.totalSeconds ?? 0,
+                                    );
                                     const visibleOwnElapsedSeconds =
-                                      Number(
-                                        scopeSummary?.elapsedSeconds ?? 0,
-                                      ) > 0
+                                      scopeWorkedSeconds > 0
                                         ? Math.min(
                                             ownElapsedSeconds,
-                                            Number(
-                                              scopeSummary?.elapsedSeconds ?? 0,
-                                            ),
+                                            scopeWorkedSeconds,
                                           )
                                         : ownElapsedSeconds;
                                     const ownElapsedLabel =
@@ -5816,14 +5812,8 @@ export default function OperatorProductionPage() {
                                           )
                                         : null;
                                     const itemElapsedLabel =
-                                      Number(
-                                        scopeSummary?.elapsedSeconds ?? 0,
-                                      ) > 0
-                                        ? formatLiveDuration(
-                                            Number(
-                                              scopeSummary?.elapsedSeconds ?? 0,
-                                            ),
-                                          )
+                                      scopeWorkedSeconds > 0
+                                        ? formatLiveDuration(scopeWorkedSeconds)
                                         : null;
                                     const itemQuantity =
                                       getProductionItemQuantity(prodItem);
@@ -7231,11 +7221,14 @@ export default function OperatorProductionPage() {
                       ownWorkSessionSecondsByScope.get(
                         getWorkSessionScopeKey(actionRunId, prodItem.id),
                       ) ?? 0;
+                    const scopeWorkedSeconds = Number(
+                      scopeSummary?.totalSeconds ?? 0,
+                    );
                     const visibleOwnElapsedSeconds =
-                      Number(scopeSummary?.elapsedSeconds ?? 0) > 0
+                      scopeWorkedSeconds > 0
                         ? Math.min(
                             ownElapsedSeconds,
-                            Number(scopeSummary?.elapsedSeconds ?? 0),
+                            scopeWorkedSeconds,
                           )
                         : ownElapsedSeconds;
                     const ownElapsedLabel =
@@ -7243,10 +7236,8 @@ export default function OperatorProductionPage() {
                         ? formatLiveDuration(visibleOwnElapsedSeconds)
                         : null;
                     const itemElapsedLabel =
-                      Number(scopeSummary?.elapsedSeconds ?? 0) > 0
-                        ? formatLiveDuration(
-                            Number(scopeSummary?.elapsedSeconds ?? 0),
-                          )
+                      scopeWorkedSeconds > 0
+                        ? formatLiveDuration(scopeWorkedSeconds)
                         : null;
                     const hasOperatorActiveSession =
                       hasActiveWorkSessionForItem(actionRunId, prodItem.id);

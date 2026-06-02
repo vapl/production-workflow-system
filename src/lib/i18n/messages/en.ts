@@ -2117,7 +2117,7 @@
         constructionModeBadge: "Construction",
         dueDate: "Due {date}",
         stationTime: "Station time:",
-        orderTime: "Order time:",
+        orderTime: "Total work time:",
         time: "Time: {value}",
         constructionTime: "Construction time: {value}",
         hideConstructions: "Hide constructions",

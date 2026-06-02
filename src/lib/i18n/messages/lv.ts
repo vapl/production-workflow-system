@@ -2197,7 +2197,7 @@
         constructionModeBadge: "Konstrukcija",
         dueDate: "Termiņš {date}",
         stationTime: "Stacijas laiks:",
-        orderTime: "Pasūtījuma laiks:",
+        orderTime: "Kopējais darba laiks:",
         time: "Laiks: {value}",
         constructionTime: "Konstrukcijas laiks: {value}",
         hideConstructions: "Paslēpt konstrukcijas",
