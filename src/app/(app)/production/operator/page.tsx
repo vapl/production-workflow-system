@@ -8,9 +8,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { FiltersDropdown } from "@/components/ui/FiltersDropdown";
 import { Input } from "@/components/ui/Input";
+import { FilterOptionSelector } from "@/components/ui/StatusChipsFilter";
 import {
   Popover,
   PopoverContent,
@@ -632,10 +634,6 @@ const operatorSuccessActionClass =
 const operatorWarningIconActionClass =
   "size-10 shrink-0 rounded-xl border-amber-200 bg-amber-50 text-amber-700 shadow-sm hover:bg-amber-100 hover:text-amber-800 sm:size-11";
 
-function isSameDayIso(value: string | null | undefined, dayIso: string) {
-  return Boolean(value) && String(value).slice(0, 10) === dayIso;
-}
-
 function getOverlapWorkedMinutes(params: {
   startIso: string | null | undefined;
   endIso: string | null | undefined;
@@ -672,6 +670,13 @@ function getOverlapWorkedMinutes(params: {
     new Date(overlapEndMs).toISOString(),
     calendar,
   ).totalMinutes;
+}
+
+function getQueueItemDisplayStatus(item: Pick<QueueItem, "status" | "operatorSessionStatus" | "hasOperatorActiveSession">) {
+  if (item.hasOperatorActiveSession) {
+    return "in_progress";
+  }
+  return item.operatorSessionStatus ?? item.status;
 }
 
 function getStoragePathFromUrl(url: string, bucket: string) {
@@ -3035,7 +3040,10 @@ export default function OperatorProductionPage() {
             return false;
           }
         }
-        if (statusFilter !== "all" && item.status !== statusFilter) {
+        if (
+          statusFilter !== "all" &&
+          getQueueItemDisplayStatus(item) !== statusFilter
+        ) {
           return false;
         }
         if (priorityFilter !== "all" && item.priority !== priorityFilter) {
@@ -3162,100 +3170,75 @@ export default function OperatorProductionPage() {
   }, [quickActionItem, dependenciesByStation, itemsByGroupAndStation]);
 
   const activitySummary = useMemo(() => {
-    const todayStartIso = `${today}T00:00:00`;
-    const tomorrow = new Date(`${today}T00:00:00`);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowIso = tomorrow.toISOString();
-    const sessionStarted = ownWorkSessions.filter(
-      (row) => String(row.started_at ?? "").slice(0, 10) === today,
+    const visibleItems = Array.from(filteredQueueByStation.values()).flat();
+    const started = visibleItems.filter(
+      (item) => getQueueItemDisplayStatus(item) === "in_progress",
     ).length;
-    const sessionDone = ownWorkSessions.filter(
-      (row) =>
-        row.ended_status === "done" &&
-        String(row.stopped_at ?? "").slice(0, 10) === today,
+    const done = visibleItems.filter(
+      (item) => getQueueItemDisplayStatus(item) === "done",
     ).length;
-    const sessionBlocked = ownWorkSessions.filter(
-      (row) =>
-        row.ended_status === "blocked" &&
-        String(row.stopped_at ?? "").slice(0, 10) === today,
+    const blocked = visibleItems.filter(
+      (item) =>
+        getQueueItemDisplayStatus(item) === "blocked" ||
+        item.items.some((row) => row.status === "blocked"),
     ).length;
-    const sessionMinutes = ownWorkSessions.reduce(
-      (sum, session) =>
-        sum +
-        getProductionWorkSessionOverlapMinutes({
-          session,
-          range: {
-            startAt: todayStartIso,
-            endAt: tomorrowIso,
-          },
-          calendar: workingCalendar,
-          nowMs: liveNowMs,
-        }).totalMinutes,
+    const minutes = visibleItems.reduce(
+      (sum, item) => sum + Number(item.durationMinutes ?? 0),
       0,
     );
-    const rawStarted =
-      latestWorkEntries.filter(
-        (entry) =>
-          isSameDayIso(entry.startedAt, today) &&
-          entry.status !== "queued" &&
-          entry.status !== "pending",
-      ).length +
-      unmatchedBatchRuns.filter(
-        (run) =>
-          isSameDayIso(run.started_at ?? null, today) &&
-          run.status !== "queued" &&
-          run.status !== "pending",
-      ).length;
-    const rawDone =
-      latestWorkEntries.filter((entry) => isSameDayIso(entry.doneAt, today))
-        .length +
-      unmatchedBatchRuns.filter((run) =>
-        isSameDayIso(run.done_at ?? null, today),
-      ).length;
-    const rawBlocked =
-      latestWorkEntries.filter((entry) => entry.status === "blocked").length +
-      unmatchedBatchRuns.filter((run) => run.status === "blocked").length;
-    const rawMinutes =
-      latestWorkEntries.reduce(
-        (sum, entry) =>
-          sum +
-          getOverlapWorkedMinutes({
-            startIso: entry.startedAt,
-            endIso: entry.doneAt,
-            rangeStartIso: todayStartIso,
-            rangeEndIso: tomorrowIso,
-            calendar: workingCalendar,
-            nowMs: liveNowMs,
-          }),
-        0,
-      ) +
-      unmatchedBatchRuns.reduce(
-        (sum, run) =>
-          sum +
-          getOverlapWorkedMinutes({
-            startIso: run.started_at ?? null,
-            endIso: run.done_at ?? null,
-            rangeStartIso: todayStartIso,
-            rangeEndIso: tomorrowIso,
-            calendar: workingCalendar,
-            nowMs: liveNowMs,
-          }),
-        0,
-      );
 
     return {
-      started: Math.max(sessionStarted, rawStarted),
-      done: Math.max(sessionDone, rawDone),
-      blocked: Math.max(sessionBlocked, rawBlocked),
-      minutes: Math.max(sessionMinutes, rawMinutes),
+      started,
+      done,
+      blocked,
+      minutes,
     };
+  }, [filteredQueueByStation]);
+
+  const filterStatusCounts = useMemo(() => {
+    const items = Array.from(queueByStation.values()).flat().filter((item) => {
+      if (orderFilter && item.orderId !== orderFilter) {
+        return false;
+      }
+      if (
+        !orderFilter &&
+        item.operatorSessionStatus === "done" &&
+        !item.hasOperatorActiveSession &&
+        (item.status === "done" || (item.activeOperatorsCount ?? 0) > 0)
+      ) {
+        return false;
+      }
+      if (!orderFilter && selectedDate) {
+        const filterDate = item.plannedDate ?? item.dueDate ?? null;
+        if (
+          filterDate &&
+          (filterDate < selectedWeekStart || filterDate > selectedWeekEnd)
+        ) {
+          return false;
+        }
+      }
+      if (priorityFilter !== "all" && item.priority !== priorityFilter) {
+        return false;
+      }
+      if (onlyBlocked && !item.items.some((row) => row.status === "blocked")) {
+        return false;
+      }
+      return true;
+    });
+    const counts = new Map<QueueStatusFilter, number>([["all", items.length]]);
+    items.forEach((item) => {
+      const status = getQueueItemDisplayStatus(item);
+      counts.set(status, (counts.get(status) ?? 0) + 1);
+    });
+    return counts;
   }, [
-    latestWorkEntries,
-    liveNowMs,
-    today,
-    unmatchedBatchRuns,
-    ownWorkSessions,
-    workingCalendar,
+    orderFilter,
+    onlyBlocked,
+    priorityFilter,
+    queueByStation,
+    selectedDate,
+    selectedWeekEnd,
+    selectedWeekStart,
   ]);
 
   const weeklySummary = useMemo(() => {
@@ -5190,34 +5173,20 @@ export default function OperatorProductionPage() {
               className="h-10"
               contentClassName="w-[360px] p-4"
             >
-              <div className="space-y-4">
-                <SelectField
-                  label={t("production.operator.filters.status")}
+              <div className="space-y-3">
+                <FilterOptionSelector
+                  title={t("production.operator.filters.status")}
                   value={statusFilter}
-                  onValueChange={(value) =>
+                  onChange={(value) =>
                     applyFiltersToUrl({ status: value as QueueStatusFilter })
                   }
-                >
-                  <Select
-                    value={statusFilter}
-                    onValueChange={(value) =>
-                      applyFiltersToUrl({ status: value as QueueStatusFilter })
-                    }
-                  >
-                    <SelectTrigger className="h-10 w-full">
-                      <SelectValue
-                        placeholder={t("production.operator.status.all")}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {statusOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </SelectField>
+                  options={statusOptions.map((option) => ({
+                    ...option,
+                    count: filterStatusCounts.get(option.value) ?? 0,
+                  }))}
+                />
+
+                <div className="h-px bg-border/70" />
 
                 <SelectField
                   label={t("production.operator.filters.priority")}
@@ -5249,19 +5218,20 @@ export default function OperatorProductionPage() {
                   </Select>
                 </SelectField>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    applyFiltersToUrl({ blocked: !onlyBlocked })
-                  }
-                  className={`inline-flex h-9 w-full items-center justify-center rounded-full border px-3 text-sm font-medium transition ${
-                    onlyBlocked
-                      ? "border-foreground bg-foreground text-background shadow-sm"
-                      : "border-border bg-background text-foreground hover:bg-muted/50"
-                  }`}
-                >
-                  {blockedOnlyLabel}
-                </button>
+                <div className="h-px bg-border/70" />
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">
+                    {t("orders.page.quickFilters")}
+                  </div>
+                  <Checkbox
+                    checked={onlyBlocked}
+                    onChange={() =>
+                      applyFiltersToUrl({ blocked: !onlyBlocked })
+                    }
+                    label={blockedOnlyLabel}
+                  />
+                </div>
 
                 <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
                   <Button
@@ -5291,53 +5261,44 @@ export default function OperatorProductionPage() {
       </div>
 
       <div className="hidden gap-3 md:grid md:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardContent className="flex items-center justify-between py-4">
+        <Card className="border-blue-200 bg-blue-50/60 dark:border-blue-900/60 dark:bg-blue-950/20">
+          <CardContent className="py-4">
             <div>
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-blue-700/80 dark:text-blue-200/80">
                 {t("production.operator.metrics.started")}
               </div>
-              <div className="text-xl font-semibold">
+              <div className="text-xl font-semibold text-blue-950 dark:text-blue-50">
                 {activitySummary.started}
               </div>
             </div>
-            <Badge variant="status-in_engineering">
-              {t("production.operator.metrics.today")}
-            </Badge>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="flex items-center justify-between py-4">
+        <Card className="border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+          <CardContent className="py-4">
             <div>
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-emerald-700/80 dark:text-emerald-200/80">
                 {t("production.operator.metrics.done")}
               </div>
-              <div className="text-xl font-semibold">
+              <div className="text-xl font-semibold text-emerald-950 dark:text-emerald-50">
                 {activitySummary.done}
               </div>
             </div>
-            <Badge variant="status-ready_for_production">
-              {t("production.operator.metrics.today")}
-            </Badge>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="flex items-center justify-between py-4">
+        <Card className="border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20">
+          <CardContent className="py-4">
             <div>
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-amber-700/80 dark:text-amber-200/80">
                 {t("production.operator.metrics.blocked")}
               </div>
-              <div className="text-xl font-semibold">
+              <div className="text-xl font-semibold text-amber-950 dark:text-amber-50">
                 {activitySummary.blocked}
               </div>
             </div>
-            <Badge variant="status-blocked">
-              {t("production.operator.metrics.today")}
-            </Badge>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="flex items-center justify-between py-4">
+        <Card className="border-border/80 bg-card">
+          <CardContent className="py-4">
             <div>
               <div className="text-xs text-muted-foreground">
                 {t("production.operator.metrics.workTime")}
@@ -5346,9 +5307,6 @@ export default function OperatorProductionPage() {
                 {formatDuration(activitySummary.minutes)}
               </div>
             </div>
-            <Badge variant="status-draft">
-              {t("production.operator.metrics.accumulated")}
-            </Badge>
           </CardContent>
         </Card>
       </div>
@@ -6036,6 +5994,9 @@ export default function OperatorProductionPage() {
                                                   actionRunId,
                                                   prodItem.id,
                                                 );
+                                              const hasOtherOperatorActiveSession =
+                                                !hasOperatorActiveSession &&
+                                                workingOperatorNames.length > 0;
                                               const hasOperatorCompletedSession =
                                                 ownSessionStatus === "done" &&
                                                 (effectiveStatus === "done" ||
@@ -6081,7 +6042,8 @@ export default function OperatorProductionPage() {
                                                 <>
                                                   <Button
                                                     variant={
-                                                      hasOperatorActiveSession
+                                                      hasOperatorActiveSession ||
+                                                      hasOtherOperatorActiveSession
                                                         ? "secondary"
                                                         : "default"
                                                     }
@@ -6092,6 +6054,7 @@ export default function OperatorProductionPage() {
                                                     disabled={
                                                       isDone ||
                                                       hasOperatorCompletedSession ||
+                                                      hasOtherOperatorActiveSession ||
                                                       startLockedByDate ||
                                                       startLockedByWorkHours ||
                                                       (!isBlocked &&
@@ -6102,11 +6065,13 @@ export default function OperatorProductionPage() {
                                                         : isStarting)
                                                     }
                                                     onClick={() =>
-                                                      hasOperatorActiveSession
-                                                        ? handleOpenPaused(
-                                                            actionRunId,
-                                                            prodItem.id,
-                                                          )
+                                                      hasOtherOperatorActiveSession
+                                                        ? undefined
+                                                        : hasOperatorActiveSession
+                                                          ? handleOpenPaused(
+                                                              actionRunId,
+                                                              prodItem.id,
+                                                            )
                                                         : handleUserStatusUpdate(
                                                             prodItem.id,
                                                             actionRunId,
@@ -6122,6 +6087,8 @@ export default function OperatorProductionPage() {
                                                       )
                                                     ) : isStarting ? (
                                                       <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                                    ) : hasOtherOperatorActiveSession ? (
+                                                      <PauseIcon className="h-4 w-4" />
                                                     ) : (
                                                       <PlayIcon className="h-4 w-4" />
                                                     )}
@@ -6135,6 +6102,10 @@ export default function OperatorProductionPage() {
                                                         ? t(
                                                             "production.operator.actions.pause",
                                                           )
+                                                        : hasOtherOperatorActiveSession
+                                                          ? runStatusLabel(
+                                                              "in_progress",
+                                                            )
                                                         : t(
                                                             "production.operator.actions.start",
                                                           )}
@@ -6390,6 +6361,10 @@ export default function OperatorProductionPage() {
                                         item.runIds.some((runId) =>
                                           hasActiveWorkSessionForRun(runId),
                                         );
+                                      const hasOtherOperatorActiveRunSession =
+                                        !hasOperatorActiveRunSession &&
+                                        (item.workingOperatorIds?.length ?? 0) >
+                                          0;
                                       const hasOperatorCompletedRunSession =
                                         item.operatorSessionStatus === "done" &&
                                         (isBatchDone ||
@@ -6404,7 +6379,8 @@ export default function OperatorProductionPage() {
                                           {!isReceiptOnlyTracking ? (
                                             <Button
                                               variant={
-                                                hasOperatorActiveRunSession
+                                                hasOperatorActiveRunSession ||
+                                                hasOtherOperatorActiveRunSession
                                                   ? "secondary"
                                                   : "default"
                                               }
@@ -6415,6 +6391,7 @@ export default function OperatorProductionPage() {
                                               disabled={
                                                 isBatchDone ||
                                                 hasOperatorCompletedRunSession ||
+                                                hasOtherOperatorActiveRunSession ||
                                                 batchStartLockedByDate ||
                                                 (!hasOperatorActiveRunSession &&
                                                   !isWithinWorkingHoursNow) ||
@@ -6430,9 +6407,11 @@ export default function OperatorProductionPage() {
                                                     ))
                                               }
                                               onClick={() =>
-                                                hasOperatorActiveRunSession
-                                                  ? handleOpenPaused(item.id)
-                                                  : handleRunStatusUpdate(
+                                                hasOtherOperatorActiveRunSession
+                                                  ? undefined
+                                                  : hasOperatorActiveRunSession
+                                                    ? handleOpenPaused(item.id)
+                                                    : handleRunStatusUpdate(
                                                       item.id,
                                                       "in_progress",
                                                     )
@@ -6452,6 +6431,8 @@ export default function OperatorProductionPage() {
                                                   "in_progress",
                                                 ) ? (
                                                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                              ) : hasOtherOperatorActiveRunSession ? (
+                                                <PauseIcon className="h-4 w-4" />
                                               ) : (
                                                 <PlayIcon className="h-4 w-4" />
                                               )}
@@ -6465,6 +6446,10 @@ export default function OperatorProductionPage() {
                                                   ? t(
                                                       "production.operator.actions.pause",
                                                     )
+                                                  : hasOtherOperatorActiveRunSession
+                                                    ? runStatusLabel(
+                                                        "in_progress",
+                                                      )
                                                   : t(
                                                       "production.operator.actions.start",
                                                     )}
@@ -7038,6 +7023,9 @@ export default function OperatorProductionPage() {
                         quickActionItem.runIds.some((runId) =>
                           hasActiveWorkSessionForRun(runId),
                         );
+                      const hasOtherOperatorActiveRunSession =
+                        !hasOperatorActiveRunSession &&
+                        (quickActionItem.workingOperatorIds?.length ?? 0) > 0;
                       const hasOperatorCompletedRunSession =
                         quickActionItem.operatorSessionStatus === "done" &&
                         (quickActionItem.status === "done" ||
@@ -7050,7 +7038,8 @@ export default function OperatorProductionPage() {
                           {quickActionItem.trackingMode !== "receipt_only" ? (
                             <Button
                               variant={
-                                hasOperatorActiveRunSession
+                                hasOperatorActiveRunSession ||
+                                hasOtherOperatorActiveRunSession
                                   ? "secondary"
                                   : "default"
                               }
@@ -7059,6 +7048,7 @@ export default function OperatorProductionPage() {
                               disabled={
                                 quickActionItem.status === "done" ||
                                 hasOperatorCompletedRunSession ||
+                                hasOtherOperatorActiveRunSession ||
                                 isFuturePlannedDate(
                                   quickActionItem.plannedDate,
                                 ) ||
@@ -7075,9 +7065,11 @@ export default function OperatorProductionPage() {
                                     ))
                               }
                               onClick={() =>
-                                hasOperatorActiveRunSession
-                                  ? handleOpenPaused(quickActionItem.id)
-                                  : handleRunStatusUpdate(
+                                hasOtherOperatorActiveRunSession
+                                  ? undefined
+                                  : hasOperatorActiveRunSession
+                                    ? handleOpenPaused(quickActionItem.id)
+                                    : handleRunStatusUpdate(
                                       quickActionItem.id,
                                       "in_progress",
                                     )
@@ -7095,8 +7087,10 @@ export default function OperatorProductionPage() {
                               ) : isRunActionLoading(
                                   quickActionItem.id,
                                   "in_progress",
-                                ) ? (
+                              ) ? (
                                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                              ) : hasOtherOperatorActiveRunSession ? (
+                                <PauseIcon className="h-4 w-4" />
                               ) : (
                                 <PlayIcon className="h-4 w-4" />
                               )}
@@ -7106,6 +7100,8 @@ export default function OperatorProductionPage() {
                                 ? t("production.operator.actions.resume")
                                 : hasOperatorActiveRunSession
                                   ? t("production.operator.actions.pause")
+                                  : hasOtherOperatorActiveRunSession
+                                    ? runStatusLabel("in_progress")
                                   : t("production.operator.actions.start")}
                             </Button>
                           ) : null}
@@ -7241,6 +7237,9 @@ export default function OperatorProductionPage() {
                         : null;
                     const hasOperatorActiveSession =
                       hasActiveWorkSessionForItem(actionRunId, prodItem.id);
+                    const hasOtherOperatorActiveSession =
+                      !hasOperatorActiveSession &&
+                      workingOperatorNames.length > 0;
                     const hasStarted =
                       Boolean(effectiveStartedAt) ||
                       effectiveStatus === "in_progress" ||
@@ -7381,7 +7380,8 @@ export default function OperatorProductionPage() {
                           <div className="mt-3 flex items-stretch gap-2">
                             <Button
                               variant={
-                                hasOperatorActiveSession
+                                hasOperatorActiveSession ||
+                                hasOtherOperatorActiveSession
                                   ? "secondary"
                                   : "default"
                               }
@@ -7390,6 +7390,7 @@ export default function OperatorProductionPage() {
                               disabled={
                                 isDone ||
                                 hasOperatorCompletedSession ||
+                                hasOtherOperatorActiveSession ||
                                 startLockedByDate ||
                                 startLockedByWorkHours ||
                                 (hasOperatorActiveSession
@@ -7397,9 +7398,11 @@ export default function OperatorProductionPage() {
                                   : isStarting)
                               }
                               onClick={() =>
-                                hasOperatorActiveSession
-                                  ? handleOpenPaused(actionRunId, prodItem.id)
-                                  : handleUserStatusUpdate(
+                                hasOtherOperatorActiveSession
+                                  ? undefined
+                                  : hasOperatorActiveSession
+                                    ? handleOpenPaused(actionRunId, prodItem.id)
+                                    : handleUserStatusUpdate(
                                       prodItem.id,
                                       actionRunId,
                                       "in_progress",
@@ -7414,6 +7417,8 @@ export default function OperatorProductionPage() {
                                 )
                               ) : isStarting ? (
                                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                              ) : hasOtherOperatorActiveSession ? (
+                                <PauseIcon className="h-4 w-4" />
                               ) : (
                                 <PlayIcon className="h-4 w-4" />
                               )}
@@ -7421,6 +7426,8 @@ export default function OperatorProductionPage() {
                                 ? t("production.operator.actions.resume")
                                 : hasOperatorActiveSession
                                   ? t("production.operator.actions.pause")
+                                  : hasOtherOperatorActiveSession
+                                    ? runStatusLabel("in_progress")
                                   : t("production.operator.actions.start")}
                             </Button>
                             {itemRemainingQty > 1 ? (
@@ -7639,36 +7646,36 @@ export default function OperatorProductionPage() {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-border px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">
-                    {t("production.operator.profile.todayDone")}
+                <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/20">
+                  <div className="text-[11px] text-blue-700/80 dark:text-blue-200/80">
+                    {t("production.operator.metrics.started")}
                   </div>
-                  <div className="text-lg font-semibold">
+                  <div className="text-lg font-semibold text-blue-950 dark:text-blue-50">
+                    {activitySummary.started}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+                  <div className="text-[11px] text-emerald-700/80 dark:text-emerald-200/80">
+                    {t("production.operator.metrics.done")}
+                  </div>
+                  <div className="text-lg font-semibold text-emerald-950 dark:text-emerald-50">
                     {activitySummary.done}
                   </div>
                 </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/20">
+                  <div className="text-[11px] text-amber-700/80 dark:text-amber-200/80">
+                    {t("production.operator.metrics.blocked")}
+                  </div>
+                  <div className="text-lg font-semibold text-amber-950 dark:text-amber-50">
+                    {activitySummary.blocked}
+                  </div>
+                </div>
                 <div className="rounded-lg border border-border px-3 py-2">
                   <div className="text-[11px] text-muted-foreground">
-                    {t("production.operator.profile.todayTime")}
+                    {t("production.operator.metrics.workTime")}
                   </div>
                   <div className="text-lg font-semibold">
                     {formatDuration(activitySummary.minutes)}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">
-                    {t("production.operator.profile.weekDone")}
-                  </div>
-                  <div className="text-lg font-semibold">
-                    {weeklySummary.done}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">
-                    {t("production.operator.profile.weekTime")}
-                  </div>
-                  <div className="text-lg font-semibold">
-                    {formatDuration(weeklySummary.minutes)}
                   </div>
                 </div>
               </div>
@@ -7739,40 +7746,40 @@ export default function OperatorProductionPage() {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded-lg border border-border px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">
+                <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/20">
+                  <div className="text-[11px] text-blue-700/80 dark:text-blue-200/80">
                     <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
-                    {t("production.operator.profile.todayDone")}
+                    {t("production.operator.metrics.started")}
                   </div>
-                  <div className="text-lg font-semibold">
+                  <div className="text-lg font-semibold text-blue-950 dark:text-blue-50">
+                    {activitySummary.started}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+                  <div className="text-[11px] text-emerald-700/80 dark:text-emerald-200/80">
+                    <CheckCheckIcon className="mr-1 inline h-3.5 w-3.5" />
+                    {t("production.operator.metrics.done")}
+                  </div>
+                  <div className="text-lg font-semibold text-emerald-950 dark:text-emerald-50">
                     {activitySummary.done}
                   </div>
                 </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/20">
+                  <div className="text-[11px] text-amber-700/80 dark:text-amber-200/80">
+                    <BanIcon className="mr-1 inline h-3.5 w-3.5" />
+                    {t("production.operator.metrics.blocked")}
+                  </div>
+                  <div className="text-lg font-semibold text-amber-950 dark:text-amber-50">
+                    {activitySummary.blocked}
+                  </div>
+                </div>
                 <div className="rounded-lg border border-border px-3 py-2">
                   <div className="text-[11px] text-muted-foreground">
                     <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
-                    {t("production.operator.profile.todayTime")}
+                    {t("production.operator.metrics.workTime")}
                   </div>
                   <div className="text-lg font-semibold">
                     {formatDuration(activitySummary.minutes)}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">
-                    <ActivityIcon className="mr-1 inline h-3.5 w-3.5" />
-                    {t("production.operator.profile.weekDone")}
-                  </div>
-                  <div className="text-lg font-semibold">
-                    {weeklySummary.done}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">
-                    <Clock3Icon className="mr-1 inline h-3.5 w-3.5" />
-                    {t("production.operator.profile.weekTime")}
-                  </div>
-                  <div className="text-lg font-semibold">
-                    {formatDuration(weeklySummary.minutes)}
                   </div>
                 </div>
               </div>

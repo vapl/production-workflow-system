@@ -106,7 +106,7 @@ export function OperatorManagementModal({
       )
       .map((profile) => {
         const config = configByUserId.get(profile.id);
-        return {
+        const row: ManagedOperatorRow = {
           userId: profile.id,
           fullName: profile.full_name?.trim() || "",
           role: profile.role === "Warehouse" ? "Warehouse" : "Operator",
@@ -118,6 +118,7 @@ export function OperatorManagementModal({
             new Set(stationIdsByUserId.get(profile.id) ?? []),
           ),
         };
+        return row;
       })
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
   }, [assignments, operatorConfigs, profiles]);

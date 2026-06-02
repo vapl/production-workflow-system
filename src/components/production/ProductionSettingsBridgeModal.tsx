@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FactoryIcon, WorkflowIcon, XIcon } from "lucide-react";
 
 import { DetailTabsBar } from "@/components/layout/DetailTabsBar";
@@ -170,6 +170,13 @@ export function ProductionSettingsBridgeModal({
   const currentUser = useCurrentUser();
   const { refresh: refreshWorkingCalendar } = useWorkingCalendar();
   const { confirm, dialog } = useConfirmDialog();
+  const confirmRemove = useCallback(
+    (message: string) =>
+      confirm({
+        title: message,
+      }),
+    [confirm],
+  );
   const {
     workStations,
     stopReasons,
@@ -531,7 +538,7 @@ export function ProductionSettingsBridgeModal({
       return;
     }
     if (
-      !(await confirm(
+      !(await confirmRemove(
         t("settings.operations.removeSelectedReasonsConfirm", {
           count: selectedStopReasonIds.length,
         }),
@@ -916,7 +923,9 @@ export function ProductionSettingsBridgeModal({
   }
 
   async function handleRemoveAttachmentCategory(id: string) {
-    if (!(await confirm(t("settings.workflow.removeAttachmentCategoryConfirm")))) {
+    if (
+      !(await confirmRemove(t("settings.workflow.removeAttachmentCategoryConfirm")))
+    ) {
       return;
     }
     const nextCategories = attachmentCategoryDrafts.filter(
@@ -1107,7 +1116,7 @@ export function ProductionSettingsBridgeModal({
                   updateStopReason={updateStopReason}
                   handleEditStopReason={handleEditStopReason}
                   handleCopyStopReason={handleCopyStopReason}
-                  confirmRemove={confirm}
+                  confirmRemove={confirmRemove}
                   removeStopReason={removeStopReason}
                 />
               </div>
@@ -1170,7 +1179,7 @@ export function ProductionSettingsBridgeModal({
               addChecklistItem={addChecklistItem}
               updateChecklistItem={updateChecklistItem}
               removeChecklistItem={removeChecklistItem}
-              confirmRemove={confirm}
+              confirmRemove={confirmRemove}
               newReturnReason={newReturnReason}
               setNewReturnReason={setNewReturnReason}
               addReturnReason={addReturnReason}
